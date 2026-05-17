@@ -4,10 +4,10 @@ A Next.js application hosted on Vercel with Supabase as the database.
 
 ## Setup Instructions
 
-### 1 . Clone and install
+### 1\. Clone and install
 
 ```bash
-git clone https://github.com/YOUR\_USERNAME/longitudeinc-dashboard.git
+git clone https://github.com/YOUR\\\_USERNAME/longitudeinc-dashboard.git
 cd longitudeinc-dashboard
 npm install
 ```
