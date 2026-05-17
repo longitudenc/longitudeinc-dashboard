@@ -1,28 +1,14 @@
 import type { Metadata } from 'next'
-import { Inter, Outfit } from 'next/font/google'
-import { SessionProvider } from '@/components/SessionProvider'
-import './globals.css'
-
-const inter = Inter({ subsets: ['latin'], variable: '--font-inter' })
-const outfit = Outfit({ subsets: ['latin'], variable: '--font-outfit' })
 
 export const metadata: Metadata = {
-  title: 'Longitude Inc — Dashboard',
-  description: 'Area Manager Performance Dashboard',
+  title: 'Longitude Inc',
+  description: 'Longitude Inc Platform',
 }
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className={`${inter.variable} ${outfit.variable}`}>
-        <SessionProvider>
-          {children}
-        </SessionProvider>
-      </body>
+      <body style={{ margin: 0, padding: 0 }}>{children}</body>
     </html>
   )
 }
