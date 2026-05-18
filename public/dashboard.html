@@ -660,11 +660,9 @@ const AMS = {
   kayla:     {name:'Kayla Medlin',       init:'KM', color:'#8a2a80', globalId:'2014-0001-2984', salons:[]},
 };
 
-const _lyRaw      = null;
-const LY_AVG      = typeof _lyRaw === 'string' ? JSON.parse(_lyRaw) : _lyRaw;
+const LY_AVG = {}; // Last year averages - populated by scrapers in future
 
-const _payRaw     = null;
-const PAYROLL_MAP = typeof _payRaw === 'string' ? JSON.parse(_payRaw) : _payRaw;
+const PAYROLL_MAP = {}; // Payroll map - populated by scrapers in future
 
 const NAMED = new Set(['3015','3058','4138','3062','3071','9489','1304','3043','3545','8725','3025','3027','7728','3053','3685','9689']);
 const AM_ORDER = ['cassi','dawn','luann','dana','bridgette','kayla'];
