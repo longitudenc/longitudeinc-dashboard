@@ -651,8 +651,14 @@ const USER_ROLE   = 'admin'.replace(/"/g,'').trim();
 const USER_AM_ID  = ''.replace(/"/g,'').trim();
 const USER_AM_NAME= ''.replace(/"/g,'').trim();
 
-const _amsRaw     = null;
-const AMS         = typeof _amsRaw === 'string' ? JSON.parse(_amsRaw) : _amsRaw;
+const AMS = {
+  cassi:     {name:'Cassi Sharpe',       init:'CS', color:'#a03030', globalId:'2014-0001-6376', salons:['3015','3058','4138']},
+  dawn:      {name:'Dawn Bowersox',      init:'DB', color:'#2a6a9a', globalId:'2014-0001-6880', salons:['3062','3071','9489']},
+  luann:     {name:'Luann Wetherington', init:'LW', color:'#6b3fa0', globalId:'2014-0001-5804', salons:['1304','3043','3545','8725']},
+  dana:      {name:'Dana Gainous',       init:'DG', color:'#2a7a4a', globalId:'2014-0001-2977', salons:['3025','3027','7728']},
+  bridgette: {name:'Bridgette Stout',    init:'BS', color:'#9a5a2a', globalId:'2014-0001-5799', salons:['3053','3685','9689']},
+  kayla:     {name:'Kayla Medlin',       init:'KM', color:'#8a2a80', globalId:'2014-0001-2984', salons:[]},
+};
 
 const _lyRaw      = null;
 const LY_AVG      = typeof _lyRaw === 'string' ? JSON.parse(_lyRaw) : _lyRaw;
