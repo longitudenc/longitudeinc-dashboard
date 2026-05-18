@@ -498,7 +498,7 @@
 
 
     <!-- Admin upload panel -->
-    <div class="page" id="page-admin">
+    <div class="page" id="page-admin" style="min-height:200px;border:3px solid red;">
       <div class="page-header"><h2>Admin — Data Management</h2><div class="sub">Upload new weekly reports and manage data</div></div>
       <div class="upload-panel">
         <div class="card-title">Admin — Data Management</div>
@@ -981,6 +981,10 @@ function switchToAdmin(){
   if(adminEl) adminEl.classList.add('active');
   console.log('page-admin display after active:', adminEl ? window.getComputedStyle(adminEl).display : 'NOT FOUND');
   console.log('page-admin innerHTML length:', adminEl ? adminEl.innerHTML.length : 0);
+  // Force scroll to top
+  const mainEl = document.querySelector('.content');
+  if(mainEl) mainEl.scrollTop = 0;
+  window.scrollTo(0,0);
   renderManagerTable();
   populateWaiverDropdowns();
   renderWaiverTable();
