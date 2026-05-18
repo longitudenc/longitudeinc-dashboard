@@ -25,14 +25,14 @@ function formatAllData(raw: any) {
   raw.salonRows.forEach((row: any) => {
     const wk = row.weekEnding || ''
     if (!wk) return
-    if (!weekMap[wk]) weekMap[wk] = { weekEnding: wk, salons: [], employees: [] }
+    if (!weekMap[wk]) weekMap[wk] = { weekEnding: wk, salons: [], emps: [] }
     weekMap[wk].salons.push(row)
   })
   raw.empRows.forEach((row: any) => {
     const wk = row.weekEnding || ''
     if (!wk) return
-    if (!weekMap[wk]) weekMap[wk] = { weekEnding: wk, salons: [], employees: [] }
-    weekMap[wk].employees.push(row)
+    if (!weekMap[wk]) weekMap[wk] = { weekEnding: wk, salons: [], emps: [] }
+    weekMap[wk].emps.push(row)
   })
   const weeks = Object.values(weekMap).sort((a: any, b: any) =>
     new Date(a.weekEnding).getTime() - new Date(b.weekEnding).getTime()

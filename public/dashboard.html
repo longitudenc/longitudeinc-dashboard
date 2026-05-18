@@ -2036,6 +2036,7 @@ function wipeAndReprocess(){
 
 function renderWeeksList(){
   const el=document.getElementById('weeks-list');
+  if(!el) return;
   if(!S.weekHistory.length){ el.innerHTML='<div class="no-data">No weeks loaded yet — drop CSV files into your Google Drive upload folder</div>'; return; }
   const sorted=[...S.weekHistory].sort((a,b)=>new Date(b.weekEnding)-new Date(a.weekEnding));
 
