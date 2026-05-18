@@ -1988,12 +1988,10 @@ function checkForNewFiles(){
         renderWeeksList();
         document.getElementById('last-updated').textContent = new Date().toLocaleTimeString();
       }
-    })
-    .withFailureHandler(err=>{
+    }).catch(err=>{
       document.querySelector('.refresh-btn button').disabled = false;
       document.getElementById('refresh-status').textContent = 'Error: ' + err;
-    })
-    .triggerProcessAndLoad();
+    });
 }
 
 function deduplicateData(){
@@ -2008,12 +2006,9 @@ function deduplicateData(){
             if(data.weeks){ S.weekHistory=data.weeks; S.trackerData=data.trackerData||{}; updateWeekDropdown(); renderWeeksList(); }
             document.getElementById('refresh-status').textContent = '✓ Done — removed ' + result.removed + ' duplicates';
           })
-          .withFailureHandler(err=>console.error(err))
-          .getAllData();
+          .catch(err=>console.error(err));
       }
-    })
-    .withFailureHandler(err=>{ document.getElementById('refresh-status').textContent = 'Error: ' + err; })
-    .deduplicateEmpData();
+    }).catch(err=>{ document.getElementById('refresh-status').textContent = 'Error: ' + err; });
 }
 
 function wipeAndReprocess(){
@@ -2027,11 +2022,10 @@ function wipeAndReprocess(){
       updateWeekDropdown();
       setTimeout(checkForNewFiles, 500);
     })
-    .withFailureHandler(err=>{
+    .catch(err=>{
       document.querySelector('.refresh-btn button').disabled = false;
       document.getElementById('refresh-status').textContent = 'Error: ' + err;
-    })
-    .clearAllData();
+    });
 }
 
 function renderWeeksList(){
@@ -2975,8 +2969,7 @@ function addPenaltyWaiver(){
       document.getElementById('waiver-hours').checked=false;
       document.getElementById('waiver-notes').value='';
     })
-    .withFailureHandler(err=>{ statusEl.textContent='✗ '+err; statusEl.style.color='#9C0006'; })
-    .savePenaltyWaivers(S_penaltyWaivers);
+
 }
 
 function removePenaltyWaiver(idx){
@@ -2989,8 +2982,7 @@ function removePenaltyWaiver(idx){
       renderWaiverTable();
       renderBonusContent();
       renderCompanyBonus();
-    }).catch(err=>{statusEl.textContent='✗ '+err; //FailureHandler(err=>{ statusEl.textContent='✗ '+err; statusEl.style.color='#9C0006'; })
-    .savePenaltyWaivers(S_penaltyWaivers);
+    }).catch(err=>{statusEl.textContent='✗ '+err; statusEl.style.color='#9C0006'; });
 }
 
 function getWaiver(salonNum, periodLabel){
@@ -3096,8 +3088,7 @@ function saveManagerAssignments(){
   fetch('/api/gs/saveManagerTable',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({managers:Object.entries(S_managerTable).map(([k,v])=>({salonNum:k,...v}))})}).then(r=>r.json()).then(r=>{
       statusEl.textContent = r.success ? '✓ Saved — ' + new Date().toLocaleTimeString() : '✗ Error: ' + r.error;
       statusEl.style.color = r.success ? '#2a7a4a' : '#9C0006';
-    }).catch(err=>{ statusEl.textContent = '✗ ' + err; //statusEl.style.color='#9C0006'; })
-    .saveManagerTable(managers);
+    }).catch(err=>{ statusEl.textContent = '✗ ' + err; statusEl.style.color='#9C0006'; });
 }
 
 // ── AM Bonus ──────────────────────────────────────────────────
@@ -3951,12 +3942,11 @@ function exportPayrollCSV(periodKey){
       a.click();
       URL.revokeObjectURL(url);
     })
-    .withFailureHandler(err=>{
+    .catch(err=>{
       btn.disabled = false;
       btn.textContent = '⬇ ADP Payroll CSV';
       alert('Error: ' + err);
-    })
-    .generatePayrollCSV(periodKey);
+    });
 }
 
 function exportBonusJPEG(periodKey){
@@ -5169,12 +5159,11 @@ function bulkPrintReviews(){
       status.textContent = `Generating ${data.reviews.length} reviews — opening print window...`;
       setTimeout(()=>openBulkPrintWindow(data), 100);
     })
-    .withFailureHandler(err=>{
+    .catch(err=>{
       btn.disabled = false;
       btn.textContent = '🖨 Generate Reviews';
       status.textContent = 'Error: ' + String(err);
-    })
-    .getBulkReviewData(salonNum, year);
+    });
 }
 
 function openBulkPrintWindow(data){
@@ -5379,13 +5368,12 @@ function refreshDiscPoints(){
         status.style.color = '#9C0006';
       }
     })
-    .withFailureHandler(err=>{
+    .catch(err=>{
       btn.disabled = false;
       btn.textContent = '🔄 Refresh Disc Points';
       status.textContent = '✗ ' + String(err);
       status.style.color = '#9C0006';
-    })
-    .reprocessDiscPoints();
+    });
 }
 
 // ── Start ─────────────────────────────────────────────────────
