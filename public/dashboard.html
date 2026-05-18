@@ -985,9 +985,9 @@ function switchToAdmin(){
   const mainEl = document.querySelector('.content');
   if(mainEl) mainEl.scrollTop = 0;
   window.scrollTo(0,0);
-  renderManagerTable();
-  populateWaiverDropdowns();
-  renderWaiverTable();
+  try { renderManagerTable(); console.log('renderManagerTable OK, innerHTML:', document.getElementById('page-admin').innerHTML.length); } catch(e) { console.error('renderManagerTable error:', e); }
+  try { populateWaiverDropdowns(); console.log('populateWaiverDropdowns OK'); } catch(e) { console.error('populateWaiverDropdowns error:', e); }
+  try { renderWaiverTable(); console.log('renderWaiverTable OK, innerHTML:', document.getElementById('page-admin').innerHTML.length); } catch(e) { console.error('renderWaiverTable error:', e); }
 }
 function switchTab(tab,el){ 
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active')); 
