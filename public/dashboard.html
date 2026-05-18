@@ -970,10 +970,17 @@ function switchToCompany(){
   renderCompany(); 
 }
 function switchToAdmin(){
+  console.log('switchToAdmin called');
   initBulkPrintSelectors();
   clearActive();
   const b=document.getElementById('btn-admin'); if(b) b.classList.add('active');
-  document.getElementById('page-admin').classList.add('active');
+  const adminEl = document.getElementById('page-admin');
+  console.log('page-admin element:', adminEl);
+  console.log('page-admin display:', adminEl ? window.getComputedStyle(adminEl).display : 'NOT FOUND');
+  console.log('page-admin classes:', adminEl ? adminEl.className : 'NOT FOUND');
+  if(adminEl) adminEl.classList.add('active');
+  console.log('page-admin display after active:', adminEl ? window.getComputedStyle(adminEl).display : 'NOT FOUND');
+  console.log('page-admin innerHTML length:', adminEl ? adminEl.innerHTML.length : 0);
   renderManagerTable();
   populateWaiverDropdowns();
   renderWaiverTable();
