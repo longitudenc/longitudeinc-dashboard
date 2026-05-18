@@ -499,7 +499,7 @@
 
 
     <!-- Admin upload panel -->
-    <div class="page" id="page-admin" style="min-height:200px;border:3px solid red;position:relative;z-index:100;background:yellow;">
+    <div class="page" id="page-admin">
       <div class="page-header"><h2>Admin — Data Management</h2><div class="sub">Upload new weekly reports and manage data</div></div>
       <div class="upload-panel">
         <div class="card-title">Admin — Data Management</div>
@@ -971,24 +971,15 @@ function switchToCompany(){
   renderCompany(); 
 }
 function switchToAdmin(){
-  console.log('switchToAdmin called');
   initBulkPrintSelectors();
   clearActive();
   const b=document.getElementById('btn-admin'); if(b) b.classList.add('active');
-  const adminEl = document.getElementById('page-admin');
-  console.log('page-admin element:', adminEl);
-  console.log('page-admin display:', adminEl ? window.getComputedStyle(adminEl).display : 'NOT FOUND');
-  console.log('page-admin classes:', adminEl ? adminEl.className : 'NOT FOUND');
-  if(adminEl) adminEl.classList.add('active');
-  console.log('page-admin display after active:', adminEl ? window.getComputedStyle(adminEl).display : 'NOT FOUND');
-  console.log('page-admin innerHTML length:', adminEl ? adminEl.innerHTML.length : 0);
-  // Force scroll to top
+  document.getElementById('page-admin').classList.add('active');
   const mainEl = document.querySelector('.content');
   if(mainEl) mainEl.scrollTop = 0;
-  window.scrollTo(0,0);
-  try { renderManagerTable(); console.log('renderManagerTable OK, innerHTML:', document.getElementById('page-admin').innerHTML.length); } catch(e) { console.error('renderManagerTable error:', e); }
-  try { populateWaiverDropdowns(); console.log('populateWaiverDropdowns OK'); } catch(e) { console.error('populateWaiverDropdowns error:', e); }
-  try { renderWaiverTable(); console.log('renderWaiverTable OK, innerHTML:', document.getElementById('page-admin').innerHTML.length); } catch(e) { console.error('renderWaiverTable error:', e); }
+  renderManagerTable();
+  populateWaiverDropdowns();
+  renderWaiverTable();
 }
 function switchTab(tab,el){ 
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active')); 
