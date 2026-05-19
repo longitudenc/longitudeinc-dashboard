@@ -384,6 +384,7 @@
             <div class="trend-sidebar">
               <div class="trend-sidebar-label">Salon Metrics</div>
               <button class="trend-metric-btn active" onclick="selectTrendMetric('cc',this)">Customer Count</button>
+              <button class="trend-metric-btn" onclick="selectTrendMetric('lyDiff',this)">CC +/- LY Avg</button>
               <button class="trend-metric-btn" onclick="selectTrendMetric('ccG',this)">CC Growth %</button>
               <button class="trend-metric-btn" onclick="selectTrendMetric('sgr',this)">Sales Growth %</button>
               <button class="trend-metric-btn" onclick="selectTrendMetric('prod',this)">Product %</button>
@@ -663,7 +664,14 @@ const AMS = {
   kayla:     {name:'Kayla Medlin',       init:'KM', color:'#8a2a80', globalId:'2014-0001-2984', salons:[]},
 };
 
-const LY_AVG = {}; // Last year averages - populated by scrapers in future
+// Last year (2025) weekly avg CC per salon — sourced from 2025_AVGs.XLS
+// Scrapers will refresh this in Session 4
+const LY_AVG = {
+  '1304':404.71,'2554':326.38,'3015':508.87,'3025':612.60,'3027':499.92,
+  '3043':475.98,'3045':353.94,'3053':454.15,'3058':641.96,'3062':594.96,
+  '3071':753.98,'3545':159.75,'3685':264.83,'4138':307.15,'7728':505.23,
+  '8725':318.79,'9478':636.67,'9489':314.10,'9689':596.25
+};
 
 const PAYROLL_MAP = {}; // Payroll map - populated by scrapers in future
 
@@ -703,7 +711,7 @@ function tierCPH(v,cc)    { const t=payrollTargets(cc); return v>=t.cph?'c4':v>=
 function tierToScore(t)   { return t==='c4'?2:t==='c3'?1:0; }
 
 const SALON_SCORE_METRICS = [
-  {label:'CC',            fn:a=>tierCC(Math.round(a.cc)),              fmtVal:a=>Math.round(a.cc)},
+  {label:'CC',            fn:a=>tierCC(Math.round(a.cc)),              fmtVal:a=>{ const cc=Math.round(a.cc); if(a.lyDiff===null||a.lyDiff===undefined) return cc; const d=Math.round(a.lyDiff); return `${cc} <span class="${tc(d)}" style="font-size:11px;font-weight:600;">(${sgn(d,0)} vs LY)</span>`; }},
   {label:'CC Growth',     fn:a=>tierCCG(a.ccG),                        fmtVal:a=>a.ccG.toFixed(1)+'%'},
   {label:'Sales Growth',  fn:a=>tierSGR(a.sgr),                        fmtVal:a=>a.sgr.toFixed(1)+'%'},
   {label:'Product %',     fn:a=>tierProd(a.prod),                      fmtVal:a=>a.prod.toFixed(1)+'%'},
@@ -792,7 +800,10 @@ function calcAvgs(rows){
   if(!rows.length)return null;
   const f=k=>avg(rows.map(r=>n(r[k])));
   const fp=k=>avg(rows.map(r=>p(r[k])));
-  return{cc:f('ccThis'),ccG:fp('ccGrowth'),sgr:fp('salesGrowth'),prod:fp('product'),nr:fp('nr'),rr:fp('rr'),hc:f('hcTime'),mbc:f('mbc'),ssW:fp('ssWaits'),wts:fp('waits'),noc:fp('nonOciWaits'),pay:fp('payroll'),cph:f('cph')};
+  // Avg LY diff: average across rows that have a known LY avg
+  const lyDiffs = rows.map(r=>{ const l=LY_AVG[r.salonNum]; return (l && !isNaN(n(r.ccThis))) ? n(r.ccThis)-l : null; }).filter(x=>x!==null);
+  const lyDiff = lyDiffs.length ? avg(lyDiffs) : null;
+  return{cc:f('ccThis'),ccG:fp('ccGrowth'),sgr:fp('salesGrowth'),prod:fp('product'),nr:fp('nr'),rr:fp('rr'),hc:f('hcTime'),mbc:f('mbc'),ssW:fp('ssWaits'),wts:fp('waits'),noc:fp('nonOciWaits'),pay:fp('payroll'),cph:f('cph'),lyDiff:lyDiff};
 }
 function calcEmpAvgs(emps){
   const e=emps.filter(x=>x.hcTime&&!isNaN(n(x.hcTime)));
@@ -1196,7 +1207,10 @@ function buildSalonRow(r,cols,showAM=false){
 function buildAvgRow(a,label,showAM=false){
   if(!a)return'';
   const avCC=Math.round(a.cc),avT=payrollTargets(avCC);
-  const vals=[label,avCC,'—',`<span class="${tc(a.ccG)}">${sgn(a.ccG)}%</span>`,`<span class="${tc(a.sgr)}">${sgn(a.sgr)}%</span>`,a.prod.toFixed(1)+'%',a.nr.toFixed(1)+'%',a.rr.toFixed(1)+'%',a.hc.toFixed(1),a.mbc.toFixed(1),a.ssW.toFixed(1)+'%',a.wts.toFixed(1)+'%',a.noc.toFixed(1)+'%',a.pay.toFixed(1)+'%',a.cph.toFixed(2)];
+  const lyCell = (a.lyDiff===null || a.lyDiff===undefined)
+    ? '—'
+    : `<span class="${tc(a.lyDiff)}">${sgn(a.lyDiff,0)}</span>`;
+  const vals=[label,avCC,lyCell,`<span class="${tc(a.ccG)}">${sgn(a.ccG)}%</span>`,`<span class="${tc(a.sgr)}">${sgn(a.sgr)}%</span>`,a.prod.toFixed(1)+'%',a.nr.toFixed(1)+'%',a.rr.toFixed(1)+'%',a.hc.toFixed(1),a.mbc.toFixed(1),a.ssW.toFixed(1)+'%',a.wts.toFixed(1)+'%',a.noc.toFixed(1)+'%',a.pay.toFixed(1)+'%',a.cph.toFixed(2)];
   if(showAM) vals.splice(1,0,'');
   return `<tr class="avg-row">${vals.map(v=>`<td>${v}</td>`).join('')}</tr>`;
 }
@@ -1226,10 +1240,13 @@ function renderSalonTab(){
   function ytdRow(a){
     if(!a) return '';
     const avCC=Math.round(a.cc), avT=payrollTargets(avCC);
+    const lyCell = (a.lyDiff===null || a.lyDiff===undefined)
+      ? '—'
+      : `<span class="${tc(a.lyDiff)}">${sgn(a.lyDiff,0)}</span>`;
     return `<tr style="background:#e8eaf5;">
       <td style="font-weight:700;color:#3a4a9a;">▸ YTD Average <span class="ytd-badge">YTD</span></td>
       <td class="${tierCC(avCC)}">${avCC}</td>
-      <td>—</td>
+      <td>${lyCell}</td>
       <td class="${tierCCG(a.ccG)}"><span class="${tc(a.ccG)}">${sgn(a.ccG)}%</span></td>
       <td><span class="${tc(a.sgr)}">${sgn(a.sgr)}%</span></td>
       <td class="${tierProd(a.prod)}">${a.prod.toFixed(1)}%</td>
@@ -1500,6 +1517,9 @@ const TREND_METRICS = {
   cc:  { label:'Customer Count', unit:'', higher:true,
          targets:[{val:520,color:'#2d7a1a',label:'Excellence ≥520'},{val:420,color:'#c8a800',label:'Growth ≥420'}],
          chartType:'bar', color:'#2a6a9a' },
+  lyDiff:{ label:'CC +/- LY Avg', unit:'', higher:true,
+         targets:[{val:0,color:'#999',label:'LY Baseline'}],
+         chartType:'line', color:'#2a6a9a' },
   ccG: { label:'CC Growth %', unit:'%', higher:true,
          targets:[{val:5,color:'#2d7a1a',label:'Excellence ≥5%'},{val:3,color:'#c8a800',label:'Growth ≥3%'}],
          chartType:'line', color:'#2a7a4a' },
@@ -1569,7 +1589,7 @@ function selectTrendMetric(key, btn, overrideSalon){
   }
 
   const labels = weeks.map(w=>{ const d=new Date(w.weekEnding); return (d.getMonth()+1)+'/'+d.getDate(); });
-  const keyMap = {cc:'cc',ccG:'ccG',sgr:'sgr',prod:'prod',nr:'nr',rr:'rr',hc:'hc',mbc:'mbc',ssW:'ssW',wts:'wts',noc:'noc',pay:'pay',cph:'cph'};
+  const keyMap = {cc:'cc',ccG:'ccG',sgr:'sgr',prod:'prod',nr:'nr',rr:'rr',hc:'hc',mbc:'mbc',ssW:'ssW',wts:'wts',noc:'noc',pay:'pay',cph:'cph',lyDiff:'lyDiff'};
   const getVal = (a) => {
     if(!a) return null;
     const v = a[keyMap[key]];
@@ -1601,7 +1621,16 @@ function selectTrendMetric(key, btn, overrideSalon){
   amSalons.forEach((snum, idx)=>{
     const data = weeks.map(w=>{
       const row = w.salons.find(r=>r.salonNum.trim()===snum);
-      if(!row || !rowField) return null;
+      if(!row) return null;
+      // Special case: CC +/- LY = this week's CC minus salon's LY avg
+      if(key==='lyDiff'){
+        const ly = LY_AVG[snum];
+        if(!ly) return null;
+        const cc = parseFloat(row.ccThis);
+        if(isNaN(cc)) return null;
+        return parseFloat((cc - ly).toFixed(2));
+      }
+      if(!rowField) return null;
       const raw = row[rowField];
       if(raw===undefined || raw===null || raw==='') return null;
       const v = parseFloat(raw);
@@ -1686,6 +1715,42 @@ function selectTrendMetric(key, btn, overrideSalon){
     ? `<button class="back-btn" onclick="drillBack()">← Back</button>`
     : '';
 
+  // Period averages — for the visible weeks
+  const meanOfArr = arr => { const v=arr.filter(x=>x!==null&&x!==undefined&&!isNaN(x)); return v.length?v.reduce((s,x)=>s+x,0)/v.length:null; };
+  // Salon Avg tile = drilled salon's avg, or AM avg if not drilled
+  let salonAvgLineData;
+  if(drillSalon){
+    // datasets[0] is the salon line
+    salonAvgLineData = datasets[0]?.data || [];
+  } else {
+    // AM avg dataset was pushed after all per-salon datasets
+    const amAvgDs = datasets.find(d => d.label === am.name+' Avg');
+    salonAvgLineData = amAvgDs ? amAvgDs.data : [];
+  }
+  const coAvgDs = datasets.find(d => d.label === 'Company Avg');
+  const coAvgLineData = coAvgDs ? coAvgDs.data : [];
+  const salonPeriodAvg = meanOfArr(salonAvgLineData);
+  const coPeriodAvg    = meanOfArr(coAvgLineData);
+  const unit = metric.unit || '';
+  const dec = (key==='cph') ? 2 : (unit==='%' ? 1 : (key==='cc' ? 0 : 1));
+  const fmtTile = v => {
+    if(v===null) return '—';
+    if(key==='lyDiff') return (v>=0?'+':'')+v.toFixed(0);
+    return v.toFixed(dec)+unit;
+  };
+  const salonTileLabel = drillSalon ? `${salonName} Avg (${weeks.length}wk)` : `${am.name} Avg (${weeks.length}wk)`;
+  const periodStatsHtml = `
+    <div id="trend-period-stats" style="display:flex;gap:10px;margin:8px 0 12px 0;flex-wrap:wrap;">
+      <div style="flex:1;min-width:180px;background:#f7f6f3;border:1px solid var(--border);border-radius:8px;padding:10px 14px;">
+        <div style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);">${salonTileLabel}</div>
+        <div style="font-size:20px;font-weight:700;color:${am.color};margin-top:2px;">${fmtTile(salonPeriodAvg)}</div>
+      </div>
+      <div style="flex:1;min-width:180px;background:#f7f6f3;border:1px solid var(--border);border-radius:8px;padding:10px 14px;">
+        <div style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);">Company Avg (${weeks.length}wk)</div>
+        <div style="font-size:20px;font-weight:700;color:#555;margin-top:2px;">${fmtTile(coPeriodAvg)}</div>
+      </div>
+    </div>`;
+
   const area = document.getElementById('trend-chart-area');
   area.innerHTML = `
     ${backBtn}
@@ -1695,6 +1760,7 @@ function selectTrendMetric(key, btn, overrideSalon){
         <div class="trend-chart-sub">${chartSub}</div>
       </div>
     </div>
+    ${periodStatsHtml}
     <div class="chart-canvas-wrap"><canvas id="trend-canvas"></canvas></div>
     <div id="trend-custom-legend" style="margin-top:14px;display:flex;flex-wrap:wrap;gap:6px;padding:0 4px;"></div>`;
 
@@ -1867,6 +1933,7 @@ function renderCompany(){
       {k:'am',lbl:'AM',sv:r=>r.am.name,fv:r=>`<span class="am-chip"><span class="chip-dot" style="background:${r.am.color}"></span><strong>${r.am.name}</strong></span>`,cl:()=>''},
       {k:'n', lbl:'#', sv:r=>r.cnt, fv:r=>r.cnt, cl:()=>''},
       {k:'cc', lbl:'Avg CC',    sv:r=>r.cc,  fv:r=>Math.round(r.cc),           cl:r=>tierCC(Math.round(r.cc))},
+      {k:'lyDiff', lbl:'CC +/- LY', sv:r=>(r.lyDiff===null||r.lyDiff===undefined)?-9999:r.lyDiff, fv:r=>(r.lyDiff===null||r.lyDiff===undefined)?'<span style="color:#aaa">—</span>':`<span class="${tc(r.lyDiff)}">${sgn(r.lyDiff,0)}</span>`, cl:()=>''},
       {k:'ccG',lbl:'CC Growth', sv:r=>r.ccG, fv:r=>`<span class="${tc(r.ccG)}">${sgn(r.ccG)}%</span>`, cl:r=>tierCCG(r.ccG)},
       {k:'nr', lbl:'NR %',      sv:r=>r.nr,  fv:r=>r.nr.toFixed(1)+'%',        cl:r=>tierNR(r.nr)},
       {k:'rr', lbl:'RR %',      sv:r=>r.rr,  fv:r=>r.rr.toFixed(1)+'%',        cl:r=>tierRR(r.rr)},
@@ -1881,7 +1948,7 @@ function renderCompany(){
 
     document.getElementById('co-am-tbody').innerHTML=
       amData.map(r=>`<tr>${CO_COLS.map(c=>`<td class="${c.cl(r)}">${c.fv(r)}</td>`).join('')}</tr>`).join('')+
-      (allAForAM?`<tr class="avg-row"><td>▸ ${S_coAMMode==='ytd'?'YTD':'This Week'} Avg</td><td>${allForAMAvg.length}</td><td>${Math.round(allAForAM.cc)}</td><td><span class="${tc(allAForAM.ccG)}">${sgn(allAForAM.ccG)}%</span></td><td>${allAForAM.nr.toFixed(1)}%</td><td>${allAForAM.rr.toFixed(1)}%</td><td>${allAForAM.hc.toFixed(1)}</td><td>${allAForAM.mbc.toFixed(1)}</td><td>${allAForAM.ssW.toFixed(1)}%</td><td>${allAForAM.wts.toFixed(1)}%</td><td>${allAForAM.noc.toFixed(1)}%</td><td>${allAForAM.pay.toFixed(1)}%</td></tr>`:'');
+      (allAForAM?`<tr class="avg-row"><td>▸ ${S_coAMMode==='ytd'?'YTD':'This Week'} Avg</td><td>${allForAMAvg.length}</td><td>${Math.round(allAForAM.cc)}</td><td>${(allAForAM.lyDiff===null||allAForAM.lyDiff===undefined)?'—':`<span class="${tc(allAForAM.lyDiff)}">${sgn(allAForAM.lyDiff,0)}</span>`}</td><td><span class="${tc(allAForAM.ccG)}">${sgn(allAForAM.ccG)}%</span></td><td>${allAForAM.nr.toFixed(1)}%</td><td>${allAForAM.rr.toFixed(1)}%</td><td>${allAForAM.hc.toFixed(1)}</td><td>${allAForAM.mbc.toFixed(1)}</td><td>${allAForAM.ssW.toFixed(1)}%</td><td>${allAForAM.wts.toFixed(1)}%</td><td>${allAForAM.noc.toFixed(1)}%</td><td>${allAForAM.pay.toFixed(1)}%</td></tr>`:'');
 
     // All salons detail
     const allCols=[
@@ -1899,11 +1966,14 @@ function renderCompany(){
     function coYtdRow(a){
       if(!a) return '';
       const avCC=Math.round(a.cc);
+      const lyCell = (a.lyDiff===null || a.lyDiff===undefined)
+        ? '—'
+        : `<span class="${tc(a.lyDiff)}">${sgn(a.lyDiff,0)}</span>`;
       return `<tr style="background:#e8eaf5;">
         <td style="font-weight:700;color:#3a4a9a;">▸ Company YTD Average <span class="ytd-badge">YTD</span></td>
         <td></td>
         <td class="${tierCC(avCC)}">${avCC}</td>
-        <td>—</td>
+        <td>${lyCell}</td>
         <td class="${tierCCG(a.ccG)}"><span class="${tc(a.ccG)}">${sgn(a.ccG)}%</span></td>
         <td><span class="${tc(a.sgr)}">${sgn(a.sgr)}%</span></td>
         <td class="${tierProd(a.prod)}">${a.prod.toFixed(1)}%</td>
