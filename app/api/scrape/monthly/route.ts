@@ -6,6 +6,7 @@ import {
   fetchSalons,
   fetchGroupedSummary,
   fetchDailyStoreSummary,
+  batchMap,
 } from '@/lib/sd3'
 import { upsertSheet } from '@/lib/sheets'
 import { aggregatePeriod, type AggregatedPeriod } from '@/lib/aggregate'
@@ -144,10 +145,13 @@ export async function GET(request: Request) {
     const salons = await fetchSalons(session)
 
     console.log(
-      `[scrape/monthly] ${monthStart}→${monthEnd} — pulling ${salons.length} salons`
+      `[scrape/monthly] ${monthStart}→${monthEnd} — pulling ${salons.length} salons (batches of 4)`
     )
 
-    const fetches = salons.map(async salon => {
+    // Process salons in batches of 4 to avoid overwhelming SD3 with concurrent
+    // long-range daily fetches. Each batch = 8 concurrent SD3 calls
+    // (4 grouped + 4 daily). Sequential between batches.
+    const fetchedRows = await batchMap(salons, 4, async salon => {
       try {
         const [grouped, daily] = await Promise.all([
           fetchGroupedSummary(session, salon.storeId, monthStart, monthEnd),
@@ -168,7 +172,7 @@ export async function GET(request: Request) {
       }
     })
 
-    const rows = (await Promise.all(fetches)).filter(
+    const rows = fetchedRows.filter(
       (r): r is Record<string, any> => r !== null
     )
     results.salonsProcessed = rows.length

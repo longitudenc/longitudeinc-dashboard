@@ -287,3 +287,40 @@ function jsonHeaders(token: string): HeadersInit {
     Accept: 'application/json',
   }
 }
+// ── Concurrency helper ───────────────────────────────────────
+
+/**
+ * Map an async function over an array with bounded concurrency.
+ *
+ * Unlike Promise.all(items.map(fn)) which fires ALL requests at once,
+ * this processes `concurrency` items at a time, waiting for each batch
+ * to complete before starting the next.
+ *
+ * Used to throttle SD3 calls so long-range fetches (like monthly) don't
+ * overwhelm SD3 with 38+ simultaneous requests.
+ *
+ * @param items       — input array
+ * @param concurrency — how many to run in parallel (e.g. 4)
+ * @param fn          — async mapper
+ * @returns           — results in the SAME ORDER as input items
+ */
+export async function batchMap<T, U>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T, index: number) => Promise<U>
+): Promise<U[]> {
+  const results: U[] = new Array(items.length)
+  let cursor = 0
+
+  async function worker() {
+    while (true) {
+      const i = cursor++
+      if (i >= items.length) return
+      results[i] = await fn(items[i], i)
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, () => worker())
+  await Promise.all(workers)
+  return results
+}

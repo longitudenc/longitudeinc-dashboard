@@ -17,6 +17,7 @@ import {
   fetchSalons,
   fetchGroupedSummary,
   fetchDailyStoreSummary,
+  batchMap,
 } from '@/lib/sd3'
 import { upsertSheet } from '@/lib/sheets'
 import { aggregatePeriod, type AggregatedPeriod } from '@/lib/aggregate'
@@ -28,10 +29,9 @@ export const maxDuration = 60
 
 const SD_WEEKLY_TAB = 'SD_WEEKLY'
 
-// Header row for SD_WEEKLY tab. Field names match AggregatedPeriod exactly.
 const COLUMNS = [
-  'weekEnd',          // YYYY-MM-DD (Friday)
-  'weekStart',        // YYYY-MM-DD (Saturday)
+  'weekEnd',
+  'weekStart',
   'storeId',
   'cc',
   'newCust',
@@ -107,7 +107,6 @@ export async function GET(request: Request) {
   const startParam = url.searchParams.get('start')
   const endParam = url.searchParams.get('end')
 
-  // Determine target week
   let weekStart: string
   let weekEnd: string
 
@@ -135,23 +134,19 @@ export async function GET(request: Request) {
     const salons = await fetchSalons(session)
 
     console.log(
-      `[scrape/weekly] ${weekStart}→${weekEnd} — pulling ${salons.length} salons`
+      `[scrape/weekly] ${weekStart}→${weekEnd} — pulling ${salons.length} salons (batches of 4)`
     )
 
-    // For each salon, in parallel:
-    //   1. Pull grouped summary (1 record, full week aggregates)
-    //   2. Pull daily rows (7 records, needed for Sat/Sun split)
-    //   3. Aggregate into dashboard format
-    const fetches = salons.map(async salon => {
+    // Process salons in batches of 4. Weekly is fast even without batching,
+    // but using batchMap everywhere keeps behavior consistent and protects
+    // against future SD3 slowdowns.
+    const fetchedRows = await batchMap(salons, 4, async salon => {
       try {
         const [grouped, daily] = await Promise.all([
           fetchGroupedSummary(session, salon.storeId, weekStart, weekEnd),
           fetchDailyStoreSummary(session, salon.storeId, weekStart, weekEnd),
         ])
-        if (!grouped) {
-          // No data this week — salon may be closed or data not posted yet
-          return null
-        }
+        if (!grouped) return null
         const agg = aggregatePeriod(grouped, daily, weekStart, weekEnd)
         return rowFromAggregate(agg)
       } catch (err) {
@@ -166,7 +161,7 @@ export async function GET(request: Request) {
       }
     })
 
-    const rows = (await Promise.all(fetches)).filter(
+    const rows = fetchedRows.filter(
       (r): r is Record<string, any> => r !== null
     )
     results.salonsProcessed = rows.length
