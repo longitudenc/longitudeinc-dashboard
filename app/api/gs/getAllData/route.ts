@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getAllDashboardData } from '@/lib/sheets'
+import { getDashboardWeeks } from '@/lib/dashboard-data'
 import { AMS } from '@/lib/config'
 
 let cache: { data: any; timestamp: number } | null = null
@@ -10,8 +11,12 @@ export async function GET() {
     if (cache && Date.now() - cache.timestamp < CACHE_TTL) {
       return NextResponse.json({ ...cache.data, cached: true })
     }
-    const raw = await getAllDashboardData()
-    const data = formatAllData(raw)
+    // Pull legacy data (emps, bonuses, etc.) and new scraped salon data in parallel
+    const [raw, scrapedWeeks] = await Promise.all([
+      getAllDashboardData(),
+      getDashboardWeeks(),
+    ])
+    const data = formatAllData(raw, scrapedWeeks)
     cache = { data, timestamp: Date.now() }
     return NextResponse.json(data)
   } catch (e: any) {
@@ -19,21 +24,29 @@ export async function GET() {
   }
 }
 
-function formatAllData(raw: any) {
-  // ── Weeks (salon + employee rows grouped by week) ──────────
+function formatAllData(raw: any, scrapedWeeks: any[]) {
+  // ── Weeks: build map from scraped salon data, then layer in legacy emps ──
+  // Salon rows now come from SD_WEEKLY (via getDashboardWeeks).
+  // Employee rows still come from the legacy EmpData tab.
   const weekMap: Record<string, any> = {}
-  raw.salonRows.forEach((row: any) => {
-    const wk = row.weekEnding || ''
-    if (!wk) return
-    if (!weekMap[wk]) weekMap[wk] = { weekEnding: wk, salons: [], emps: [] }
-    weekMap[wk].salons.push(row)
+
+  // Seed weekMap with scraped salon rows
+  scrapedWeeks.forEach((w: any) => {
+    weekMap[w.weekEnding] = {
+      weekEnding: w.weekEnding,
+      salons: w.salons,
+      emps: [],
+    }
   })
+
+  // Layer in employee rows from legacy EmpData
   raw.empRows.forEach((row: any) => {
     const wk = row.weekEnding || ''
     if (!wk) return
     if (!weekMap[wk]) weekMap[wk] = { weekEnding: wk, salons: [], emps: [] }
     weekMap[wk].emps.push(row)
   })
+
   const weeks = Object.values(weekMap).sort((a: any, b: any) =>
     new Date(a.weekEnding).getTime() - new Date(b.weekEnding).getTime()
   )
