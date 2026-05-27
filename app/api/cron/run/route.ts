@@ -1,20 +1,15 @@
 // app/api/cron/run/route.ts
 //
-// Single daily cron dispatcher (designed for Vercel Hobby plan — one schedule).
+// Single daily cron dispatcher (Vercel Hobby plan compatible).
 //
 // Schedule: 4 AM ET every day
 //
-// Logic each run:
-//   1. Always run /api/scrape/daily (pulls yesterday's data for all 19 salons)
-//   2. If today is Saturday, also run /api/scrape/weekly (last completed fiscal week)
-//   3. If yesterday was the final Friday of a calendar month, also run
-//      /api/scrape/monthly (last completed fiscal month)
-//
-// Auth: requires Bearer token matching CRON_SECRET (Vercel Cron sends this).
-//   Also accepts ?secret= for manual invocation.
+// Calls scrape functions DIRECTLY (in-process) instead of via HTTP.
+// This avoids Vercel Deployment Protection issues with internal API calls.
 
 import { NextResponse } from 'next/server'
 import { todayET, yesterdayET, dayOfWeek, isLastFridayOfMonth } from '@/lib/fiscal'
+import { runDailyScrape, runWeeklyScrape, runMonthlyScrape } from '@/lib/scrape-runner'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -29,50 +24,12 @@ function isAuthorized(request: Request): boolean {
   return url.searchParams.get('secret') === expected
 }
 
-async function invokeScrape(
-  endpoint: string,
-  requestHost: string,
-  secret: string
-): Promise<any> {
-  const base = process.env.VERCEL_URL
-    ? `https://${process.env.VERCEL_URL}`
-    : `http://${requestHost}`
-  const url = `${base}${endpoint}`
-  const startedAt = Date.now()
-  try {
-    const res = await fetch(url, {
-      headers: { authorization: `Bearer ${secret}` },
-      cache: 'no-store',
-    })
-    const json = await res.json()
-    return {
-      endpoint,
-      status: res.status,
-      durationMs: Date.now() - startedAt,
-      ok: res.ok && json.ok !== false,
-      result: json,
-    }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return {
-      endpoint,
-      status: 0,
-      durationMs: Date.now() - startedAt,
-      ok: false,
-      error: msg,
-    }
-  }
-}
-
 export async function GET(request: Request) {
   const startedAt = Date.now()
 
   if (!isAuthorized(request)) {
     return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
   }
-
-  const secret = process.env.CRON_SECRET!
-  const requestHost = request.headers.get('host') || 'localhost:3001'
 
   const today = todayET()
   const yesterday = yesterdayET()
@@ -89,17 +46,20 @@ export async function GET(request: Request) {
 
   const results: any[] = []
 
-  results.push(await invokeScrape('/api/scrape/daily', requestHost, secret))
+  // 1. Daily — always
+  results.push({ name: 'daily', result: await runDailyScrape() })
 
+  // 2. Weekly — only on Saturday
   if (isSaturday) {
-    results.push(await invokeScrape('/api/scrape/weekly', requestHost, secret))
+    results.push({ name: 'weekly', result: await runWeeklyScrape() })
   }
 
+  // 3. Monthly — only when yesterday was a month-end Friday
   if (isMonthEnd) {
-    results.push(await invokeScrape('/api/scrape/monthly', requestHost, secret))
+    results.push({ name: 'monthly', result: await runMonthlyScrape() })
   }
 
-  const allOk = results.every(r => r.ok)
+  const allOk = results.every(r => r.result.ok)
   const durationMs = Date.now() - startedAt
 
   console.log(
