@@ -11,7 +11,6 @@ export async function GET() {
     if (cache && Date.now() - cache.timestamp < CACHE_TTL) {
       return NextResponse.json({ ...cache.data, cached: true })
     }
-    // Pull legacy data (emps, bonuses, etc.) and new scraped salon data in parallel
     const [raw, scrapedWeeks] = await Promise.all([
       getAllDashboardData(),
       getDashboardWeeks(),
@@ -24,13 +23,38 @@ export async function GET() {
   }
 }
 
+/**
+ * Normalize a date string to YYYY-MM-DD.
+ * Handles:
+ *   - "5/15/2026"   → "2026-05-15"
+ *   - "5/15/26"     → "2026-05-15"   (assumes 2000s)
+ *   - "2026-05-15"  → "2026-05-15"   (already correct)
+ *   - "5/15/2026 0:00:00" → "2026-05-15"  (strips time)
+ * Returns the original string if it can't parse it (so we don't lose data).
+ */
+function normalizeDateString(s: string): string {
+  if (!s) return s
+  const trimmed = String(s).trim()
+
+  // Already YYYY-MM-DD?
+  if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) return trimmed.slice(0, 10)
+
+  // M/D/YYYY or MM/DD/YYYY (optionally with time)
+  const match = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/)
+  if (match) {
+    let [, m, d, y] = match
+    if (y.length === 2) y = '20' + y
+    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
+  }
+
+  return trimmed
+}
+
 function formatAllData(raw: any, scrapedWeeks: any[]) {
-  // ── Weeks: build map from scraped salon data, then layer in legacy emps ──
-  // Salon rows now come from SD_WEEKLY (via getDashboardWeeks).
-  // Employee rows still come from the legacy EmpData tab.
+  // ── Weeks: scraped salon data is the source of truth; emp data joined by normalized weekEnding ──
   const weekMap: Record<string, any> = {}
 
-  // Seed weekMap with scraped salon rows
+  // Seed weekMap with scraped salon rows (canonical YYYY-MM-DD keys)
   scrapedWeeks.forEach((w: any) => {
     weekMap[w.weekEnding] = {
       weekEnding: w.weekEnding,
@@ -39,12 +63,15 @@ function formatAllData(raw: any, scrapedWeeks: any[]) {
     }
   })
 
-  // Layer in employee rows from legacy EmpData
+  // Layer in employee rows — normalize their weekEnding to YYYY-MM-DD so they
+  // merge correctly with scraped weeks (no more duplicate dropdown entries).
   raw.empRows.forEach((row: any) => {
-    const wk = row.weekEnding || ''
-    if (!wk) return
+    const rawWk = row.weekEnding || ''
+    if (!rawWk) return
+    const wk = normalizeDateString(rawWk)
     if (!weekMap[wk]) weekMap[wk] = { weekEnding: wk, salons: [], emps: [] }
-    weekMap[wk].emps.push(row)
+    // Also normalize the row's own weekEnding so downstream code uses the canonical form
+    weekMap[wk].emps.push({ ...row, weekEnding: wk })
   })
 
   const weeks = Object.values(weekMap).sort((a: any, b: any) =>
@@ -128,8 +155,8 @@ function formatAllData(raw: any, scrapedWeeks: any[]) {
     trackerData,
     bonusPeriods: Object.values(bonusMap),
     salonSummaryPeriods: Object.values(ssMap),
-    payrollConsolidatedPeriods: Object.values(pcMap), // matches S_payrollConsolidated
-    managerTable,           // array, not object
+    payrollConsolidatedPeriods: Object.values(pcMap),
+    managerTable,
     penaltyWaivers: raw.waiverRows,
     homeEmployees,
     homeDataMap,

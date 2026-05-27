@@ -2,22 +2,20 @@
 //
 // Translates SD_WEEKLY rows into the legacy SalonData dashboard format.
 //
-// The existing dashboard (public/dashboard.html) reads a "salonRows" array
-// with these exact field names:
-//   weekEnding, salonNum, salonName, salesLast, salesThis, salesGrowth,
-//   ccLast, ccThis, ccGrowth, nr, rr, product, payroll, waits, ssWaits,
-//   nonOciWaits, hcTime, cph, mbc
+// Growth metrics (ccGrowth, salesGrowth) compare THIS week to the SAME FISCAL
+// WEEK last year (week ending Friday minus 364 days). This matches what SD3's
+// own reports show — e.g. fiscal week ending 2026-05-22 (Fri) compares to
+// fiscal week ending 2025-05-23 (Fri).
 //
-// This module reads from SD_WEEKLY (our new clean schema) and returns rows
-// in the dashboard's expected shape.
+// If no matching LY week exists in SD_WEEKLY, growth fields are null
+// (rendered as 0% / dash in the dashboard).
 
 import { readSheet, rowsToObjects } from '@/lib/sheets'
 import { authenticate, fetchSalons } from '@/lib/sd3'
+import { addDays } from '@/lib/fiscal'
 
 const SD_WEEKLY_TAB = 'SD_WEEKLY'
 
-// Salon name lookup — matches public/dashboard.html SALON_NAMES.
-// Duplicated here so server-side rendering doesn't depend on the client file.
 const SALON_NAMES: Record<string, string> = {
   '1304': '1304 Hilltop',
   '2554': '2554 Carmel',
@@ -40,7 +38,6 @@ const SALON_NAMES: Record<string, string> = {
   '9689': '9689 Cureton',
 }
 
-// Dashboard's expected SalonData row shape
 export type DashboardSalonRow = {
   weekEnding: string
   salonNum: string
@@ -63,14 +60,12 @@ export type DashboardSalonRow = {
   mbc: number
 }
 
-// Dashboard's "weeks" array shape — one element per week, with all 19 salons inside
 export type DashboardWeek = {
   weekEnding: string
   salons: DashboardSalonRow[]
-  emps: any[] // future: EmpData translation
+  emps: any[]
 }
 
-// Raw SD_WEEKLY row shape (what we read from Sheets)
 type SDWeeklyRow = {
   weekEnd: string
   weekStart: string
@@ -92,27 +87,33 @@ type SDWeeklyRow = {
   [k: string]: any
 }
 
-// Safe number parse — handles strings, nulls, empties
 function num(v: any): number {
   if (v === null || v === undefined || v === '') return 0
   const n = typeof v === 'number' ? v : parseFloat(String(v))
   return isNaN(n) ? 0 : n
 }
 
-// Percent change between this and last; returns 0 if last is 0 or missing
 function pctChange(thisVal: number, lastVal: number): number {
   if (!lastVal) return 0
   return ((thisVal - lastVal) / lastVal) * 100
 }
 
 /**
- * Read all SD_WEEKLY rows, group by week, fill in prior-week comparison
- * fields, and join storeId → salonNum.
+ * Compute the LY equivalent fiscal week-ending date.
+ * Subtracts 364 days (52 weeks) so day-of-week stays the same.
  *
- * Returns an array of DashboardWeek, sorted by weekEnding ascending.
+ * Example: 2026-05-22 (Fri) → 2025-05-23 (Fri)
+ */
+function lyWeekEnd(thisWeekEnd: string): string {
+  return addDays(thisWeekEnd, -364)
+}
+
+/**
+ * Read all SD_WEEKLY rows, build a lookup by (storeId, weekEnd),
+ * and use it to populate this-year-vs-last-year growth fields.
  */
 export async function getDashboardWeeks(): Promise<DashboardWeek[]> {
-  // 1. Pull mapping storeId → salonNum (always fresh from SD3)
+  // 1. storeId → salonNum mapping from SD3
   const session = await authenticate()
   const salons = await fetchSalons(session)
   const storeIdToSalonNum = new Map<string, string>()
@@ -123,76 +124,67 @@ export async function getDashboardWeeks(): Promise<DashboardWeek[]> {
   // 2. Read all SD_WEEKLY rows
   const sheetData = await readSheet(SD_WEEKLY_TAB)
   if (!sheetData.length) return []
-
   const rows = rowsToObjects(sheetData) as SDWeeklyRow[]
 
-  // 3. Group rows by (storeId) so we can look up prior weeks per salon
-  //    Each salon's history sorted by weekEnd ascending
-  const bySalon = new Map<string, SDWeeklyRow[]>()
+  // 3. Lookup by composite key for O(1) LY access
+  //    Key: `${storeId}|${weekEnd}` → row
+  const byStoreWeek = new Map<string, SDWeeklyRow>()
   for (const r of rows) {
-    const sid = String(r.storeId)
-    if (!bySalon.has(sid)) bySalon.set(sid, [])
-    bySalon.get(sid)!.push(r)
-  }
-  for (const arr of bySalon.values()) {
-    arr.sort((a, b) => (a.weekEnd < b.weekEnd ? -1 : a.weekEnd > b.weekEnd ? 1 : 0))
+    byStoreWeek.set(`${r.storeId}|${r.weekEnd}`, r)
   }
 
-  // 4. Now group by week (weekEnd) so each "week" contains all salons
+  // 4. Group rows by week (weekEnd) so each "week" contains all salons
   const byWeek = new Map<string, DashboardSalonRow[]>()
 
-  for (const [sid, history] of bySalon.entries()) {
+  for (const r of rows) {
+    const sid = String(r.storeId)
     const salonNum = storeIdToSalonNum.get(sid)
-    if (!salonNum) {
-      // Unknown store — skip rather than crash
-      continue
-    }
+    if (!salonNum) continue
     const salonName = SALON_NAMES[salonNum] || salonNum
 
-    history.forEach((row, idx) => {
-      const prior = idx > 0 ? history[idx - 1] : null
+    // LY lookup: this week ending minus 364 days, same storeId
+    const lyKey = `${sid}|${lyWeekEnd(r.weekEnd)}`
+    const lyRow = byStoreWeek.get(lyKey)
 
-      const salesThis = num(row.totalSales)
-      const ccThis = num(row.cc)
-      const salesLast = prior ? num(prior.totalSales) : 0
-      const ccLast = prior ? num(prior.cc) : 0
+    const salesThis = num(r.totalSales)
+    const ccThis = num(r.cc)
+    const salesLast = lyRow ? num(lyRow.totalSales) : 0
+    const ccLast = lyRow ? num(lyRow.cc) : 0
 
-      const dashRow: DashboardSalonRow = {
-        weekEnding: row.weekEnd,
-        salonNum,
-        salonName,
-        salesLast,
-        salesThis,
-        salesGrowth: pctChange(salesThis, salesLast),
-        ccLast,
-        ccThis,
-        ccGrowth: pctChange(ccThis, ccLast),
-        nr: num(row.nr),
-        rr: num(row.rr),
-        product: num(row.productPct),
-        payroll: num(row.payrollPct),
-        waits: num(row.waits),
-        ssWaits: num(row.ssWaits),
-        nonOciWaits: num(row.nonOciWaits),
-        hcTime: num(row.hcTime),
-        cph: num(row.cph),
-        mbc: num(row.mbc),
-      }
+    const dashRow: DashboardSalonRow = {
+      weekEnding: r.weekEnd,
+      salonNum,
+      salonName,
+      salesLast,
+      salesThis,
+      salesGrowth: lyRow ? pctChange(salesThis, salesLast) : 0,
+      ccLast,
+      ccThis,
+      ccGrowth: lyRow ? pctChange(ccThis, ccLast) : 0,
+      nr: num(r.nr),
+      rr: num(r.rr),
+      product: num(r.productPct),
+      payroll: num(r.payrollPct),
+      waits: num(r.waits),
+      ssWaits: num(r.ssWaits),
+      nonOciWaits: num(r.nonOciWaits),
+      hcTime: num(r.hcTime),
+      cph: num(r.cph),
+      mbc: num(r.mbc),
+    }
 
-      const weekEnd = row.weekEnd
-      if (!byWeek.has(weekEnd)) byWeek.set(weekEnd, [])
-      byWeek.get(weekEnd)!.push(dashRow)
-    })
+    if (!byWeek.has(r.weekEnd)) byWeek.set(r.weekEnd, [])
+    byWeek.get(r.weekEnd)!.push(dashRow)
   }
 
-  // 5. Convert map to sorted array of DashboardWeek
+  // 5. Convert to sorted array of DashboardWeek
   const weeks: DashboardWeek[] = []
   const weekEndings = [...byWeek.keys()].sort()
   for (const we of weekEndings) {
     weeks.push({
       weekEnding: we,
       salons: byWeek.get(we)!,
-      emps: [], // empty for now — EmpData translation comes later
+      emps: [],
     })
   }
 

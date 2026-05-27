@@ -27,7 +27,7 @@
   /* Week badge / dropdown */
   .week-badge{background:rgba(200,129,58,.3);border:1px solid rgba(200,129,58,.5);color:#f5c98a;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;position:relative;user-select:none;}
   .week-badge:hover{background:rgba(200,129,58,.5);}
-  .week-dropdown{position:absolute;top:calc(100% + 8px);right:0;background:white;border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);min-width:180px;z-index:200;overflow:hidden;display:none;}
+  .week-dropdown{position:absolute;top:calc(100% + 8px);right:0;background:white;border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);min-width:220px;z-index:200;max-height:60vh;overflow-y:auto;overflow-x:hidden;display:none;}
   .week-dropdown.open{display:block;}
   .week-dropdown-item{padding:9px 16px;font-size:13px;color:var(--text);cursor:pointer;border-bottom:1px solid #f0efec;}
   .week-dropdown-item:last-child{border-bottom:none;}
@@ -1003,7 +1003,7 @@ function switchTab(tab,el){
   if(tab==='bonus') renderBonus();
 }
 
-// ── Week dropdown ─────────────────────────────────────────────
+// — Week dropdown ────────────────────────────────────────────
 function toggleWeekDropdown(e){ e.stopPropagation(); document.getElementById('week-dropdown').classList.toggle('open'); }
 document.addEventListener('click',()=>{ const d=document.getElementById('week-dropdown'); if(d)d.classList.remove('open'); });
 
@@ -1011,8 +1011,8 @@ function updateWeekDropdown(){
   const weeks=[...S.weekHistory].sort((a,b)=>new Date(b.weekEnding)-new Date(a.weekEnding));
   const el=document.getElementById('week-dropdown-items');
   if(!weeks.length){ el.innerHTML='<div class="week-dropdown-item" style="color:var(--text-muted);font-style:italic;">No data yet</div>'; return; }
-  el.innerHTML=weeks.map(w=>`<div class="week-dropdown-item ${S.currentWeek===w.weekEnding?'active':''}" onclick="selectWeek('${w.weekEnding}')">Week Ending ${w.weekEnding}</div>`).join('');
-  document.getElementById('week-label').textContent='Week Ending '+(S.currentWeek||'—')+' ▾';
+  el.innerHTML=weeks.map(w=>`<div class="week-dropdown-item ${S.currentWeek===w.weekEnding?'active':''}" onclick="selectWeek('${w.weekEnding}')">Week Ending ${fmtWeek(w.weekEnding)}</div>`).join('');
+  document.getElementById('week-label').textContent='Week Ending '+(S.currentWeek?fmtWeek(S.currentWeek):'—')+' ▼';
 }
 
 function selectWeek(wk){
@@ -1037,7 +1037,7 @@ function selectWeek(wk){
     else renderScorecard();
     // Update header
     document.getElementById('am-sub').textContent = 'Area Manager · Week Ending ' + (wk||'—');
-    document.getElementById('salon-week-label').textContent = wk||'—';
+    document.getElementById('salon-week-label').textContent = wk?fmtWeek(wk):'—';
   }
 }
 
@@ -1046,8 +1046,8 @@ function renderAM(){
   const am=AMS[S.currentAM];
   if(!am) return;
   document.getElementById('am-name').textContent=am.name;
-  document.getElementById('am-sub').textContent='Area Manager · Week Ending '+(S.currentWeek||'—');
-  document.getElementById('salon-week-label').textContent=S.currentWeek||'—';
+  document.getElementById('am-sub').textContent='Area Manager · Week Ending '+(S.currentWeek?fmtWeek(S.currentWeek):'—');
+  document.getElementById('salon-week-label').textContent=S.currentWeek?fmtWeek(S.currentWeek):'—';
   renderScorecard();
 }
 
@@ -1195,7 +1195,19 @@ function updateHeadSort(thead,ci,asc){ thead.querySelectorAll('th').forEach((th,
 function salonLink(salonNum, label, fromTab){
   return `<span class="salon-link" onclick="drillIntoSalon('${salonNum}','${fromTab}')" title="View ${label} trends">${label}</span>`;
 }
-
+function fmtWeek(iso){
+  // Convert YYYY-MM-DD → M/D/YYYY. Falls back to original string if not parseable.
+  if(!iso) return '';
+  const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(!m) return iso;
+  return `${parseInt(m[2],10)}/${parseInt(m[3],10)}/${m[1]}`;
+}
+function fmtWeek(iso){
+  if(!iso) return '';
+  const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(!m) return iso;
+  return `${parseInt(m[2],10)}/${parseInt(m[3],10)}/${m[1]}`;
+}
 function buildSalonRow(r,cols,showAM=false){
   const amId=amOf(r.salonNum), am=AMS[amId]||{color:'#999',name:'Unknown'};
   const fromTab = showAM ? 'salon' : 'salon';
@@ -1234,7 +1246,7 @@ function renderSalonTab(){
   thead.innerHTML=buildHead(SALON_COLS,'salon-table','sortSalon');
   // Update week label in salon tab header
   const swl = document.getElementById('salon-week-label');
-  if(swl) swl.textContent = isYTD ? 'YTD Average' : (S.currentWeek||'—');
+  if(swl) swl.textContent = isYTD ? 'YTD Average' : (S.currentWeek?fmtWeek(S.currentWeek):'—');
 
   // Build YTD avg row
   function ytdRow(a){
