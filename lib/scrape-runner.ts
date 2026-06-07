@@ -11,10 +11,13 @@ import {
   fetchSalons,
   fetchDailyStoreSummary,
   fetchGroupedSummary,
+  fetchEmployeePerformanceCsv,
+  fetchPayrollCsv,
   batchMap,
   type SD3DailyStoreSummary,
 } from '@/lib/sd3'
-import { upsertSheet } from '@/lib/sheets'
+import { upsertSheet, readSheet, rowsToObjects } from '@/lib/sheets'
+import { parseCsv, rowsToObjectsAt, num, returnRate } from '@/lib/csv'
 import { aggregatePeriod, type AggregatedPeriod } from '@/lib/aggregate'
 import { yesterdayET, lastCompletedFiscalWeek, lastCompletedFiscalMonth, todayET, isLastFridayOfMonth } from '@/lib/fiscal'
 
@@ -289,6 +292,282 @@ export async function runMonthlyScrape(
     ;(result as any).error = msg
   }
 
+  result.durationMs = Date.now() - startedAt
+  return result
+}
+
+
+// ═════════════════════════════════════════════════════════════════════
+// Roster / Employee / Payroll scrapes — weekly cadence.
+// Logic mirrors the standalone routes (app/api/scrape/{roster,employee,
+// payroll}); these runner versions exist so the cron dispatcher can call
+// them in-process. Keep the two in sync if either changes.
+// ═════════════════════════════════════════════════════════════════════
+
+const SALON_ROSTER_TAB = 'SalonRoster'
+const SD_EMP_WEEKLY_TAB = 'SD_EMP_WEEKLY'
+const SD_PAYROLL_TAB = 'SD_PAYROLL'
+
+export type EntityScrapeResult = {
+  ok: boolean
+  durationMs: number
+  weekStart?: string
+  weekEnd?: string
+  rowsUpserted: number
+  updated: number
+  inserted: number
+  skipped?: number
+  processed?: number
+  error?: string | null
+  // roster-specific
+  listxCount?: number
+  newlyAdded?: number
+  refreshed?: number
+  preserved?: number
+}
+
+// ── Roster ───────────────────────────────────────────────────────────
+
+const ROSTER_COLUMNS = [
+  'salonNum', 'storeId', 'name', 'city', 'state', 'market', 'district',
+  'entity', 'openedOn', 'am', 'status', 'closedDate', 'soldDate', 'notes',
+  'lastSyncedAt',
+] as const
+
+const ROSTER_SD3_FIELDS = new Set([
+  'salonNum', 'name', 'city', 'state', 'market', 'district', 'entity', 'openedOn',
+])
+
+const DEFAULT_AM_BY_SALON: Record<string, string> = {
+  '1304': 'luann', '3015': 'cassi', '3025': 'dana', '3027': 'dana',
+  '3043': 'luann', '3053': 'bridgette', '3058': 'cassi', '3062': 'dawn',
+  '3071': 'dawn', '3545': 'luann', '3685': 'bridgette', '4138': 'cassi',
+  '7728': 'dana', '8725': 'luann', '9489': 'dawn', '9689': 'bridgette',
+}
+
+export async function runRosterScrape(): Promise<EntityScrapeResult> {
+  const startedAt = Date.now()
+  const result: EntityScrapeResult = {
+    ok: true, durationMs: 0, rowsUpserted: 0, updated: 0, inserted: 0,
+    listxCount: 0, newlyAdded: 0, refreshed: 0, preserved: 0, error: null,
+  }
+  try {
+    const existingRaw = await readSheet(SALON_ROSTER_TAB)
+    const existingObjects = rowsToObjects(existingRaw)
+    const existingByStoreId = new Map<string, Record<string, any>>()
+    for (const row of existingObjects) {
+      const sid = String(row.storeId || '').trim()
+      if (sid) existingByStoreId.set(sid, row)
+    }
+
+    const session = await authenticate()
+    const salons = await fetchSalons(session)
+    result.listxCount = salons.length
+    console.log(`[scrape/roster] listx ${salons.length} salons; ${existingByStoreId.size} existing rows`)
+
+    const now = new Date().toISOString()
+    const seen = new Set<string>()
+    const outRows: Record<string, any>[] = []
+
+    for (const s of salons) {
+      const sid = String(s.storeId)
+      seen.add(sid)
+      const existing = existingByStoreId.get(sid)
+      const sd3Row = {
+        salonNum: s.salonNum, storeId: s.storeId, name: s.name, city: s.city,
+        state: s.state, market: s.market, district: s.district, entity: s.entity,
+        openedOn: s.openedOn ?? '',
+      }
+      if (existing) {
+        const merged: Record<string, any> = { ...existing }
+        for (const fld of ROSTER_SD3_FIELDS) merged[fld] = (sd3Row as Record<string, any>)[fld]
+        merged.storeId = s.storeId
+        merged.lastSyncedAt = now
+        outRows.push(merged)
+        result.refreshed!++
+      } else {
+        outRows.push({
+          ...sd3Row, am: DEFAULT_AM_BY_SALON[s.salonNum] ?? '', status: 'active',
+          closedDate: '', soldDate: '', notes: '', lastSyncedAt: now,
+        })
+        result.newlyAdded!++
+      }
+    }
+    for (const [sid, existing] of existingByStoreId) {
+      if (seen.has(sid)) continue
+      outRows.push(existing)
+      result.preserved!++
+    }
+
+    if (outRows.length > 0) {
+      const up = await upsertSheet(SALON_ROSTER_TAB, [...ROSTER_COLUMNS], ['storeId'], outRows)
+      result.rowsUpserted = outRows.length
+      result.updated = up.updated
+      result.inserted = up.inserted
+    }
+  } catch (err) {
+    result.ok = false
+    result.error = err instanceof Error ? err.message : String(err)
+    console.error('[scrape/roster] fatal:', result.error)
+  }
+  result.durationMs = Date.now() - startedAt
+  return result
+}
+
+// ── Employee performance (weekly CSV) ────────────────────────────────
+
+const EMP_HEADER_ROW_INDEX = 4
+const EMP_COLUMNS = [
+  'weekEnd', 'salonNum', 'storeId', 'globalId', 'payId', 'employeeName',
+  'position', 'floorHours', 'custCount', 'hcTime', 'cph', 'productPct', 'mbc',
+  'nonCutMph', 'productivity', 'payrollPct', 'nr', 'rr', 'scrapedAt',
+] as const
+
+function empRowFromCsv(o: Record<string, string>, weekEnd: string, storeIdMap: Record<string, number>): Record<string, any> | null {
+  const salonNum = (o['Salon #'] || '').trim()
+  const position = (o['Position'] || '').trim()
+  const storeId = storeIdMap[salonNum]
+  if (!storeId) return null
+  if (!position) return null
+  return {
+    weekEnd, salonNum, storeId,
+    globalId: (o['Global EE ID'] || '').trim(),
+    payId: (o['Pay ID'] || '').trim(),
+    employeeName: (o['Employee Name'] || '').trim(),
+    position,
+    floorHours: num(o['Floor Hours']) ?? '',
+    custCount: num(o['Cust Count']) ?? '',
+    hcTime: num(o['Avg HC Time']) ?? '',
+    cph: num(o['Cuts Per Hour']) ?? '',
+    productPct: num(o['Stnd Prod %']) ?? '',
+    mbc: num(o['Avg Min Btwn Cust w/ Cust Waiting']) ?? '',
+    nonCutMph: num(o['Total NonCut Time MPH']) ?? '',
+    productivity: num(o['Productivity']) ?? '',
+    payrollPct: num(o['Payroll %']) ?? '',
+    nr: returnRate(o['Stylist New Cust Return %']) ?? '',
+    rr: returnRate(o['Stylist Repeat Cust Return %']) ?? '',
+    scrapedAt: new Date().toISOString(),
+  }
+}
+
+export async function runEmployeeScrape(weekStart?: string, weekEnd?: string): Promise<EntityScrapeResult> {
+  const startedAt = Date.now()
+  let ws = weekStart, we = weekEnd
+  if (!ws || !we) { const w = lastCompletedFiscalWeek(todayET()); ws = w.start; we = w.end }
+  const result: EntityScrapeResult = {
+    ok: true, durationMs: 0, weekStart: ws, weekEnd: we,
+    rowsUpserted: 0, updated: 0, inserted: 0, skipped: 0, processed: 0, error: null,
+  }
+  try {
+    const session = await authenticate()
+    const salons = await fetchSalons(session)
+    const storeIdMap: Record<string, number> = {}
+    for (const s of salons) storeIdMap[s.salonNum] = s.storeId
+    const storeIds = salons.map(s => s.storeId)
+    console.log(`[scrape/employee] ${ws}→${we} — single CSV pull, ${storeIds.length} salons`)
+
+    const csvText = await fetchEmployeePerformanceCsv(session, storeIds, ws!, we!)
+    const objects = rowsToObjectsAt(parseCsv(csvText), EMP_HEADER_ROW_INDEX)
+    const dataRows: Record<string, any>[] = []
+    for (const o of objects) {
+      const row = empRowFromCsv(o, we!, storeIdMap)
+      if (row) dataRows.push(row); else result.skipped!++
+    }
+    result.processed = dataRows.length
+    if (dataRows.length > 0) {
+      const up = await upsertSheet(SD_EMP_WEEKLY_TAB, [...EMP_COLUMNS], ['weekEnd', 'storeId', 'payId'], dataRows)
+      result.rowsUpserted = dataRows.length
+      result.updated = up.updated
+      result.inserted = up.inserted
+    }
+  } catch (err) {
+    result.ok = false
+    result.error = err instanceof Error ? err.message : String(err)
+    console.error('[scrape/employee] fatal:', result.error)
+  }
+  result.durationMs = Date.now() - startedAt
+  return result
+}
+
+// ── Payroll (weekly CSV) ─────────────────────────────────────────────
+
+const PAYROLL_HEADER_ROW_INDEX = 0
+const PAYROLL_COLUMNS = [
+  'weekEnd', 'salonNum', 'storeId', 'globalId', 'payId', 'employeeName',
+  'baseWage', 'floorHours', 'closingHours', 'trainingHours', 'adminHours',
+  'receptionHours', 'totalHoursWorked', 'vacationHours', 'holidayHours',
+  'sickHours', 'totalHours', 'overtimeHours', 'subTotalPay',
+  'productivityIncentive', 'productIncentive', 'newReturnIncentive',
+  'totalTips', 'effectiveWageNoOt', 'effectiveWageOt', 'scrapedAt',
+] as const
+
+function payrollRowFromCsv(o: Record<string, string>, weekEnd: string, storeIdMap: Record<string, number>): Record<string, any> | null {
+  const salonNum = (o['Salon #'] || '').trim()
+  const storeId = storeIdMap[salonNum]
+  if (!storeId) return null
+  return {
+    weekEnd, salonNum, storeId,
+    globalId: (o['Global Employee ID'] || '').trim(),
+    payId: (o['Payroll ID'] || '').trim(),
+    employeeName: (o['Employee Name'] || '').trim(),
+    baseWage: num(o['Base Wage']) ?? '',
+    floorHours: num(o['Floor Hours']) ?? '',
+    closingHours: num(o['Closing Hours']) ?? '',
+    trainingHours: num(o['Training Hours']) ?? '',
+    adminHours: num(o['Admin Hours']) ?? '',
+    receptionHours: num(o['Reception Hours']) ?? '',
+    totalHoursWorked: num(o['Total Hours Worked']) ?? '',
+    vacationHours: num(o['Vacation Hours']) ?? '',
+    holidayHours: num(o['Holiday Hours']) ?? '',
+    sickHours: num(o['Sick Hours']) ?? '',
+    totalHours: num(o['Total Hours']) ?? '',
+    overtimeHours: num(o['Overtime Hours']) ?? '',
+    subTotalPay: num(o['Sub-Total Pay']) ?? '',
+    productivityIncentive: num(o['Productivity Incentive']) ?? '',
+    productIncentive: num(o['Product Incentive']) ?? '',
+    newReturnIncentive: num(o['New Return Incentive']) ?? '',
+    totalTips: num(o['Total Tips']) ?? '',
+    effectiveWageNoOt: num(o['Effective Wage w/o Overtime']) ?? '',
+    effectiveWageOt: num(o['Effective Wage w/ Overtime']) ?? '',
+    scrapedAt: new Date().toISOString(),
+  }
+}
+
+export async function runPayrollScrape(weekStart?: string, weekEnd?: string): Promise<EntityScrapeResult> {
+  const startedAt = Date.now()
+  let ws = weekStart, we = weekEnd
+  if (!ws || !we) { const w = lastCompletedFiscalWeek(todayET()); ws = w.start; we = w.end }
+  const result: EntityScrapeResult = {
+    ok: true, durationMs: 0, weekStart: ws, weekEnd: we,
+    rowsUpserted: 0, updated: 0, inserted: 0, skipped: 0, processed: 0, error: null,
+  }
+  try {
+    const session = await authenticate()
+    const salons = await fetchSalons(session)
+    const storeIdMap: Record<string, number> = {}
+    for (const s of salons) storeIdMap[s.salonNum] = s.storeId
+    const storeIds = salons.map(s => s.storeId)
+    console.log(`[scrape/payroll] ${ws}→${we} — single CSV pull, ${storeIds.length} salons`)
+
+    const csvText = await fetchPayrollCsv(session, storeIds, ws!, we!)
+    const objects = rowsToObjectsAt(parseCsv(csvText), PAYROLL_HEADER_ROW_INDEX)
+    const dataRows: Record<string, any>[] = []
+    for (const o of objects) {
+      const row = payrollRowFromCsv(o, we!, storeIdMap)
+      if (row) dataRows.push(row); else result.skipped!++
+    }
+    result.processed = dataRows.length
+    if (dataRows.length > 0) {
+      const up = await upsertSheet(SD_PAYROLL_TAB, [...PAYROLL_COLUMNS], ['weekEnd', 'storeId', 'payId'], dataRows)
+      result.rowsUpserted = dataRows.length
+      result.updated = up.updated
+      result.inserted = up.inserted
+    }
+  } catch (err) {
+    result.ok = false
+    result.error = err instanceof Error ? err.message : String(err)
+    console.error('[scrape/payroll] fatal:', result.error)
+  }
   result.durationMs = Date.now() - startedAt
   return result
 }

@@ -9,7 +9,14 @@
 
 import { NextResponse } from 'next/server'
 import { todayET, yesterdayET, dayOfWeek, isLastFridayOfMonth } from '@/lib/fiscal'
-import { runDailyScrape, runWeeklyScrape, runMonthlyScrape } from '@/lib/scrape-runner'
+import {
+  runDailyScrape,
+  runWeeklyScrape,
+  runMonthlyScrape,
+  runRosterScrape,
+  runEmployeeScrape,
+  runPayrollScrape,
+} from '@/lib/scrape-runner'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -49,9 +56,14 @@ export async function GET(request: Request) {
   // 1. Daily — always
   results.push({ name: 'daily', result: await runDailyScrape() })
 
-  // 2. Weekly — only on Saturday
+  // 2. Weekly — only on Saturday. Salon weekly first, then the three
+  //    weekly-cadence entity scrapers. Each runner catches its own errors
+  //    and returns {ok:false,...}, so one failure won't abort the rest.
   if (isSaturday) {
-    results.push({ name: 'weekly', result: await runWeeklyScrape() })
+    results.push({ name: 'weekly',   result: await runWeeklyScrape() })
+    results.push({ name: 'roster',   result: await runRosterScrape() })
+    results.push({ name: 'employee', result: await runEmployeeScrape() })
+    results.push({ name: 'payroll',  result: await runPayrollScrape() })
   }
 
   // 3. Monthly — only when yesterday was a month-end Friday
