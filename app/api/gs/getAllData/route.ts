@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server'
-import { getAllDashboardData } from '@/lib/sheets'
+import { getAllDashboardData, readSheet, rowsToObjects } from '@/lib/sheets'
 import { getDashboardWeeks } from '@/lib/dashboard-data'
 import { AMS } from '@/lib/config'
+
+const SALON_ROSTER_TAB = 'SalonRoster'
 
 let cache: { data: any; timestamp: number } | null = null
 const CACHE_TTL = 3 * 60 * 1000
@@ -11,15 +13,49 @@ export async function GET() {
     if (cache && Date.now() - cache.timestamp < CACHE_TTL) {
       return NextResponse.json({ ...cache.data, cached: true })
     }
-    const [raw, scrapedWeeks] = await Promise.all([
+    const [raw, scrapedWeeks, rosterRows] = await Promise.all([
       getAllDashboardData(),
       getDashboardWeeks(),
+      fetchSalonRoster(),
     ])
-    const data = formatAllData(raw, scrapedWeeks)
+    const data = formatAllData(raw, scrapedWeeks, rosterRows)
     cache = { data, timestamp: Date.now() }
     return NextResponse.json(data)
   } catch (e: any) {
     return NextResponse.json({ success: false, error: e.message }, { status: 500 })
+  }
+}
+
+/**
+ * Fetch the SalonRoster tab. Returns [] (not an error) if the tab is missing or
+ * empty — the dashboard should keep working even if the roster hasn't been
+ * scraped yet. The dashboard treats an empty roster as "fall back to whatever
+ * hardcoded constants used to exist."
+ */
+async function fetchSalonRoster(): Promise<any[]> {
+  try {
+    const raw = await readSheet(SALON_ROSTER_TAB)
+    const rows = rowsToObjects(raw)
+    return rows.map(r => ({
+      salonNum: String(r.salonNum || '').trim(),
+      storeId: Number(r.storeId) || 0,
+      name: String(r.name || '').trim(),
+      city: String(r.city || '').trim(),
+      state: String(r.state || '').trim(),
+      market: String(r.market || '').trim(),
+      district: String(r.district || '').trim(),
+      entity: String(r.entity || '').trim(),
+      openedOn: normalizeDateString(String(r.openedOn || '').trim()),
+      am: String(r.am || '').trim().toLowerCase(),
+      status: (String(r.status || 'active').trim().toLowerCase() || 'active'),
+      closedDate: normalizeDateString(String(r.closedDate || '').trim()),
+      soldDate: normalizeDateString(String(r.soldDate || '').trim()),
+      notes: String(r.notes || '').trim(),
+      lastSyncedAt: String(r.lastSyncedAt || '').trim(),
+    }))
+  } catch (err) {
+    console.warn('[getAllData] SalonRoster fetch failed, continuing without it:', err)
+    return []
   }
 }
 
@@ -50,7 +86,7 @@ function normalizeDateString(s: string): string {
   return trimmed
 }
 
-function formatAllData(raw: any, scrapedWeeks: any[]) {
+function formatAllData(raw: any, scrapedWeeks: any[], rosterRows: any[]) {
   // ── Weeks: scraped salon data is the source of truth; emp data joined by normalized weekEnding ──
   const weekMap: Record<string, any> = {}
 
@@ -164,5 +200,6 @@ function formatAllData(raw: any, scrapedWeeks: any[]) {
     homeEffectiveDate: raw.homeRows[0]?.effectiveDate || '',
     homeRetroUpdated: 0,
     lyAvg: null,
+    salonRoster: rosterRows,
   }
 }

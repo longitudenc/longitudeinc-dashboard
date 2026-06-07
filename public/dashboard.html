@@ -690,6 +690,71 @@ const SALON_NAMES = {
 };
 function salonDisplay(salonNum){ return SALON_NAMES[salonNum] || salonNum; }
 
+// ── Salon roster (active/sold/closed + AM assignment) ───────────────
+// ROSTER is loaded from getAllData (data.salonRoster) in onDataLoaded and
+// becomes the source of truth for which salons are active and who owns them.
+// The hardcoded AMS/NAMED/SALON_NAMES above are the fallback if the roster
+// is ever unavailable, so the dashboard degrades to today's behavior.
+let ROSTER = [];
+let ACTIVE_SALONS = [...new Set([
+  ...Object.values(AMS).flatMap(am=>am.salons||[]),
+  ...Object.keys(SALON_NAMES)
+])].sort((a,b)=>parseInt(a)-parseInt(b));
+const REGULAR_AMS = new Set(['cassi','dawn','luann','dana','bridgette']);
+
+// Every currently-active salon (sold/closed excluded). Used everywhere a view
+// needs "the salon universe right now."
+function allActiveSalons(){ return ACTIVE_SALONS.slice(); }
+
+// Which AM owns a salon (regular AMs only; kayla is all-salons by rule).
+function amOf(salonNum){
+  const sn = String(salonNum);
+  for(const k of Object.keys(AMS)){
+    if(k!=='kayla' && (AMS[k].salons||[]).includes(sn)) return k;
+  }
+  return '';
+}
+
+// Salons that were active as of a given date — for active-aware YoY math.
+// A sold/closed salon still counts for periods on/before its end date.
+function activeSalons(asOf){
+  if(!ROSTER.length || !asOf) return allActiveSalons();
+  const d = new Date(asOf);
+  return ROSTER.filter(r=>{
+    if(!r.salonNum) return false;
+    const st = (r.status||'active');
+    if(st==='active') return true;
+    const end = r.soldDate || r.closedDate || '';
+    return end ? (new Date(end) >= d) : false;
+  }).map(r=>String(r.salonNum)).sort((a,b)=>parseInt(a)-parseInt(b));
+}
+
+// Rebuild AMS.salons / NAMED / ACTIVE_SALONS from the roster. Non-destructive
+// to SALON_NAMES (kept as an all-time display lookup so sold salons still name
+// correctly in historical views). Returns false if roster is empty.
+function rebuildFromRoster(roster){
+  if(!Array.isArray(roster) || !roster.length) return false;
+  ROSTER = roster;
+  const active = roster.filter(r => (r.status||'active')==='active' && r.salonNum);
+  Object.keys(AMS).forEach(k=>{
+    if(k==='kayla') return; // kayla = all active salons, resolved at render time
+    AMS[k].salons = active
+      .filter(r => (r.am||'').toLowerCase()===k)
+      .map(r => String(r.salonNum))
+      .sort((a,b)=>parseInt(a)-parseInt(b));
+  });
+  NAMED.clear();
+  active.filter(r => REGULAR_AMS.has((r.am||'').toLowerCase()))
+        .forEach(r => NAMED.add(String(r.salonNum)));
+  ACTIVE_SALONS = active.map(r=>String(r.salonNum)).sort((a,b)=>parseInt(a)-parseInt(b));
+  // Add display names for any salon we don't already know (e.g. future opens)
+  roster.forEach(r=>{
+    const sn = String(r.salonNum||'');
+    if(sn && !SALON_NAMES[sn] && r.name) SALON_NAMES[sn] = (sn+' '+r.name).trim();
+  });
+  return true;
+}
+
 function payrollTargets(cc){
   if(!PAYROLL_MAP || !Array.isArray(PAYROLL_MAP)) return {exc:37,grw:38,cph:2.5};
   const r = PAYROLL_MAP.find(row=>cc>=row[0]&&cc<=row[1]);
@@ -854,6 +919,15 @@ function initWithSession(email, role, amId){
 function onDataLoaded(data){
   try {
     if(!data || !data.success){ console.error(data ? data.error : 'No data'); hideLoading(); return; }
+
+    // Salon roster — source of truth for active/sold/closed + AM assignment.
+    ROSTER = data.salonRoster || [];
+    const _rosterOk = rebuildFromRoster(ROSTER);
+    console.log('[ROSTER] ' + ROSTER.length + ' rows — ' +
+      ROSTER.filter(r=>(r.status||'active')==='active').length + ' active, ' +
+      ROSTER.filter(r=>r.status==='sold').length + ' sold, ' +
+      ROSTER.filter(r=>r.status==='closed').length + ' closed' +
+      (_rosterOk ? '' : ' (roster empty — using hardcoded fallback)'));
 
     S.weekHistory = data.weeks || [];
     S.trackerData = data.trackerData || {};
@@ -2986,10 +3060,7 @@ function populateWaiverDropdowns(){
   // Salons
   const salonSel = document.getElementById('waiver-salon');
   if(!salonSel) return;
-  const allSalons = [...new Set([
-    ...Object.values(AMS).flatMap(am=>am.salons||[]),
-    ...Object.keys(SALON_NAMES)
-  ])].sort((a,b)=>parseInt(a)-parseInt(b));
+  const allSalons = allActiveSalons();
   salonSel.innerHTML = '<option value="">— Select salon —</option>' +
     allSalons.map(s=>`<option value="${s}">${salonDisplay(s)}</option>`).join('');
 
@@ -3090,9 +3161,7 @@ function renderManagerTable(){
   if(!el) return;
 
   // All salons — named AM salons plus any in SALON_NAMES not yet assigned (e.g. 2554, 3045, 9478)
-  const assignedSalons = Object.values(AMS).flatMap(am=>am.salons||[]).filter(Boolean);
-  const allKnownSalons = Object.keys(SALON_NAMES);
-  const uniqueSalons = [...new Set([...assignedSalons, ...allKnownSalons])].sort((a,b)=>parseInt(a)-parseInt(b));
+  const uniqueSalons = allActiveSalons();
 
   if(!_homeEmployees.length){
     el.innerHTML = '<div style="font-size:12px;color:var(--text-muted);">Loading employee list...</div>';
@@ -3201,7 +3270,7 @@ function calcAMBonus(amId, periodLabel){
   const ssPeriod = S_salonSummaryPeriods.find(p=>normPeriodLabel(p.periodLabel)===normLabel||normPeriodLabel(p.periodKey)===normLabel);
   if(!ssPeriod) return null;
 
-  const amSalons = isKayla ? Object.keys(SALON_NAMES) : (am.salons||[]);
+  const amSalons = isKayla ? allActiveSalons() : (am.salons||[]);
 
   const salonDetails = [];
   let totalPayout = 0;
@@ -3806,10 +3875,7 @@ function buildCoMgrPeriod(){
   if(!ssPeriod) return '<div class="no-data">No data for this period.</div>';
 
   // All salons in salon order
-  const allSalons = [...new Set([
-    ...Object.values(AMS).flatMap(am=>am.salons||[]),
-    ...Object.keys(SALON_NAMES)
-  ])].sort((a,b)=>parseInt(a)-parseInt(b));
+  const allSalons = allActiveSalons();
 
   // Stats across all salons
   let totPot=0, totPay=0, totPenalties=0, payrollMissedCount=0, productPenCount=0, earning=0;
@@ -3895,10 +3961,7 @@ function buildCoMgrPeriod(){
 function buildCoMgrYTD(){
   if(!S_salonSummaryPeriods.length) return '<div class="no-data">No Salon Summary data loaded.</div>';
 
-  const allSalons = [...new Set([
-    ...Object.values(AMS).flatMap(am=>am.salons||[]),
-    ...Object.keys(SALON_NAMES)
-  ])].sort((a,b)=>parseInt(a)-parseInt(b));
+  const allSalons = allActiveSalons();
 
   const periods = S_salonSummaryPeriods.map(p=>p.periodKey);
   const periodLabels = S_salonSummaryPeriods.map(p=>p.periodLabel);
