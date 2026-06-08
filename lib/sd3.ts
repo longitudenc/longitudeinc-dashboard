@@ -278,6 +278,33 @@ export async function fetchPayrollCsv(
   return res.text()
 }
 
+/**
+ * Pull the employee `reporting` endpoint (JSON) for the given stores/range.
+ * This is the ADP-replacement source: hire/rehire dates + home store. The
+ * response carries PII (names, addresses, photo thumbnails) — the PROFILE
+ * SCRAPER is responsible for discarding everything except an explicit
+ * allow-list. This helper just returns the raw parsed JSON; it never logs it.
+ *
+ * Auth: Bearer header (same as listx), NOT a URL token like the CSV endpoints.
+ */
+export async function fetchEmployeeReporting(
+  session: SD3Session,
+  storeIds: number[],
+  startDate: string,
+  endDate: string
+): Promise<unknown> {
+  const stores = storeIds.join(',')
+  const url =
+    `${SD3_BASE}/rest/employee/reporting` +
+    `?storeIds=${stores}&start=${startDate}&end=${endDate}`
+
+  const res = await fetch(url, { headers: jsonHeaders(session.token) })
+  if (!res.ok) {
+    throw new Error(`Employee reporting fetch failed: ${res.status} ${res.statusText}`)
+  }
+  return res.json()
+}
+
 // ── Internals ────────────────────────────────────────────────
 
 function jsonHeaders(token: string): HeadersInit {

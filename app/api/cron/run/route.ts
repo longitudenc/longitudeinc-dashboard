@@ -16,6 +16,7 @@ import {
   runRosterScrape,
   runEmployeeScrape,
   runPayrollScrape,
+  runProfileScrape,
 } from '@/lib/scrape-runner'
 
 export const runtime = 'nodejs'
@@ -66,9 +67,11 @@ export async function GET(request: Request) {
     results.push({ name: 'payroll',  result: await runPayrollScrape() })
   }
 
-  // 3. Monthly — only when yesterday was a month-end Friday
+  // 3. Monthly — only when yesterday was a month-end Friday. Salon monthly
+  //    plus the profile scrape (hire/rehire/home-store changes rarely).
   if (isMonthEnd) {
     results.push({ name: 'monthly', result: await runMonthlyScrape() })
+    results.push({ name: 'profile', result: await runProfileScrape() })
   }
 
   const allOk = results.every(r => r.result.ok)

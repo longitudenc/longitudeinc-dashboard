@@ -13,6 +13,7 @@ import {
   fetchGroupedSummary,
   fetchEmployeePerformanceCsv,
   fetchPayrollCsv,
+  fetchEmployeeReporting,
   batchMap,
   type SD3DailyStoreSummary,
 } from '@/lib/sd3'
@@ -567,6 +568,118 @@ export async function runPayrollScrape(weekStart?: string, weekEnd?: string): Pr
     result.ok = false
     result.error = err instanceof Error ? err.message : String(err)
     console.error('[scrape/payroll] fatal:', result.error)
+  }
+  result.durationMs = Date.now() - startedAt
+  return result
+}
+
+
+// ═════════════════════════════════════════════════════════════════════
+// Profile scrape — monthly cadence. ADP replacement: hire/rehire dates +
+// home store, from the JSON `reporting` endpoint.
+//
+// PII SAFETY: the reporting payload carries names, addresses, and photo
+// thumbnails. profileRow() reads ONLY the six allow-listed properties below
+// and never spreads/copies the source object, so PII can't leak into the
+// sheet. Nothing here logs the raw payload. Join key = globalId
+// (globalEmployeeKey), which matches SD_EMP_WEEKLY / SD_PAYROLL.
+// ═════════════════════════════════════════════════════════════════════
+
+const EMP_PROFILE_TAB = 'EmployeeProfile'
+
+const PROFILE_COLUMNS = [
+  'globalId',       // join key — from globalEmployeeKey (e.g. "2023-0000-7354")
+  'dateOfHire',     // YYYY-MM-DD
+  'rehireDate',     // YYYY-MM-DD or ''
+  'homeStoreNum',   // public salon number, from primaryStoreDict.n (e.g. "2554")
+  'homeStoreName',  // from primaryStoreDict.a (e.g. "Carmel Commons")
+  'homeStoreId',    // SD3 store id, from primaryStoreDict.pk
+  'scrapedAt',
+] as const
+
+// Defensive: the reporting endpoint may return a bare array or an object
+// wrapping the array under some key. Find the employee array either way.
+function extractEmployees(payload: unknown): any[] {
+  if (Array.isArray(payload)) return payload
+  if (payload && typeof payload === 'object') {
+    const obj = payload as Record<string, unknown>
+    for (const key of ['employees', 'data', 'results', 'rows', 'content', 'list']) {
+      if (Array.isArray(obj[key])) return obj[key] as any[]
+    }
+    for (const v of Object.values(obj)) if (Array.isArray(v)) return v as any[]
+  }
+  return []
+}
+
+// STRICT ALLOW-LIST. Reads only the six named fields. Returns null if there's
+// no globalEmployeeKey (can't join without it).
+function profileRow(e: any): Record<string, any> | null {
+  const globalId = String(e?.globalEmployeeKey || '').trim()
+  if (!globalId) return null
+  const home = (e?.primaryStoreDict && typeof e.primaryStoreDict === 'object')
+    ? e.primaryStoreDict as Record<string, any>
+    : {}
+  return {
+    globalId,
+    dateOfHire: e?.dateOfHire ? String(e.dateOfHire).trim() : '',
+    rehireDate: e?.rehireDate ? String(e.rehireDate).trim() : '',
+    homeStoreNum: home?.n != null ? String(home.n).trim() : '',
+    homeStoreName: home?.a != null ? String(home.a).trim() : '',
+    homeStoreId: home?.pk != null ? (Number(home.pk) || '') : '',
+    scrapedAt: new Date().toISOString(),
+  }
+}
+
+export async function runProfileScrape(start?: string, end?: string): Promise<EntityScrapeResult> {
+  const startedAt = Date.now()
+  // Default to the last completed fiscal month — a wide window so we catch
+  // part-timers. Upsert-by-globalId is non-destructive, so a too-narrow pull
+  // only ever leaves prior rows intact; the table self-heals over time.
+  let ms = start, me = end
+  if (!ms || !me) { const m = lastCompletedFiscalMonth(yesterdayET()); ms = m.start; me = m.end }
+  const result: EntityScrapeResult = {
+    ok: true, durationMs: 0, weekStart: ms, weekEnd: me,
+    rowsUpserted: 0, updated: 0, inserted: 0, skipped: 0, processed: 0, error: null,
+  }
+  try {
+    const session = await authenticate()
+    const salons = await fetchSalons(session)
+    console.log(`[scrape/profile] ${ms}→${me} — ${salons.length} salons (per-store, deduped by globalId)`)
+
+    // Pull per store (the proven single-store usage), then dedupe by globalId
+    // so a multi-store employee yields one row at their home store.
+    const perStore = await batchMap(salons, 4, async salon => {
+      try {
+        const payload = await fetchEmployeeReporting(session, [salon.storeId], ms!, me!)
+        return extractEmployees(payload)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.error(`[scrape/profile] failed for ${salon.salonNum}:`, msg)
+        return [] as any[]
+      }
+    })
+
+    const byGlobalId = new Map<string, Record<string, any>>()
+    for (const emps of perStore) {
+      for (const e of emps) {
+        const row = profileRow(e)
+        if (!row) { result.skipped!++; continue }
+        if (!byGlobalId.has(row.globalId)) byGlobalId.set(row.globalId, row)
+      }
+    }
+    const dataRows = [...byGlobalId.values()]
+    result.processed = dataRows.length
+
+    if (dataRows.length > 0) {
+      const up = await upsertSheet(EMP_PROFILE_TAB, [...PROFILE_COLUMNS], ['globalId'], dataRows)
+      result.rowsUpserted = dataRows.length
+      result.updated = up.updated
+      result.inserted = up.inserted
+    }
+  } catch (err) {
+    result.ok = false
+    result.error = err instanceof Error ? err.message : String(err)
+    console.error('[scrape/profile] fatal:', result.error)
   }
   result.durationMs = Date.now() - startedAt
   return result
