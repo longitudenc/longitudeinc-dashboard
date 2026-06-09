@@ -156,7 +156,13 @@ function formatAllData(raw: any, scrapedWeeks: any[], rosterRows: any[]) {
       periodKey: pk, periodLabel: row.periodLabel || pk,
       weeksN: parseInt(row.weeksN) || 4, employees: []
     }
-    pcMap[pk].employees.push(row)
+    // Coerce hours to numbers — readSheet returns formatted strings, and the
+    // bonus cards call .toFixed() on these directly (manager + AM cards).
+    pcMap[pk].employees.push({
+      ...row,
+      avgWeeklyQualifying: Number(row.avgWeeklyQualifying) || 0,
+      floorHoursTotal: Number(row.floorHoursTotal) || 0,
+    })
   })
 
   // ── Manager table — return as ARRAY (dashboard expects forEach) ──

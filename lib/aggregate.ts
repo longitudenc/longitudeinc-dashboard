@@ -10,6 +10,16 @@
 //
 // The grouped record gives us most metrics directly. Daily rows are needed only
 // for Sat/Sun-specific splits and for storing per-day granularity in SD_DAILY.
+//
+// 2026-06: now also exposes the RAW inputs behind SD3's Manager Bonus report
+// formulas (verified exactly against the May 2026 report for salon 1304):
+//   Product %     = Σ productSales / (Σ serviceSales + Σ svcDiscounts + Σ redo)
+//   Productivity  = (Σ serviceSales + Σ svcDiscounts + Σ redo) / Σ floorHours
+//   CPH           = Productivity / (Σ grossHaircutSales / Σ haircutCount)
+//   Waits >15     = Σ waitOver15Count / Σ cc
+//   Sat/Sun >15   = Σ ssWaitCount / Σ ssCustCount
+// These raw fields are persisted weekly so the salon-month aggregator can
+// reproduce the bonus report from SD_WEEKLY alone.
 
 import type { SD3GroupedSummary, SD3DailyStoreSummary } from './sd3'
 import { dayOfWeek } from './fiscal'
@@ -36,6 +46,17 @@ export interface AggregatedPeriod {
   floorHours: number
   payrollAmount: number
   trainingPay: number
+  receptionistPay: number
+
+  // Raw bonus-formula inputs (period totals)
+  serviceDiscounts: number     // $ service discounts
+  productDiscounts: number     // $ product discounts
+  redoAmount: number           // $ redos
+  grossHaircutSales: number    // $ haircut sales (gross)
+  haircutCount: number         // number of haircuts (cuts, not customers)
+  waitOver15Count: number      // customers who waited > 15 min
+  ssCustCount: number          // Sat+Sun customer count
+  ssWaitCount: number          // Sat+Sun customers who waited > 15 min
 
   // Computed percentages and averages
   cph: number             // customers per hour
@@ -75,6 +96,7 @@ export function aggregatePeriod(
   const floorHours = num(grouped.floorHours)
   const payrollAmount = num(grouped.approximatePayrollAmount)
   const trainingPay = num(grouped.trainingPay)
+  const receptionistPay = num(grouped.receptionistPay)
 
   const haircutOnlyServiceMinutes = num(grouped.haircutOnlyServiceMinutes)
   const haircutOnlyInvoiceCount = num(grouped.haircutOnlyInvoiceCount)
@@ -87,6 +109,13 @@ export function aggregatePeriod(
   const newCustomerVisitCount = num(grouped.newCustomerVisitCount)
   const repeatCustomerReturnCount = num(grouped.repeatCustomerReturnCount)
   const repeatCustomerVisitCount = num(grouped.repeatCustomerVisitCount)
+
+  // Raw bonus-formula inputs from the grouped row
+  const serviceDiscounts = num(grouped.serviceDiscounts)
+  const productDiscounts = num(grouped.productDiscounts)
+  const redoAmount = num(grouped.redoAmount)
+  const grossHaircutSales = num(grouped.grossHaircutSales)
+  const haircutCount = num(grouped.haircutCount)
 
   // Sat/Sun split — only place where we need daily granularity
   const weekendRows = dailyRows.filter(r => {
@@ -109,6 +138,16 @@ export function aggregatePeriod(
     floorHours,
     payrollAmount,
     trainingPay,
+    receptionistPay,
+
+    serviceDiscounts,
+    productDiscounts,
+    redoAmount,
+    grossHaircutSales,
+    haircutCount,
+    waitOver15Count: waitOver15MinsCount,
+    ssCustCount,
+    ssWaitCount,
 
     cph: safeDiv(cc, floorHours),
     payrollPct: pct(payrollAmount, totalSales),

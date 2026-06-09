@@ -27,14 +27,34 @@ function sheetsClient(): sheets_v4.Sheets {
 
 // ── Reads ─────────────────────────────────────────────────────
 
+// Retry transient Google Sheets rate-limit errors (429) and brief 503s with
+// exponential backoff. Per-minute read/write quotas reset within 60s, so the
+// later delays are long enough to clear the window before giving up.
+async function withRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  const delays = [2000, 5000, 12000, 30000] // ms — up to 4 retries (~49s total)
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn()
+    } catch (err: any) {
+      const status = err?.code ?? err?.status ?? err?.response?.status
+      if ((status !== 429 && status !== 503) || attempt >= delays.length) throw err
+      const wait = delays[attempt]
+      console.warn(`[sheets] ${label} rate-limited (${status}); retry ${attempt + 1}/${delays.length} in ${wait}ms`)
+      await new Promise(r => setTimeout(r, wait))
+    }
+  }
+}
+
 export async function readSheet(sheetName: string, range?: string) {
   try {
     const sheets = sheetsClient()
     const fullRange = range ? `${sheetName}!${range}` : sheetName
-    const response = await sheets.spreadsheets.values.get({
-      spreadsheetId: SHEET_ID,
-      range: fullRange,
-    })
+    const response = await withRetry(`read ${sheetName}`, () =>
+      sheets.spreadsheets.values.get({
+        spreadsheetId: SHEET_ID,
+        range: fullRange,
+      })
+    )
     return response.data.values || []
   } catch (error) {
     console.error(`Error reading sheet ${sheetName}:`, error)
@@ -219,6 +239,22 @@ export async function upsertSheet(
   } else {
     existingHeaders = existing[0].map((h: any) => String(h).trim())
     existingRows = existing.slice(1)
+  }
+
+  // Reconcile header: if the caller passes columns the sheet doesn't have yet
+  // (e.g. new fields added to a COLUMNS list), append them to the header row so
+  // their values have somewhere to land. Without this, new columns are silently
+  // dropped on an existing tab. Existing data rows keep their length; the new
+  // trailing cells read as '' until rewritten below.
+  const missingCols = headers.filter(h => !existingHeaders.includes(h))
+  if (missingCols.length > 0) {
+    existingHeaders = [...existingHeaders, ...missingCols]
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SHEET_ID,
+      range: `${tabName}!A1`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [existingHeaders] },
+    })
   }
 
   const keyIdxs = keyColumns.map(k => existingHeaders.indexOf(k))

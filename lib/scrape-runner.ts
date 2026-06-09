@@ -41,9 +41,14 @@ const DAILY_COLUMNS = [
 
 const PERIOD_COLUMNS = [
   'cc', 'newCust', 'newCustPct', 'serviceSales', 'productSales', 'totalSales',
-  'floorHours', 'payrollAmount', 'trainingPay', 'cph', 'payrollPct',
+  'floorHours', 'payrollAmount', 'trainingPay', 'receptionistPay', 'cph', 'payrollPct',
   'payrollPctNoTraining', 'productPct', 'hcTime', 'mbc', 'avgWaitTime',
-  'waits', 'nonOciWaits', 'ssWaits', 'nr', 'rr', 'scrapedAt',
+  'waits', 'nonOciWaits', 'ssWaits', 'nr', 'rr',
+  // raw bonus-formula inputs (period totals) — added 2026-06
+  'serviceDiscounts', 'productDiscounts', 'redoAmount',
+  'grossHaircutSales', 'haircutCount', 'waitOver15Count',
+  'ssCustCount', 'ssWaitCount',
+  'scrapedAt',
 ] as const
 
 const WEEKLY_COLUMNS = ['weekEnd', 'weekStart', 'storeId', ...PERIOD_COLUMNS] as const
@@ -78,6 +83,7 @@ function periodRow(
     floorHours: agg.floorHours,
     payrollAmount: agg.payrollAmount,
     trainingPay: agg.trainingPay,
+    receptionistPay: agg.receptionistPay,
     cph: agg.cph,
     payrollPct: agg.payrollPct,
     payrollPctNoTraining: agg.payrollPctNoTraining,
@@ -90,6 +96,15 @@ function periodRow(
     ssWaits: agg.ssWaits,
     nr: agg.nr,
     rr: agg.rr,
+    // raw bonus-formula inputs (period totals) — added 2026-06
+    serviceDiscounts: agg.serviceDiscounts,
+    productDiscounts: agg.productDiscounts,
+    redoAmount: agg.redoAmount,
+    grossHaircutSales: agg.grossHaircutSales,
+    haircutCount: agg.haircutCount,
+    waitOver15Count: agg.waitOver15Count,
+    ssCustCount: agg.ssCustCount,
+    ssWaitCount: agg.ssWaitCount,
     scrapedAt: new Date().toISOString(),
   }
 }

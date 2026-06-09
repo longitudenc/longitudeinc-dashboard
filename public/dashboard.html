@@ -1695,6 +1695,7 @@ function selectTrendMetric(key, btn, overrideSalon){
   const palette = ['#4e79a7','#f28e2b','#e15759','#76b7b2','#59a14f','#edc948','#b07aa1','#ff9da7','#9c755f','#bab0ac'];
   const pointStyles = ['circle','rect','triangle','star','rectRot','crossRot','cross','dash','rectRounded','circle'];
   const datasets = [];
+  const salonDatasets = []; // per-salon lines — ranked highest-first below (item #7)
 
   // Map chart key to raw row field name
   const rowFieldMap = {
@@ -1724,7 +1725,7 @@ function selectTrendMetric(key, btn, overrideSalon){
     });
     const color = palette[idx % palette.length];
     const pStyle = pointStyles[idx % pointStyles.length];
-    datasets.push({
+    salonDatasets.push({
       label: SALON_NAMES[snum]||snum,
       data,
       borderColor: color,
@@ -1739,6 +1740,11 @@ function selectTrendMetric(key, btn, overrideSalon){
       order: 3
     });
   });
+
+  // Rank salon lines highest-first by each salon's most recent value (item #7).
+  const lastVal = arr => { for(let i=arr.length-1;i>=0;i--){ const x=arr[i]; if(x!==null&&x!==undefined&&!isNaN(x)) return x; } return -Infinity; };
+  salonDatasets.sort((a,b)=>lastVal(b.data)-lastVal(a.data));
+  datasets.push(...salonDatasets);
 
   // AM average — bold (hidden in drill mode)
   if(!drillSalon){
@@ -1949,7 +1955,7 @@ function selectTrendMetric(key, btn, overrideSalon){
         y: {
           grid: {color:'#f0efec'},
           ticks: {font:{size:11}, callback: v=>v+metric.unit},
-          reverse: !metric.higher && ['mbc','ssW','wts','noc','pay','hc'].includes(key)
+          reverse: false
         }
       }
     }
@@ -2662,7 +2668,7 @@ const MGR_SLIDING = [
   {min:700, max:9999, excPay:35, grwPay:36, cph:2.9},
 ];
 function mgrSliding(cc){ return MGR_SLIDING.find(r=>cc>=r.min&&cc<=r.max)||MGR_SLIDING[MGR_SLIDING.length-1]; }
-function mgrScore(actual, grw, exc, lib){ if(lib){ return actual<=exc?'exc':actual<=grw?'grw':'miss'; } return actual>=exc?'exc':actual>=grw?'grw':'miss'; }
+function mgrScore(actual, grw, exc, lib){ const a=Math.round(actual*10)/10; /* credit the value as displayed (1 decimal) */ if(lib){ return a<=exc?'exc':a<=grw?'grw':'miss'; } return a>=exc?'exc':a>=grw?'grw':'miss'; }
 
 function calcMgrBonusFromSalonRow(salonRow, bonusMgrRow, waiver, periodLabel, isAM, mgrGlobalId){
   waiver = waiver || {};
@@ -2739,7 +2745,7 @@ function calcMgrBonusFromSalonRow(salonRow, bonusMgrRow, waiver, periodLabel, is
     return {...m, result:r, amt};
   });
 
-  const cphResult = cphVal >= sl.cph ? 'hit' : 'miss';
+  const cphResult = (Math.round(cphVal*10)/10) >= sl.cph ? 'hit' : 'miss';
   if(cphResult==='hit') earned += cphAmt;
 
   const nrResult = mgrScore(mgrNR, 24, 26, false);
@@ -2758,7 +2764,7 @@ function calcMgrBonusFromSalonRow(salonRow, bonusMgrRow, waiver, periodLabel, is
 
   const payPenAmt = payrollPenaltyActive ? earned*0.5 : 0;
   if(payrollPenaltyActive) penalties += payPenAmt;
-  const prodPenAmt = productPenalty ? (earned - payPenAmt)*0.25 : 0;
+  const prodPenAmt = productPenalty ? earned*0.25 : 0;
   if(productPenalty) penalties += prodPenAmt;
 
   // Floor hours disqualification — full $0 payout if hours not met (no waiver)
