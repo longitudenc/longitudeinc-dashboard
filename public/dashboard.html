@@ -1597,7 +1597,20 @@ function drillBack(){
 
 // ── Trend Charts ─────────────────────────────────────────────
 let S_trendMetric = 'cc';
+let S_trendWindow = 20; // Trends weeks shown: 20 | 52 | 'ytd' | 'all' (default: recent 20)
 let S_trendChart = null;
+function setTrendWindow(w){ S_trendWindow = w; renderTrends(); }
+// First Friday of January of the fiscal year a given week-ending (YYYY-MM-DD) falls in.
+// Fiscal wk1 ends the first Friday of January; YTD = weeks on/after that anchor.
+function fiscalYearStartIso(weekEndIso){
+  const firstFri = yr => {
+    const f = new Date(yr, 0, 1);
+    while (f.getDay() !== 5) f.setDate(f.getDate() + 1);
+    return `${yr}-${String(f.getMonth()+1).padStart(2,'0')}-${String(f.getDate()).padStart(2,'0')}`;
+  };
+  const y0 = Number(weekEndIso.slice(0,4));
+  return weekEndIso >= firstFri(y0) ? firstFri(y0) : firstFri(y0 - 1);
+}
 
 const TREND_METRICS = {
   cc:  { label:'Customer Count', unit:'', higher:true,
@@ -1668,7 +1681,16 @@ function selectTrendMetric(key, btn, overrideSalon){
   const am = AMS[S.currentAM], metric = TREND_METRICS[key];
   if(!metric || !am) return;
 
-  const weeks = [...S.weekHistory].sort((a,b)=>new Date(a.weekEnding)-new Date(b.weekEnding));
+  const allWeeksSorted = [...S.weekHistory].sort((a,b)=>new Date(a.weekEnding)-new Date(b.weekEnding));
+  let weeks;
+  if (S_trendWindow === 'all') {
+    weeks = allWeeksSorted;
+  } else if (S_trendWindow === 'ytd') {
+    const anchorIso = allWeeksSorted.length ? fiscalYearStartIso(allWeeksSorted[allWeeksSorted.length-1].weekEnding) : '';
+    weeks = allWeeksSorted.filter(w => w.weekEnding >= anchorIso);
+  } else {
+    weeks = allWeeksSorted.slice(-S_trendWindow);
+  }
   if(!weeks.length){
     document.getElementById('trend-chart-area').innerHTML='<div class="no-data"><div class="no-data-icon">📈</div>No data yet — upload weekly reports to see trends</div>';
     return;
@@ -1851,6 +1873,13 @@ function selectTrendMetric(key, btn, overrideSalon){
         <div class="trend-chart-title">${chartTitle}</div>
         <div class="trend-chart-sub">${chartSub}</div>
       </div>
+      <div style="margin-left:auto;display:flex;gap:4px;">
+        ${[{w:20,l:'20 wk'},{w:52,l:'52 wk'},{w:'ytd',l:'YTD'},{w:'all',l:'All'}].map(o=>{
+          const arg = typeof o.w === 'string' ? "'"+o.w+"'" : o.w;
+          const active = S_trendWindow===o.w;
+          return `<button onclick="setTrendWindow(${arg})" style="padding:4px 12px;border-radius:16px;border:1px solid var(--border);font-size:11px;font-weight:600;cursor:pointer;background:${active?'var(--primary)':'white'};color:${active?'white':'var(--text)'};">${o.l}</button>`;
+        }).join('')}
+      </div>
     </div>
     ${periodStatsHtml}
     <div class="chart-canvas-wrap"><canvas id="trend-canvas"></canvas></div>
@@ -1943,8 +1972,10 @@ function selectTrendMetric(key, btn, overrideSalon){
             title: items => 'Week Ending ' + (items[0]?.label||''),
             label: c => {
               // Skip target/goal lines in tooltip
-              const skip = ['≤','≥','Min','Max','Target','Excellence','Growth ≥','Growth t'];
-              if(skip.some(s => c.dataset.label.includes(s))) return null;
+              // Skip only the target/threshold lines, matched exactly — a loose
+              // substring check dropped salon names like "Mint Hill" (contains "Min").
+              if(metric.targets.some(t => t.label === c.dataset.label)) return null;
+              if(c.parsed.y === null || c.parsed.y === undefined) return null;
               return ' ' + c.dataset.label + ': ' + c.parsed.y + metric.unit;
             }
           }
@@ -1954,7 +1985,7 @@ function selectTrendMetric(key, btn, overrideSalon){
         x: { grid:{color:'#f0efec'}, ticks:{font:{size:11}} },
         y: {
           grid: {color:'#f0efec'},
-          ticks: {font:{size:11}, callback: v=>v+metric.unit},
+          ticks: {font:{size:11}, callback: v=>(Math.round(v*100)/100)+metric.unit},
           reverse: false
         }
       }
