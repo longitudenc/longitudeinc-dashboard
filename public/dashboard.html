@@ -3693,6 +3693,7 @@ function renderCompanyBonus(){
   // View selector
   const views = [
     {k:'period',     lbl:'This Period'},
+    {k:'excellence', lbl:'🏆 Excellence Leaders'},
     {k:'ytd-stylist',lbl:'YTD by Stylist'},
     {k:'ytd-am',     lbl:'YTD by AM'},
     {k:'ytd-salon',  lbl:'YTD by Salon'},
@@ -3702,8 +3703,8 @@ function renderCompanyBonus(){
       onclick="window.S_coBonusView='${v.k}';S_bonusSort={col:null,asc:true};renderCompanyBonus();">${v.lbl}</button>`).join('')}
   </div>`;
 
-  // Period selector — only shown in "This Period" view
-  const periodBar = coView === 'period' ? `
+  // Period selector — shown in "This Period" and "Excellence Leaders" views
+  const periodBar = (coView === 'period' || coView === 'excellence') ? `
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
       <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);">Period:</span>
       ${S_bonusPeriods.map(p=>`<button class="bonus-period-btn ${S_bonusPeriod===p.periodKey?'active':''}"
@@ -3719,6 +3720,7 @@ function renderCompanyBonus(){
 
   let bodyHtml = '';
   if(coView === 'period')      bodyHtml = buildCompanyBonusAllStylists();
+  else if(coView === 'excellence')  bodyHtml = buildExcellenceLeaders();
   else if(coView === 'ytd-stylist') bodyHtml = buildCoBonusYTDStylist();
   else if(coView === 'ytd-am')      bodyHtml = buildCoBonusYTDAM();
   else if(coView === 'ytd-salon')   bodyHtml = buildCoBonusYTDSalon();
@@ -4498,6 +4500,66 @@ function exportBonusJPEG(periodKey){
     document.body.removeChild(printDiv);
     alert('Export failed: ' + err);
   });
+}
+
+function buildExcellenceLeaders(){
+  const period = S_bonusPeriods.find(p=>p.periodKey===S_bonusPeriod);
+  if(!period) return '<div class="no-data" style="padding:2rem;">Select a period.</div>';
+  const stys = (period.employees||[]).filter(e=>e.position!=='M');
+
+  // product/nr/rr are stored as FRACTIONS (0.26 = 26%); hcTime/mbc are plain.
+  // Compare against the fractional BONUS_CFG thresholds; format pct via fmtPct.
+  const fr = v => parseFloat(v)||0;
+  const hasNR = e => e.nr && !e.nr.toString().includes('*');
+  const hasRR = e => e.rr && !e.rr.toString().includes('*');
+  const measures = [
+    {key:'prod', title:'Product %', goal:'≥ 6%',  fmt:e=>fmtPct(e.product),
+      ok:e=>fr(e.product)>=BONUS_CFG.PROD_2, val:e=>fr(e.product), desc:true},
+    {key:'nr',   title:'New Customer Return %', goal:'≥ 26%', fmt:e=>fmtPct(e.nr),
+      ok:e=>hasNR(e)&&fr(e.nr)>=BONUS_CFG.NR_2, val:e=>fr(e.nr), desc:true},
+    {key:'rr',   title:'Repeat Customer Return %', goal:'≥ 77%', fmt:e=>fmtPct(e.rr),
+      ok:e=>hasRR(e)&&fr(e.rr)>=BONUS_CFG.RR_2, val:e=>fr(e.rr), desc:true},
+    {key:'mbc',  title:'MBC', goal:'≤ 2.0', fmt:e=>n(e.mbc).toFixed(1),
+      ok:e=>n(e.mbc)>0&&n(e.mbc)<=BONUS_CFG.MBC_2, val:e=>n(e.mbc), desc:false},
+    {key:'hc',   title:'HC Time', goal:'12–15', fmt:e=>n(e.hcTime).toFixed(1),
+      ok:e=>n(e.hcTime)>=BONUS_CFG.HC_E_LO&&n(e.hcTime)<=BONUS_CFG.HC_E_HI,
+      // sort by closeness to the 13.5 midpoint, best (most central) first
+      val:e=>Math.abs(n(e.hcTime)-13.5), desc:false},
+  ];
+
+  const cards = measures.map(m=>{
+    let leaders = stys.filter(m.ok);
+    leaders.sort((a,b)=> m.desc ? m.val(b)-m.val(a) : m.val(a)-m.val(b));
+    const rows = leaders.map((e,i)=>{
+      const amId = amOfPeriod(e.salonNum, S_bonusPeriod);
+      const am = AMS[amId] || (amId==='' ? {name:'Un-managed',color:'#999'} : {name:'?',color:'#999'});
+      const isAM = e.position==='AM' || NAMED.has((e.salonNum||'').trim());
+      return `<tr>
+        <td style="padding:5px 8px;color:var(--text-muted);width:28px;text-align:right;">${i+1}</td>
+        <td style="padding:5px 8px;">${stylistLink(e.globalId, e.empName)}</td>
+        <td style="padding:5px 8px;color:var(--text-muted);font-size:11px;">${salonDisplay(e.salonNum)}</td>
+        <td style="padding:5px 8px;"><span class="am-chip"><span class="chip-dot" style="background:${am.color}"></span>${amFirst(am)}</span></td>
+        <td style="padding:5px 8px;text-align:right;font-weight:700;" class="bv-green">${m.fmt(e)}</td>
+      </tr>`;
+    }).join('');
+    return `<div style="flex:1;min-width:320px;background:white;border:1px solid var(--border);border-radius:10px;overflow:hidden;">
+      <div style="background:var(--primary-dark);color:white;padding:10px 12px;display:flex;justify-content:space-between;align-items:baseline;">
+        <span style="font-weight:700;font-size:13px;">${m.title}</span>
+        <span style="font-size:11px;opacity:.85;">Excellence ${m.goal} · ${leaders.length} ${leaders.length===1?'stylist':'stylists'}</span>
+      </div>
+      ${leaders.length
+        ? `<table style="width:100%;border-collapse:collapse;font-size:12px;"><tbody>${rows}</tbody></table>`
+        : '<div style="padding:1rem;color:var(--text-muted);font-size:12px;">No stylists reached excellence this period.</div>'}
+    </div>`;
+  }).join('');
+
+  const totalExc = new Set();
+  measures.forEach(m=>stys.filter(m.ok).forEach(e=>totalExc.add(e.globalId)));
+  return `<div style="margin-bottom:.75rem;color:var(--text-muted);font-size:12px;">
+      Stylists hitting the <strong>excellence</strong> goal for each measure in <strong>${formatBonusPeriod(S_bonusPeriod)}</strong>, best first.
+      ${totalExc.size} stylists reached excellence in at least one measure.
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start;">${cards}</div>`;
 }
 
 function buildCompanyBonusAllStylists(){
