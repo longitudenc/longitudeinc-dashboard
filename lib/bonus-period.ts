@@ -51,6 +51,8 @@ const SALON_SUMMARY_COLUMNS = [
 const BONUS_COLUMNS = [
   'periodKey', 'periodLabel', 'weeksN', 'salonNum', 'globalId', 'payId',
   'empName', 'position', 'product', 'nr', 'rr', 'productivity',
+  'avgWkHrs', 'mbc', 'hcTime', 'points', 'perPt', 'potential', 'payout',
+  'prodPenalty', 'eligible',
   'weeksWithData', 'scrapedAt',
 ] as const
 
@@ -119,6 +121,57 @@ function weightedProductPct(rows: Record<string, any>[]): { avg: number; count: 
   }
   if (den > 0) return { avg: num_ / den, count }
   return avgPresent(rows, 'productPct') // no usable weights → simple average
+}
+
+// ── Stylist bonus engine (mirrors dashboard BONUS_CFG) ─────────
+// Points: Prod% <4=0+penalty / ≥4=1 / ≥6=2 · NR% ≥24=1 / ≥26=2 ·
+//         RR% ≥74=1 / ≥77=2 · MBC ≤3=1 / ≤2=2 · HC 12–15=2 / 11–12 or 15–17=1
+// Potential by avg weekly floor hrs: >30 → $200 ($20/pt) · ≥10 → $100 ($10/pt) · <10 → $0
+// Min 5 pts to earn · Prod <4% → payout ×0.25
+const STY = {
+  PROD_1: 4, PROD_2: 6,        // product thresholds in % points
+  NR_1: 24, NR_2: 26,
+  RR_1: 74, RR_2: 77,
+  MBC_1: 3, MBC_2: 2,
+  HC_G_LO1: 11, HC_G_HI2: 17, HC_E_LO: 12, HC_E_HI: 15,
+  HRS_EXC: 30, HRS_INEL: 10,
+  POT_EXC: 200, PPT_EXC: 20, POT_GROW: 100, PPT_GROW: 10,
+  MIN_PTS: 5, PROD_MULT: 0.25,
+}
+const r1 = (x: number) => Math.round(x * 10) / 10 // rounding credit: score the value as displayed (1 decimal)
+
+function calcStylistBonus(
+  prodPct: number | null, // in % points (e.g. 4.1), null if no data
+  nrPct: number | null,
+  rrPct: number | null,
+  mbc: number | null,
+  hc: number | null,
+  avgWkHrs: number
+) {
+  const p = prodPct === null ? null : r1(prodPct)
+  const nrr = nrPct === null ? null : r1(nrPct)
+  const rrr = rrPct === null ? null : r1(rrPct)
+  const m = mbc === null ? null : r1(mbc)
+  const h = hc === null ? null : r1(hc)
+
+  let points = 0
+  points += p !== null && p >= STY.PROD_2 ? 2 : p !== null && p >= STY.PROD_1 ? 1 : 0
+  points += nrr !== null && nrr >= STY.NR_2 ? 2 : nrr !== null && nrr >= STY.NR_1 ? 1 : 0
+  points += rrr !== null && rrr >= STY.RR_2 ? 2 : rrr !== null && rrr >= STY.RR_1 ? 1 : 0
+  points += m !== null && m <= STY.MBC_2 ? 2 : m !== null && m <= STY.MBC_1 ? 1 : 0
+  points += h !== null && h >= STY.HC_E_LO && h <= STY.HC_E_HI ? 2
+    : h !== null && h >= STY.HC_G_LO1 && h <= STY.HC_G_HI2 ? 1 : 0
+
+  const hrs = r1(avgWkHrs)
+  const potential = hrs > STY.HRS_EXC ? STY.POT_EXC : hrs >= STY.HRS_INEL ? STY.POT_GROW : 0
+  const perPt = hrs > STY.HRS_EXC ? STY.PPT_EXC : hrs >= STY.HRS_INEL ? STY.PPT_GROW : 0
+
+  const eligible = points >= STY.MIN_PTS
+  const prodPenalty = p !== null && p < STY.PROD_1
+  let payout = potential > 0 && eligible ? points * perPt : 0
+  if (prodPenalty) payout *= STY.PROD_MULT
+
+  return { points, perPt, potential, payout, prodPenalty, eligible }
 }
 
 function pctSum(numRows: Record<string, any>[], numKey: string, denKey: string): number {
@@ -231,6 +284,17 @@ export async function runBonusPeriodScrape(
       const prod = weightedProductPct(rows)
       const nr = avgPresent(rows, 'nr')
       const rr = avgPresent(rows, 'rr')
+      const mbcA = avgPresent(rows, 'mbc')
+      const hcA = avgPresent(rows, 'hcTime')
+      const avgWkHrs = weeksN ? sum(rows, 'floorHours') / weeksN : 0
+      const sty = calcStylistBonus(
+        prod.count ? prod.avg : null,
+        nr.count ? nr.avg : null,
+        rr.count ? rr.avg : null,
+        mbcA.count ? mbcA.avg : null,
+        hcA.count ? hcA.avg : null,
+        avgWkHrs
+      )
       bonusRows.push({
         periodKey, periodLabel, weeksN,
         salonNum: storeToSalon[String(last.storeId)] || last.salonNum || '',
@@ -242,6 +306,15 @@ export async function runBonusPeriodScrape(
         nr: nr.count ? nr.avg / 100 : '',
         rr: rr.count ? rr.avg / 100 : '',
         productivity: avgPresent(rows, 'productivity').avg || '',
+        avgWkHrs: Math.round(avgWkHrs * 100) / 100,
+        mbc: mbcA.count ? Math.round(mbcA.avg * 100) / 100 : '',
+        hcTime: hcA.count ? Math.round(hcA.avg * 100) / 100 : '',
+        points: sty.points,
+        perPt: sty.perPt,
+        potential: sty.potential,
+        payout: Math.round(sty.payout * 100) / 100,
+        prodPenalty: sty.prodPenalty ? 'true' : 'false',
+        eligible: sty.eligible ? 'true' : 'false',
         weeksWithData: rows.length,
         scrapedAt: new Date().toISOString(),
       })

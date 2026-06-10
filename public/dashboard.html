@@ -2373,8 +2373,8 @@ function bonusByAM(amId, periodKey){
   if(!periodKey) return [];
   const period = S_bonusPeriods.find(p=>p.periodKey===periodKey);
   if(!period) return [];
-  if(amId==='kayla') return period.employees.filter(e=>!NAMED.has(e.salonNum));
-  const salons = AMS[amId]?.salons||[];
+  if(amId==='kayla') return period.employees.filter(e=>{ const o=amOfPeriod(e.salonNum, periodKey); return !o || o==='kayla'; });
+  const salons = amSalonsForPeriod(amId, periodKey);
   return period.employees.filter(e=>salons.includes(e.salonNum));
 }
 
