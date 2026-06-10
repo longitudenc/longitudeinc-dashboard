@@ -3964,7 +3964,7 @@ function buildCompanyBonusAllYTD(){
     html+=`<tr>
       <td><strong>${emp.empName}</strong></td>
       <td>${salonDisplay(emp.salonNum)}</td>
-      <td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${am.color};margin-right:4px;"></span>${am.name}</td>
+      <td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${am.color};margin-right:4px;"></span>${amFirst(am)}</td>
       ${cells}
       <td class="${ytdCls}" style="text-align:center;font-weight:700;">${fmtMoney(ytdPay)}</td>
       <td style="text-align:center;color:var(--text-muted);">${fmtMoney(ytdPot)}</td>
@@ -4578,7 +4578,7 @@ function buildCompanyBonusAllStylists(){
     html += `<tr ${bg}>
       <td>${stylistLink(e.globalId,e.empName)}</td>
       <td>${e.salonNum}</td>
-      <td><span style="display:inline-flex;align-items:center;gap:4px;"><span style="width:8px;height:8px;border-radius:50%;background:${am.color};display:inline-block;"></span>${am.name}</span></td>
+      <td><span style="display:inline-flex;align-items:center;gap:4px;"><span style="width:8px;height:8px;border-radius:50%;background:${am.color};display:inline-block;"></span>${amFirst(am)}</span></td>
       <td>${fmtN1(e.avgWkHrs)}</td>
       <td class="${prod<BONUS_CFG.PROD_1?'bv-orange':prod<BONUS_CFG.PROD_2?'bv-yellow':'bv-green'}">${fmtPct(prod)}</td>
       <td class="${nr>=BONUS_CFG.NR_2?'bv-green':nr>=BONUS_CFG.NR_1?'bv-yellow':'bv-red'}">${fmtPct(nr)}</td>
@@ -4752,7 +4752,7 @@ function buildCoBonusYTDAM(){
     grandPay+=ytdPay; grandPot+=ytdPot;
     const ytdCls=ytdPay>0?'bv-green':'';
     html+=`<tr>
-      <td><span class="am-chip"><span class="chip-dot" style="background:${am.color}"></span><strong>${am.name}</strong></span></td>
+      <td><span class="am-chip"><span class="chip-dot" style="background:${am.color}"></span><strong>${amFirst(am)}</strong></span></td>
       ${cells}
       <td class="${ytdCls}" style="text-align:center;font-weight:700;">${fmtMoney(ytdPay)}</td>
       <td style="text-align:center;color:var(--text-muted);">${fmtMoney(ytdPot)}</td>
