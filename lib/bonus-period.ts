@@ -30,7 +30,8 @@
 // ---------------------------------------------------------------------------
 
 import { readSheet, rowsToObjects, upsertSheet, writeSheet } from '@/lib/sheets'
-import { fetchSalons, authenticate } from '@/lib/sd3'
+import { fetchSalons, authenticate, fetchEmployeePerformanceCsv, type SD3Session } from '@/lib/sd3'
+import { parseCsv, rowsToObjectsAt, num as csvNum, returnRate } from '@/lib/csv'
 import { salonMonth, salonMonthsBetween, type SalonMonth } from '@/lib/salon-month'
 
 const SD_WEEKLY_TAB = 'SD_WEEKLY'
@@ -174,6 +175,173 @@ function calcStylistBonus(
   return { points, perPt, potential, payout, prodPenalty, eligible }
 }
 
+const EMP_HEADER_ROW_INDEX = 4
+
+/** Normalize csvNum/returnRate output: blank/undefined → null. */
+function vOrNull(v: number | null | undefined): number | null {
+  return v === null || v === undefined || Number.isNaN(v) ? null : v
+}
+
+/**
+ * Build BonusData rows from SD3's month-range Employee Performance CSV.
+ * Single-salon employees (the vast majority) get SD3's monthly values passed
+ * through UNTOUCHED — exact match with the Stylist Bonus report. Multi-salon
+ * employees get a principled merge: hours summed; HC/MBC/NR/RR weighted by
+ * customer count; product weighted by service volume (productivity × hours).
+ */
+function bonusRowsFromMonthlyCsv(
+  csvText: string,
+  periodKey: string,
+  periodLabel: string,
+  weeksN: number,
+  storeToSalon: Record<string, string>,
+): Record<string, any>[] {
+  // Allow-list of real salon numbers. SD3's report emits a per-employee
+  // "Totals/Averages" summary row (Salon # = " Totals/Averages") plus footnote
+  // lines; both must be dropped, or hours double-count and salon/AM resolve wrong.
+  const validSalons = new Set(Object.values(storeToSalon).map(s => String(s).trim()))
+  const objs = rowsToObjectsAt(parseCsv(csvText), EMP_HEADER_ROW_INDEX)
+  const byEmp: Record<string, Record<string, string>[]> = {}
+  for (const o of objs) {
+    const gid = String(o['Global EE ID'] || '').trim()
+    const salonNum = String(o['Salon #'] || '').trim()
+    if (!gid || !validSalons.has(salonNum)) continue // skip Totals/Averages + footnotes
+    ;(byEmp[gid] ||= []).push(o)
+  }
+  const out: Record<string, any>[] = []
+  for (const [gid, list] of Object.entries(byEmp)) {
+    // Primary salon = where they worked the most hours (row attribution)
+    const primary = list.slice().sort(
+      (a, b) => (csvNum(b['Floor Hours']) || 0) - (csvNum(a['Floor Hours']) || 0)
+    )[0]
+    const totalHrs = list.reduce((t, o) => t + (csvNum(o['Floor Hours']) || 0), 0)
+
+    let prodPct: number | null, hc: number | null, mbc: number | null
+    let nr: number | null, rr: number | null, productivity: number | null
+    if (list.length === 1) {
+      // Pass SD3's monthly values through exactly
+      prodPct = vOrNull(csvNum(primary['Stnd Prod %']))
+      hc = vOrNull(csvNum(primary['Avg HC Time']))
+      mbc = vOrNull(csvNum(primary['Avg Min Btwn Cust w/ Cust Waiting']))
+      nr = vOrNull(returnRate(primary['Stylist New Cust Return %']))
+      rr = vOrNull(returnRate(primary['Stylist Repeat Cust Return %']))
+      productivity = vOrNull(csvNum(primary['Productivity']))
+    } else {
+      // Weighted merge across salons
+      let hcW = 0, hcC = 0, mbcW = 0, mbcC = 0, nrW = 0, nrC = 0, rrW = 0, rrC = 0
+      let prodW = 0, svc = 0, prtyW = 0, prtyH = 0
+      for (const o of list) {
+        const f = csvNum(o['Floor Hours']) || 0
+        const c = csvNum(o['Cust Count']) || 0
+        const oHc = vOrNull(csvNum(o['Avg HC Time']))
+        const oMbc = vOrNull(csvNum(o['Avg Min Btwn Cust w/ Cust Waiting']))
+        const oNr = vOrNull(returnRate(o['Stylist New Cust Return %']))
+        const oRr = vOrNull(returnRate(o['Stylist Repeat Cust Return %']))
+        const oProd = vOrNull(csvNum(o['Stnd Prod %']))
+        const oPrty = vOrNull(csvNum(o['Productivity']))
+        if (oHc !== null && c > 0) { hcW += oHc * c; hcC += c }
+        if (oMbc !== null && c > 0) { mbcW += oMbc * c; mbcC += c }
+        if (oNr !== null && c > 0) { nrW += oNr * c; nrC += c }
+        if (oRr !== null && c > 0) { rrW += oRr * c; rrC += c }
+        const sVol = (oPrty || 0) * f
+        if (oProd !== null && sVol > 0) { prodW += oProd * sVol; svc += sVol }
+        if (oPrty !== null && f > 0) { prtyW += oPrty * f; prtyH += f }
+      }
+      hc = hcC > 0 ? hcW / hcC : null
+      mbc = mbcC > 0 ? mbcW / mbcC : null
+      nr = nrC > 0 ? nrW / nrC : null
+      rr = rrC > 0 ? rrW / rrC : null
+      prodPct = svc > 0 ? prodW / svc : null
+      productivity = prtyH > 0 ? prtyW / prtyH : null
+    }
+
+    const avgWkHrs = weeksN ? totalHrs / weeksN : 0
+    const sty = calcStylistBonus(prodPct, nr, rr, mbc, hc, avgWkHrs)
+    out.push({
+      periodKey, periodLabel, weeksN,
+      salonNum: String(primary['Salon #'] || '').trim(),
+      globalId: gid,
+      payId: String(primary['Pay ID'] || '').trim(),
+      empName: String(primary['Employee Name'] || '').trim(),
+      position: String(primary['Position'] || '').trim(),
+      product: prodPct !== null ? prodPct / 100 : '',
+      nr: nr !== null ? nr / 100 : '',
+      rr: rr !== null ? rr / 100 : '',
+      productivity: productivity !== null ? Math.round(productivity * 1000) / 1000 : '',
+      avgWkHrs: Math.round(avgWkHrs * 100) / 100,
+      mbc: mbc !== null ? Math.round(mbc * 100) / 100 : '',
+      hcTime: hc !== null ? Math.round(hc * 100) / 100 : '',
+      points: sty.points,
+      perPt: sty.perPt,
+      potential: sty.potential,
+      payout: Math.round(sty.payout * 100) / 100,
+      prodPenalty: sty.prodPenalty ? 'true' : 'false',
+      eligible: sty.eligible ? 'true' : 'false',
+      weeksWithData: weeksN,
+      scrapedAt: new Date().toISOString(),
+    })
+  }
+  return out
+}
+
+/** Fallback: build BonusData by averaging the weekly table (pre-existing path). */
+function bonusRowsFromWeekly(
+  empInPeriod: Record<string, any>[],
+  periodKey: string,
+  periodLabel: string,
+  weeksN: number,
+  storeToSalon: Record<string, string>,
+): Record<string, any>[] {
+  const byEmp: Record<string, Record<string, any>[]> = {}
+  for (const r of empInPeriod) {
+    const gid = String(r.globalId || '').trim()
+    if (!gid) continue
+    ;(byEmp[gid] ||= []).push(r)
+  }
+  const out: Record<string, any>[] = []
+  for (const [gid, rows] of Object.entries(byEmp)) {
+    const last = rows[rows.length - 1]
+    const prod = weightedProductPct(rows)
+    const nr = avgPresent(rows, 'nr')
+    const rr = avgPresent(rows, 'rr')
+    const mbcA = avgPresent(rows, 'mbc')
+    const hcA = avgPresent(rows, 'hcTime')
+    const avgWkHrs = weeksN ? sum(rows, 'floorHours') / weeksN : 0
+    const sty = calcStylistBonus(
+      prod.count ? prod.avg : null,
+      nr.count ? nr.avg : null,
+      rr.count ? rr.avg : null,
+      mbcA.count ? mbcA.avg : null,
+      hcA.count ? hcA.avg : null,
+      avgWkHrs
+    )
+    out.push({
+      periodKey, periodLabel, weeksN,
+      salonNum: storeToSalon[String(last.storeId)] || last.salonNum || '',
+      globalId: gid,
+      payId: String(last.payId || '').trim(),
+      empName: String(last.employeeName || '').trim(),
+      position: String(last.position || '').trim(),
+      product: prod.count ? prod.avg / 100 : '',
+      nr: nr.count ? nr.avg / 100 : '',
+      rr: rr.count ? rr.avg / 100 : '',
+      productivity: avgPresent(rows, 'productivity').avg || '',
+      avgWkHrs: Math.round(avgWkHrs * 100) / 100,
+      mbc: mbcA.count ? Math.round(mbcA.avg * 100) / 100 : '',
+      hcTime: hcA.count ? Math.round(hcA.avg * 100) / 100 : '',
+      points: sty.points,
+      perPt: sty.perPt,
+      potential: sty.potential,
+      payout: Math.round(sty.payout * 100) / 100,
+      prodPenalty: sty.prodPenalty ? 'true' : 'false',
+      eligible: sty.eligible ? 'true' : 'false',
+      weeksWithData: rows.length,
+      scrapedAt: new Date().toISOString(),
+    })
+  }
+  return out
+}
+
 function pctSum(numRows: Record<string, any>[], numKey: string, denKey: string): number {
   const d = sum(numRows, denKey)
   if (!d) return 0
@@ -185,6 +353,8 @@ export interface BonusSources {
   emp: Record<string, any>[]
   pay: Record<string, any>[]
   storeToSalon: Record<string, string>
+  session: SD3Session
+  storeIds: number[]
 }
 
 /** Load the three weekly tables + storeId→salonNum map once (3 reads + 1 SD3 call). */
@@ -198,7 +368,7 @@ export async function loadBonusSources(): Promise<BonusSources> {
     readSheet(SD_EMP_WEEKLY_TAB).then(rowsToObjects),
     readSheet(SD_PAYROLL_TAB).then(rowsToObjects),
   ])
-  return { weekly, emp, pay, storeToSalon }
+  return { weekly, emp, pay, storeToSalon, session, storeIds: salons.map(s => s.storeId) }
 }
 
 /**
@@ -226,7 +396,7 @@ export async function runBonusPeriodScrape(
   try {
     // Use preloaded sources (backfill path — read once, reused across periods)
     // or load fresh for a single-period run.
-    const { weekly: weeklyAll, emp: empAll, pay: payAll, storeToSalon } =
+    const { weekly: weeklyAll, emp: empAll, pay: payAll, storeToSalon, session, storeIds } =
       opts.sources ?? (await loadBonusSources())
 
     // ── 1) SalonSummaryData from SD_WEEKLY ──
@@ -270,54 +440,19 @@ export async function runBonusPeriodScrape(
       result.salonSummaryRows = ssRows.length
     }
 
-    // ── 2) BonusData from SD_EMP_WEEKLY (per employee, simple avg of weeks) ──
-    const empInPeriod = empAll.filter(r => weekSet.has(String(r.weekEnd)))
-    const byEmp: Record<string, Record<string, any>[]> = {}
-    for (const r of empInPeriod) {
-      const gid = String(r.globalId || '').trim()
-      if (!gid) continue
-      ;(byEmp[gid] ||= []).push(r)
-    }
-    const bonusRows: Record<string, any>[] = []
-    for (const [gid, rows] of Object.entries(byEmp)) {
-      const last = rows[rows.length - 1]
-      const prod = weightedProductPct(rows)
-      const nr = avgPresent(rows, 'nr')
-      const rr = avgPresent(rows, 'rr')
-      const mbcA = avgPresent(rows, 'mbc')
-      const hcA = avgPresent(rows, 'hcTime')
-      const avgWkHrs = weeksN ? sum(rows, 'floorHours') / weeksN : 0
-      const sty = calcStylistBonus(
-        prod.count ? prod.avg : null,
-        nr.count ? nr.avg : null,
-        rr.count ? rr.avg : null,
-        mbcA.count ? mbcA.avg : null,
-        hcA.count ? hcA.avg : null,
-        avgWkHrs
-      )
-      bonusRows.push({
-        periodKey, periodLabel, weeksN,
-        salonNum: storeToSalon[String(last.storeId)] || last.salonNum || '',
-        globalId: gid,
-        payId: String(last.payId || '').trim(),
-        empName: String(last.employeeName || '').trim(),
-        position: String(last.position || '').trim(),
-        product: prod.count ? prod.avg / 100 : '',
-        nr: nr.count ? nr.avg / 100 : '',
-        rr: rr.count ? rr.avg / 100 : '',
-        productivity: avgPresent(rows, 'productivity').avg || '',
-        avgWkHrs: Math.round(avgWkHrs * 100) / 100,
-        mbc: mbcA.count ? Math.round(mbcA.avg * 100) / 100 : '',
-        hcTime: hcA.count ? Math.round(hcA.avg * 100) / 100 : '',
-        points: sty.points,
-        perPt: sty.perPt,
-        potential: sty.potential,
-        payout: Math.round(sty.payout * 100) / 100,
-        prodPenalty: sty.prodPenalty ? 'true' : 'false',
-        eligible: sty.eligible ? 'true' : 'false',
-        weeksWithData: rows.length,
-        scrapedAt: new Date().toISOString(),
-      })
+    // ── 2) BonusData — SD3's month-range employee report is the primary
+    //      source (EXACT monthly HC/MBC/Prod/NR/RR/hours, matching the Stylist
+    //      Bonus report). Weekly-table averages remain as a fallback if the
+    //      SD3 fetch fails, so backfills never hard-stop. ──
+    let bonusRows: Record<string, any>[] = []
+    try {
+      const csvText = await fetchEmployeePerformanceCsv(session, storeIds, monthStart, monthEnd)
+      bonusRows = bonusRowsFromMonthlyCsv(csvText, periodKey, periodLabel, weeksN, storeToSalon)
+      if (!bonusRows.length) throw new Error('monthly employee CSV parsed to 0 rows')
+    } catch (e: any) {
+      result.errors.push(`monthly emp CSV failed (${e?.message}); fell back to weekly averages`)
+      const empInPeriod = empAll.filter(r => weekSet.has(String(r.weekEnd)))
+      bonusRows = bonusRowsFromWeekly(empInPeriod, periodKey, periodLabel, weeksN, storeToSalon)
     }
     if (bonusRows.length) {
       await upsertSheet(BONUS_TAB, [...BONUS_COLUMNS], ['periodKey', 'globalId'], bonusRows)
