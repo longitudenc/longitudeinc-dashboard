@@ -3716,6 +3716,8 @@ function renderCompanyBonus(){
   const exportBtns = coView === 'period' ? `<div style="display:flex;gap:8px;">
     <button class="btn btn-secondary btn-sm" onclick="exportBonusJPEG('${_cpk}')">📷 Export Image (${_clbl})</button>
     <button class="btn btn-secondary btn-sm" onclick="exportPayrollCSV('${_cpk}')">⬇ ADP Payroll CSV (${_clbl})</button>
+  </div>` : coView === 'excellence' ? `<div style="display:flex;gap:8px;">
+    <button class="btn btn-secondary btn-sm" onclick="exportExcellenceJPEG('${_cpk}')">📷 Export Image (${_clbl})</button>
   </div>` : '';
 
   let bodyHtml = '';
@@ -4502,17 +4504,14 @@ function exportBonusJPEG(periodKey){
   });
 }
 
-function buildExcellenceLeaders(){
-  const period = S_bonusPeriods.find(p=>p.periodKey===S_bonusPeriod);
-  if(!period) return '<div class="no-data" style="padding:2rem;">Select a period.</div>';
-  const stys = (period.employees||[]).filter(e=>e.position!=='M');
-
-  // product/nr/rr are stored as FRACTIONS (0.26 = 26%); hcTime/mbc are plain.
-  // Compare against the fractional BONUS_CFG thresholds; format pct via fmtPct.
+// Excellence measure definitions — shared by the on-screen view and the
+// image export so both always agree on thresholds, sorting, and guards.
+// product/nr/rr are stored as FRACTIONS (0.26 = 26%); hcTime/mbc are plain.
+function excellenceMeasures(){
   const fr = v => parseFloat(v)||0;
   const hasNR = e => e.nr && !e.nr.toString().includes('*');
   const hasRR = e => e.rr && !e.rr.toString().includes('*');
-  const measures = [
+  return [
     {key:'prod', title:'Product %', goal:'≥ 6%',  fmt:e=>fmtPct(e.product),
       ok:e=>fr(e.product)>=BONUS_CFG.PROD_2, val:e=>fr(e.product), desc:true},
     {key:'nr',   title:'New Customer Return %', goal:'≥ 26%', fmt:e=>fmtPct(e.nr),
@@ -4523,43 +4522,196 @@ function buildExcellenceLeaders(){
       ok:e=>n(e.mbc)>0&&n(e.mbc)<=BONUS_CFG.MBC_2, val:e=>n(e.mbc), desc:false},
     {key:'hc',   title:'HC Time', goal:'12–15', fmt:e=>n(e.hcTime).toFixed(1),
       ok:e=>n(e.hcTime)>=BONUS_CFG.HC_E_LO&&n(e.hcTime)<=BONUS_CFG.HC_E_HI,
-      // sort by closeness to the 13.5 midpoint, best (most central) first
       val:e=>Math.abs(n(e.hcTime)-13.5), desc:false},
   ];
+}
+function excellenceLeadersFor(measure, stys){
+  return stys.filter(measure.ok).sort((a,b)=> measure.desc ? measure.val(b)-measure.val(a) : measure.val(a)-measure.val(b));
+}
+
+function buildExcellenceLeaders(){
+  const period = S_bonusPeriods.find(p=>p.periodKey===S_bonusPeriod);
+  if(!period) return '<div class="no-data" style="padding:2rem;">Select a period.</div>';
+  const stys = (period.employees||[]).filter(e=>e.position!=='M');
+
+  const measures = excellenceMeasures();
+
+  const EXC_CAP = 10; // keep each measure card glanceable
 
   const cards = measures.map(m=>{
-    let leaders = stys.filter(m.ok);
-    leaders.sort((a,b)=> m.desc ? m.val(b)-m.val(a) : m.val(a)-m.val(b));
-    const rows = leaders.map((e,i)=>{
-      const amId = amOfPeriod(e.salonNum, S_bonusPeriod);
-      const am = AMS[amId] || (amId==='' ? {name:'Un-managed',color:'#999'} : {name:'?',color:'#999'});
-      const isAM = e.position==='AM' || NAMED.has((e.salonNum||'').trim());
-      return `<tr>
-        <td style="padding:5px 8px;color:var(--text-muted);width:28px;text-align:right;">${i+1}</td>
+    const leaders = excellenceLeadersFor(m, stys);
+    const shown = leaders.slice(0, EXC_CAP);
+    const rows = shown.map((e,i)=>`<tr style="${i%2?'background:#f6faf4;':''}">
+        <td style="padding:5px 8px;color:var(--text-muted);width:24px;text-align:right;">${i+1}</td>
         <td style="padding:5px 8px;">${stylistLink(e.globalId, e.empName)}</td>
         <td style="padding:5px 8px;color:var(--text-muted);font-size:11px;">${salonDisplay(e.salonNum)}</td>
-        <td style="padding:5px 8px;"><span class="am-chip"><span class="chip-dot" style="background:${am.color}"></span>${amFirst(am)}</span></td>
         <td style="padding:5px 8px;text-align:right;font-weight:700;" class="bv-green">${m.fmt(e)}</td>
-      </tr>`;
-    }).join('');
-    return `<div style="flex:1;min-width:320px;background:white;border:1px solid var(--border);border-radius:10px;overflow:hidden;">
+      </tr>`).join('');
+    const more = leaders.length>EXC_CAP ? `<div style="padding:6px 10px;font-size:11px;color:var(--text-muted);border-top:1px solid var(--border);">+${leaders.length-EXC_CAP} more reached excellence</div>` : '';
+    return `<div style="flex:1;min-width:300px;background:white;border:1px solid var(--border);border-radius:10px;overflow:hidden;">
       <div style="background:var(--primary-dark);color:white;padding:10px 12px;display:flex;justify-content:space-between;align-items:baseline;">
         <span style="font-weight:700;font-size:13px;">${m.title}</span>
-        <span style="font-size:11px;opacity:.85;">Excellence ${m.goal} · ${leaders.length} ${leaders.length===1?'stylist':'stylists'}</span>
+        <span style="font-size:11px;opacity:.85;">Excellence ${m.goal} · ${leaders.length}</span>
       </div>
       ${leaders.length
-        ? `<table style="width:100%;border-collapse:collapse;font-size:12px;"><tbody>${rows}</tbody></table>`
+        ? `<table style="width:100%;border-collapse:collapse;font-size:12px;"><tbody>${rows}</tbody></table>${more}`
         : '<div style="padding:1rem;color:var(--text-muted);font-size:12px;">No stylists reached excellence this period.</div>'}
     </div>`;
   }).join('');
 
+  // ── Highlight cards ──
+  const top = topPerformers(stys, 5);
+  const topRows = top.map((e,i)=>{
+    const medal = ['🥇','🥈','🥉'][i] || (i+1)+'.';
+    return `<tr style="${i%2?'background:#f6faf4;':''}">
+      <td style="padding:6px 10px;width:30px;font-size:14px;">${medal}</td>
+      <td style="padding:6px 10px;">${stylistLink(e.globalId, e.empName)}</td>
+      <td style="padding:6px 10px;color:var(--text-muted);font-size:11px;">${salonDisplay(e.salonNum)}</td>
+      <td style="padding:6px 10px;text-align:center;font-weight:700;" class="bv-green">${e._exc} ★</td>
+      <td style="padding:6px 10px;text-align:right;color:var(--text-muted);">${e.points||0} pts</td>
+    </tr>`;
+  }).join('');
+  const topCard = top.length ? `<div style="flex:1;min-width:340px;background:white;border:2px solid var(--accent);border-radius:10px;overflow:hidden;">
+    <div style="background:var(--primary);color:white;padding:10px 12px;font-weight:700;font-size:14px;">🌟 Top Performers</div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px;"><tbody>${topRows}</tbody></table>
+    <div style="padding:6px 10px;font-size:10px;color:var(--text-muted);border-top:1px solid var(--border);">Ranked by excellence measures hit, then bonus points.</div>
+  </div>` : '';
+
+  const multi = multiMeasureStars(stys, measures);
+  const multiRows = multi.map((e,i)=>`<tr style="${i%2?'background:#f6faf4;':''}">
+      <td style="padding:6px 10px;width:24px;text-align:right;color:var(--text-muted);">${i+1}</td>
+      <td style="padding:6px 10px;">${stylistLink(e.globalId, e.empName)}</td>
+      <td style="padding:6px 10px;color:var(--text-muted);font-size:11px;">${salonDisplay(e.salonNum)}</td>
+      <td style="padding:6px 10px;text-align:center;font-weight:700;" class="bv-green">${e._exc} measures</td>
+      <td style="padding:6px 10px;color:var(--text-muted);font-size:11px;">${e._measLabels}</td>
+    </tr>`).join('');
+  const multiCard = multi.length ? `<div style="flex:1;min-width:340px;background:white;border:2px solid var(--accent);border-radius:10px;overflow:hidden;">
+    <div style="background:var(--primary);color:white;padding:10px 12px;font-weight:700;font-size:14px;">🎯 Multi-Measure Excellence</div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px;"><tbody>${multiRows}</tbody></table>
+    <div style="padding:6px 10px;font-size:10px;color:var(--text-muted);border-top:1px solid var(--border);">Stylists hitting excellence in 2+ measures.</div>
+  </div>` : '';
+
   const totalExc = new Set();
   measures.forEach(m=>stys.filter(m.ok).forEach(e=>totalExc.add(e.globalId)));
+  const highlightRow = (topCard||multiCard) ? `<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start;margin-bottom:14px;">${topCard}${multiCard}</div>` : '';
   return `<div style="margin-bottom:.75rem;color:var(--text-muted);font-size:12px;">
-      Stylists hitting the <strong>excellence</strong> goal for each measure in <strong>${formatBonusPeriod(S_bonusPeriod)}</strong>, best first.
+      Excellence leaders for <strong>${formatBonusPeriod(S_bonusPeriod)}</strong>, best first.
       ${totalExc.size} stylists reached excellence in at least one measure.
     </div>
+    ${highlightRow}
     <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start;">${cards}</div>`;
+}
+
+// Top performers: rank by # of excellence measures hit, then bonus points,
+// then avg weekly hours (a full-timer edges a partial on ties).
+function topPerformers(stys, limit){
+  const measures = excellenceMeasures();
+  const scored = stys.map(e=>{
+    const exc = measures.reduce((c,m)=>c+(m.ok(e)?1:0),0);
+    return Object.assign({}, e, {_exc:exc});
+  }).filter(e=>e._exc>0);
+  scored.sort((a,b)=> b._exc-a._exc || (parseFloat(b.points)||0)-(parseFloat(a.points)||0) || (parseFloat(b.avgWkHrs)||0)-(parseFloat(a.avgWkHrs)||0));
+  return scored.slice(0, limit);
+}
+
+// Stylists hitting excellence in 2+ measures, with which ones.
+function multiMeasureStars(stys, measures){
+  const SHORT = {prod:'Prod', nr:'NR', rr:'RR', mbc:'MBC', hc:'HC'};
+  const scored = stys.map(e=>{
+    const hit = measures.filter(m=>m.ok(e));
+    return Object.assign({}, e, {_exc:hit.length, _measLabels:hit.map(m=>SHORT[m.key]||m.title).join(', ')});
+  }).filter(e=>e._exc>=2);
+  scored.sort((a,b)=> b._exc-a._exc || (parseFloat(b.points)||0)-(parseFloat(a.points)||0));
+  return scored;
+}
+
+function exportExcellenceJPEG(periodKey){
+  const period = S_bonusPeriods.find(p=>p.periodKey===periodKey);
+  if(!period){ alert('Period not found'); return; }
+  if(typeof html2canvas==='undefined'){ alert('Image library not loaded — try a hard refresh.'); return; }
+
+  const label = formatBonusPeriod(periodKey);
+  const stys = (period.employees||[]).filter(e=>e.position!=='M');
+  const measures = excellenceMeasures();
+  const EXC_CAP = 10;
+
+  const cardHTML = measures.map(m=>{
+    const leaders = excellenceLeadersFor(m, stys);
+    const shown = leaders.slice(0, EXC_CAP);
+    const rows = shown.map((e,i)=>`<tr style="${i%2?'background:#f6faf4;':''}">
+        <td style="padding:5px 9px;color:#999;text-align:right;width:22px;">${i+1}</td>
+        <td style="padding:5px 9px;font-weight:600;white-space:nowrap;">${e.empName}</td>
+        <td style="padding:5px 9px;color:#777;font-size:11px;white-space:nowrap;">${salonDisplay(e.salonNum)}</td>
+        <td style="padding:5px 9px;text-align:right;font-weight:700;color:#1a6b3f;white-space:nowrap;">${m.fmt(e)}</td>
+      </tr>`).join('');
+    const more = leaders.length>EXC_CAP ? `<div style="padding:5px 9px;font-size:10px;color:#999;border-top:1px solid #e3ece3;">+${leaders.length-EXC_CAP} more</div>` : '';
+    return `<div style="border:1px solid #d7e3d7;border-radius:10px;overflow:hidden;break-inside:avoid;min-width:300px;flex:1;">
+      <div style="background:#03654e;color:white;padding:9px 12px;display:flex;justify-content:space-between;align-items:baseline;">
+        <span style="font-weight:700;font-size:14px;">${m.title}</span>
+        <span style="font-size:11px;opacity:.85;">Excellence ${m.goal} · ${leaders.length}</span>
+      </div>
+      ${leaders.length
+        ? `<table style="width:100%;border-collapse:collapse;font-size:12px;"><tbody>${rows}</tbody></table>${more}`
+        : '<div style="padding:12px;color:#999;font-size:12px;">None this period.</div>'}
+    </div>`;
+  }).join('');
+
+  // Highlight cards
+  const top = topPerformers(stys, 5);
+  const topRows = top.map((e,i)=>{
+    const medal = ['🥇','🥈','🥉'][i] || (i+1)+'.';
+    return `<tr style="${i%2?'background:#f6faf4;':''}">
+      <td style="padding:6px 11px;width:28px;font-size:15px;">${medal}</td>
+      <td style="padding:6px 11px;font-weight:600;white-space:nowrap;">${e.empName}</td>
+      <td style="padding:6px 11px;color:#777;font-size:11px;white-space:nowrap;">${salonDisplay(e.salonNum)}</td>
+      <td style="padding:6px 11px;text-align:center;font-weight:700;color:#1a6b3f;">${e._exc} ★</td>
+      <td style="padding:6px 11px;text-align:right;color:#777;">${e.points||0} pts</td>
+    </tr>`;
+  }).join('');
+  const topCard = top.length ? `<div style="border:2px solid #9acb3a;border-radius:10px;overflow:hidden;break-inside:avoid;min-width:340px;flex:1;">
+    <div style="background:#048667;color:white;padding:9px 12px;font-weight:700;font-size:15px;">🌟 Top Performers</div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px;"><tbody>${topRows}</tbody></table>
+  </div>` : '';
+
+  const multi = multiMeasureStars(stys, measures);
+  const multiRows = multi.slice(0, EXC_CAP+2).map((e,i)=>`<tr style="${i%2?'background:#f6faf4;':''}">
+      <td style="padding:6px 11px;width:22px;text-align:right;color:#999;">${i+1}</td>
+      <td style="padding:6px 11px;font-weight:600;white-space:nowrap;">${e.empName}</td>
+      <td style="padding:6px 11px;color:#777;font-size:11px;white-space:nowrap;">${salonDisplay(e.salonNum)}</td>
+      <td style="padding:6px 11px;text-align:center;font-weight:700;color:#1a6b3f;">${e._exc}</td>
+      <td style="padding:6px 11px;color:#777;font-size:11px;white-space:nowrap;">${e._measLabels}</td>
+    </tr>`).join('');
+  const multiCard = multi.length ? `<div style="border:2px solid #9acb3a;border-radius:10px;overflow:hidden;break-inside:avoid;min-width:340px;flex:1;">
+    <div style="background:#048667;color:white;padding:9px 12px;font-weight:700;font-size:15px;">🎯 Multi-Measure Excellence</div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px;"><tbody>${multiRows}</tbody></table>
+  </div>` : '';
+
+  const totalExc = new Set();
+  measures.forEach(m=>stys.filter(m.ok).forEach(e=>totalExc.add(e.globalId)));
+
+  const printDiv = document.createElement('div');
+  printDiv.style.cssText = 'position:fixed;top:-9999px;left:0;background:white;padding:24px;font-family:Arial,sans-serif;width:1100px;';
+  printDiv.innerHTML = `
+    <div style="text-align:center;margin-bottom:18px;border-bottom:3px solid #03654e;padding-bottom:12px;">
+      <div style="font-size:22px;font-weight:700;color:#03654e;">Monthly Excellence Leaders 🏆</div>
+      <div style="font-size:15px;color:#555;margin-top:4px;">${label} · ${totalExc.size} stylists reached excellence in at least one measure</div>
+    </div>
+    ${(topCard||multiCard) ? `<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start;margin-bottom:16px;">${topCard}${multiCard}</div>` : ''}
+    <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start;">${cardHTML}</div>
+    <div style="margin-top:14px;font-size:11px;color:#999;text-align:right;">Generated ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</div>`;
+  document.body.appendChild(printDiv);
+
+  html2canvas(printDiv, { scale:3, backgroundColor:'#ffffff', useCORS:true, logging:false })
+    .then(canvas=>{
+      document.body.removeChild(printDiv);
+      const link = document.createElement('a');
+      link.download = 'Excellence_Leaders_' + label.replace(' ','_') + '.jpeg';
+      link.href = canvas.toDataURL('image/jpeg', 0.92);
+      link.click();
+    }).catch(err=>{
+      document.body.removeChild(printDiv);
+      alert('Export failed: ' + err);
+    });
 }
 
 function buildCompanyBonusAllStylists(){
