@@ -4441,6 +4441,7 @@ function exportBonusJPEG(periodKey){
       const nrBg=nr>=BONUS_CFG.NR_2?'#C6EFCE':nr>=BONUS_CFG.NR_1?'#FFEB9C':'#FFC7CE';
       const rrBg=rr>=BONUS_CFG.RR_2?'#C6EFCE':rr>=BONUS_CFG.RR_1?'#FFEB9C':'#FFC7CE';
       const mbcBg=mbc<=BONUS_CFG.MBC_2?'#C6EFCE':mbc<=BONUS_CFG.MBC_1?'#FFEB9C':'#FFC7CE';
+      const hcBg=(hc>=BONUS_CFG.HC_E_LO&&hc<=BONUS_CFG.HC_E_HI)?'#C6EFCE':(hc>=BONUS_CFG.HC_G_LO1&&hc<=BONUS_CFG.HC_G_HI2)?'#FFEB9C':'#FFC7CE';
       const notes=[];
       if(e.prodPenalty==='true'||e.prodPenalty===true) notes.push('Prod penalty');
       if((e.eligible==='false'||e.eligible===false)&&potential>0) notes.push('<5 pts');
@@ -4455,7 +4456,7 @@ function exportBonusJPEG(periodKey){
         <td style="padding:7px 10px;text-align:center;background:${nrBg};">${fmtPct(nr)}</td>
         <td style="padding:7px 10px;text-align:center;background:${rrBg};">${fmtPct(rr)}</td>
         <td style="padding:7px 10px;text-align:center;background:${mbcBg};">${fmtN1(mbc)}</td>
-        <td style="padding:7px 10px;text-align:center;">${fmtN1(hc)}</td>
+        <td style="padding:7px 10px;text-align:center;background:${hcBg};">${fmtN1(hc)}</td>
         <td style="padding:7px 10px;text-align:center;font-weight:700;">${e.points||'—'}</td>
         <td style="padding:7px 10px;text-align:center;">${potential>0?fmtMoney(potential):'$0'}</td>
         <td style="padding:7px 10px;text-align:center;background:${payBg};font-weight:700;">${fmtMoney(payout)}</td>
@@ -4584,7 +4585,7 @@ function buildCompanyBonusAllStylists(){
       <td class="${nr>=BONUS_CFG.NR_2?'bv-green':nr>=BONUS_CFG.NR_1?'bv-yellow':'bv-red'}">${fmtPct(nr)}</td>
       <td class="${rr>=BONUS_CFG.RR_2?'bv-green':rr>=BONUS_CFG.RR_1?'bv-yellow':'bv-red'}">${fmtPct(rr)}</td>
       <td class="${mbc<=BONUS_CFG.MBC_2?'bv-green':mbc<=BONUS_CFG.MBC_1?'bv-yellow':'bv-red'}">${fmtN1(mbc)}</td>
-      <td>${fmtN1(hc)}</td>
+      <td class="${(hc>=BONUS_CFG.HC_E_LO&&hc<=BONUS_CFG.HC_E_HI)?'bv-green':(hc>=BONUS_CFG.HC_G_LO1&&hc<=BONUS_CFG.HC_G_HI2)?'bv-yellow':'bv-red'}">${fmtN1(hc)}</td>
       <td style="font-weight:700;">${e.points||'—'}</td>
       <td>${potential>0?fmtMoney(potential):'$0'}</td>
       <td class="${discInelig?'bv-red':pCls}" style="font-weight:700;">${discInelig?'$0.00':fmtMoney(payout)}</td>
