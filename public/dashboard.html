@@ -4,19 +4,22 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Longitude Inc — AM Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <style>
   :root {
-    --primary:#1a1a2e; --accent:#c8813a; --accent-light:#f5e6d3;
-    --border:#e0ddd8; --bg:#f9f8f6; --text:#1a1a1a; --text-muted:#6b6b6b; --text-light:#999;
+    --primary:#048667; --primary-dark:#03654e; --accent:#9acb3a; --accent-light:#eaf5d8;
+    --border:#dfe3df; --bg:#f2f2f2; --text:#1a1a1a; --text-muted:#6b6b6b; --text-light:#999;
     --exc-bg:#e6f4e0; --exc-text:#1a5c0a; --exc-border:#a8d890;
     --grw-bg:#fdf6e0; --grw-text:#7a5a00; --grw-border:#f0d060;
     --min-bg:#fdeede; --min-text:#8a3a10; --min-border:#f0b080;
     --wrn-bg:#fbe8e8; --wrn-text:#8a1a1a; --wrn-border:#e8a0a0;
   }
   *{box-sizing:border-box;margin:0;padding:0;}
-  body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;}
+  body{font-family:'Poppins','Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;}
 
   /* Header */
   .app-header{background:var(--primary);color:white;padding:0 2rem;display:flex;align-items:center;justify-content:space-between;height:56px;position:sticky;top:0;z-index:100;}
@@ -25,8 +28,8 @@
   .user-chip{font-size:12px;color:#ccc;background:rgba(255,255,255,.1);padding:4px 10px;border-radius:20px;}
 
   /* Week badge / dropdown */
-  .week-badge{background:rgba(200,129,58,.3);border:1px solid rgba(200,129,58,.5);color:#f5c98a;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;position:relative;user-select:none;}
-  .week-badge:hover{background:rgba(200,129,58,.5);}
+  .week-badge{background:rgba(154,203,58,.25);border:1px solid rgba(154,203,58,.55);color:#d6ec9f;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;position:relative;user-select:none;}
+  .week-badge:hover{background:rgba(154,203,58,.55);}
   .week-dropdown{position:absolute;top:calc(100% + 8px);right:0;background:white;border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);min-width:220px;z-index:200;max-height:60vh;overflow-y:auto;overflow-x:hidden;display:none;}
   .week-dropdown.open{display:block;}
   .week-dropdown-item{padding:9px 16px;font-size:13px;color:var(--text);cursor:pointer;border-bottom:1px solid #f0efec;}
@@ -39,7 +42,7 @@
   .main-layout{display:grid;grid-template-columns:220px 1fr;height:calc(100vh - 56px);overflow:hidden;transition:grid-template-columns .2s ease;}
   .main-layout.sidebar-collapsed{grid-template-columns:0px 1fr;}
   .main-layout.sidebar-collapsed .sidebar{padding:1rem 0 0;border-right:none;}
-  .sidebar{background:#f2f1ee;border-right:1px solid var(--border);padding:1rem 0;position:sticky;top:0;height:100vh;overflow-y:auto;overflow-x:hidden;flex-shrink:0;white-space:nowrap;}
+  .sidebar{background:#ececec;border-right:1px solid var(--border);padding:1rem 0;position:sticky;top:0;height:100vh;overflow-y:auto;overflow-x:hidden;flex-shrink:0;white-space:nowrap;}
   .sidebar-toggle{background:none;border:none;color:white;cursor:pointer;font-size:18px;padding:4px 8px;border-radius:6px;line-height:1;margin-right:8px;}
   .sidebar-toggle:hover{background:rgba(255,255,255,.15);}
   .sidebar-label{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text-muted);padding:.5rem 1rem .25rem;}
@@ -85,11 +88,11 @@
 
   /* Data tables */
   .data-table{width:100%;border-collapse:collapse;font-size:12.5px;}
-  .data-table th{background:#2a2a3e;color:#ccc;font-size:10px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;padding:9px 8px;text-align:left;border-bottom:2px solid #1a1a2e;white-space:nowrap;cursor:pointer;user-select:none;}
+  .data-table th{background:var(--primary-dark);color:#d8efe8;font-size:10px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;padding:9px 8px;text-align:left;border-bottom:2px solid #024d3c;white-space:nowrap;cursor:pointer;user-select:none;}
   .data-table th:hover{background:#3a3a5e;color:white;}
   .data-table th .si{margin-left:4px;font-size:9px;opacity:.4;}
-  .data-table th.sa .si::after{content:'▲';opacity:1;color:#f5c98a;}
-  .data-table th.sd .si::after{content:'▼';opacity:1;color:#f5c98a;}
+  .data-table th.sa .si::after{content:'▲';opacity:1;color:#d6ec9f;}
+  .data-table th.sd .si::after{content:'▼';opacity:1;color:#d6ec9f;}
   .data-table th:not(.sa):not(.sd) .si::after{content:'⇅';}
   .data-table td{padding:7px 8px;border-bottom:1px solid #f0efec;vertical-align:middle;}
   .data-table tbody tr:hover td{background:#f5f4f0!important;}
@@ -126,7 +129,7 @@
   .score-tier-name{font-weight:600;}
   .score-tier-range{color:var(--text-muted);font-size:11px;}
   .sc-table{width:100%;border-collapse:collapse;font-size:13px;}
-  .sc-table thead tr:first-child th{background:#1a1a2e;color:white;font-size:11px;padding:10px 12px;text-align:left;letter-spacing:.04em;}
+  .sc-table thead tr:first-child th{background:var(--primary-dark);color:white;font-size:11px;padding:10px 12px;text-align:left;letter-spacing:.04em;}
   .sc-table tbody tr{border-bottom:1px solid #f5f4f1;}
   .sc-table tbody tr:last-child{border-bottom:none;}
   .sc-table tbody tr:hover td{background:#faf9f7;}
@@ -153,18 +156,18 @@
 
   /* Employee table */
   .emp-table{width:100%;border-collapse:collapse;font-size:12px;}
-  .emp-table th{background:#2a2a3e;color:#ccc;font-size:10px;text-transform:uppercase;letter-spacing:.06em;padding:9px 8px;text-align:left;border-bottom:2px solid #1a1a2e;white-space:nowrap;cursor:pointer;user-select:none;}
+  .emp-table th{background:var(--primary-dark);color:#d8efe8;font-size:10px;text-transform:uppercase;letter-spacing:.06em;padding:9px 8px;text-align:left;border-bottom:2px solid #024d3c;white-space:nowrap;cursor:pointer;user-select:none;}
   .emp-table th:hover{background:#3a3a5e;color:white;}
   .emp-table th .si{margin-left:4px;font-size:9px;opacity:.5;}
-  .emp-table th.sa .si::after{content:'▲';opacity:1;color:#f5c98a;}
-  .emp-table th.sd .si::after{content:'▼';opacity:1;color:#f5c98a;}
+  .emp-table th.sa .si::after{content:'▲';opacity:1;color:#d6ec9f;}
+  .emp-table th.sd .si::after{content:'▼';opacity:1;color:#d6ec9f;}
   .emp-table th:not(.sa):not(.sd) .si::after{content:'⇅';}
   .emp-table td{padding:7px 8px;border-bottom:1px solid #f0efec;vertical-align:middle;}
   .emp-table tbody tr:hover td{background:#faf9f7;}
 
   /* Co scorecard */
   .co-score-table{width:100%;border-collapse:collapse;font-size:13px;}
-  .co-score-table th{background:#2a2a3e;color:#ccc;font-size:10px;text-transform:uppercase;letter-spacing:.06em;padding:9px 10px;text-align:left;border-bottom:2px solid #1a1a2e;white-space:nowrap;}
+  .co-score-table th{background:var(--primary-dark);color:#d8efe8;font-size:10px;text-transform:uppercase;letter-spacing:.06em;padding:9px 10px;text-align:left;border-bottom:2px solid #024d3c;white-space:nowrap;}
   .co-score-table td{padding:9px 10px;border-bottom:1px solid #f0efec;vertical-align:middle;}
   .co-score-table tbody tr:hover td{background:#f5f4f0;}
   .score-bar-wrap{width:100px;height:10px;background:#eee;border-radius:5px;overflow:hidden;display:inline-block;vertical-align:middle;}
@@ -181,8 +184,8 @@
   .loading-overlay{position:fixed;inset:0;background:rgba(26,26,46,.7);display:flex;align-items:center;justify-content:center;z-index:999;color:white;font-size:16px;font-weight:600;flex-direction:column;gap:12px;}
   .spinner{width:40px;height:40px;border:4px solid rgba(255,255,255,.3);border-top-color:white;border-radius:50%;animation:spin 0.8s linear infinite;}
   @keyframes spin{to{transform:rotate(360deg);}}
-  .status-bar{background:#1a1a2e;color:#ccc;font-size:12px;padding:6px 2rem;text-align:right;}
-  .status-bar span{color:#f5c98a;}
+  .status-bar{background:var(--primary-dark);color:#cfe3dc;font-size:12px;padding:6px 2rem;text-align:right;}
+  .status-bar span{color:#d6ec9f;}
 
   /* Admin upload panel */
   .upload-panel{background:white;border:1px solid var(--border);border-radius:12px;padding:1.5rem;margin-bottom:1.5rem;}
@@ -193,7 +196,7 @@
 
   /* Trend Charts */
   .trend-layout{display:grid;grid-template-columns:185px 1fr;min-height:520px;}
-  .trend-sidebar{background:#f2f1ee;border-right:1px solid var(--border);padding:1rem 0;}
+  .trend-sidebar{background:#ececec;border-right:1px solid var(--border);padding:1rem 0;}
   .trend-sidebar-label{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted);padding:.5rem 1rem .25rem;}
   .trend-metric-btn{display:block;width:100%;padding:8px 1rem;border:none;background:none;text-align:left;font-size:12.5px;color:var(--text);cursor:pointer;transition:background .15s;border-left:3px solid transparent;}
   .trend-metric-btn:hover{background:rgba(0,0,0,.05);}
@@ -243,11 +246,11 @@
   .bonus-subtab{padding:6px 14px;border-radius:8px;font-size:12px;cursor:pointer;border:none;background:none;color:var(--text-muted);transition:all .15s;font-weight:600;}
   .bonus-subtab.active{background:white;color:var(--primary);font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,.1);}
   .bonus-table{width:100%;border-collapse:collapse;font-size:12px;}
-  .bonus-table th{background:#1F3864;color:white;font-size:10px;text-transform:uppercase;letter-spacing:.06em;padding:8px 8px;text-align:center;border-right:1px solid rgba(255,255,255,.15);white-space:pre-line;line-height:1.3;}
+  .bonus-table th{background:var(--primary-dark);color:white;font-size:10px;text-transform:uppercase;letter-spacing:.06em;padding:8px 8px;text-align:center;border-right:1px solid rgba(255,255,255,.15);white-space:pre-line;line-height:1.3;}
   .bonus-table th:first-child{text-align:left;}
   .bonus-table td{padding:6px 8px;border-bottom:1px solid #f0efec;text-align:center;white-space:nowrap;}
   .bonus-table td:first-child{text-align:left;font-weight:500;}
-  .bonus-table tr.bonus-salon-header td{background:#1F3864!important;color:white;font-weight:700;font-size:12px;padding:6px 12px;text-align:left;}
+  .bonus-table tr.bonus-salon-header td{background:#03654e!important;color:white;font-weight:700;font-size:12px;padding:6px 12px;text-align:left;}
   .bonus-table tr:hover td{filter:brightness(.97);}
   .bv-green{background:#C6EFCE!important;color:#375623!important;font-weight:600;}
   .bv-yellow{background:#FFEB9C!important;color:#7D6608!important;font-weight:600;}
@@ -259,7 +262,7 @@
   .bonus-stat-n{font-size:20px;font-weight:700;color:var(--primary);}
   .bonus-stat-l{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-top:3px;}
   .ytd-bonus-table{width:100%;border-collapse:collapse;font-size:12px;}
-  .ytd-bonus-table th{background:#2a2a3e;color:#ccc;font-size:10px;text-transform:uppercase;padding:8px;text-align:left;border-bottom:2px solid #1a1a2e;}
+  .ytd-bonus-table th{background:var(--primary-dark);color:#d8efe8;font-size:10px;text-transform:uppercase;padding:8px;text-align:left;border-bottom:2px solid #024d3c;}
   .ytd-bonus-table td{padding:7px 8px;border-bottom:1px solid #f0efec;}
   .ytd-bonus-table tbody tr:hover td{background:#f5f4f0;}
   .salon-link:hover{color:var(--accent);}
@@ -515,7 +518,7 @@
 
           <!-- Weekly Files -->
           <div style="margin-bottom:1.2rem;">
-            <div style="font-weight:700;font-size:13px;color:#1F3864;margin-bottom:6px;display:flex;align-items:center;gap:6px;">📅 Weekly Reports <span style="font-weight:400;font-size:11px;color:var(--text-muted);">Drop into: AM Review — Weekly Uploads</span></div>
+            <div style="font-weight:700;font-size:13px;color:#03654e;margin-bottom:6px;display:flex;align-items:center;gap:6px;">📅 Weekly Reports <span style="font-weight:400;font-size:11px;color:var(--text-muted);">Drop into: AM Review — Weekly Uploads</span></div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
               <div style="background:#f8f7f4;border:1px solid var(--border);border-radius:8px;padding:10px;">
                 <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:4px;">Salon Report</div>
@@ -530,7 +533,7 @@
 
           <!-- Monthly Files -->
           <div style="margin-bottom:1.2rem;">
-            <div style="font-weight:700;font-size:13px;color:#1F3864;margin-bottom:6px;">📆 Monthly Reports</div>
+            <div style="font-weight:700;font-size:13px;color:#03654e;margin-bottom:6px;">📆 Monthly Reports</div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
               <div style="background:#f8f7f4;border:1px solid var(--border);border-radius:8px;padding:10px;">
                 <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:4px;">Stylist Bonus File</div>
@@ -549,7 +552,7 @@
 
           <!-- Standing Files -->
           <div style="margin-bottom:1.2rem;">
-            <div style="font-weight:700;font-size:13px;color:#1F3864;margin-bottom:6px;">📁 Standing Files <span style="font-weight:400;font-size:11px;color:var(--text-muted);">Update as needed</span></div>
+            <div style="font-weight:700;font-size:13px;color:#03654e;margin-bottom:6px;">📁 Standing Files <span style="font-weight:400;font-size:11px;color:var(--text-muted);">Update as needed</span></div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
               <div style="background:#f8f7f4;border:1px solid var(--border);border-radius:8px;padding:10px;">
                 <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:4px;">Home Department File</div>
@@ -566,7 +569,7 @@
 
           <!-- Manager Assignments -->
           <div style="margin-bottom:1.2rem;">
-            <div style="font-weight:700;font-size:13px;color:#1F3864;margin-bottom:6px;display:flex;align-items:center;gap:6px;">👤 Manager Assignments <span style="font-weight:400;font-size:11px;color:var(--text-muted);">Map each salon to its current manager</span></div>
+            <div style="font-weight:700;font-size:13px;color:#03654e;margin-bottom:6px;display:flex;align-items:center;gap:6px;">👤 Manager Assignments <span style="font-weight:400;font-size:11px;color:var(--text-muted);">Map each salon to its current manager</span></div>
             <div style="background:#f8f7f4;border:1px solid var(--border);border-radius:8px;padding:10px;">
               <div id="manager-table-container"><div style="color:var(--text-muted);font-size:12px;">Loading...</div></div>
               <div style="margin-top:10px;display:flex;align-items:center;gap:10px;">
@@ -578,7 +581,7 @@
 
           <!-- Penalty Waivers -->
           <div style="margin-bottom:1.2rem;">
-            <div style="font-weight:700;font-size:13px;color:#1F3864;margin-bottom:6px;display:flex;align-items:center;gap:6px;">
+            <div style="font-weight:700;font-size:13px;color:#03654e;margin-bottom:6px;display:flex;align-items:center;gap:6px;">
               🚫 Manager Bonus Penalty Waivers
               <span style="font-weight:400;font-size:11px;color:var(--text-muted);">Period-specific payroll and floor hours waivers</span>
             </div>
@@ -637,7 +640,7 @@
             </div>
           </div>
           <div style="background:#f0f4ff;border:1px solid #c0cef0;border-radius:8px;padding:12px;margin-bottom:1rem;">
-            <div style="font-weight:700;font-size:13px;color:#1F3864;margin-bottom:8px;">🖨 Bulk Print Annual Reviews</div>
+            <div style="font-weight:700;font-size:13px;color:#03654e;margin-bottom:8px;">🖨 Bulk Print Annual Reviews</div>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
               <select id="bulk-salon-select" style="font-size:13px;padding:6px 10px;border-radius:6px;border:1px solid var(--border);">
                 <option value="ALL">All Salons</option>
@@ -673,7 +676,7 @@
         <h2 style="color:var(--primary);margin-bottom:8px;">Access Restricted</h2>
         <p style="color:var(--text-muted);">Your email address (<span id="no-access-email"></span>) is not registered.<br>Contact your administrator to get access.</p>
         <div style="margin-top:1.5rem;padding:12px 20px;background:#f8f7f4;border:1px solid #ddd;border-radius:8px;font-size:12px;color:#666;max-width:400px;margin-left:auto;margin-right:auto;">
-          <strong>Server detected:</strong> <span style="font-family:monospace;color:#1F3864;">''</span><br>
+          <strong>Server detected:</strong> <span style="font-family:monospace;color:#03654e;">''</span><br>
           <span style="font-size:11px;">Make sure you are signed into your Great Clips Google account, then refresh.</span>
         </div>
       </div>
@@ -2592,7 +2595,7 @@ function buildBonusMonth(){
   html += '</tbody></table></div></div>';
 
   // Benchmarks note
-  html += `<div style="background:#D6E4F7;color:#1F3864;font-size:11px;padding:9px 12px;border-radius:6px;margin-top:1rem;line-height:1.7;">
+  html += `<div style="background:#D6E4F7;color:#03654e;font-size:11px;padding:9px 12px;border-radius:6px;margin-top:1rem;line-height:1.7;">
     <strong>Points:</strong> Prod%: &lt;4%=0pts+penalty / ≥4%=1pt / ≥6%=2pts &nbsp;|&nbsp;
     NR%: &lt;24%=0 / ≥24%=1 / ≥26%=2 &nbsp;|&nbsp; RR%: &lt;74%=0 / ≥74%=1 / ≥77%=2 &nbsp;|&nbsp;
     MBC: &gt;3=0 / ≤3=1 / ≤2=2 &nbsp;|&nbsp; HC Time: same as AM tiers<br>
@@ -3922,7 +3925,7 @@ function buildCompanyBonusAllYTD(){
     // AM group header row
     if(amId !== lastAmId){
       lastAmId = amId;
-      html += `<tr style="background:#1F3864;color:white;">
+      html += `<tr style="background:var(--primary-dark);color:white;">
         <td colspan="${3 + S_bonusPeriods.length + 3}" style="padding:6px 12px;font-weight:700;">
           <span style="background:${am.color};border-radius:50%;display:inline-block;width:10px;height:10px;margin-right:6px;"></span>
           ${am.name}
@@ -4380,7 +4383,7 @@ function exportBonusJPEG(periodKey){
     .filter(e=>e.position!=='M')
     .sort((a,b)=>{ const sA=parseInt(a.salonNum)||0, sB=parseInt(b.salonNum)||0; return sA-sB||a.empName.localeCompare(b.empName); });
 
-  const headerHTML = `<tr style="background:#1F3864;color:white;font-size:13px;">
+  const headerHTML = `<tr style="background:var(--primary-dark);color:white;font-size:13px;">
     <th style="padding:8px 10px;text-align:left;min-width:180px;">Employee</th>
     <th style="padding:8px 10px;text-align:left;min-width:160px;">Salon</th>
     <th style="padding:8px 10px;text-align:center;min-width:80px;">Avg Wkly Hrs</th>
@@ -4454,8 +4457,8 @@ function exportBonusJPEG(periodKey){
   const printDiv = document.createElement('div');
   printDiv.style.cssText = 'position:fixed;top:-9999px;left:0;background:white;padding:24px;font-family:Arial,sans-serif;min-width:1200px;';
   printDiv.innerHTML = `
-    <div style="text-align:center;margin-bottom:16px;border-bottom:3px solid #1F3864;padding-bottom:12px;">
-      <div style="font-size:22px;font-weight:700;color:#1F3864;">Longitude Inc — Stylist Bonus</div>
+    <div style="text-align:center;margin-bottom:16px;border-bottom:3px solid #03654e;padding-bottom:12px;">
+      <div style="font-size:22px;font-weight:700;color:#03654e;">Longitude Inc — Stylist Bonus</div>
       <div style="font-size:16px;color:#555;margin-top:4px;">${label} · ${stys.length} Stylists · Total Payout: ${fmtMoney(stys.reduce((s,e)=>s+(parseFloat(e.payout)||0),0))}</div>
     </div>
     <table style="border-collapse:collapse;border:1px solid #ccc;">
@@ -4659,7 +4662,7 @@ function buildCoBonusYTDStylist(){
     const showDiv = S_bonusSort.col===null || S_bonusSort.col===1;
     if(showDiv && emp.salonNum !== lastSalon){
       lastSalon = emp.salonNum;
-      html += `<tr style="background:#1F3864;color:white;"><td colspan="${3+S_bonusPeriods.length+2}" style="padding:6px 12px;font-weight:700;font-size:12px;">${emp.salonNum}</td></tr>`;
+      html += `<tr style="background:var(--primary-dark);color:white;"><td colspan="${3+S_bonusPeriods.length+2}" style="padding:6px 12px;font-weight:700;font-size:12px;">${emp.salonNum}</td></tr>`;
     }
     let ytdPay=0, ytdPot=0;
     const cells = S_bonusPeriods.map(p=>{
@@ -5005,7 +5008,7 @@ function buildProfile(globalId, name){
           ${!bonusRows.length ?
             '<div style="color:var(--text-muted);">No bonus data on record.</div>' :
           `<table style="width:100%;border-collapse:collapse;font-size:13px;">
-            <thead><tr style="background:#1F3864;color:white;">
+            <thead><tr style="background:var(--primary-dark);color:white;">
               <th style="padding:8px 12px;text-align:left;">Period</th>
               <th style="padding:8px 12px;text-align:center;">Avg Wkly Hrs</th>
               <th style="padding:8px 12px;text-align:center;">Prod%</th>
@@ -5070,7 +5073,7 @@ function buildProfile(globalId, name){
           ${!empRows.length ?
             '<div style="color:var(--text-muted);">No weekly data on record.</div>' :
           `<table style="width:100%;border-collapse:collapse;font-size:12px;">
-            <thead style="position:sticky;top:0;z-index:1;"><tr style="background:#1F3864;color:white;">
+            <thead style="position:sticky;top:0;z-index:1;"><tr style="background:var(--primary-dark);color:white;">
               <th style="padding:7px 10px;text-align:left;">Week Ending</th>
               <th style="padding:7px 10px;text-align:center;">HC Time</th>
               <th style="padding:7px 10px;text-align:center;">MBC</th>
@@ -5388,7 +5391,7 @@ function renderReview(data){
   <div style="overflow-x:auto;">
   <table style="width:100%;border-collapse:collapse;font-size:11px;">
     <thead>
-      <tr style="background:#1F3864;color:white;">
+      <tr style="background:var(--primary-dark);color:white;">
         <th style="padding:5px 8px;text-align:left;min-width:90px;">Metric</th>
         <th style="padding:5px 8px;text-align:center;background:#2E4D8A;">Goal</th>
         ${REVIEW_MONTHS.map(m=>`<th style="padding:5px 6px;text-align:center;">${m}</th>`).join('')}
@@ -5400,14 +5403,14 @@ function renderReview(data){
         const annVal = data.annualAvg[m.k];
         return `<tr>
           <td style="padding:5px 8px;font-weight:700;background:#f5f5f5;border:1px solid #ddd;">${m.lbl}</td>
-          <td style="padding:5px 8px;text-align:center;background:#E8EAF0;font-weight:700;color:#1F3864;border:1px solid #ddd;">${m.goal}</td>
+          <td style="padding:5px 8px;text-align:center;background:#E8EAF0;font-weight:700;color:#03654e;border:1px solid #ddd;">${m.goal}</td>
           ${REVIEW_MONTHS.map(mo=>{
             const cell = data.grid[mo];
             const val  = cell ? cell[m.k] : null;
             const style = val!==null ? revCellColor(m.k,val) : 'background:#f9f9f9;color:#ccc;';
             return `<td style="padding:5px 6px;text-align:center;border:1px solid #ddd;${style}">${val!==null?m.fmt(val):'—'}</td>`;
           }).join('')}
-          <td style="padding:5px 8px;text-align:center;font-weight:700;border:1px solid #ddd;${annVal!==null?revCellColor(m.k,annVal):"background:#D9E1F2;color:#1F3864;"}">${annVal!==null?m.fmt(annVal):'—'}</td>
+          <td style="padding:5px 8px;text-align:center;font-weight:700;border:1px solid #ddd;${annVal!==null?revCellColor(m.k,annVal):"background:#D9E1F2;color:#03654e;"}">${annVal!==null?m.fmt(annVal):'—'}</td>
         </tr>`;
       }).join('')}
     </tbody>
@@ -5419,7 +5422,7 @@ function renderReview(data){
 
     <!-- Quarterly + Score -->
     <div>
-      <div style="background:#1F3864;color:white;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.06em;padding:5px 8px;margin-bottom:4px;">12-Month Score</div>
+      <div style="background:var(--primary-dark);color:white;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.06em;padding:5px 8px;margin-bottom:4px;">12-Month Score</div>
       <table style="width:100%;border-collapse:collapse;font-size:11px;">
         <thead>
           <tr style="background:#2E4D8A;color:white;">
@@ -5441,12 +5444,12 @@ function renderReview(data){
             return `<tr>
               <td style="padding:5px 8px;font-weight:700;background:#f5f5f5;border:1px solid #ddd;">${m.lbl}</td>
               ${qVals.map(v=>`<td style="padding:5px 6px;text-align:center;border:1px solid #ddd;${v!==null?revCellColor(m.k,v):''}">${v!==null?m.fmt(v):'—'}</td>`).join('')}
-              <td style="padding:5px 6px;text-align:center;font-weight:700;border:1px solid #ddd;${annVal!==null?revCellColor(m.k,annVal):"background:#D9E1F2;color:#1F3864;"}">${annVal!==null?m.fmt(annVal):'—'}</td>
+              <td style="padding:5px 6px;text-align:center;font-weight:700;border:1px solid #ddd;${annVal!==null?revCellColor(m.k,annVal):"background:#D9E1F2;color:#03654e;"}">${annVal!==null?m.fmt(annVal):'—'}</td>
               <td style="padding:5px 6px;text-align:center;font-weight:700;border:1px solid #ddd;background:${sc>=3?'#C6EFCE':sc===2?'#FFEB9C':'#FFC7CE'};color:${sc>=3?'#375623':sc===2?'#7D6608':'#9C0006'};">${sc}</td>
               <td style="padding:5px 6px;text-align:center;border:1px solid #ddd;color:#888;">4</td>
             </tr>`;
           }).join('')}
-          <tr style="background:#1F3864;color:white;font-weight:700;">
+          <tr style="background:var(--primary-dark);color:white;font-weight:700;">
             <td style="padding:6px 8px;">Total</td>
             <td colspan="5"></td>
             <td style="padding:6px;text-align:center;font-size:14px;">${data.totalPts}</td>
@@ -5468,7 +5471,7 @@ function renderReview(data){
 
     <!-- Raise calculation -->
     <div>
-      <div style="background:#1F3864;color:white;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.06em;padding:5px 8px;margin-bottom:4px;">Raise Calculation</div>
+      <div style="background:var(--primary-dark);color:white;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.06em;padding:5px 8px;margin-bottom:4px;">Raise Calculation</div>
 
       <!-- Raise table -->
       <table style="width:100%;border-collapse:collapse;font-size:10px;margin-bottom:8px;">
@@ -5495,12 +5498,12 @@ function renderReview(data){
         </div>
         <div style="border:1px solid #ddd;padding:10px;text-align:center;border-radius:4px;">
           <div style="font-size:9px;text-transform:uppercase;color:#888;letter-spacing:.04em;">Raise Earned</div>
-          <div style="font-size:22px;font-weight:700;color:#1F3864;">$${data.raiseEarned.toFixed(2)}</div>
+          <div style="font-size:22px;font-weight:700;color:#03654e;">$${data.raiseEarned.toFixed(2)}</div>
           <div style="font-size:9px;color:#999;">Per hour (full year)</div>
         </div>
         <div style="border:1px solid #ddd;padding:10px;text-align:center;border-radius:4px;">
           <div style="font-size:9px;text-transform:uppercase;color:#888;letter-spacing:.04em;">Months Worked</div>
-          <div style="font-size:22px;font-weight:700;color:#1F3864;">${data.monthsWorked}/12</div>
+          <div style="font-size:22px;font-weight:700;color:#03654e;">${data.monthsWorked}/12</div>
           ${data.monthsWorked<12?`<div style="font-size:9px;color:#999;">Prorated: ×${(data.monthsWorked/12).toFixed(2)}</div>`:'<div style="font-size:9px;color:#999;">Full year</div>'}
         </div>
         <div style="border:1px solid #ddd;padding:10px;text-align:center;border-radius:4px;background:${(!discIneligible&&data.totalPts>=REVIEW_MIN_PTS)?'#f0f7f0':'#fff5f5'};">
@@ -5646,7 +5649,7 @@ function openBulkPrintWindow(data){
       <!-- Monthly performance -->
       <table style="width:100%;border-collapse:collapse;font-size:10px;margin-bottom:8px;">
         <thead>
-          <tr style="background:#1F3864;color:white;">
+          <tr style="background:var(--primary-dark);color:white;">
             <th style="padding:4px 6px;text-align:left;width:70px;">Metric</th>
             <th style="padding:4px 6px;text-align:center;background:#2E4D8A;width:40px;">Goal</th>
             ${MONTHS.map(m=>`<th style="padding:4px 4px;text-align:center;">${m}</th>`).join('')}
@@ -5658,12 +5661,12 @@ function openBulkPrintWindow(data){
             const av = r.annualAvg[m.k];
             return `<tr>
               <td style="padding:4px 6px;font-weight:700;background:#f5f5f5;border:1px solid #ddd;">${m.lbl}</td>
-              <td style="padding:4px 6px;text-align:center;background:#E8EAF0;font-weight:700;color:#1F3864;border:1px solid #ddd;">${m.goal}</td>
+              <td style="padding:4px 6px;text-align:center;background:#E8EAF0;font-weight:700;color:#03654e;border:1px solid #ddd;">${m.goal}</td>
               ${MONTHS.map(mo=>{
                 const cell=r.grid[mo]; const val=cell?cell[m.k]:null;
                 return `<td style="padding:4px 4px;text-align:center;border:1px solid #ddd;${val!==null?cellColor(m.k,val):'background:#f9f9f9;'}">${val!==null?m.fmt(val):'—'}</td>`;
               }).join('')}
-              <td style="padding:4px 6px;text-align:center;font-weight:700;border:1px solid #ddd;background:#D9E1F2;color:#1F3864;">${av!==null?m.fmt(av):'—'}</td>
+              <td style="padding:4px 6px;text-align:center;font-weight:700;border:1px solid #ddd;background:#D9E1F2;color:#03654e;">${av!==null?m.fmt(av):'—'}</td>
             </tr>`;
           }).join('')}
         </tbody>
@@ -5687,12 +5690,12 @@ function openBulkPrintWindow(data){
             return `<tr>
               <td style="padding:4px 6px;font-weight:700;background:#f5f5f5;border:1px solid #ddd;">${m.lbl}</td>
               ${qv.map(v=>`<td style="padding:4px 6px;text-align:center;border:1px solid #ddd;${v!==null?cellColor(m.k,v):''}">${v!==null?m.fmt(v):'—'}</td>`).join('')}
-              <td style="padding:4px 6px;text-align:center;font-weight:700;border:1px solid #ddd;background:#D9E1F2;color:#1F3864;">${av!==null?m.fmt(av):'—'}</td>
+              <td style="padding:4px 6px;text-align:center;font-weight:700;border:1px solid #ddd;background:#D9E1F2;color:#03654e;">${av!==null?m.fmt(av):'—'}</td>
               <td style="padding:4px 6px;text-align:center;font-weight:700;border:1px solid #ddd;background:${sc>=3?'#C6EFCE':sc===2?'#FFEB9C':'#FFC7CE'};color:${sc>=3?'#375623':sc===2?'#7D6608':'#9C0006'};">${sc}</td>
               <td style="padding:4px 6px;text-align:center;border:1px solid #ddd;color:#888;">4</td>
             </tr>`;
           }).join('')}
-          <tr style="background:#1F3864;color:white;font-weight:700;">
+          <tr style="background:var(--primary-dark);color:white;font-weight:700;">
             <td style="padding:5px 6px;">Total</td><td colspan="5"></td>
             <td style="padding:5px 6px;text-align:center;font-size:13px;">${r.totalPts}</td>
             <td style="padding:5px 6px;text-align:center;">20</td>
@@ -5721,12 +5724,12 @@ function openBulkPrintWindow(data){
           </td>
           <td style="padding:8px;text-align:center;border:1px solid #ddd;width:25%;">
             <div style="font-size:9px;text-transform:uppercase;color:#888;">Raise Earned</div>
-            <div style="font-size:20px;font-weight:700;color:#1F3864;">$${r.raiseEarned.toFixed(2)}</div>
+            <div style="font-size:20px;font-weight:700;color:#03654e;">$${r.raiseEarned.toFixed(2)}</div>
             <div style="font-size:9px;color:#999;">Per hour (full year)</div>
           </td>
           <td style="padding:8px;text-align:center;border:1px solid #ddd;width:25%;">
             <div style="font-size:9px;text-transform:uppercase;color:#888;">Months Worked</div>
-            <div style="font-size:20px;font-weight:700;color:#1F3864;">${r.monthsWorked}/12</div>
+            <div style="font-size:20px;font-weight:700;color:#03654e;">${r.monthsWorked}/12</div>
             ${r.monthsWorked<12?`<div style="font-size:9px;color:#999;">Prorated ×${(r.monthsWorked/12).toFixed(2)}</div>`:'<div style="font-size:9px;color:#999;">Full year</div>'}
           </td>
           <td style="padding:8px;text-align:center;border:1px solid #ddd;width:25%;background:${!discIneligible&&r.totalPts>=11?'#f0f7f0':'#fff5f5'};">
@@ -5748,7 +5751,7 @@ function openBulkPrintWindow(data){
     <title>Annual Reviews — ${data.year}</title>
     <style>
       body { font-family: Arial, sans-serif; margin: 0; padding: 0; font-size: 11px; }
-      .review-page { padding: 16px; page-break-after: always; border-bottom: 3px solid #1F3864; }
+      .review-page { padding: 16px; page-break-after: always; border-bottom: 3px solid #03654e; }
       .review-page:last-child { page-break-after: avoid; border-bottom: none; }
       @media print {
         .review-page { padding: 10px; page-break-after: always; }
@@ -5759,12 +5762,12 @@ function openBulkPrintWindow(data){
       th, td { border: 1px solid #ddd; }
     </style>
   </head><body>
-    <div class="no-print" style="background:#1F3864;color:white;padding:10px 20px;display:flex;align-items:center;justify-content:space-between;">
+    <div class="no-print" style="background:var(--primary-dark);color:white;padding:10px 20px;display:flex;align-items:center;justify-content:space-between;">
       <div>
         <strong>Annual Reviews — ${data.year}</strong>
         <span style="margin-left:16px;opacity:.7;">${data.reviews.length} stylists</span>
       </div>
-      <button onclick="window.print()" style="background:white;color:#1F3864;border:none;padding:8px 20px;font-weight:700;border-radius:4px;cursor:pointer;font-size:13px;">🖨 Print All</button>
+      <button onclick="window.print()" style="background:white;color:#03654e;border:none;padding:8px 20px;font-weight:700;border-radius:4px;cursor:pointer;font-size:13px;">🖨 Print All</button>
     </div>
     ${allHTML}
   </body></html>`);
