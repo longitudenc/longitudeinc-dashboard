@@ -102,10 +102,10 @@
   .data-table tr.avg-row td .dn{color:#f4a0a0;}
 
   /* Tier colors */
-  .c4{background:var(--exc-bg)!important;color:var(--exc-text);font-weight:600;}
-  .c3{background:var(--grw-bg)!important;color:var(--grw-text);font-weight:600;}
-  .c2{background:var(--min-bg)!important;color:var(--min-text);font-weight:600;}
-  .c1{background:var(--wrn-bg)!important;color:var(--wrn-text);font-weight:600;}
+  .c4{background:#C6EFCE!important;color:#006100;font-weight:600;}
+  .c3{background:#FFEB9C!important;color:#9C6500;font-weight:600;}
+  .c2{background:#FCE4D6!important;color:#974706;font-weight:600;}
+  .c1{background:#FFC7CE!important;color:#9C0006;font-weight:600;}
   .up{color:#2d7a4f;font-weight:600;}.dn{color:#b83232;font-weight:600;}.fl{color:var(--text-muted);}
 
   /* Scorecard */
@@ -872,6 +872,7 @@ const p=v=>parseFloat((v||'0').toString().replace('%','').replace(/\*+/g,'0'))||
 const n=v=>parseFloat(v||0)||0;
 const avg=arr=>arr.length?arr.reduce((a,b)=>a+b,0)/arr.length:0;
 function tc(v){return v>0?'up':v<0?'dn':'fl';}
+function amFirst(am){ return am && am.name ? String(am.name).split(' ')[0] : '?'; }
 function sgn(v,dec=1){return(v>0?'+':'')+v.toFixed(dec);}
 
 // ── Data accessors ────────────────────────────────────────────
@@ -1190,15 +1191,16 @@ function ytdEmpsByAM(amId){
 function calcYTDAvgs(amId){
   // Average each salon's metrics across all weeks — doesn't depend on selected week
   if(!S.weekHistory.length) return null;
+  const yWeeks = ytdWeeks();
   const salonNums = amId==='kayla'
-    ? [...new Set(S.weekHistory.flatMap(w=>w.salons.map(r=>r.salonNum.trim())).filter(s=>!NAMED.has(s)))]
+    ? [...new Set(yWeeks.flatMap(w=>(w.salons||[]).map(r=>String(r.salonNum||'').trim())).filter(s=>!NAMED.has(s)))]
     : (AMS[amId]?.salons||[]);
 
   const salonAvgs = salonNums.map(snum=>{
-    const weeklyRows = S.weekHistory.map(w=>{
+    const weeklyRows = yWeeks.map(w=>{
       return (amId==='kayla'
-        ? w.salons.filter(r=>!NAMED.has(r.salonNum.trim()))
-        : w.salons.filter(r=>r.salonNum.trim()===snum)
+        ? (w.salons||[]).filter(r=>!NAMED.has(String(r.salonNum||'').trim()))
+        : (w.salons||[]).filter(r=>String(r.salonNum||'').trim()===snum)
       );
     }).flat();
     return calcAvgs(weeklyRows);
@@ -1215,7 +1217,7 @@ function calcYTDEmpAvgs(amId){
   // Try to pull the AM's own personal numbers by Global ID first
   const am = AMS[amId];
   if(am && am.globalId){
-    const amPersonalRows = S.weekHistory.flatMap(w=>
+    const amPersonalRows = ytdWeeks().flatMap(w=>
       (w.emps||[]).filter(e=>e.globalId && e.globalId.trim()===am.globalId)
     );
     if(amPersonalRows.length > 0){
@@ -1328,7 +1330,7 @@ function buildSalonRow(r,cols,showAM=false){
   const amId=amOf(r.salonNum), am=AMS[amId]||{color:'#999',name:'Unknown'};
   const fromTab = showAM ? 'salon' : 'salon';
   const nameCell = `<td class="${cols[0].cl(r)}">${salonLink(r.salonNum, cols[0].fv(r), fromTab)}</td>`;
-  const amCell=showAM?`<td><span class="am-chip"><span class="chip-dot" style="background:${am.color}"></span>${am.name}</span></td>`:'';
+  const amCell=showAM?`<td><span class="am-chip"><span class="chip-dot" style="background:${am.color}"></span>${amFirst(am)}</span></td>`:'';
   if(showAM) return `<tr>${nameCell}${amCell}${cols.slice(1).map(c=>`<td class="${c.cl(r)}">${c.fv(r)}</td>`).join('')}</tr>`;
   return `<tr>${nameCell}${cols.slice(1).map(c=>`<td class="${c.cl(r)}">${c.fv(r)}</td>`).join('')}</tr>`;
 }
@@ -1347,7 +1349,7 @@ function renderSalonTab(){
   const isYTD = S_globalMode === 'ytd';
   // In YTD mode use all weeks' data; in weekly mode use current week only
   const rows = isYTD
-    ? S.weekHistory.flatMap(w=>salonsByAM(S.currentAM, w))
+    ? ytdWeeks().flatMap(w=>salonsByAM(S.currentAM, w))
     : salonsByAM(S.currentAM);
   const thead=document.getElementById('salon-thead'),tbody=document.getElementById('salon-tbody'),sumEl=document.getElementById('salon-summary');
   if(!S.weekHistory.length){ sumEl.innerHTML=''; thead.innerHTML=''; tbody.innerHTML='<tr><td colspan="15" class="no-data"><div class="no-data-icon">📊</div>No data yet — waiting for first upload</td></tr>'; return; }
@@ -1395,10 +1397,10 @@ function renderSalonTab(){
   if(isYTD){
     // Aggregate each salon's YTD average as a single row
     const amSalons = S.currentAM==='kayla'
-      ? [...new Set(S.weekHistory.flatMap(w=>w.salons.map(r=>r.salonNum.trim())).filter(s=>!NAMED.has(s)))]
+      ? [...new Set(ytdWeeks().flatMap(w=>(w.salons||[]).map(r=>String(r.salonNum||'').trim())).filter(s=>!NAMED.has(s)))]
       : (AMS[S.currentAM]?.salons||[]);
     const ytdSalonRows = amSalons.map(snum=>{
-      const allRows = S.weekHistory.flatMap(w=>w.salons.filter(r=>r.salonNum.trim()===snum));
+      const allRows = ytdWeeks().flatMap(w=>(w.salons||[]).filter(r=>String(r.salonNum||'').trim()===snum));
       const avg = calcAvgs(allRows);
       if(!avg) return null;
       // Build a synthetic row with YTD averages
@@ -1644,6 +1646,16 @@ let S_trendChart = null;
 function setTrendWindow(w){ S_trendWindow = w; renderTrends(); }
 // First Friday of January of the fiscal year a given week-ending (YYYY-MM-DD) falls in.
 // Fiscal wk1 ends the first Friday of January; YTD = weeks on/after that anchor.
+// Weeks in the fiscal year of the currently selected week, up to and
+// including that week. This is what every "YTD" average should run over —
+// selecting a 2025 week yields 2025 fiscal YTD, not all loaded history.
+function ytdWeeks(){
+  const cur = S.currentWeek || (S.weekHistory.length ? S.weekHistory[S.weekHistory.length-1].weekEnding : '');
+  if(!cur) return S.weekHistory;
+  const fy = fiscalYearStartIso(cur);
+  return S.weekHistory.filter(w => w.weekEnding >= fy && w.weekEnding <= cur);
+}
+
 function fiscalYearStartIso(weekEndIso){
   const firstFri = yr => {
     const f = new Date(yr, 0, 1);
@@ -2042,11 +2054,11 @@ function renderCompany(){
     const isYTD = S_globalMode === 'ytd';
     const snap=getSnap();
     const all = isYTD
-      ? S.weekHistory.flatMap(w=>w.salons||[])
+      ? ytdWeeks().flatMap(w=>w.salons||[])
       : (snap?snap.salons:[]);
     // For AM table avg row — use same mode as toggle
     const allForAMAvg = S_coAMMode==='ytd'
-      ? S.weekHistory.flatMap(w=>w.salons||[])
+      ? ytdWeeks().flatMap(w=>w.salons||[])
       : (snap?snap.salons:[]);
     const allAForAM = calcAvgs(allForAMAvg);
     document.getElementById('company-sub').textContent = isYTD
@@ -2076,7 +2088,7 @@ function renderCompany(){
     document.getElementById('co-score-tbody').innerHTML=scoreData.map(d=>{
       const tier=scoreTierLabel(d.total); const bp=(d.total/30*100).toFixed(0);
       return `<tr>
-        <td><span class="am-chip"><span class="chip-dot" style="background:${d.am.color}"></span><strong>${d.am.name}</strong></span></td>
+        <td><span class="am-chip"><span class="chip-dot" style="background:${d.am.color}"></span><strong>${amFirst(d.am)}</strong></span></td>
         <td><strong style="font-size:16px;">${d.total}</strong><span style="font-size:11px;color:var(--text-muted);">/30</span></td>
         <td><div class="score-bar-wrap"><div class="score-bar-fill" style="width:${bp}%;background:${tierColors[tier.cls]};"></div></div></td>
         <td><span style="padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;background:${tierBgs[tier.cls]};color:${tierTxts[tier.cls]};">${tier.label}</span></td>
@@ -2095,7 +2107,7 @@ function renderCompany(){
     }).filter(Boolean);
 
     const CO_COLS=[
-      {k:'am',lbl:'AM',sv:r=>r.am.name,fv:r=>`<span class="am-chip"><span class="chip-dot" style="background:${r.am.color}"></span><strong>${r.am.name}</strong></span>`,cl:()=>''},
+      {k:'am',lbl:'AM',sv:r=>r.am.name,fv:r=>`<span class="am-chip"><span class="chip-dot" style="background:${r.am.color}"></span><strong>${amFirst(r.am)}</strong></span>`,cl:()=>''},
       {k:'n', lbl:'#', sv:r=>r.cnt, fv:r=>r.cnt, cl:()=>''},
       {k:'cc', lbl:'Avg CC',    sv:r=>r.cc,  fv:r=>Math.round(r.cc),           cl:r=>tierCC(Math.round(r.cc))},
       {k:'lyDiff', lbl:'CC +/- LY', sv:r=>(r.lyDiff===null||r.lyDiff===undefined)?-9999:r.lyDiff, fv:r=>(r.lyDiff===null||r.lyDiff===undefined)?'<span style="color:#aaa">—</span>':`<span class="${tc(r.lyDiff)}">${sgn(r.lyDiff,0)}</span>`, cl:()=>''},
@@ -2118,7 +2130,7 @@ function renderCompany(){
     // All salons detail
     const allCols=[
       {k:'salon',lbl:'Salon',sv:r=>r.salonName||r.salonNum,fv:r=>`<strong>${r.salonName||r.salonNum}</strong>`,cl:()=>''},
-      {k:'am',lbl:'AM',sv:r=>amOf(r.salonNum),fv:r=>{ const a=AMS[amOf(r.salonNum)]||{color:'#999',name:'?'}; return `<span class="am-chip"><span class="chip-dot" style="background:${a.color}"></span>${a.name}</span>`; },cl:()=>''}, 
+      {k:'am',lbl:'AM',sv:r=>amOf(r.salonNum),fv:r=>{ const a=AMS[amOf(r.salonNum)]||{color:'#999',name:'?'}; return `<span class="am-chip"><span class="chip-dot" style="background:${a.color}"></span>${amFirst(a)}</span>`; },cl:()=>''}, 
       ...SALON_COLS.slice(1)
     ];
     const coAllSort = S.sortState['co-all'];
@@ -2126,7 +2138,7 @@ function renderCompany(){
 
     document.getElementById('co-all-thead').innerHTML=buildHead(allCols,'co-all','sortCoAll');
     // Company YTD averages across all weeks
-    const allWeeksRows = S.weekHistory.flatMap(w=>w.salons||[]);
+    const allWeeksRows = ytdWeeks().flatMap(w=>w.salons||[]);
     const coYtdA = calcAvgs(allWeeksRows);
     function coYtdRow(a){
       if(!a) return '';
@@ -2154,9 +2166,9 @@ function renderCompany(){
       </tr>`;
     }
     if(isYTD){
-      const allSalonNums = [...new Set(S.weekHistory.flatMap(w=>w.salons.map(r=>r.salonNum.trim())))];
+      const allSalonNums = [...new Set(ytdWeeks().flatMap(w=>(w.salons||[]).map(r=>String(r.salonNum||'').trim())))];
       let ytdSalonRows = allSalonNums.map(snum=>{
-        const allRows = S.weekHistory.flatMap(w=>w.salons.filter(r=>r.salonNum.trim()===snum));
+        const allRows = ytdWeeks().flatMap(w=>(w.salons||[]).filter(r=>String(r.salonNum||'').trim()===snum));
         const avg = calcAvgs(allRows);
         if(!avg) return null;
         return {salonNum:snum, salonName:SALON_NAMES[snum]||snum,
@@ -3765,7 +3777,7 @@ function buildCompanyBonusMonth(){
     const pp = pot>0?Math.round(pay/pot*100)+'%':'—';
     const cls = pay>0?(pay/pot<0.5?'bv-yellow':'bv-green'):'';
     html += `<tr>
-      <td><span class="am-chip"><span class="chip-dot" style="background:${am.color}"></span>${am.name}</span></td>
+      <td><span class="am-chip"><span class="chip-dot" style="background:${am.color}"></span>${amFirst(am)}</span></td>
       <td>${amEmps.length}</td><td>${earnedN}</td>
       <td class="${cls}">${fmtMoney(pay)}</td>
       <td>${fmtMoney(pot)}</td>
@@ -3813,7 +3825,7 @@ function buildCompanyBonusYTD(){
     grandPay+=ytdPay; grandPot+=ytdPot;
     const ytdCls=ytdPay>0?'bv-green':'';
     html+=`<tr>
-      <td><span class="am-chip"><span class="chip-dot" style="background:${am.color}"></span>${am.name}</span></td>
+      <td><span class="am-chip"><span class="chip-dot" style="background:${am.color}"></span>${amFirst(am)}</span></td>
       ${cells}
       <td class="${ytdCls}" style="text-align:center;font-weight:700;">${fmtMoney(ytdPay)}</td>
       <td style="text-align:center;color:var(--text-muted);">${fmtMoney(ytdPot)}</td>
@@ -3868,7 +3880,7 @@ function buildCompanyBonusAll(){
     html+=`<tr>
       <td><strong>${e.empName}</strong></td>
       <td>${salonDisplay(e.salonNum)}</td>
-      <td><span class="am-chip"><span class="chip-dot" style="background:${am.color}"></span>${am.name}</span></td>
+      <td><span class="am-chip"><span class="chip-dot" style="background:${am.color}"></span>${amFirst(am)}</span></td>
       <td>${fmtN1(e.avgWkHrs)}</td>
       <td class="${parseFloat(e.product)<BONUS_CFG.PROD_1?'bv-orange':parseFloat(e.product)<BONUS_CFG.PROD_2?'bv-yellow':'bv-green'}">${fmtPct(e.product)}</td>
       <td class="${parseFloat(e.nr)>=BONUS_CFG.NR_2?'bv-green':parseFloat(e.nr)>=BONUS_CFG.NR_1?'bv-yellow':'bv-red'}">${fmtPct(e.nr)}</td>
@@ -4200,7 +4212,7 @@ function buildCoMgrPeriod(){
     html += `<tr style="cursor:pointer;" onclick="coMgrDrillInto('${snum}')" title="Click to drill down">
       <td style="font-weight:600;color:var(--primary);text-decoration:underline dotted;">${salonDisplay(snum)}</td>
       <td style="font-size:12px;">${mgrName}${isAMFallback?'':''}</td>
-      <td><span class="am-chip"><span class="chip-dot" style="background:${am.color}"></span>${am.name}</span></td>
+      <td><span class="am-chip"><span class="chip-dot" style="background:${am.color}"></span>${amFirst(am)}</span></td>
       <td style="text-align:center;">${Math.round(result.cc)}</td>
       <td style="text-align:center;${result.hoursUnknown?'color:#c8a800;':result.floorHrsOk?'':'color:#9C0006;'}" title="${result.hoursUnknown?'Load Payroll Consolidated for hours':'Floor+Vac+Holiday'}">${result.floorHrs!==null?result.floorHrs.toFixed(1):'—'}</td>
       <td style="text-align:center;${result.payrollMissed?'color:#9C0006;font-weight:700;':''}">${result.payroll.toFixed(1)}%</td>
@@ -4280,7 +4292,7 @@ function buildCoMgrYTD(){
     html += `<tr>
       <td style="font-weight:600;color:var(--primary);cursor:pointer;text-decoration:underline dotted;" onclick="coMgrDrillInto('${snum}')">${salonDisplay(snum)}</td>
       <td style="font-size:12px;">${mgrName}</td>
-      <td><span class="am-chip"><span class="chip-dot" style="background:${am.color}"></span>${am.name}</span></td>
+      <td><span class="am-chip"><span class="chip-dot" style="background:${am.color}"></span>${amFirst(am)}</span></td>
       ${cells}
       <td class="${ytdCls}" style="text-align:center;font-weight:700;">${fmtMoney(ytdPay)}</td>
       <td style="text-align:center;color:var(--text-muted);">${fmtMoney(ytdPot)}</td>
@@ -4803,7 +4815,7 @@ function buildCoBonusYTDSalon(){
     const ytdCls=ytdPay>0?'bv-green':'';
     html+=`<tr>
       <td><strong>${sn}</strong></td>
-      <td><span class="am-chip"><span class="chip-dot" style="background:${am.color}"></span>${am.name}</span></td>
+      <td><span class="am-chip"><span class="chip-dot" style="background:${am.color}"></span>${amFirst(am)}</span></td>
       ${cells}
       <td class="${ytdCls}" style="text-align:center;font-weight:700;">${fmtMoney(ytdPay)}</td>
       <td style="text-align:center;color:var(--text-muted);">${fmtMoney(ytdPot)}</td>
