@@ -101,6 +101,26 @@ function avgPresent(rows: Record<string, any>[], key: string): { avg: number; co
   return { avg: vals.reduce((a, b) => a + b, 0) / vals.length, count: vals.length }
 }
 
+/**
+ * Volume-weighted employee product %.
+ * SD3's monthly product % = Σ productSales / Σ adjustedServiceSales, NOT a flat
+ * average of weekly percentages. We don't scrape raw $ per employee, but each
+ * week's adjusted service sales ≈ productivity × floorHours, so we weight the
+ * weekly productPct by that. Falls back to a simple average if weights are
+ * unavailable. Returns { avg, count } to match avgPresent's shape.
+ */
+function weightedProductPct(rows: Record<string, any>[]): { avg: number; count: number } {
+  let num_ = 0, den = 0, count = 0
+  for (const r of rows) {
+    if (!present(r['productPct'])) continue
+    count++
+    const w = n(r['productivity']) * n(r['floorHours']) // ≈ adjusted service sales
+    if (w > 0) { num_ += n(r['productPct']) * w; den += w }
+  }
+  if (den > 0) return { avg: num_ / den, count }
+  return avgPresent(rows, 'productPct') // no usable weights → simple average
+}
+
 function pctSum(numRows: Record<string, any>[], numKey: string, denKey: string): number {
   const d = sum(numRows, denKey)
   if (!d) return 0
@@ -208,7 +228,7 @@ export async function runBonusPeriodScrape(
     const bonusRows: Record<string, any>[] = []
     for (const [gid, rows] of Object.entries(byEmp)) {
       const last = rows[rows.length - 1]
-      const prod = avgPresent(rows, 'productPct')
+      const prod = weightedProductPct(rows)
       const nr = avgPresent(rows, 'nr')
       const rr = avgPresent(rows, 'rr')
       bonusRows.push({

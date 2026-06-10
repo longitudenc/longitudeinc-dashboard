@@ -935,20 +935,20 @@ function onDataLoaded(data){
     S.homeEffectiveDate = data.homeEffectiveDate || '';
     S.homeRetroUpdated = data.homeRetroUpdated || 0;
     S.homeDataMap = data.homeDataMap || {};
-    // Load bonus periods
-    S_bonusPeriods = data.bonusPeriods || [];
+    // Load bonus periods (sorted chronologically — re-run periods can arrive out of order)
+    S_bonusPeriods = (data.bonusPeriods || []).slice().sort((a,b)=>periodSortKey(a.periodKey)-periodSortKey(b.periodKey));
     if(S_bonusPeriods.length > 0 && !S_bonusPeriod){
       S_bonusPeriod = S_bonusPeriods[S_bonusPeriods.length-1].periodKey;
     }
     // Load salon summary periods
-    S_salonSummaryPeriods = data.salonSummaryPeriods || [];
+    S_salonSummaryPeriods = (data.salonSummaryPeriods || []).slice().sort((a,b)=>periodSortKey(a.periodKey)-periodSortKey(b.periodKey));
     // Load manager table
     S_managerTable = {};
     (data.managerTable || []).forEach(m => { if(m.salonNum) S_managerTable[m.salonNum] = {name: m.managerName||'', globalId: m.globalId||''}; });
     // Load penalty waivers
     S_penaltyWaivers = data.penaltyWaivers || [];
     // Load payroll consolidated periods
-    S_payrollConsolidated = data.payrollConsolidatedPeriods || [];
+    S_payrollConsolidated = (data.payrollConsolidatedPeriods || []).slice().sort((a,b)=>periodSortKey(a.periodKey)-periodSortKey(b.periodKey));
 
     console.log('Weeks loaded:', S.weekHistory.length);
 
@@ -2263,6 +2263,12 @@ let S_salonSummaryPeriods = []; // salon summary data by period
 let S_managerTable = {};        // salonNum -> {name, globalId}
 let S_penaltyWaivers = [];      // [{salonNum, period, payroll, hours, notes}]
 let S_payrollConsolidated = []; // payroll consolidated periods with employee hours
+// Convert a "Mon YY" period key to a sortable number (year*12 + month index).
+function periodSortKey(pk){
+  const M = {Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11};
+  const p = String(pk||'').trim().split(/\s+/);
+  return (2000 + (parseInt(p[1],10)||0)) * 12 + (M[p[0]] ?? 0);
+}
 function sortBonus(col){
   S_bonusSort = { col: col, asc: S_bonusSort.col===col ? !S_bonusSort.asc : true };
   const companyActive = document.getElementById('page-company')?.classList.contains('active');
