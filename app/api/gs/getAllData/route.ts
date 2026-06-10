@@ -172,6 +172,15 @@ function formatAllData(raw: any, scrapedWeeks: any[], rosterRows: any[]) {
     globalId: row.globalId || '',
   })).filter((r: any) => r.salonNum)
 
+  // ── AM assignments — effective-dated salon→AM history ──────
+  const amAssignments = (raw.amAssignmentRows || []).map((row: any) => ({
+    salonNum: String(row.salonNum || '').trim(),
+    amKey: String(row.amKey || '').trim().toLowerCase(),
+    startPeriod: String(row.startPeriod || '').trim(),
+    endPeriod: String(row.endPeriod || '').trim(),
+    notes: String(row.notes || '').trim(),
+  })).filter((r: any) => r.salonNum)
+
   // ── Home employees ─────────────────────────────────────────
   const homeEmployees = raw.homeRows.map((row: any) => ({
     name: row.payrollName || '', globalId: row.globalId || '', salon: row.homeSalon || ''
@@ -200,6 +209,7 @@ function formatAllData(raw: any, scrapedWeeks: any[], rosterRows: any[]) {
     payrollConsolidatedPeriods: Object.values(pcMap),
     managerTable,
     penaltyWaivers: raw.waiverRows,
+    amAssignments,
     homeEmployees,
     homeDataMap,
     homeCount: raw.homeRows.length,

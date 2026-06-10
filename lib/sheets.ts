@@ -95,6 +95,16 @@ export async function getManagerTable() {
 export async function getPenaltyWaivers() {
   return rowsToObjects(await readSheet('PenaltyWaivers'))
 }
+export async function getAMAssignments() {
+  // Effective-dated salon→AM assignments. Tab may not exist yet — treat
+  // missing/unreadable as "no overrides" so the dashboard falls back to the
+  // current SalonRoster mapping.
+  try {
+    return rowsToObjects(await readSheet('AMAssignments'))
+  } catch {
+    return []
+  }
+}
 export async function getHomeData() {
   return rowsToObjects(await readSheet('HomeData'))
 }
@@ -114,6 +124,7 @@ export async function getAllDashboardData() {
     payrollRows,
     managerRows,
     waiverRows,
+    amAssignmentRows,
     homeRows,
     trackerRows,
   ] = await Promise.all([
@@ -124,6 +135,7 @@ export async function getAllDashboardData() {
     getPayrollConsolidated(),
     getManagerTable(),
     getPenaltyWaivers(),
+    getAMAssignments(),
     getHomeData(),
     getTrackerData(),
   ])
@@ -136,6 +148,7 @@ export async function getAllDashboardData() {
     payrollRows,
     managerRows,
     waiverRows,
+    amAssignmentRows,
     homeRows,
     trackerRows,
   }

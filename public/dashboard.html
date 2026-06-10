@@ -36,8 +36,12 @@
   .week-dropdown-label{padding:7px 16px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);background:#f9f8f6;}
 
   /* Layout */
-  .main-layout{display:grid;grid-template-columns:220px 1fr;height:calc(100vh - 56px);overflow:hidden;}
-  .sidebar{background:#f2f1ee;border-right:1px solid var(--border);padding:1rem 0;position:sticky;top:0;height:100vh;overflow-y:auto;flex-shrink:0;}
+  .main-layout{display:grid;grid-template-columns:220px 1fr;height:calc(100vh - 56px);overflow:hidden;transition:grid-template-columns .2s ease;}
+  .main-layout.sidebar-collapsed{grid-template-columns:0px 1fr;}
+  .main-layout.sidebar-collapsed .sidebar{padding:1rem 0 0;border-right:none;}
+  .sidebar{background:#f2f1ee;border-right:1px solid var(--border);padding:1rem 0;position:sticky;top:0;height:100vh;overflow-y:auto;overflow-x:hidden;flex-shrink:0;white-space:nowrap;}
+  .sidebar-toggle{background:none;border:none;color:white;cursor:pointer;font-size:18px;padding:4px 8px;border-radius:6px;line-height:1;margin-right:8px;}
+  .sidebar-toggle:hover{background:rgba(255,255,255,.15);}
   .sidebar-label{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text-muted);padding:.5rem 1rem .25rem;}
   .am-btn{display:flex;align-items:center;gap:10px;padding:9px 1rem;width:100%;border:none;background:none;cursor:pointer;text-align:left;font-size:14px;color:var(--text);transition:background .15s;}
   .am-btn:hover{background:rgba(0,0,0,.05);}
@@ -273,7 +277,10 @@
 </div>
 
 <header class="app-header">
-  <h1>Longitude Inc — AM Dashboard</h1>
+  <div style="display:flex;align-items:center;">
+    <button class="sidebar-toggle" id="sidebar-toggle-btn" onclick="toggleSidebar()" title="Show/hide sidebar">☰</button>
+    <h1>Longitude Inc — AM Dashboard</h1>
+  </div>
   <div class="header-right">
     <div style="display:flex;align-items:center;gap:6px;background:rgba(255,255,255,.1);border-radius:20px;padding:3px;">
       <button id="mode-weekly-btn" onclick="setGlobalMode('weekly')" style="padding:4px 12px;border-radius:16px;border:none;font-size:12px;font-weight:600;cursor:pointer;background:white;color:var(--primary);transition:all .15s;">This Week</button>
@@ -599,6 +606,34 @@
                 <span id="waiver-save-status" style="font-size:12px;color:var(--text-muted);"></span>
               </div>
               <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">Waivers take effect immediately — no page refresh needed. Navigate to the Manager Bonus tab to see updated payouts.</div>
+            </div>
+          </div>
+          <div style="margin-bottom:1rem;">
+            <div style="font-weight:700;font-size:13px;margin-bottom:8px;">
+              🔄 AM Salon Assignments
+              <span style="font-weight:400;font-size:11px;color:var(--text-muted);">Reassign a salon to a different AM, effective a chosen month. History is preserved — past bonus periods keep their original AM.</span>
+            </div>
+            <div style="background:#f8f7f4;border:1px solid var(--border);border-radius:8px;padding:10px;">
+              <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
+                <select id="amassign-salon" style="font-size:12px;padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:white;">
+                  <option value="">— Select salon —</option>
+                </select>
+                <select id="amassign-am" style="font-size:12px;padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:white;">
+                  <option value="">— New AM —</option>
+                </select>
+                <select id="amassign-period" style="font-size:12px;padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:white;">
+                  <option value="">— First month under new AM —</option>
+                </select>
+                <input type="text" id="amassign-notes" placeholder="Notes (optional)" style="font-size:12px;padding:5px 8px;border-radius:6px;border:1px solid var(--border);width:180px;">
+                <button class="btn btn-primary btn-sm" onclick="reassignAM()">🔄 Reassign</button>
+              </div>
+              <div id="amassign-table-container">
+                <div style="color:var(--text-muted);font-size:12px;">No reassignments recorded — all salons follow the roster mapping.</div>
+              </div>
+              <div style="margin-top:8px;display:flex;align-items:center;gap:10px;">
+                <span id="amassign-save-status" style="font-size:12px;color:var(--text-muted);"></span>
+              </div>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">One click updates both the assignment history and the SalonRoster — no sheet editing needed. Choose "Un-managed (Kayla pool)" to leave a salon without a regular AM.</div>
             </div>
           </div>
           <div style="background:#f0f4ff;border:1px solid #c0cef0;border-radius:8px;padding:12px;margin-bottom:1rem;">
@@ -947,6 +982,8 @@ function onDataLoaded(data){
     (data.managerTable || []).forEach(m => { if(m.salonNum) S_managerTable[m.salonNum] = {name: m.managerName||'', globalId: m.globalId||''}; });
     // Load penalty waivers
     S_penaltyWaivers = data.penaltyWaivers || [];
+    // Load effective-dated AM assignments (salon→AM history for bonus views)
+    S_amAssignments = data.amAssignments || [];
     // Load payroll consolidated periods
     S_payrollConsolidated = (data.payrollConsolidatedPeriods || []).slice().sort((a,b)=>periodSortKey(a.periodKey)-periodSortKey(b.periodKey));
 
@@ -1065,6 +1102,8 @@ function switchToAdmin(){
   renderManagerTable();
   populateWaiverDropdowns();
   renderWaiverTable();
+  populateAMAssignControls();
+  renderAMAssignTable();
 }
 function switchTab(tab,el){ 
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active')); 
@@ -2263,11 +2302,45 @@ let S_salonSummaryPeriods = []; // salon summary data by period
 let S_managerTable = {};        // salonNum -> {name, globalId}
 let S_penaltyWaivers = [];      // [{salonNum, period, payroll, hours, notes}]
 let S_payrollConsolidated = []; // payroll consolidated periods with employee hours
+let S_amAssignments = []; // effective-dated salon→AM assignments (AMAssignments tab)
 // Convert a "Mon YY" period key to a sortable number (year*12 + month index).
 function periodSortKey(pk){
   const M = {Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11};
   const p = String(pk||'').trim().split(/\s+/);
   return (2000 + (parseInt(p[1],10)||0)) * 12 + (M[p[0]] ?? 0);
+}
+
+// ── Effective-dated AM assignments ──────────────────────────────
+// Rows: {salonNum, amKey, startPeriod, endPeriod}. Blank start = "since the
+// beginning"; blank end = "ongoing". Salons with NO rows at all fall back to
+// the current SalonRoster mapping (amOf), so only reshuffled salons need rows.
+function assignmentCovers(row, sk){
+  const s = row.startPeriod ? periodSortKey(normPeriodLabel(row.startPeriod)) : -Infinity;
+  const e = row.endPeriod   ? periodSortKey(normPeriodLabel(row.endPeriod))   :  Infinity;
+  return sk >= s && sk <= e;
+}
+// Which AM owned a salon during a given period. '' = un-managed (Kayla pool).
+function amOfPeriod(salonNum, periodLabel){
+  const sn = String(salonNum);
+  const rows = S_amAssignments.filter(a=>String(a.salonNum)===sn);
+  if(!rows.length) return amOf(sn); // no history recorded → current mapping
+  const sk = periodSortKey(normPeriodLabel(periodLabel));
+  const hit = rows.find(a=>assignmentCovers(a, sk));
+  return hit ? String(hit.amKey||'').toLowerCase() : '';
+}
+// The salon set an AM owned during a given period (regular AMs only).
+function amSalonsForPeriod(amId, periodLabel){
+  const sk = periodSortKey(normPeriodLabel(periodLabel));
+  const set = new Set();
+  // Salons with no assignment history → current roster mapping applies
+  (AMS[amId]?.salons||[]).forEach(sn=>{
+    if(!S_amAssignments.some(a=>String(a.salonNum)===String(sn))) set.add(String(sn));
+  });
+  // Plus any salon whose covering assignment row names this AM
+  S_amAssignments.forEach(a=>{
+    if(String(a.amKey||'').toLowerCase()===amId && assignmentCovers(a, sk)) set.add(String(a.salonNum));
+  });
+  return [...set].sort((a,b)=>parseInt(a)-parseInt(b));
 }
 function sortBonus(col){
   S_bonusSort = { col: col, asc: S_bonusSort.col===col ? !S_bonusSort.asc : true };
@@ -3196,6 +3269,157 @@ function getWaiver(salonNum, periodLabel){
   return S_penaltyWaivers.find(w=>w.salonNum===salonNum && normPeriodLabel(w.period)===norm) || null;
 }
 
+// ── Sidebar collapse ──────────────────────────────────────────
+function toggleSidebar(){
+  const layout = document.querySelector('.main-layout');
+  if(!layout) return;
+  const collapsed = layout.classList.toggle('sidebar-collapsed');
+  try{ localStorage.setItem('sidebarCollapsed', collapsed ? '1' : '0'); }catch(e){}
+}
+// Restore preference on load
+try{
+  if(localStorage.getItem('sidebarCollapsed')==='1'){
+    document.addEventListener('DOMContentLoaded', ()=>{
+      const l = document.querySelector('.main-layout');
+      if(l) l.classList.add('sidebar-collapsed');
+    });
+  }
+}catch(e){}
+
+// ── AM Reassignment Admin Panel ───────────────────────────────
+// Converts a periodSortKey number back to a "Mon YY" label.
+function periodKeyFromSort(sk){
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return M[sk % 12] + ' ' + String(Math.floor(sk / 12) - 2000);
+}
+function prevPeriod(label){ return periodKeyFromSort(periodSortKey(normPeriodLabel(label)) - 1); }
+
+function populateAMAssignControls(){
+  const salonSel = document.getElementById('amassign-salon');
+  const amSel = document.getElementById('amassign-am');
+  const perSel = document.getElementById('amassign-period');
+  if(!salonSel || !amSel || !perSel) return;
+  // Salons: all active
+  salonSel.innerHTML = '<option value="">— Select salon —</option>' +
+    allActiveSalons().map(sn=>`<option value="${sn}">${salonDisplay(sn)}</option>`).join('');
+  // AMs: regular AMs + un-managed
+  amSel.innerHTML = '<option value="">— New AM —</option>' +
+    Object.keys(AMS).filter(k=>k!=='kayla').map(k=>`<option value="${k}">${AMS[k].name}</option>`).join('') +
+    '<option value="__unmanaged__">Un-managed (Kayla pool)</option>';
+  // Periods: existing periods + 12 future months (reassignments are usually future-dated)
+  const keys = S_salonSummaryPeriods.map(p=>periodSortKey(p.periodKey));
+  const lastSk = keys.length ? Math.max(...keys) : periodSortKey('Jan 26');
+  const firstSk = keys.length ? Math.min(...keys) : lastSk;
+  const opts = [];
+  for(let sk=firstSk; sk<=lastSk+12; sk++) opts.push(periodKeyFromSort(sk));
+  perSel.innerHTML = '<option value="">— First month under new AM —</option>' +
+    opts.map(pk=>`<option value="${pk}">${pk}</option>`).join('');
+}
+
+function renderAMAssignTable(){
+  const el = document.getElementById('amassign-table-container');
+  if(!el) return;
+  if(!S_amAssignments.length){
+    el.innerHTML = '<div style="color:var(--text-muted);font-size:12px;">No reassignments recorded — all salons follow the roster mapping.</div>';
+    return;
+  }
+  const rows = S_amAssignments.map((a,i)=>{
+    const amName = a.amKey ? (AMS[a.amKey]?.name || a.amKey) : 'Un-managed';
+    const win = (a.startPeriod || 'beginning') + ' → ' + (a.endPeriod || 'ongoing');
+    return `<tr>
+      <td style="padding:4px 10px;">${salonDisplay(a.salonNum)}</td>
+      <td style="padding:4px 10px;">${amName}</td>
+      <td style="padding:4px 10px;">${win}</td>
+      <td style="padding:4px 10px;color:var(--text-muted);">${a.notes||''}</td>
+      <td style="padding:4px 10px;"><a href="javascript:void(0)" onclick="removeAMAssignment(${i})" style="color:#9C0006;font-size:11px;">✕ Remove</a></td>
+    </tr>`;
+  }).join('');
+  el.innerHTML = `<table style="font-size:12px;border-collapse:collapse;">
+    <thead><tr style="color:var(--text-muted);text-align:left;">
+      <th style="padding:4px 10px;">Salon</th><th style="padding:4px 10px;">AM</th>
+      <th style="padding:4px 10px;">Window</th><th style="padding:4px 10px;">Notes</th><th></th>
+    </tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function saveAMAssignments(rosterUpdates, statusMsg){
+  const statusEl = document.getElementById('amassign-save-status');
+  if(statusEl){ statusEl.textContent='Saving...'; statusEl.style.color='var(--text-muted)'; }
+  return fetch('/api/gs/saveAMAssignments',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({assignments:S_amAssignments, rosterUpdates:rosterUpdates||[]})
+  }).then(r=>r.json()).then(r=>{
+    if(statusEl){
+      statusEl.textContent = r.success ? ('✓ ' + (statusMsg||'Saved')) : ('✗ ' + r.error);
+      statusEl.style.color = r.success ? '#2a7a4a' : '#9C0006';
+    }
+    renderAMAssignTable();
+    return r;
+  }).catch(err=>{
+    if(statusEl){ statusEl.textContent='✗ '+err; statusEl.style.color='#9C0006'; }
+  });
+}
+
+function reassignAM(){
+  const salonNum = document.getElementById('amassign-salon').value;
+  const newKeyRaw = document.getElementById('amassign-am').value;
+  const period = document.getElementById('amassign-period').value;
+  const notes = document.getElementById('amassign-notes').value.trim();
+  if(!salonNum || !newKeyRaw || !period){ alert('Please select a salon, a new AM, and the first month under the new AM.'); return; }
+  const newKey = newKeyRaw==='__unmanaged__' ? '' : newKeyRaw;
+
+  const sk = periodSortKey(normPeriodLabel(period));
+  const closeAt = prevPeriod(period);
+  const currentOwner = amOfPeriod(salonNum, period); // owner the change displaces
+  if(newKey && newKey===currentOwner){ alert(AMS[newKey].name+' already owns '+salonNum+' for '+period+'.'); return; }
+
+  // 1) Close any window that covers or extends past the effective period
+  let hadHistory = false;
+  S_amAssignments = S_amAssignments.filter(a=>{
+    if(String(a.salonNum)!==String(salonNum)) return true;
+    hadHistory = true;
+    const startSk = a.startPeriod ? periodSortKey(normPeriodLabel(a.startPeriod)) : -Infinity;
+    const endSk   = a.endPeriod   ? periodSortKey(normPeriodLabel(a.endPeriod))   :  Infinity;
+    if(startSk >= sk) return false;          // superseded future-dated row — drop it
+    if(endSk >= sk) a.endPeriod = closeAt;   // open/overlapping window — close it
+    return true;
+  });
+  // 2) No history yet → freeze the current roster owner's tenure as a closing row
+  if(!hadHistory){
+    const rosterOwner = amOf(salonNum);
+    if(rosterOwner && rosterOwner!=='kayla'){
+      S_amAssignments.push({salonNum:String(salonNum), amKey:rosterOwner, startPeriod:'', endPeriod:closeAt, notes:''});
+    }
+  }
+  // 3) Open the new owner's window (un-managed = no new row)
+  if(newKey){
+    S_amAssignments.push({salonNum:String(salonNum), amKey:newKey, startPeriod:period, endPeriod:'', notes});
+  }
+
+  // 4) Update local roster state so current-state views flip immediately
+  const rr = ROSTER.find(r=>String(r.salonNum)===String(salonNum));
+  if(rr){ rr.am = newKey; rebuildFromRoster(ROSTER); }
+
+  saveAMAssignments([{salonNum:String(salonNum), am:newKey}],
+    salonNum+' → '+(newKey?AMS[newKey].name:'Un-managed')+' from '+period+' — roster updated').then(()=>{
+      try{ renderBonusContent(); }catch(e){}
+      try{ renderCompanyBonus(); }catch(e){}
+    });
+  document.getElementById('amassign-salon').value='';
+  document.getElementById('amassign-am').value='';
+  document.getElementById('amassign-period').value='';
+  document.getElementById('amassign-notes').value='';
+}
+
+function removeAMAssignment(idx){
+  const a = S_amAssignments[idx];
+  if(!a) return;
+  if(!confirm('Remove the '+(a.amKey?(AMS[a.amKey]?.name||a.amKey):'Un-managed')+' window for salon '+a.salonNum+'? Historical bonus periods will fall back to other rows or the current roster mapping.')) return;
+  S_amAssignments.splice(idx,1);
+  saveAMAssignments([], 'Removed').then(()=>{
+    try{ renderBonusContent(); }catch(e){}
+    try{ renderCompanyBonus(); }catch(e){}
+  });
+}
+
 // ── Manager Assignment Admin Panel ────────────────────────────
 let _homeEmployees = [];  // cache of home file employees for dropdown
 
@@ -3313,7 +3537,7 @@ function calcAMBonus(amId, periodLabel){
   const ssPeriod = S_salonSummaryPeriods.find(p=>normPeriodLabel(p.periodLabel)===normLabel||normPeriodLabel(p.periodKey)===normLabel);
   if(!ssPeriod) return null;
 
-  const amSalons = isKayla ? allActiveSalons() : (am.salons||[]);
+  const amSalons = isKayla ? allActiveSalons() : amSalonsForPeriod(amId, normLabel);
 
   const salonDetails = [];
   let totalPayout = 0;
@@ -3894,7 +4118,7 @@ function getMgrBonusForSalon(snum, ssPeriodKey){
   const salonRow = {...(ssPeriod.salons.find(s=>s.salonNum===snum)||{}), weeksN: ssPeriod.weeksN};
   if(!salonRow.salonNum || !salonRow.avgWeeklySales) return null;
   const bonusPeriod = S_bonusPeriods.find(p=>p.periodKey===normPeriodLabel(ssPeriod.periodLabel)||p.periodLabel===normPeriodLabel(ssPeriod.periodLabel));
-  const amId = amOf(snum); const am = AMS[amId];
+  const amId = amOfPeriod(snum, ssPeriodKey); const am = AMS[amId];
   const mgrInfo = S_managerTable[snum];
   let bonusMgrRow = null;
   let isAMFallback = false;
@@ -3929,7 +4153,7 @@ function buildCoMgrPeriod(){
     if(!entry) return;
     const {result, isAMFallback} = entry;
     const mgrInfo = S_managerTable[snum];
-    const amId = amOf(snum); const am = AMS[amId]||{name:'?',color:'#999'};
+    const amId = amOfPeriod(snum, S_coMgrPeriod); const am = AMS[amId]||{name:'?',color:'#999'};
     const mgrName = isAMFallback ? (am.name+' (AM)') : (mgrInfo ? mgrInfo.name : '—');
     totPot += result.totalPotential;
     totPay += result.finalPayout;
@@ -4087,7 +4311,7 @@ function coMgrDrillInto(snum){
 
 function buildCoMgrDrill(snum){
   const mgrInfo = S_managerTable[snum];
-  const amId = amOf(snum); const am = AMS[amId]||{name:'?',color:'#999'};
+  const amId = amOfPeriod(snum, S_coMgrPeriod); const am = AMS[amId]||{name:'?',color:'#999'};
   const isAMFallback = !mgrInfo || !mgrInfo.name;
   const mgrName = isAMFallback ? (am.name+' (AM)') : mgrInfo.name;
 
