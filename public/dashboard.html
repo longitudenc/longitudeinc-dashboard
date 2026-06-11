@@ -4525,6 +4525,19 @@ function excellenceMeasures(){
       val:e=>Math.abs(n(e.hcTime)-13.5), desc:false},
   ];
 }
+// Cards shown on the leaderboard: the four % / count measures plus a
+// Customers Served ranking (volume, not a bonus tier — everyone qualifies,
+// ranked high to low). HC Time still counts toward excellence/points via
+// excellenceMeasures(), it's just not shown as its own list.
+function excellenceCards(){
+  const m = excellenceMeasures();
+  const byKey = Object.fromEntries(m.map(x=>[x.key,x]));
+  return [
+    byKey.prod, byKey.nr, byKey.rr, byKey.mbc,
+    {key:'cust', title:'Customers Served', goal:'volume', fmt:e=>n(e.custCount).toLocaleString(),
+      ok:e=>n(e.custCount)>0, val:e=>n(e.custCount), desc:true},
+  ];
+}
 function excellenceLeadersFor(measure, stys){
   return stys.filter(measure.ok).sort((a,b)=> measure.desc ? measure.val(b)-measure.val(a) : measure.val(a)-measure.val(b));
 }
@@ -4535,10 +4548,11 @@ function buildExcellenceLeaders(){
   const stys = (period.employees||[]).filter(e=>e.position!=='M');
 
   const measures = excellenceMeasures();
+  const cardMeasures = excellenceCards();
 
-  const EXC_CAP = 10; // keep each measure card glanceable
+  const EXC_CAP = 25; // each measure card
 
-  const cards = measures.map(m=>{
+  const cards = cardMeasures.map(m=>{
     const leaders = excellenceLeadersFor(m, stys);
     const shown = leaders.slice(0, EXC_CAP);
     const rows = shown.map((e,i)=>`<tr style="${i%2?'background:#f6faf4;':''}">
@@ -4560,7 +4574,7 @@ function buildExcellenceLeaders(){
   }).join('');
 
   // ── Highlight cards ──
-  const top = topPerformers(stys, 5);
+  const top = topPerformers(stys, 10);
   const topRows = top.map((e,i)=>{
     const medal = ['🥇','🥈','🥉'][i] || (i+1)+'.';
     return `<tr style="${i%2?'background:#f6faf4;':''}">
@@ -4568,32 +4582,19 @@ function buildExcellenceLeaders(){
       <td style="padding:6px 10px;">${stylistLink(e.globalId, e.empName)}</td>
       <td style="padding:6px 10px;color:var(--text-muted);font-size:11px;">${salonDisplay(e.salonNum)}</td>
       <td style="padding:6px 10px;text-align:center;font-weight:700;" class="bv-green">${e._exc} ★</td>
+      <td style="padding:6px 10px;color:var(--text-muted);font-size:11px;">${e._measLabels}</td>
       <td style="padding:6px 10px;text-align:right;color:var(--text-muted);">${e.points||0} pts</td>
     </tr>`;
   }).join('');
-  const topCard = top.length ? `<div style="flex:1;min-width:340px;background:white;border:2px solid var(--accent);border-radius:10px;overflow:hidden;">
+  const topCard = top.length ? `<div style="width:100%;background:white;border:2px solid var(--accent);border-radius:10px;overflow:hidden;">
     <div style="background:var(--primary);color:white;padding:10px 12px;font-weight:700;font-size:14px;">🌟 Top Performers</div>
     <table style="width:100%;border-collapse:collapse;font-size:12px;"><tbody>${topRows}</tbody></table>
-    <div style="padding:6px 10px;font-size:10px;color:var(--text-muted);border-top:1px solid var(--border);">Ranked by excellence measures hit, then bonus points.</div>
-  </div>` : '';
-
-  const multi = multiMeasureStars(stys, measures);
-  const multiRows = multi.map((e,i)=>`<tr style="${i%2?'background:#f6faf4;':''}">
-      <td style="padding:6px 10px;width:24px;text-align:right;color:var(--text-muted);">${i+1}</td>
-      <td style="padding:6px 10px;">${stylistLink(e.globalId, e.empName)}</td>
-      <td style="padding:6px 10px;color:var(--text-muted);font-size:11px;">${salonDisplay(e.salonNum)}</td>
-      <td style="padding:6px 10px;text-align:center;font-weight:700;" class="bv-green">${e._exc} measures</td>
-      <td style="padding:6px 10px;color:var(--text-muted);font-size:11px;">${e._measLabels}</td>
-    </tr>`).join('');
-  const multiCard = multi.length ? `<div style="flex:1;min-width:340px;background:white;border:2px solid var(--accent);border-radius:10px;overflow:hidden;">
-    <div style="background:var(--primary);color:white;padding:10px 12px;font-weight:700;font-size:14px;">🎯 Multi-Measure Excellence</div>
-    <table style="width:100%;border-collapse:collapse;font-size:12px;"><tbody>${multiRows}</tbody></table>
-    <div style="padding:6px 10px;font-size:10px;color:var(--text-muted);border-top:1px solid var(--border);">Stylists hitting excellence in 2+ measures.</div>
+    <div style="padding:6px 10px;font-size:10px;color:var(--text-muted);border-top:1px solid var(--border);">Ranked by excellence measures hit, then bonus points. ★ = measures at excellence.</div>
   </div>` : '';
 
   const totalExc = new Set();
   measures.forEach(m=>stys.filter(m.ok).forEach(e=>totalExc.add(e.globalId)));
-  const highlightRow = (topCard||multiCard) ? `<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start;margin-bottom:14px;">${topCard}${multiCard}</div>` : '';
+  const highlightRow = topCard ? `<div style="margin-bottom:14px;">${topCard}</div>` : '';
   return `<div style="margin-bottom:.75rem;color:var(--text-muted);font-size:12px;">
       Excellence leaders for <strong>${formatBonusPeriod(S_bonusPeriod)}</strong>, best first.
       ${totalExc.size} stylists reached excellence in at least one measure.
@@ -4606,11 +4607,12 @@ function buildExcellenceLeaders(){
 // then avg weekly hours (a full-timer edges a partial on ties).
 function topPerformers(stys, limit){
   const measures = excellenceMeasures();
+  const SHORT = {prod:'Prod', nr:'NR', rr:'RR', mbc:'MBC', hc:'HC'};
   const scored = stys.map(e=>{
-    const exc = measures.reduce((c,m)=>c+(m.ok(e)?1:0),0);
-    return Object.assign({}, e, {_exc:exc});
+    const hit = measures.filter(m=>m.ok(e));
+    return Object.assign({}, e, {_exc:hit.length, _measLabels:hit.map(m=>SHORT[m.key]||m.title).join(', ')});
   }).filter(e=>e._exc>0);
-  scored.sort((a,b)=> b._exc-a._exc || (parseFloat(b.points)||0)-(parseFloat(a.points)||0) || (parseFloat(b.avgWkHrs)||0)-(parseFloat(a.avgWkHrs)||0));
+  scored.sort((a,b)=> b._exc-a._exc || (parseFloat(b.points)||0)-(parseFloat(a.points)||0) || (parseFloat(b.avgWkHrs)||0)-(parseFloat(a.avgWkHrs)||0) || a.empName.localeCompare(b.empName));
   return scored.slice(0, limit);
 }
 
@@ -4621,7 +4623,7 @@ function multiMeasureStars(stys, measures){
     const hit = measures.filter(m=>m.ok(e));
     return Object.assign({}, e, {_exc:hit.length, _measLabels:hit.map(m=>SHORT[m.key]||m.title).join(', ')});
   }).filter(e=>e._exc>=2);
-  scored.sort((a,b)=> b._exc-a._exc || (parseFloat(b.points)||0)-(parseFloat(a.points)||0));
+  scored.sort((a,b)=> b._exc-a._exc || (parseFloat(b.points)||0)-(parseFloat(a.points)||0) || (parseFloat(b.avgWkHrs)||0)-(parseFloat(a.avgWkHrs)||0) || a.empName.localeCompare(b.empName));
   return scored;
 }
 
@@ -4633,9 +4635,10 @@ function exportExcellenceJPEG(periodKey){
   const label = formatBonusPeriod(periodKey);
   const stys = (period.employees||[]).filter(e=>e.position!=='M');
   const measures = excellenceMeasures();
-  const EXC_CAP = 10;
+  const cardMeasures = excellenceCards();
+  const EXC_CAP = 25;
 
-  const cardHTML = measures.map(m=>{
+  const cardHTML = cardMeasures.map(m=>{
     const leaders = excellenceLeadersFor(m, stys);
     const shown = leaders.slice(0, EXC_CAP);
     const rows = shown.map((e,i)=>`<tr style="${i%2?'background:#f6faf4;':''}">
@@ -4656,8 +4659,8 @@ function exportExcellenceJPEG(periodKey){
     </div>`;
   }).join('');
 
-  // Highlight cards
-  const top = topPerformers(stys, 5);
+  // Highlight card — Top 10, merged with multi-measure detail
+  const top = topPerformers(stys, 10);
   const topRows = top.map((e,i)=>{
     const medal = ['🥇','🥈','🥉'][i] || (i+1)+'.';
     return `<tr style="${i%2?'background:#f6faf4;':''}">
@@ -4665,25 +4668,13 @@ function exportExcellenceJPEG(periodKey){
       <td style="padding:6px 11px;font-weight:600;white-space:nowrap;">${e.empName}</td>
       <td style="padding:6px 11px;color:#777;font-size:11px;white-space:nowrap;">${salonDisplay(e.salonNum)}</td>
       <td style="padding:6px 11px;text-align:center;font-weight:700;color:#1a6b3f;">${e._exc} ★</td>
+      <td style="padding:6px 11px;color:#777;font-size:11px;white-space:nowrap;">${e._measLabels}</td>
       <td style="padding:6px 11px;text-align:right;color:#777;">${e.points||0} pts</td>
     </tr>`;
   }).join('');
-  const topCard = top.length ? `<div style="border:2px solid #9acb3a;border-radius:10px;overflow:hidden;break-inside:avoid;min-width:340px;flex:1;">
+  const topCard = top.length ? `<div style="border:2px solid #9acb3a;border-radius:10px;overflow:hidden;break-inside:avoid;width:100%;">
     <div style="background:#048667;color:white;padding:9px 12px;font-weight:700;font-size:15px;">🌟 Top Performers</div>
     <table style="width:100%;border-collapse:collapse;font-size:12px;"><tbody>${topRows}</tbody></table>
-  </div>` : '';
-
-  const multi = multiMeasureStars(stys, measures);
-  const multiRows = multi.slice(0, EXC_CAP+2).map((e,i)=>`<tr style="${i%2?'background:#f6faf4;':''}">
-      <td style="padding:6px 11px;width:22px;text-align:right;color:#999;">${i+1}</td>
-      <td style="padding:6px 11px;font-weight:600;white-space:nowrap;">${e.empName}</td>
-      <td style="padding:6px 11px;color:#777;font-size:11px;white-space:nowrap;">${salonDisplay(e.salonNum)}</td>
-      <td style="padding:6px 11px;text-align:center;font-weight:700;color:#1a6b3f;">${e._exc}</td>
-      <td style="padding:6px 11px;color:#777;font-size:11px;white-space:nowrap;">${e._measLabels}</td>
-    </tr>`).join('');
-  const multiCard = multi.length ? `<div style="border:2px solid #9acb3a;border-radius:10px;overflow:hidden;break-inside:avoid;min-width:340px;flex:1;">
-    <div style="background:#048667;color:white;padding:9px 12px;font-weight:700;font-size:15px;">🎯 Multi-Measure Excellence</div>
-    <table style="width:100%;border-collapse:collapse;font-size:12px;"><tbody>${multiRows}</tbody></table>
   </div>` : '';
 
   const totalExc = new Set();
@@ -4696,7 +4687,7 @@ function exportExcellenceJPEG(periodKey){
       <div style="font-size:22px;font-weight:700;color:#03654e;">Monthly Excellence Leaders 🏆</div>
       <div style="font-size:15px;color:#555;margin-top:4px;">${label} · ${totalExc.size} stylists reached excellence in at least one measure</div>
     </div>
-    ${(topCard||multiCard) ? `<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start;margin-bottom:16px;">${topCard}${multiCard}</div>` : ''}
+    ${topCard ? `<div style="margin-bottom:16px;">${topCard}</div>` : ''}
     <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start;">${cardHTML}</div>
     <div style="margin-top:14px;font-size:11px;color:#999;text-align:right;">Generated ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</div>`;
   document.body.appendChild(printDiv);

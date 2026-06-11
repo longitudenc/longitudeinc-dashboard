@@ -52,7 +52,7 @@ const SALON_SUMMARY_COLUMNS = [
 const BONUS_COLUMNS = [
   'periodKey', 'periodLabel', 'weeksN', 'salonNum', 'globalId', 'payId',
   'empName', 'position', 'product', 'nr', 'rr', 'productivity',
-  'avgWkHrs', 'mbc', 'hcTime', 'points', 'perPt', 'potential', 'payout',
+  'avgWkHrs', 'custCount', 'mbc', 'hcTime', 'points', 'perPt', 'potential', 'payout',
   'prodPenalty', 'eligible',
   'weeksWithData', 'scrapedAt',
 ] as const
@@ -215,6 +215,7 @@ function bonusRowsFromMonthlyCsv(
       (a, b) => (csvNum(b['Floor Hours']) || 0) - (csvNum(a['Floor Hours']) || 0)
     )[0]
     const totalHrs = list.reduce((t, o) => t + (csvNum(o['Floor Hours']) || 0), 0)
+    const totalCust = list.reduce((t, o) => t + (csvNum(o['Cust Count']) || 0), 0)
 
     let prodPct: number | null, hc: number | null, mbc: number | null
     let nr: number | null, rr: number | null, productivity: number | null
@@ -269,6 +270,7 @@ function bonusRowsFromMonthlyCsv(
       rr: rr !== null ? rr / 100 : '',
       productivity: productivity !== null ? Math.round(productivity * 1000) / 1000 : '',
       avgWkHrs: Math.round(avgWkHrs * 100) / 100,
+      custCount: Math.round(totalCust),
       mbc: mbc !== null ? Math.round(mbc * 100) / 100 : '',
       hcTime: hc !== null ? Math.round(hc * 100) / 100 : '',
       points: sty.points,
@@ -307,6 +309,7 @@ function bonusRowsFromWeekly(
     const mbcA = avgPresent(rows, 'mbc')
     const hcA = avgPresent(rows, 'hcTime')
     const avgWkHrs = weeksN ? sum(rows, 'floorHours') / weeksN : 0
+    const totalCust = sum(rows, 'custCount')
     const sty = calcStylistBonus(
       prod.count ? prod.avg : null,
       nr.count ? nr.avg : null,
@@ -327,6 +330,7 @@ function bonusRowsFromWeekly(
       rr: rr.count ? rr.avg / 100 : '',
       productivity: avgPresent(rows, 'productivity').avg || '',
       avgWkHrs: Math.round(avgWkHrs * 100) / 100,
+      custCount: Math.round(totalCust),
       mbc: mbcA.count ? Math.round(mbcA.avg * 100) / 100 : '',
       hcTime: hcA.count ? Math.round(hcA.avg * 100) / 100 : '',
       points: sty.points,
