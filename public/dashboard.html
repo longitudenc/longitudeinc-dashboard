@@ -864,7 +864,7 @@ function setGlobalMode(mode){
   } else if(amActive){
     // Re-render whichever AM tab is active
     const activeTab = document.querySelector('.tab.active');
-    const tabId = activeTab ? activeTab.id : 'tb-score';
+    const tabId = activeTab ? activeTab.id : 'tb-salon';
     if(tabId==='tb-salon') renderSalonTab();
     else if(tabId==='tb-individual') renderIndividual();
     else if(tabId==='tb-score') renderScorecard();
@@ -1180,14 +1180,22 @@ function showPage(id){ clearActive(); document.getElementById('page-'+id)?.class
 
 function switchAM(id){
   if(!id || !AMS[id]) return;
+  // Security: an area_manager may only ever view their OWN dashboard. Even if
+  // switchAM is called with another AM's id (e.g. via console), reject it and
+  // snap back to their own. Owners/admins/viewers can switch freely.
+  if(isAMRole() && id !== USER_AM_ID){
+    id = USER_AM_ID;
+    if(!id || !AMS[id]) return;
+  }
   S.currentAM=id;
   clearActive();
   const btn=document.getElementById('btn-'+id); if(btn) btn.classList.add('active');
   document.getElementById('page-am').classList.add('active');
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
-  document.getElementById('tb-score').classList.add('active');
-  ['salon','individual','trends','bonus'].forEach(t=>{ const el=document.getElementById('tab-'+t); if(el) el.style.display='none'; });
-  document.getElementById('tab-score').style.display='block';
+  // Default to Salon Performance (not Scorecard).
+  document.getElementById('tb-salon').classList.add('active');
+  ['score','individual','trends','bonus'].forEach(t=>{ const el=document.getElementById('tab-'+t); if(el) el.style.display='none'; });
+  document.getElementById('tab-salon').style.display='block';
   renderAM();
 }
 function switchToCompany(){ 
@@ -1249,7 +1257,7 @@ function selectWeek(wk){
   } else if(amActive && S.currentAM){
     // Re-render whichever AM tab is active
     const activeTab = document.querySelector('.tab.active');
-    const tabId = activeTab ? activeTab.id : 'tb-score';
+    const tabId = activeTab ? activeTab.id : 'tb-salon';
     if(tabId === 'tb-salon') renderSalonTab();
     else if(tabId === 'tb-individual') renderIndividual();
     else if(tabId === 'tb-tracker') renderTracker();
