@@ -1263,7 +1263,7 @@ function selectWeek(wk){
     else if(tabId === 'tb-tracker') renderTracker();
     else renderScorecard();
     // Update header
-    document.getElementById('am-sub').textContent = 'Area Manager · Week Ending ' + (wk||'—');
+    document.getElementById('am-sub').textContent = 'Area Manager · Week Ending ' + (wk?fmtWeek(wk):'—');
     document.getElementById('salon-week-label').textContent = wk?fmtWeek(wk):'—';
   }
 }
@@ -1275,7 +1275,15 @@ function renderAM(){
   document.getElementById('am-name').textContent=am.name;
   document.getElementById('am-sub').textContent='Area Manager · Week Ending '+(S.currentWeek?fmtWeek(S.currentWeek):'—');
   document.getElementById('salon-week-label').textContent=S.currentWeek?fmtWeek(S.currentWeek):'—';
-  renderScorecard();
+  // Render whichever tab is currently active (defaults to salon now), instead
+  // of always rendering the scorecard.
+  const activeTab = document.querySelector('.tab.active');
+  const tabId = activeTab ? activeTab.id : 'tb-salon';
+  if(tabId==='tb-salon') renderSalonTab();
+  else if(tabId==='tb-individual') renderIndividual();
+  else if(tabId==='tb-trends') renderTrends();
+  else if(tabId==='tb-bonus') renderBonus();
+  else renderScorecard();
 }
 
 // ── YTD helpers ───────────────────────────────────────────────
@@ -2195,7 +2203,7 @@ function renderCompany(){
     const allAForAM = calcAvgs(allForAMAvg);
     document.getElementById('company-sub').textContent = isYTD
       ? 'All Salons · YTD Average · ' + S.weekHistory.length + ' weeks'
-      : 'All Salons · Week Ending '+(S.currentWeek||'—');
+      : 'All Salons · Week Ending '+(S.currentWeek?fmtWeek(S.currentWeek):'—');
     const allA=calcAvgs(all);
     // For the summary cards, collapse salon-weeks → distinct salons (averaged),
     // so counts reflect salons-that-did-X this period, not salon-weeks summed.
