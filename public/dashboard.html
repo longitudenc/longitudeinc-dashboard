@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Longitude Inc — AM Dashboard</title>
+<link rel="icon" type="image/png" href="longitude-badge.png?v=1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -275,6 +276,7 @@
 
 <!-- Loading overlay -->
 <div class="loading-overlay" id="loading">
+  <img src="longitude-badge.png?v=1" alt="Longitude Inc" style="width:96px;height:96px;margin-bottom:18px;opacity:.9;" />
   <div class="spinner"></div>
   <div>Loading AM Dashboard...</div>
 </div>
@@ -282,7 +284,8 @@
 <header class="app-header">
   <div style="display:flex;align-items:center;">
     <button class="sidebar-toggle" id="sidebar-toggle-btn" onclick="toggleSidebar()" title="Show/hide sidebar">☰</button>
-    <h1>Longitude Inc — AM Dashboard</h1>
+    <img src="longitude-header.png?v=1" alt="Longitude Inc — A Great Clips Franchisee" style="height:38px;width:auto;display:block;" />
+    <span style="margin-left:14px;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:rgba(255,255,255,.75);border-left:1px solid rgba(255,255,255,.3);padding-left:14px;">AM Dashboard</span>
   </div>
   <div class="header-right">
     <div style="display:flex;align-items:center;gap:6px;background:rgba(255,255,255,.1);border-radius:20px;padding:3px;">
@@ -4684,6 +4687,7 @@ function exportExcellenceJPEG(periodKey){
   printDiv.style.cssText = 'position:fixed;top:-9999px;left:0;background:white;padding:24px;font-family:Arial,sans-serif;width:1100px;';
   printDiv.innerHTML = `
     <div style="text-align:center;margin-bottom:18px;border-bottom:3px solid #03654e;padding-bottom:12px;">
+      <img src="longitude-header-jade.png?v=1" alt="Longitude Inc" style="height:46px;width:auto;margin-bottom:10px;" />
       <div style="font-size:22px;font-weight:700;color:#03654e;">Monthly Excellence Leaders 🏆</div>
       <div style="font-size:15px;color:#555;margin-top:4px;">${label} · ${totalExc.size} stylists reached excellence in at least one measure</div>
     </div>
@@ -4692,6 +4696,12 @@ function exportExcellenceJPEG(periodKey){
     <div style="margin-top:14px;font-size:11px;color:#999;text-align:right;">Generated ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</div>`;
   document.body.appendChild(printDiv);
 
+  // Ensure the logo image is fully loaded before html2canvas snapshots,
+  // otherwise it can capture a blank/half-loaded image.
+  const waitImgs = Array.from(printDiv.querySelectorAll('img')).map(img =>
+    img.complete ? Promise.resolve() : new Promise(res=>{ img.onload=res; img.onerror=res; })
+  );
+  Promise.all(waitImgs).then(()=>
   html2canvas(printDiv, { scale:3, backgroundColor:'#ffffff', useCORS:true, logging:false })
     .then(canvas=>{
       document.body.removeChild(printDiv);
@@ -4702,7 +4712,8 @@ function exportExcellenceJPEG(periodKey){
     }).catch(err=>{
       document.body.removeChild(printDiv);
       alert('Export failed: ' + err);
-    });
+    })
+  );
 }
 
 function buildCompanyBonusAllStylists(){
