@@ -78,7 +78,10 @@ export async function getSalonWeeks() {
   return rowsToObjects(await readSheet('SalonData'))
 }
 export async function getEmployeeWeeks() {
-  return rowsToObjects(await readSheet('EmpData'))
+  // Live weekly employee metrics written by the SD3 scraper. (Was the legacy
+  // 'EmpData' tab, which the current scrapers no longer populate — that stale
+  // pointer is why recent weeks showed "No employee data".)
+  return rowsToObjects(await readSheet('SD_EMP_WEEKLY'))
 }
 export async function getBonusPeriods() {
   return rowsToObjects(await readSheet('BonusData'))
@@ -112,7 +115,14 @@ export async function getUsers() {
   return rowsToObjects(await readSheet('Users'))
 }
 export async function getTrackerData() {
-  return rowsToObjects(await readSheet('TrackerData'))
+  // Legacy tracker tab — may not exist (the Apps Script workflow it came from
+  // is being retired). Treat missing/unreadable as "no tracker rows" so
+  // getAllData never errors on its absence.
+  try {
+    return rowsToObjects(await readSheet('TrackerData'))
+  } catch {
+    return []
+  }
 }
 
 export async function getAllDashboardData() {

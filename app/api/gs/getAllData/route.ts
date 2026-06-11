@@ -101,13 +101,20 @@ function formatAllData(raw: any, scrapedWeeks: any[], rosterRows: any[]) {
 
   // Layer in employee rows — normalize their weekEnding to YYYY-MM-DD so they
   // merge correctly with scraped weeks (no more duplicate dropdown entries).
+  // SD_EMP_WEEKLY uses weekEnd / productPct / employeeName; the dashboard reads
+  // weekEnding / product / empName — alias them here so no client change is needed.
   raw.empRows.forEach((row: any) => {
-    const rawWk = row.weekEnding || ''
+    const rawWk = row.weekEnding || row.weekEnd || ''
     if (!rawWk) return
     const wk = normalizeDateString(rawWk)
     if (!weekMap[wk]) weekMap[wk] = { weekEnding: wk, salons: [], emps: [] }
-    // Also normalize the row's own weekEnding so downstream code uses the canonical form
-    weekMap[wk].emps.push({ ...row, weekEnding: wk })
+    weekMap[wk].emps.push({
+      ...row,
+      weekEnding: wk,
+      product: row.product ?? row.productPct ?? '',
+      empName: row.empName ?? row.employeeName ?? '',
+      payroll: row.payroll ?? row.payrollPct ?? '',
+    })
   })
 
   const weeks = Object.values(weekMap).sort((a: any, b: any) =>
