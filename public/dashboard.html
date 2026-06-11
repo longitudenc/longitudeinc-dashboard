@@ -1298,6 +1298,26 @@ function ytdEmpsByAM(amId){
   return allEmps;
 }
 
+// Collapse salon-WEEK rows into one row per distinct salon, with that salon's
+// CC and payroll AVERAGED across the period. Use this for the top summary
+// cards so "Total Salons" counts distinct salons (not salon-weeks) and the
+// "X at 4-rating" counts reflect each salon's average for the period — not a
+// sum of every salon-week that happened to qualify.
+function collapseSalonsAvg(rows){
+  const bySalon = {};
+  (rows||[]).forEach(r=>{
+    const k = String(r.salonNum||'').trim() || '?';
+    if(!bySalon[k]) bySalon[k] = { salonNum:k, _cc:[], _pay:[] };
+    const cc = n(r.ccThis); if(cc>0) bySalon[k]._cc.push(cc);
+    const pay = p(r.payroll); if(pay>0) bySalon[k]._pay.push(pay);
+  });
+  return Object.values(bySalon).map(s=>({
+    salonNum: s.salonNum,
+    ccThis: s._cc.length ? s._cc.reduce((a,b)=>a+b,0)/s._cc.length : 0,
+    payroll: s._pay.length ? (s._pay.reduce((a,b)=>a+b,0)/s._pay.length) : 0,
+  }));
+}
+
 function calcYTDAvgs(amId){
   // Average each salon's metrics across all weeks — doesn't depend on selected week
   if(!S.weekHistory.length) return null;
@@ -1465,12 +1485,14 @@ function renderSalonTab(){
   if(!S.weekHistory.length){ sumEl.innerHTML=''; thead.innerHTML=''; tbody.innerHTML='<tr><td colspan="15" class="no-data"><div class="no-data-icon">📊</div>No data yet — waiting for first upload</td></tr>'; return; }
   const a = isYTD ? calcYTDAvgs(S.currentAM) : calcAvgs(salonsByAM(S.currentAM));
   const ytdA = calcYTDAvgs(S.currentAM);
+  // Collapse salon-weeks → distinct salons (averaged) for the cards.
+  const cards = isYTD ? collapseSalonsAvg(rows) : rows;
   sumEl.innerHTML=`
-    <div class="metric-card"><div class="metric-label">Salons</div><div class="metric-value">${rows.length}</div><div class="metric-sub">Assigned</div></div>
+    <div class="metric-card"><div class="metric-label">Salons</div><div class="metric-value">${cards.length}</div><div class="metric-sub">Assigned</div></div>
     <div class="metric-card"><div class="metric-label">Avg CC</div><div class="metric-value">${a?Math.round(a.cc):'—'}</div><div class="target-label">4: ≥520 · 3: 420–519</div></div>
     <div class="metric-card"><div class="metric-label">Avg Payroll %</div><div class="metric-value">${a?a.pay.toFixed(1)+'%':'—'}</div><div class="target-label">Sliding by CC</div></div>
-    <div class="metric-card"><div class="metric-label">CC at 4-Rating</div><div class="metric-value">${rows.filter(r=>n(r.ccThis)>=520).length}/${rows.length}</div><div class="metric-sub" style="color:var(--exc-text);">≥ 520</div></div>
-    <div class="metric-card"><div class="metric-label">Payroll at 4-Rating</div><div class="metric-value">${rows.filter(r=>{ const t=payrollTargets(Math.round(n(r.ccThis))); return p(r.payroll)<=t.exc; }).length}/${rows.length}</div><div class="metric-sub" style="color:var(--exc-text);">At excellence</div></div>`;
+    <div class="metric-card"><div class="metric-label">CC at 4-Rating</div><div class="metric-value">${cards.filter(r=>n(r.ccThis)>=520).length}/${cards.length}</div><div class="metric-sub" style="color:var(--exc-text);">≥ 520</div></div>
+    <div class="metric-card"><div class="metric-label">Payroll at 4-Rating</div><div class="metric-value">${cards.filter(r=>{ const t=payrollTargets(Math.round(n(r.ccThis))); return p(r.payroll)<=t.exc; }).length}/${cards.length}</div><div class="metric-sub" style="color:var(--exc-text);">At excellence</div></div>`;
   thead.innerHTML=buildHead(SALON_COLS,'salon-table','sortSalon');
   // Update week label in salon tab header
   const swl = document.getElementById('salon-week-label');
@@ -2175,13 +2197,16 @@ function renderCompany(){
       ? 'All Salons · YTD Average · ' + S.weekHistory.length + ' weeks'
       : 'All Salons · Week Ending '+(S.currentWeek||'—');
     const allA=calcAvgs(all);
+    // For the summary cards, collapse salon-weeks → distinct salons (averaged),
+    // so counts reflect salons-that-did-X this period, not salon-weeks summed.
+    const cards = isYTD ? collapseSalonsAvg(all) : all;
     const sumEl=document.getElementById('company-summary');
     sumEl.innerHTML=`
-      <div class="metric-card"><div class="metric-label">Total Salons</div><div class="metric-value">${all.length}</div><div class="metric-sub">In report</div></div>
+      <div class="metric-card"><div class="metric-label">Total Salons</div><div class="metric-value">${cards.length}</div><div class="metric-sub">In report</div></div>
       <div class="metric-card"><div class="metric-label">Company Avg CC</div><div class="metric-value">${allA?Math.round(allA.cc):'—'}</div><div class="target-label">4: ≥520 · 3: 420–519</div></div>
       <div class="metric-card"><div class="metric-label">Company Avg Payroll</div><div class="metric-value">${allA?allA.pay.toFixed(1)+'%':'—'}</div><div class="target-label">Sliding by CC</div></div>
-      <div class="metric-card"><div class="metric-label">CC at 4-Rating</div><div class="metric-value">${all.filter(r=>n(r.ccThis)>=520).length}/${all.length}</div><div class="metric-sub" style="color:var(--exc-text);">≥ 520</div></div>
-      <div class="metric-card"><div class="metric-label">Payroll at 4-Rating</div><div class="metric-value">${all.filter(r=>{ const t=payrollTargets(Math.round(n(r.ccThis))); return p(r.payroll)<=t.exc; }).length}/${all.length}</div><div class="metric-sub" style="color:var(--exc-text);">At excellence</div></div>`;
+      <div class="metric-card"><div class="metric-label">CC at 4-Rating</div><div class="metric-value">${cards.filter(r=>n(r.ccThis)>=520).length}/${cards.length}</div><div class="metric-sub" style="color:var(--exc-text);">≥ 520</div></div>
+      <div class="metric-card"><div class="metric-label">Payroll at 4-Rating</div><div class="metric-value">${cards.filter(r=>{ const t=payrollTargets(Math.round(n(r.ccThis))); return p(r.payroll)<=t.exc; }).length}/${cards.length}</div><div class="metric-sub" style="color:var(--exc-text);">At excellence</div></div>`;
 
     // Scorecard ranking — YTD scores
     const tierColors={c4:'#2d7a1a',c3:'#c8a800',c2:'#d06010',c1:'#b83232'};
