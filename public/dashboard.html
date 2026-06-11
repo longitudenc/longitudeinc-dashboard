@@ -519,54 +519,23 @@
         <div class="card-title">Admin — Data Management</div>
         <div class="upload-instructions">
 
-          <!-- Weekly Files -->
+          <!-- Disciplinary Points editor -->
           <div style="margin-bottom:1.2rem;">
-            <div style="font-weight:700;font-size:13px;color:#03654e;margin-bottom:6px;display:flex;align-items:center;gap:6px;">📅 Weekly Reports <span style="font-weight:400;font-size:11px;color:var(--text-muted);">Drop into: AM Review — Weekly Uploads</span></div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-              <div style="background:#f8f7f4;border:1px solid var(--border);border-radius:8px;padding:10px;">
-                <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:4px;">Salon Report</div>
-                <div style="font-size:12px;">Any filename — e.g. <span class="folder-name">AM_Review_5-8-2026.csv</span></div>
+            <div style="font-weight:700;font-size:13px;color:#03654e;margin-bottom:6px;display:flex;align-items:center;gap:6px;">⚠ Disciplinary Points <span style="font-weight:400;font-size:11px;color:var(--text-muted);">Each entry is one dated event · active points roll off after 12 months · 4+ blocks bonus, 6+ blocks raise</span></div>
+            <div style="background:#f8f7f4;border:1px solid var(--border);border-radius:8px;padding:10px;">
+              <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
+                <select id="disc-emp" style="font-size:12px;padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:white;min-width:200px;">
+                  <option value="">— Select employee —</option>
+                </select>
+                <input type="number" id="disc-points" min="1" max="20" step="1" placeholder="Points" style="font-size:12px;padding:5px 8px;border-radius:6px;border:1px solid var(--border);width:80px;">
+                <input type="date" id="disc-date" style="font-size:12px;padding:5px 8px;border-radius:6px;border:1px solid var(--border);">
+                <input type="text" id="disc-reason" placeholder="Reason (optional)" style="font-size:12px;padding:5px 8px;border-radius:6px;border:1px solid var(--border);width:200px;">
+                <button class="btn btn-primary btn-sm" onclick="addDiscEvent()">+ Add Points</button>
               </div>
-              <div style="background:#f8f7f4;border:1px solid var(--border);border-radius:8px;padding:10px;">
-                <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:4px;">Employee Report</div>
-                <div style="font-size:12px;">Must include "employee" or "emp" — e.g. <span class="folder-name">Employee_Performance_5-8-2026.csv</span></div>
+              <div id="disc-table-container">
+                <div style="color:var(--text-muted);font-size:12px;">No disciplinary points on record.</div>
               </div>
-            </div>
-          </div>
-
-          <!-- Monthly Files -->
-          <div style="margin-bottom:1.2rem;">
-            <div style="font-weight:700;font-size:13px;color:#03654e;margin-bottom:6px;">📆 Monthly Reports</div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-              <div style="background:#f8f7f4;border:1px solid var(--border);border-radius:8px;padding:10px;">
-                <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:4px;">Stylist Bonus File</div>
-                <div style="font-size:12px;">Must include "bonus" — e.g. <span class="folder-name">Bonus_Jan2026.csv</span><br>Drop each month after the period ends.</div>
-              </div>
-              <div style="background:#f8f7f4;border:1px solid var(--border);border-radius:8px;padding:10px;">
-                <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:4px;">Payroll Consolidated File</div>
-                <div style="font-size:12px;">Must start with "Payroll_Consolidated" — e.g. <span class="folder-name">Payroll_Consolidated_2026-04-03_-_2026-04-24.csv</span><br>Used for accurate manager and AM hours including vacation and holiday.</div>
-              </div>
-              <div style="background:#f8f7f4;border:1px solid var(--border);border-radius:8px;padding:10px;">
-                <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:4px;">Salon Summary File</div>
-                <div style="font-size:12px;">Must start with "Salon Summary" — e.g. <span class="folder-name">Salon Summary - Salon Month 19 salons...</span><br>Used to calculate manager bonuses.</div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Standing Files -->
-          <div style="margin-bottom:1.2rem;">
-            <div style="font-weight:700;font-size:13px;color:#03654e;margin-bottom:6px;">📁 Standing Files <span style="font-weight:400;font-size:11px;color:var(--text-muted);">Update as needed</span></div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-              <div style="background:#f8f7f4;border:1px solid var(--border);border-radius:8px;padding:10px;">
-                <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:4px;">Home Department File</div>
-                <div style="font-size:12px;">Must include "home" — re-drop when stylists change salons or new hires join. Includes hire dates and base wages.</div>
-              </div>
-              <div style="background:#f8f7f4;border:1px solid var(--border);border-radius:8px;padding:10px;">
-                <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:4px;">Disciplinary Points</div>
-                <div style="font-size:12px;">Lives permanently in upload folder. Update your tracking sheet then click Refresh below.</div>
-                <button class="btn btn-secondary btn-sm" id="refresh-disc-btn" onclick="refreshDiscPoints()" style="margin-top:8px;">🔄 Refresh Disc Points</button>
-                <span id="refresh-disc-status" style="display:block;margin-top:4px;font-size:11px;color:var(--text-muted);"></span>
-              </div>
+              <span id="disc-save-status" style="display:block;margin-top:6px;font-size:11px;color:var(--text-muted);"></span>
             </div>
           </div>
 
@@ -657,9 +626,6 @@
 
         </div>
         <div class="refresh-btn">
-          <button class="btn btn-primary" onclick="checkForNewFiles()">⟳ Check for New Files Now</button>
-          <button class="btn btn-secondary btn-sm" onclick="deduplicateData()" style="margin-left:8px;" title="Remove duplicate employee records">⊘ Fix Duplicates</button>
-          <button class="btn btn-secondary btn-sm" onclick="wipeAndReprocess()" style="margin-left:8px;border-color:#b83232;color:#b83232;" title="Clears all stored data and reprocesses all files from scratch">⚠ Wipe &amp; Reprocess All</button>
           <span id="refresh-status" style="font-size:12px;color:var(--text-muted);margin-left:10px;"></span>
         </div>
       </div>
@@ -1109,6 +1075,8 @@ function switchToAdmin(){
   renderManagerTable();
   populateWaiverDropdowns();
   renderWaiverTable();
+  populateDiscControls();
+  loadDiscPoints(()=>renderDiscTable());
   populateAMAssignControls();
   renderAMAssignTable();
 }
@@ -2218,75 +2186,6 @@ function setCoAMMode(mode){
 }
 
 // ── Admin ─────────────────────────────────────────────────────
-function checkForNewFiles(){
-  document.getElementById('refresh-status').textContent = 'Processing files...';
-  document.querySelector('.refresh-btn button').disabled = true;
-
-  fetch('/api/gs/triggerProcessAndLoad',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})}).then(r=>r.json()).then(data=>{
-      const result = data.processResult || {};
-      const msg = result.message || 'Done';
-      const remaining = result.remaining || 0;
-
-      document.querySelector('.refresh-btn button').disabled = false;
-
-      if(remaining > 0){
-        document.getElementById('refresh-status').innerHTML =
-          `✓ ${msg} &nbsp;<button class="btn btn-secondary btn-sm" onclick="checkForNewFiles()" style="margin-left:8px;">Continue Processing</button>`;
-      } else {
-        document.getElementById('refresh-status').textContent = '✓ ' + msg;
-      }
-
-      if(data.weeks){
-        S.weekHistory = data.weeks;
-        S.trackerData = data.trackerData || {};
-        if(S.weekHistory.length > 0){
-          const sorted = [...S.weekHistory].sort((a,b)=>new Date(b.weekEnding)-new Date(a.weekEnding));
-          S.currentWeek = sorted[0].weekEnding;
-        }
-        updateWeekDropdown();
-        renderWeeksList();
-        document.getElementById('last-updated').textContent = new Date().toLocaleTimeString();
-      }
-    }).catch(err=>{
-      document.querySelector('.refresh-btn button').disabled = false;
-      document.getElementById('refresh-status').textContent = 'Error: ' + err;
-    });
-}
-
-function deduplicateData(){
-  document.getElementById('refresh-status').textContent = 'Removing duplicates...';
-  fetch('/api/gs/deduplicateEmpData').then(r=>r.json()).then(result=>{
-      if(result.error){
-        document.getElementById('refresh-status').textContent = 'Error: ' + result.error;
-      } else {
-        document.getElementById('refresh-status').textContent = '✓ Removed ' + result.removed + ' duplicate rows — reloading data...';
-        // Reload data
-        fetch('/api/gs/getAllData').then(r=>r.json()).then(data=>{
-            if(data.weeks){ S.weekHistory=data.weeks; S.trackerData=data.trackerData||{}; updateWeekDropdown(); renderWeeksList(); }
-            document.getElementById('refresh-status').textContent = '✓ Done — removed ' + result.removed + ' duplicates';
-          })
-          .catch(err=>console.error(err));
-      }
-    }).catch(err=>{ document.getElementById('refresh-status').textContent = 'Error: ' + err; });
-}
-
-function wipeAndReprocess(){
-  if(!confirm('This will DELETE all stored salon and employee data and reprocess every file from scratch. Continue?')) return;
-  document.getElementById('refresh-status').textContent = 'Wiping data...';
-  document.querySelector('.refresh-btn button').disabled = true;
-  fetch('/api/gs/clearAllData',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})}).then(r=>r.json()).then(data=>{
-      document.getElementById('refresh-status').textContent = '✓ Data cleared — now processing files...';
-      S.weekHistory = [];
-      S.currentWeek = null;
-      updateWeekDropdown();
-      setTimeout(checkForNewFiles, 500);
-    })
-    .catch(err=>{
-      document.querySelector('.refresh-btn button').disabled = false;
-      document.getElementById('refresh-status').textContent = 'Error: ' + err;
-    });
-}
-
 function renderWeeksList(){
   const el=document.getElementById('weeks-list');
   if(!el) return;
@@ -2395,8 +2294,8 @@ function bonusByAM(amId, periodKey){
 
 function renderBonus(){
   if(!S.currentAM) return;
-  if(Object.keys(_discPoints).length === 0){
-    fetch('/api/gs/getDiscPoints').then(r=>r.json()).then(r=>{ _discPoints = r.success?r.points:{}; renderBonus(); }).catch(()=>{ renderBonus(); });
+  if(!_discLoaded){
+    loadDiscPoints(()=>renderBonus());
   }
 
   const container = document.getElementById('bonus-container');
@@ -2575,8 +2474,10 @@ function buildBonusMonth(){
         return;
       }
 
-      // Disc ineligibility is stored at processing time in BonusData
-      const discIneligible = e.discIneligible==='true' || e.discIneligible===true;
+      // Disc ineligibility computed live: active points (rolling 12mo) as of
+      // this bonus period's month. 4+ → no bonus.
+      const discPtsActive = activeDiscPoints(e.globalId, S_bonusPeriod);
+      const discIneligible = discPtsActive >= 4;
 
       const pC = payout>0?(pp<0.5?'bv-yellow':'bv-green'):'bv-red';
       const prC = prod<BONUS_CFG.PROD_1?'bv-orange':prod<BONUS_CFG.PROD_2?'bv-yellow':'bv-green';
@@ -2585,7 +2486,7 @@ function buildBonusMonth(){
       const mbC = mbc<=BONUS_CFG.MBC_2?'bv-green':mbc<=BONUS_CFG.MBC_1?'bv-yellow':'bv-red';
       const hcC = (hc>=BONUS_CFG.HC_E_LO&&hc<=BONUS_CFG.HC_E_HI)?'bv-green':(hc>=BONUS_CFG.HC_G_LO1&&hc<=BONUS_CFG.HC_G_HI2)?'bv-yellow':'bv-red';
       const notes = [];
-      if(discIneligible) notes.push('⚠ Disc. ineligible');
+      if(discIneligible) notes.push('⚠ Disc. ineligible ('+discPtsActive+' pts)');
       if(e.prodPenalty==='true'||e.prodPenalty===true) notes.push('Prod <4% → ×0.25');
       if((e.eligible==='false'||e.eligible===false)&&potential>0) notes.push('<5 pts');
       if(potential===0) notes.push('Hrs <10');
@@ -2601,8 +2502,8 @@ function buildBonusMonth(){
         <td>${isNaN(pts)?'—':pts}</td>
         <td>${e.perPt?'$'+e.perPt:'—'}</td>
         <td>${potential>0?fmtMoney(potential):'$0'}</td>
-        <td class="${(e.discIneligible==='true'||e.discIneligible===true)?'bv-red':pC}">${(e.discIneligible==='true'||e.discIneligible===true)?'$0.00':fmtMoney(payout)}</td>
-        <td class="${(e.discIneligible==='true'||e.discIneligible===true)?'bv-red':pC}">${(e.discIneligible==='true'||e.discIneligible===true)?'Ineligible':potential>0?Math.round(pp*100)+'%':'—'}</td>
+        <td class="${discIneligible?'bv-red':pC}">${discIneligible?'$0.00':fmtMoney(payout)}</td>
+        <td class="${discIneligible?'bv-red':pC}">${discIneligible?'Ineligible':potential>0?Math.round(pp*100)+'%':'—'}</td>
         <td style="font-size:10px;color:#666;">${notes.join('; ')}</td>
       </tr>`;
     });
@@ -4778,9 +4679,10 @@ function buildCompanyBonusAllStylists(){
     const pp=potential>0?Math.round(payout/potential*100)+'%':'—';
     const pCls=payout>0?(payout/potential>=0.5?'bv-green':'bv-yellow'):'bv-red';
     const amId=amOf(e.salonNum); const am=AMS[amId]||{name:'?',color:'#999'};
-    const discInelig = e.discIneligible==='true'||e.discIneligible===true;
+    const discPtsA = activeDiscPoints(e.globalId, S_bonusPeriod);
+    const discInelig = discPtsA >= 4;
     const notes=[];
-    if(discInelig) notes.push('⚠ Disc. ineligible');
+    if(discInelig) notes.push('⚠ Disc. ineligible ('+discPtsA+' pts)');
     if(e.prodPenalty==='true'||e.prodPenalty===true) notes.push('Prod <4%→×0.25');
     if((e.eligible==='false'||e.eligible===false)&&potential>0) notes.push('<5 pts');
     if(potential===0||potential==='0') notes.push('Hrs <10');
@@ -5480,7 +5382,130 @@ function drawProfileChart(mk){
 let _reviewGlobalId = null;
 let _reviewName     = null;
 let _reviewYear     = new Date().getFullYear() - 1; // default prior year
-let _discPoints     = {}; // name.lower -> points (loaded once)
+let _discEvents     = [];   // [{eventId,globalId,employeeName,points,date,reason}]
+let _discByEmp      = {};   // globalId -> [events]
+let _discLoaded     = false;
+
+// Active disciplinary points for an employee as of a bonus period, using the
+// rolling 12-month window: a point incurred in month M counts for periods M
+// through M+11 (received month inclusive), then drops off. Anchored to the
+// PERIOD's month so a past bonus permanently reflects that month's standing.
+function discMonthKey(isoDate){
+  // YYYY-MM-DD -> same month-index space as periodSortKey (year*12 + monthIdx)
+  const m = String(isoDate||'').match(/^(\d{4})-(\d{2})/);
+  if(!m) return null;
+  return parseInt(m[1],10)*12 + (parseInt(m[2],10)-1);
+}
+function activeDiscPoints(globalId, periodKey){
+  const evs = _discByEmp[globalId];
+  if(!evs || !evs.length) return 0;
+  const evalKey = periodSortKey(periodKey); // year*12 + monthIdx
+  let total = 0;
+  for(const e of evs){
+    const mk = discMonthKey(e.date);
+    if(mk===null) continue;
+    const diff = evalKey - mk;
+    if(diff >= 0 && diff <= 11) total += Number(e.points)||0; // within 12-month window
+  }
+  return total;
+}
+function discBonusIneligible(globalId, periodKey){ return activeDiscPoints(globalId, periodKey) >= 4; }
+function discRaiseIneligible(globalId, periodKey){ return activeDiscPoints(globalId, periodKey) >= 6; }
+
+function loadDiscPoints(cb){
+  fetch('/api/gs/getDiscPoints').then(r=>r.json()).then(r=>{
+    _discEvents = r.success ? (r.events||[]) : [];
+    _discByEmp  = r.success ? (r.byEmp||{}) : {};
+    _discLoaded = true;
+    if(cb) cb();
+  }).catch(()=>{ _discLoaded = true; if(cb) cb(); });
+}
+
+// ── Disciplinary Points admin editor ──────────────────────────
+function populateDiscControls(){
+  const sel = document.getElementById('disc-emp');
+  if(!sel) return;
+  // Build employee list from all known stylists across loaded weeks (globalId → name)
+  const byId = {};
+  (S.weekHistory||[]).forEach(w=>(w.emps||[]).forEach(e=>{
+    const gid = String(e.globalId||'').trim();
+    if(gid && !byId[gid]) byId[gid] = { name: e.empName||e.employeeName||gid, salon: e.salonNum||'' };
+  }));
+  const opts = Object.entries(byId)
+    .sort((a,b)=>a[1].name.localeCompare(b[1].name))
+    .map(([gid,o])=>`<option value="${gid}" data-name="${o.name.replace(/"/g,'')}">${o.name} (${o.salon})</option>`)
+    .join('');
+  sel.innerHTML = '<option value="">— Select employee —</option>' + opts;
+  // default date to today
+  const d = document.getElementById('disc-date');
+  if(d && !d.value) d.value = new Date().toISOString().slice(0,10);
+}
+
+function renderDiscTable(){
+  const el = document.getElementById('disc-table-container');
+  if(!el) return;
+  if(!_discEvents.length){
+    el.innerHTML = '<div style="color:var(--text-muted);font-size:12px;">No disciplinary points on record.</div>';
+    return;
+  }
+  // Group by employee, newest first, with active-as-of-today total
+  const curPeriod = periodKeyFromWeekEnd(new Date().toISOString());
+  const byEmp = {};
+  _discEvents.forEach(e=>{ (byEmp[e.globalId] ||= []).push(e); });
+  const blocks = Object.entries(byEmp).map(([gid,evs])=>{
+    evs.sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+    const active = activeDiscPoints(gid, curPeriod);
+    const name = evs[0].employeeName || gid;
+    const flag = active>=6?'<span style="color:#9C0006;font-weight:700;"> · raise+bonus ineligible</span>':active>=4?'<span style="color:#843C0C;font-weight:700;"> · bonus ineligible</span>':'';
+    const rows = evs.map(e=>{
+      const mk = discMonthKey(e.date), ek = periodSortKey(curPeriod);
+      const expired = mk===null || (ek-mk)>11;
+      return `<tr style="${expired?'opacity:.45;':''}">
+        <td style="padding:3px 8px;">${e.date}</td>
+        <td style="padding:3px 8px;font-weight:700;">${e.points}</td>
+        <td style="padding:3px 8px;color:var(--text-muted);">${e.reason||''}${expired?' (expired)':''}</td>
+        <td style="padding:3px 8px;"><a href="javascript:void(0)" onclick="removeDiscEvent('${e.eventId}')" style="color:#9C0006;font-size:11px;">✕</a></td>
+      </tr>`;
+    }).join('');
+    return `<div style="margin-bottom:10px;">
+      <div style="font-size:12px;font-weight:700;margin-bottom:2px;">${name} — <span style="color:${active>=4?'#9C0006':'#2a7a4a'};">${active} active</span>${flag}</div>
+      <table style="font-size:12px;border-collapse:collapse;"><tbody>${rows}</tbody></table>
+    </div>`;
+  });
+  el.innerHTML = blocks.join('');
+}
+
+function addDiscEvent(){
+  const sel = document.getElementById('disc-emp');
+  const gid = sel.value;
+  const name = sel.options[sel.selectedIndex]?.getAttribute('data-name') || '';
+  const points = parseInt(document.getElementById('disc-points').value,10);
+  const date = document.getElementById('disc-date').value;
+  const reason = document.getElementById('disc-reason').value.trim();
+  if(!gid || !points || points<1 || !date){ alert('Select an employee, a points value (1+), and a date.'); return; }
+  const status = document.getElementById('disc-save-status');
+  if(status){ status.textContent='Saving...'; status.style.color='var(--text-muted)'; }
+  fetch('/api/gs/saveDiscPoints',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({action:'add', event:{globalId:gid, employeeName:name, points, date, reason}})
+  }).then(r=>r.json()).then(r=>{
+    if(!r.success){ if(status){status.textContent='✗ '+r.error;status.style.color='#9C0006';} return; }
+    if(status){ status.textContent='✓ Added'; status.style.color='#2a7a4a'; }
+    document.getElementById('disc-points').value='';
+    document.getElementById('disc-reason').value='';
+    loadDiscPoints(()=>{ renderDiscTable(); });
+  }).catch(e=>{ if(status){status.textContent='✗ '+e;status.style.color='#9C0006';} });
+}
+
+function removeDiscEvent(eventId){
+  if(!confirm('Remove this disciplinary point entry?')) return;
+  const status = document.getElementById('disc-save-status');
+  fetch('/api/gs/saveDiscPoints',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({action:'remove', eventId})
+  }).then(r=>r.json()).then(r=>{
+    if(status){ status.textContent = r.success?'✓ Removed':'✗ '+r.error; status.style.color = r.success?'#2a7a4a':'#9C0006'; }
+    loadDiscPoints(()=>{ renderDiscTable(); });
+  });
+}
 
 const REVIEW_RAISE = {11:.20,12:.25,13:.30,14:.35,15:.40,16:.45,17:.50,18:.55,19:.60,20:.70};
 const REVIEW_MIN_PTS = 11;
@@ -5539,31 +5564,27 @@ function loadReview(){
 
   fetch('/api/gs/getReviewData',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({globalId:_reviewGlobalId,year:_reviewYear})}).then(r=>r.json()).then(data=>{ reviewData = data; reviewDone = true; tryRender(); }).catch(err=>{ reviewData = {success:false,error:String(err)}; reviewDone = true; tryRender(); });
 
-  // Always fetch fresh disc points
-  fetch('/api/gs/getDiscPoints').then(r=>r.json()).then(r=>{ _discPoints = r.success ? r.points : {}; discDone = true; tryRender(); }).catch(()=>{ _discPoints = {}; discDone = true; tryRender(); });
+  // Always fetch fresh disc events
+  loadDiscPoints(()=>{ discDone = true; tryRender(); });
+}
+
+// "Mon YY" period key for a given week-ending ISO (its calendar month)
+function periodKeyFromWeekEnd(iso){
+  const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const m = String(iso||'').match(/^(\d{4})-(\d{2})/);
+  if(!m) return '';
+  return M[parseInt(m[2],10)-1] + ' ' + m[1].slice(2);
 }
 
 function renderReview(data){
   if(!data.success){ document.getElementById('review-body').innerHTML = '<div style="padding:20px;color:red;">'+data.error+'</div>'; return; }
 
-  // Get disc points - match by Global ID first (most reliable), then name
-  const nameLower = (_reviewName||'').toLowerCase().trim();
-  let discPts = 0;
-
-  // Try Global ID match first
-  if(_reviewGlobalId && _discPoints['id:'+_reviewGlobalId] !== undefined){
-    discPts = _discPoints['id:'+_reviewGlobalId];
-  } else if(_discPoints[nameLower] !== undefined){
-    discPts = _discPoints[nameLower];
-  } else {
-    // Fallback: try reversed name "First Last" from "Last, First"
-    const nameParts = nameLower.split(',').map(s=>s.trim());
-    const nameReversed = nameParts.length > 1 ? (nameParts[1]+' '+nameParts[0]) : nameLower;
-    if(_discPoints[nameReversed] !== undefined){
-      discPts = _discPoints[nameReversed];
-    }
-  }
-  const discIneligible = discPts >= 4;
+  // Active disciplinary points as of the current period (rolling 12 months).
+  // 4+ → bonus ineligible; 6+ → raise ineligible.
+  const curPeriod = periodKeyFromWeekEnd(S.currentWeek) || periodKeyFromWeekEnd(new Date().toISOString());
+  const discPts = activeDiscPoints(_reviewGlobalId, curPeriod);
+  const discBonusInelig = discPts >= 4;
+  const discIneligible = discPts >= 6; // raise ineligibility (this view is about raises)
 
   const home = S.homeDataMap ? S.homeDataMap[_reviewGlobalId] : null;
   const baseWage = home ? (parseFloat(home.baseWage)||0) : 0;
@@ -5689,11 +5710,11 @@ function renderReview(data){
 
       <!-- Disciplinary note -->
       <div style="margin-top:8px;padding:8px 10px;border:1px solid ${discIneligible?'#9C0006':'#ddd'};background:${discIneligible?'#FFC7CE':'#f9f9f9'};border-radius:4px;display:flex;align-items:center;gap:10px;">
-        <div style="font-size:22px;font-weight:700;color:${discIneligible?'#9C0006':'#2a7a4a'};min-width:30px;">${discPts}</div>
+        <div style="font-size:22px;font-weight:700;color:${discIneligible?'#9C0006':discBonusInelig?'#843C0C':'#2a7a4a'};min-width:30px;">${discPts}</div>
         <div>
-          <div style="font-size:11px;font-weight:700;">Disciplinary Points</div>
-          <div style="font-size:10px;color:#666;">${discIneligible?'⚠ Ineligible for raise (4+ points)':'No impact on raise eligibility'}</div>
-          <div style="font-size:9px;color:#999;margin-top:2px;">4 or more points eliminates raise eligibility</div>
+          <div style="font-size:11px;font-weight:700;">Disciplinary Points <span style="font-weight:400;color:#999;">(active, rolling 12 mo)</span></div>
+          <div style="font-size:10px;color:#666;">${discIneligible?'⚠ Ineligible for raise (6+ points)':discBonusInelig?'⚠ Ineligible for bonus (4+); raise still eligible':'No impact on bonus or raise'}</div>
+          <div style="font-size:9px;color:#999;margin-top:2px;">4+ points → no bonus · 6+ points → no raise</div>
         </div>
       </div>
     </div>
@@ -6003,32 +6024,6 @@ function openBulkPrintWindow(data){
   w.document.close();
 }
 
-function refreshDiscPoints(){
-  const btn    = document.getElementById('refresh-disc-btn');
-  const status = document.getElementById('refresh-disc-status');
-  btn.disabled = true;
-  btn.textContent = '⏳ Refreshing...';
-  status.textContent = '';
-  fetch('/api/gs/reprocessDiscPoints',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})}).then(r=>r.json()).then(r=>{
-      btn.disabled = false;
-      btn.textContent = '🔄 Refresh Disc Points';
-      if(r.success){
-        status.textContent = '✓ Updated — ' + new Date().toLocaleTimeString();
-        status.style.color = '#2a7a4a';
-        // Clear cached disc points so next review load fetches fresh
-        _discPoints = {};
-      } else {
-        status.textContent = '✗ ' + (r.error||'Error');
-        status.style.color = '#9C0006';
-      }
-    })
-    .catch(err=>{
-      btn.disabled = false;
-      btn.textContent = '🔄 Refresh Disc Points';
-      status.textContent = '✗ ' + String(err);
-      status.style.color = '#9C0006';
-    });
-}
 
 // ── Start ─────────────────────────────────────────────────────
 init();
