@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Login Test — Longitude</title>
+<style>
+  body{font-family:Arial,Helvetica,sans-serif;background:#f4f4f2;margin:0;padding:40px;color:#222;}
+  .card{max-width:440px;margin:40px auto;background:#fff;border:1px solid #ddd;border-radius:12px;padding:28px;}
+  h1{font-size:20px;color:#03654e;margin:0 0 6px;}
+  p.sub{color:#666;font-size:13px;margin:0 0 20px;}
+  label{display:block;font-size:13px;font-weight:600;margin-bottom:6px;}
+  input{width:100%;box-sizing:border-box;padding:10px 12px;font-size:14px;border:1px solid #ccc;border-radius:8px;margin-bottom:14px;}
+  #code{letter-spacing:6px;font-size:20px;text-align:center;}
+  button{background:#03654e;color:#fff;border:none;padding:11px 20px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;width:100%;}
+  button:disabled{opacity:.6;cursor:default;}
+  .step2{display:none;}
+  .out{margin-top:18px;padding:12px;border-radius:8px;font-size:13px;white-space:pre-wrap;word-break:break-word;display:none;}
+  .out.ok{background:#e8f5ee;border:1px solid #a9d8bf;color:#0a5236;display:block;}
+  .out.err{background:#fdecea;border:1px solid #f0b4ae;color:#8a1c12;display:block;}
+  .link{margin-top:12px;font-size:12px;color:#03654e;cursor:pointer;text-decoration:underline;}
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Login Test</h1>
+    <p class="sub">Step 1: enter your email, get a code. Step 2: enter the code to sign in.</p>
+
+    <div id="step1">
+      <label for="email">Email</label>
+      <input type="email" id="email" placeholder="you@example.com" autocomplete="off">
+      <button id="btn1" onclick="requestCode()">Send code</button>
+    </div>
+
+    <div id="step2" class="step2">
+      <label for="code">6-digit code (sent to <span id="emailEcho"></span>)</label>
+      <input type="text" id="code" maxlength="6" inputmode="numeric" placeholder="000000" autocomplete="off">
+      <button id="btn2" onclick="verify()">Verify & sign in</button>
+      <div class="link" onclick="backToStep1()">Use a different email</div>
+    </div>
+
+    <div class="out" id="out"></div>
+  </div>
+<script>
+let currentEmail = '';
+function show(cls, msg){ const o=document.getElementById('out'); o.className='out '+cls; o.textContent=msg; }
+
+async function requestCode(){
+  const btn=document.getElementById('btn1');
+  currentEmail=document.getElementById('email').value.trim();
+  btn.disabled=true; btn.textContent='Sending...';
+  try{
+    const res=await fetch('/api/auth/request-link',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:currentEmail})});
+    const data=await res.json();
+    show('ok', data.message || 'Code sent.');
+    document.getElementById('emailEcho').textContent=currentEmail;
+    document.getElementById('step1').style.display='none';
+    document.getElementById('step2').style.display='block';
+    document.getElementById('code').focus();
+  }catch(e){ show('err','Request failed: '+e.message); }
+  btn.disabled=false; btn.textContent='Send code';
+}
+
+async function verify(){
+  const btn=document.getElementById('btn2');
+  const code=document.getElementById('code').value.trim();
+  btn.disabled=true; btn.textContent='Verifying...';
+  try{
+    const res=await fetch('/api/auth/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:currentEmail, code})});
+    const data=await res.json();
+    if(data.ok){ show('ok','✓ Signed in! Role: '+data.role+'\nA session cookie is now set. (longitude_session)'); }
+    else{
+      const msg={invalid:'Wrong code. Try again.',expired:'Code expired — request a new one.',locked:'Too many attempts — request a new code.',used:'That code was already used — request a new one.'}[data.reason]||('Failed: '+data.reason);
+      show('err', msg);
+    }
+  }catch(e){ show('err','Verify failed: '+e.message); }
+  btn.disabled=false; btn.textContent='Verify & sign in';
+}
+
+function backToStep1(){
+  document.getElementById('step2').style.display='none';
+  document.getElementById('step1').style.display='block';
+  document.getElementById('out').className='out';
+  document.getElementById('code').value='';
+}
+</script>
+</body>
+</html>

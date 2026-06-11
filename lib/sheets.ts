@@ -108,6 +108,26 @@ export async function getAMAssignments() {
     return []
   }
 }
+export async function getAreaManagers() {
+  // AM identity (key, name, init, color, globalId, payId). Editable source of
+  // truth that replaces the hardcoded AMS constant. Salons are NOT stored here
+  // — those live in AMAssignments (effective-dated). Tolerant of a missing tab.
+  try {
+    return rowsToObjects(await readSheet('AreaManagers'))
+  } catch {
+    return []
+  }
+}
+export async function getEmployeeProfiles() {
+  // SD3-sourced employee profiles incl. login email (globalId, email, ...).
+  // SERVER-ONLY: email is PII + an auth credential — never include this in any
+  // payload sent to the browser. Tolerant of a missing tab.
+  try {
+    return rowsToObjects(await readSheet('EmployeeProfile'))
+  } catch {
+    return []
+  }
+}
 export async function getHomeData() {
   return rowsToObjects(await readSheet('HomeData'))
 }

@@ -54,8 +54,11 @@ export async function GET(request: Request) {
 
   const results: any[] = []
 
-  // 1. Daily — always
+  // 1. Daily — always. Includes the employee profile scrape so login emails
+  //    refresh every night: when SD3 drops a departed employee, their email
+  //    drops from EmployeeProfile within a day and their access is revoked.
   results.push({ name: 'daily', result: await runDailyScrape() })
+  results.push({ name: 'profile', result: await runProfileScrape() })
 
   // 2. Weekly — only on Saturday. Salon weekly first, then the three
   //    weekly-cadence entity scrapers. Each runner catches its own errors
@@ -67,11 +70,9 @@ export async function GET(request: Request) {
     results.push({ name: 'payroll',  result: await runPayrollScrape() })
   }
 
-  // 3. Monthly — only when yesterday was a month-end Friday. Salon monthly
-  //    plus the profile scrape (hire/rehire/home-store changes rarely).
+  // 3. Monthly — only when yesterday was a month-end Friday.
   if (isMonthEnd) {
     results.push({ name: 'monthly', result: await runMonthlyScrape() })
-    results.push({ name: 'profile', result: await runProfileScrape() })
   }
 
   const allOk = results.every(r => r.result.ok)

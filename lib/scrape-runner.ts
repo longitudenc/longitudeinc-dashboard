@@ -604,6 +604,7 @@ const EMP_PROFILE_TAB = 'EmployeeProfile'
 
 const PROFILE_COLUMNS = [
   'globalId',       // join key — from globalEmployeeKey (e.g. "2023-0000-7354")
+  'email',          // emailAddress, lowercased — AUTH USE ONLY (see PII note below)
   'dateOfHire',     // YYYY-MM-DD
   'rehireDate',     // YYYY-MM-DD or ''
   'homeStoreNum',   // public salon number, from primaryStoreDict.n (e.g. "2554")
@@ -626,8 +627,14 @@ function extractEmployees(payload: unknown): any[] {
   return []
 }
 
-// STRICT ALLOW-LIST. Reads only the six named fields. Returns null if there's
+// STRICT ALLOW-LIST. Reads only the named fields. Returns null if there's
 // no globalEmployeeKey (can't join without it).
+//
+// PII NOTE: `email` (from emailAddress) is read here BY NAME like every other
+// field — the source object is never spread, so photos/addresses/phone never
+// leak. Email is stored ONLY in the server-side EmployeeProfile tab for login
+// resolution; it is never included in the getAllData payload sent to browsers,
+// and never logged.
 function profileRow(e: any): Record<string, any> | null {
   const globalId = String(e?.globalEmployeeKey || '').trim()
   if (!globalId) return null
@@ -636,6 +643,7 @@ function profileRow(e: any): Record<string, any> | null {
     : {}
   return {
     globalId,
+    email: e?.emailAddress ? String(e.emailAddress).trim().toLowerCase() : '',
     dateOfHire: e?.dateOfHire ? String(e.dateOfHire).trim() : '',
     rehireDate: e?.rehireDate ? String(e.rehireDate).trim() : '',
     homeStoreNum: home?.n != null ? String(home.n).trim() : '',

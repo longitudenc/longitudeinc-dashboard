@@ -281,6 +281,33 @@
   <div>Loading AM Dashboard...</div>
 </div>
 
+<!-- Login overlay (shown when not signed in) -->
+<div id="login-overlay" style="display:none;position:fixed;inset:0;background:#03654e;z-index:1000;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:16px;padding:34px 30px;width:360px;max-width:90vw;box-shadow:0 12px 40px rgba(0,0,0,.25);">
+    <img src="longitude-badge.png?v=1" alt="Longitude Inc" style="width:72px;height:72px;display:block;margin:0 auto 14px;" />
+    <div style="text-align:center;font-size:18px;font-weight:700;color:#03654e;margin-bottom:4px;">Longitude Dashboard</div>
+    <div id="login-sub" style="text-align:center;font-size:13px;color:#666;margin-bottom:20px;">Sign in with your work email</div>
+
+    <div id="login-step-email">
+      <input type="email" id="login-email" placeholder="you@example.com" autocomplete="username"
+        style="width:100%;box-sizing:border-box;padding:11px 13px;font-size:14px;border:1px solid #ccc;border-radius:9px;margin-bottom:12px;">
+      <button id="login-btn-email" onclick="loginRequestCode()"
+        style="width:100%;background:#03654e;color:#fff;border:none;padding:12px;border-radius:9px;font-size:14px;font-weight:600;cursor:pointer;">Send code</button>
+    </div>
+
+    <div id="login-step-code" style="display:none;">
+      <input type="text" id="login-code" maxlength="6" inputmode="numeric" placeholder="000000" autocomplete="one-time-code"
+        style="width:100%;box-sizing:border-box;padding:11px 13px;font-size:20px;letter-spacing:6px;text-align:center;border:1px solid #ccc;border-radius:9px;margin-bottom:12px;">
+      <button id="login-btn-code" onclick="loginVerifyCode()"
+        style="width:100%;background:#03654e;color:#fff;border:none;padding:12px;border-radius:9px;font-size:14px;font-weight:600;cursor:pointer;">Verify &amp; sign in</button>
+      <div onclick="loginBackToEmail()" style="text-align:center;font-size:12px;color:#03654e;cursor:pointer;text-decoration:underline;margin-top:12px;">Use a different email</div>
+    </div>
+
+    <div id="login-msg" style="margin-top:14px;font-size:13px;text-align:center;min-height:18px;"></div>
+  </div>
+</div>
+
+
 <header class="app-header">
   <div style="display:flex;align-items:center;">
     <button class="sidebar-toggle" id="sidebar-toggle-btn" onclick="toggleSidebar()" title="Show/hide sidebar">☰</button>
@@ -299,7 +326,7 @@
         <div id="week-dropdown-items"><div class="week-dropdown-item" style="color:var(--text-muted);font-style:italic;">Loading...</div></div>
       </div>
     </div>
-    <div class="user-chip" id="user-chip" title="admin access">Loading...</div>
+    <div class="user-chip" id="user-chip" title="Click to sign out" onclick="if(confirm('Sign out?')) logout();" style="cursor:pointer;">Loading...</div>
   </div>
 </header>
 
@@ -643,10 +670,9 @@
       <div style="text-align:center;padding:4rem 2rem;">
         <div style="font-size:48px;margin-bottom:1rem;">🔒</div>
         <h2 style="color:var(--primary);margin-bottom:8px;">Access Restricted</h2>
-        <p style="color:var(--text-muted);">Your email address (<span id="no-access-email"></span>) is not registered.<br>Contact your administrator to get access.</p>
-        <div style="margin-top:1.5rem;padding:12px 20px;background:#f8f7f4;border:1px solid #ddd;border-radius:8px;font-size:12px;color:#666;max-width:400px;margin-left:auto;margin-right:auto;">
-          <strong>Server detected:</strong> <span style="font-family:monospace;color:#03654e;">''</span><br>
-          <span style="font-size:11px;">Make sure you are signed into your Great Clips Google account, then refresh.</span>
+        <p style="color:var(--text-muted);">Your email address (<span id="no-access-email"></span>) isn't registered for access.<br>Contact your administrator to get access.</p>
+        <div style="margin-top:1.5rem;padding:12px 20px;background:#f8f7f4;border:1px solid #ddd;border-radius:8px;font-size:12px;color:#666;max-width:420px;margin-left:auto;margin-right:auto;">
+          <span style="font-size:11px;">Make sure you signed in with the email address used on the salon iPads, then try again.</span>
         </div>
       </div>
     </div>
@@ -656,11 +682,20 @@
 <div class="status-bar">Last updated: <span id="last-updated">—</span></div>
 
 <script>
-// ── Server-injected values ────────────────────────────────────
-const USER_EMAIL  = 'longitudenc@gmail.com';
-const USER_ROLE   = 'admin'.replace(/"/g,'').trim();
-const USER_AM_ID  = ''.replace(/"/g,'').trim();
-const USER_AM_NAME= ''.replace(/"/g,'').trim();
+// ── User identity (populated from the real session in startDashboard) ──
+let USER_EMAIL  = '';
+let USER_ROLE   = 'none';
+let USER_AM_ID  = '';
+let USER_AM_NAME= '';
+
+// Role helpers — translate the auth vocabulary (owner/admin/viewer/
+// area_manager/manager/stylist) into the dashboard's access buckets.
+// Owner behaves as admin-plus; area_manager behaves as the old "am".
+function roleClean(){ return String(USER_ROLE||'').replace(/["']/g,'').trim(); }
+function isAdminRole(){ const r=roleClean(); return r==='owner'||r==='admin'; }
+function isViewerRole(){ return roleClean()==='viewer'; }
+function isAMRole(){ const r=roleClean(); return r==='area_manager'||r==='am'; }
+function canSeeAllSalons(){ return isAdminRole()||isViewerRole(); }
 
 const AMS = {
   cassi:     {name:'Cassi Sharpe',       init:'CS', color:'#a03030', globalId:'2014-0001-6376', salons:['3015','3058','4138']},
@@ -668,7 +703,7 @@ const AMS = {
   luann:     {name:'Luann Wetherington', init:'LW', color:'#6b3fa0', globalId:'2014-0001-5804', salons:['1304','3043','3545','8725']},
   dana:      {name:'Dana Gainous',       init:'DG', color:'#2a7a4a', globalId:'2014-0001-2977', salons:['3025','3027','7728']},
   bridgette: {name:'Bridgette Stout',    init:'BS', color:'#9a5a2a', globalId:'2014-0001-5799', salons:['3053','3685','9689']},
-  kayla:     {name:'Kayla Medlin',       init:'KM', color:'#8a2a80', globalId:'2014-0001-2984', salons:[]},
+  kayla:     {name:'Kayla Medlin',       init:'KM', color:'#8a2a80', globalId:'2014-0001-2984', payId:'5446', salons:[]},
 };
 
 // Last year (2025) weekly avg CC per salon — sourced from 2025_AVGs.XLS
@@ -892,15 +927,49 @@ function calcScore(sA,eA){
 function scoreTierLabel(total){ if(total>=24)return{label:'Performance Excellence',cls:'c4'}; if(total>=18)return{label:'Performance Growth',cls:'c3'}; if(total>=12)return{label:'Performance Minimum',cls:'c2'}; return{label:'Performance Warning',cls:'c1'}; }
 
 // ── Init ──────────────────────────────────────────────────────
-function init(){
-  try {
-    const cleanEmail = USER_EMAIL.replace(/"/g,'').trim();
-    const cleanRole  = USER_ROLE.replace(/"/g,'').trim();
-    document.getElementById('user-chip').textContent = cleanEmail || 'Unknown';
+// Real per-user identity, set from /api/auth/me after sign-in.
+let SESSION = { email: '', role: 'none', globalId: '', salons: [] };
 
-    if(cleanRole === 'none'){
+function init(){
+  // Ask the server who's signed in. No valid session → show login.
+  fetch('/api/auth/me').then(r=>r.json()).then(me=>{
+    if(!me || !me.access){
+      showLogin();
+      return;
+    }
+    SESSION = {
+      email: me.email || '',
+      role: me.access.role || 'none',
+      globalId: me.access.globalId || '',
+      salons: me.access.salons || []
+    };
+    startDashboard();
+  }).catch(()=>{ showLogin(); });
+}
+
+function startDashboard(){
+  try {
+    // Populate the legacy USER_* vars from the real session so existing
+    // role-gating reads the verified role/scope.
+    USER_EMAIL = SESSION.email || '';
+    USER_ROLE  = SESSION.role || 'none';
+    // Map an area_manager's globalId to their amKey (the dashboard's amId).
+    if(SESSION.role === 'area_manager' && SESSION.globalId){
+      const entry = Object.entries(AMS).find(([k,v])=>v.globalId===SESSION.globalId);
+      USER_AM_ID = entry ? entry[0] : '';
+      USER_AM_NAME = entry ? entry[1].name : '';
+    } else {
+      USER_AM_ID = '';
+      USER_AM_NAME = '';
+    }
+
+    const chip = document.getElementById('user-chip');
+    if(chip) chip.textContent = SESSION.email || 'Unknown';
+
+    if(SESSION.role === 'none'){
       showPage('noaccess');
-      document.getElementById('no-access-email').textContent = cleanEmail;
+      const el = document.getElementById('no-access-email');
+      if(el) el.textContent = SESSION.email;
       hideLoading();
       return;
     }
@@ -911,6 +980,64 @@ function init(){
     console.error('init error:', err);
     hideLoading();
   }
+}
+
+// ── Login overlay ──────────────────────────────────────────────
+function showLogin(){
+  hideLoading();
+  const ov = document.getElementById('login-overlay');
+  if(ov) ov.style.display = 'flex';
+  const em = document.getElementById('login-email');
+  if(em) em.focus();
+}
+function loginMsg(text, isErr){
+  const m = document.getElementById('login-msg');
+  if(m){ m.textContent = text || ''; m.style.color = isErr ? '#b3261e' : '#0a5236'; }
+}
+function loginRequestCode(){
+  const btn = document.getElementById('login-btn-email');
+  const email = (document.getElementById('login-email').value||'').trim();
+  if(!email || !email.includes('@')){ loginMsg('Enter a valid email.', true); return; }
+  window._loginEmail = email;
+  btn.disabled = true; btn.textContent = 'Sending…';
+  fetch('/api/auth/request-link',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})})
+    .then(r=>r.json()).then(d=>{
+      loginMsg(d.message || 'If that email is registered, a code was sent.');
+      document.getElementById('login-step-email').style.display='none';
+      document.getElementById('login-step-code').style.display='block';
+      document.getElementById('login-sub').textContent = 'Enter the 6-digit code sent to ' + email;
+      document.getElementById('login-code').focus();
+    }).catch(()=>loginMsg('Something went wrong. Try again.', true))
+    .finally(()=>{ btn.disabled=false; btn.textContent='Send code'; });
+}
+function loginVerifyCode(){
+  const btn = document.getElementById('login-btn-code');
+  const code = (document.getElementById('login-code').value||'').trim();
+  if(code.length !== 6){ loginMsg('Enter the 6-digit code.', true); return; }
+  btn.disabled = true; btn.textContent = 'Verifying…';
+  fetch('/api/auth/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:window._loginEmail, code})})
+    .then(r=>r.json()).then(d=>{
+      if(d.ok){
+        loginMsg('Signed in! Loading…');
+        document.getElementById('login-overlay').style.display='none';
+        document.getElementById('loading').style.display='flex';
+        init(); // re-run; now /api/auth/me returns the session
+      } else {
+        const msg = {invalid:'Wrong code. Try again.',expired:'Code expired — request a new one.',locked:'Too many attempts — request a new code.',used:'That code was already used — request a new one.'}[d.reason] || 'Sign-in failed.';
+        loginMsg(msg, true);
+      }
+    }).catch(()=>loginMsg('Something went wrong. Try again.', true))
+    .finally(()=>{ btn.disabled=false; btn.textContent='Verify & sign in'; });
+}
+function loginBackToEmail(){
+  document.getElementById('login-step-code').style.display='none';
+  document.getElementById('login-step-email').style.display='block';
+  document.getElementById('login-sub').textContent='Sign in with your work email';
+  document.getElementById('login-code').value='';
+  loginMsg('');
+}
+function logout(){
+  fetch('/api/auth/logout',{method:'POST'}).finally(()=>window.location.reload());
 }
 
 function initWithSession(email, role, amId){
@@ -978,15 +1105,19 @@ function onDataLoaded(data){
 
     // Small delay to ensure DOM is updated before navigating
     setTimeout(()=>{
-      if(role === 'am' && amId && AMS[amId]){
+      if(isAMRole() && amId && AMS[amId]){
         switchAM(amId);
-      } else if(role === 'admin' || role === 'viewer'){
+      } else if(canSeeAllSalons()){
+        switchToCompany();
+      } else if(role === 'manager' || role === 'stylist'){
+        // Manager/stylist: limited views (own salon / own data). For now route
+        // to company overview; data-scoping (Layer 2) will narrow what shows.
         switchToCompany();
       } else {
         showPage('noaccess');
         document.getElementById('no-access-email').textContent = USER_EMAIL;
       }
-      if(role === 'admin') renderWeeksList();
+      if(isAdminRole()) renderWeeksList();
       hideLoading();
     }, 100);
 
@@ -1005,10 +1136,10 @@ function hideLoading(){
 function setupSidebar(){
   const sb = document.getElementById('sidebar');
   if(!sb) return;
-  const role = USER_ROLE.replace(/"/g,'').replace(/'/g,'').trim();
+  const role = roleClean();
   let html = '';
 
-  if(role === 'admin' || role === 'viewer'){
+  if(canSeeAllSalons()){
     html += '<div class="sidebar-label">Area Managers</div>';
     AM_ORDER.forEach(id=>{
       const am = AMS[id];
@@ -1022,12 +1153,12 @@ function setupSidebar(){
     html += `<button class="am-btn" onclick="switchToCompany()" id="btn-company">
       <div class="am-avatar" style="background:#e8eaf5;color:#3a4a9a;">CO</div>Company Overview
     </button>`;
-    if(role === 'admin'){
+    if(isAdminRole()){
       html += `<button class="am-btn" onclick="switchToAdmin()" id="btn-admin">
         <div class="am-avatar" style="background:#eee;color:#555;">⚙</div>Admin / Upload
       </button>`;
     }
-  } else if(role === 'am'){
+  } else if(isAMRole()){
     const amId = USER_AM_ID.replace(/"/g,'').trim();
     const am = AMS[amId];
     if(am){
@@ -3597,7 +3728,7 @@ function renderCompanyBonus(){
   // View selector
   const views = [
     {k:'period',     lbl:'This Period'},
-    {k:'excellence', lbl:'🏆 Excellence Leaders'},
+    {k:'excellence', lbl:'🏆 Monthly Standouts'},
     {k:'ytd-stylist',lbl:'YTD by Stylist'},
     {k:'ytd-am',     lbl:'YTD by AM'},
     {k:'ytd-salon',  lbl:'YTD by Salon'},
@@ -3607,7 +3738,7 @@ function renderCompanyBonus(){
       onclick="window.S_coBonusView='${v.k}';S_bonusSort={col:null,asc:true};renderCompanyBonus();">${v.lbl}</button>`).join('')}
   </div>`;
 
-  // Period selector — shown in "This Period" and "Excellence Leaders" views
+  // Period selector — shown in "This Period" and "Monthly Standouts" views
   const periodBar = (coView === 'period' || coView === 'excellence') ? `
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
       <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);">Period:</span>
@@ -4270,28 +4401,104 @@ function buildCoMgrDrill(snum){
 
 // ── Bonus Exports ────────────────────────────────────────────
 
+// Resolve an employee's ADP File # (payId) from any period's data, by globalId.
+// Stylists carry payId on their BonusData row; managers/AMs resolve via the
+// payroll-consolidated data (globalId → payId for every employee).
+function payIdForGlobalId(globalId, periodLabel){
+  if(!globalId) return '';
+  // bonus rows first (stylists)
+  const bp = S_bonusPeriods.find(p=>p.periodKey===normPeriodLabel(periodLabel)||p.periodLabel===normPeriodLabel(periodLabel));
+  if(bp){ const e=(bp.employees||[]).find(x=>x.globalId===globalId); if(e&&e.payId) return String(e.payId).trim(); }
+  // payroll consolidated (covers managers + AMs who work floor hours)
+  const ph = getPayrollHours(globalId, periodLabel);
+  if(ph && ph.payId) return String(ph.payId).trim();
+  // Fallback: an AM defined on the AMS constant with an explicit payId. Needed
+  // for AMs who manage no salons / work no floor hours (e.g. Kayla), so never
+  // appear as an employee in the scraped per-salon data.
+  const am = Object.values(AMS).find(a=>a.globalId===globalId);
+  if(am && am.payId) return String(am.payId).trim();
+  return '';
+}
+// Temp Dept code: salon number + "00" (e.g. 3062 → 306200).
+function tempDeptForSalon(salonNum){ return String(salonNum||'').trim() + '00'; }
+
+// Build the ADP bonus import file (EPIBSP01.csv) for a salon-month period.
+// One row per non-zero, eligible payout. Reuses the verified on-screen bonus
+// math so the file always matches the dashboard.
+//   Earnings codes: 2 = stylist · MGR = manager · GMB = area manager
+//   Temp Dept: salon+00 for stylists/managers · 000001 Kayla · 000004 other AMs
+function buildAdpCsv(periodKey){
+  const ssPeriod = S_salonSummaryPeriods.find(p=>p.periodKey===periodKey);
+  const bonusLabel = ssPeriod ? normPeriodLabel(ssPeriod.periodLabel) : normPeriodLabel(periodKey);
+  const rows = [];
+  const fmt = n => (Math.round((Number(n)||0)*100)/100).toFixed(2);
+  const push = (payId, code, amount, dept, who) => {
+    if(!(Number(amount) > 0)) return;     // skip $0 / ineligible — no row
+    if(!payId){ rows._missing = (rows._missing||[]); rows._missing.push({who:who||'(unknown)', code, amount: fmt(amount)}); return; }
+    rows.push(['BSP','01',payId,code,fmt(amount),dept]);
+  };
+
+  // 1) Stylists — BonusData, code 2, skip disc-ineligible (live, rolling 12mo)
+  const bp = S_bonusPeriods.find(p=>p.periodKey===bonusLabel||p.periodLabel===bonusLabel);
+  if(bp){
+    (bp.employees||[]).filter(e=>e.position!=='M').forEach(e=>{
+      if(activeDiscPoints(e.globalId, bonusLabel) >= 4) return; // disc-ineligible
+      push(String(e.payId||'').trim(), '2', parseFloat(e.payout)||0, tempDeptForSalon(e.salonNum), (e.empName||'')+' (stylist '+e.salonNum+')');
+    });
+  }
+
+  // 2) Managers — per salon, code MGR, reuse getMgrBonusForSalon
+  if(ssPeriod){
+    allActiveSalons().forEach(snum=>{
+      const entry = getMgrBonusForSalon(snum, periodKey);
+      if(!entry || entry.isAMFallback) return;          // AM-as-manager handled in AM pass
+      const payout = entry.result ? entry.result.finalPayout : 0;
+      if(!(payout > 0)) return;
+      const gid = (S_managerTable[snum] && S_managerTable[snum].globalId) || (entry.bonusMgrRow && entry.bonusMgrRow.globalId) || '';
+      if(activeDiscPoints(gid, bonusLabel) >= 4) return; // managers subject to disc too
+      push(payIdForGlobalId(gid, bonusLabel), 'MGR', payout, tempDeptForSalon(snum), ((S_managerTable[snum]&&S_managerTable[snum].name)||'Manager')+' (MGR '+snum+')');
+    });
+  }
+
+  // 3) Area Managers — code GMB, one row per AM, reuse calcAMBonus
+  Object.keys(AMS).forEach(amId=>{
+    const r = calcAMBonus(amId, periodKey);
+    if(!r || !(r.totalPayout > 0)) return;
+    const gid = AMS[amId].globalId;
+    if(activeDiscPoints(gid, bonusLabel) >= 4) return;
+    const dept = amId==='kayla' ? '000001' : '000004';
+    push(payIdForGlobalId(gid, bonusLabel), 'GMB', r.totalPayout, dept, AMS[amId].name+' (GMB)');
+  });
+
+  const header = 'Co Code,Batch ID,File #,Earnings 4 Code,Earnings 4 Amount,Temp Dept';
+  const body = rows.map(r=>r.join(',')).join('\n');
+  return { csv: header + '\n' + body + '\n', count: rows.length, missing: rows._missing||[] };
+}
+
 function exportPayrollCSV(periodKey){
   const btn = event.target;
   btn.disabled = true;
   btn.textContent = '⏳ Generating...';
-  fetch('/api/gs/generatePayrollCSV').then(r=>r.json()).then(result=>{
-      btn.disabled = false;
-      btn.textContent = '⬇ ADP Payroll CSV';
-      if(!result.success){ alert('Error: ' + result.error); return; }
-      // Download CSV
-      const blob = new Blob([result.csv], {type:'text/csv'});
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = result.filename || 'EPIBSP01.csv';
-      a.click();
-      URL.revokeObjectURL(url);
-    })
-    .catch(err=>{
-      btn.disabled = false;
-      btn.textContent = '⬇ ADP Payroll CSV';
-      alert('Error: ' + err);
-    });
+  try {
+    const out = buildAdpCsv(periodKey);
+    if(out.missing.length){
+      const names = out.missing.map(m=>'• '+m.who+' — $'+m.amount).join('\n');
+      const ok = confirm(out.missing.length + ' payout(s) had no File # (payId) and will be skipped:\n\n' + names + '\n\nThis usually means that person has a blank Pay ID in the scraped data for this period. Download anyway (without these rows)?');
+      if(!ok){ btn.disabled=false; btn.textContent='⬇ ADP Payroll CSV'; return; }
+    }
+    if(out.count===0){ alert('No eligible bonus payouts for this period — nothing to export.'); btn.disabled=false; btn.textContent='⬇ ADP Payroll CSV'; return; }
+    const blob = new Blob([out.csv], {type:'text/csv'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'EPIBSP01.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch(err){
+    alert('Error generating CSV: ' + err.message);
+  }
+  btn.disabled = false;
+  btn.textContent = '⬇ ADP Payroll CSV';
 }
 
 function exportBonusJPEG(periodKey){
@@ -4449,7 +4656,7 @@ function excellenceLeadersFor(measure, stys){
 function buildExcellenceLeaders(){
   const period = S_bonusPeriods.find(p=>p.periodKey===S_bonusPeriod);
   if(!period) return '<div class="no-data" style="padding:2rem;">Select a period.</div>';
-  const stys = (period.employees||[]).filter(e=>e.position!=='M');
+  const stys = (period.employees||[]); // Monthly Standouts includes everyone with individual numbers (stylists + working managers)
 
   const measures = excellenceMeasures();
   const cardMeasures = excellenceCards();
@@ -4473,7 +4680,7 @@ function buildExcellenceLeaders(){
       </div>
       ${leaders.length
         ? `<table style="width:100%;border-collapse:collapse;font-size:12px;"><tbody>${rows}</tbody></table>${more}`
-        : '<div style="padding:1rem;color:var(--text-muted);font-size:12px;">No stylists reached excellence this period.</div>'}
+        : '<div style="padding:1rem;color:var(--text-muted);font-size:12px;">No one reached excellence this period.</div>'}
     </div>`;
   }).join('');
 
@@ -4501,7 +4708,7 @@ function buildExcellenceLeaders(){
   const highlightRow = topCard ? `<div style="margin-bottom:14px;">${topCard}</div>` : '';
   return `<div style="margin-bottom:.75rem;color:var(--text-muted);font-size:12px;">
       Excellence leaders for <strong>${formatBonusPeriod(S_bonusPeriod)}</strong>, best first.
-      ${totalExc.size} stylists reached excellence in at least one measure.
+      ${totalExc.size} people reached excellence in at least one measure.
     </div>
     ${highlightRow}
     <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start;">${cards}</div>`;
@@ -4537,7 +4744,7 @@ function exportExcellenceJPEG(periodKey){
   if(typeof html2canvas==='undefined'){ alert('Image library not loaded — try a hard refresh.'); return; }
 
   const label = formatBonusPeriod(periodKey);
-  const stys = (period.employees||[]).filter(e=>e.position!=='M');
+  const stys = (period.employees||[]); // Monthly Standouts includes everyone with individual numbers (stylists + working managers)
   const measures = excellenceMeasures();
   const cardMeasures = excellenceCards();
   const EXC_CAP = 25;
@@ -4589,8 +4796,8 @@ function exportExcellenceJPEG(periodKey){
   printDiv.innerHTML = `
     <div style="text-align:center;margin-bottom:18px;border-bottom:3px solid #03654e;padding-bottom:12px;">
       <img src="longitude-header-jade.png?v=1" alt="Longitude Inc" style="height:46px;width:auto;margin-bottom:10px;" />
-      <div style="font-size:22px;font-weight:700;color:#03654e;">Monthly Excellence Leaders 🏆</div>
-      <div style="font-size:15px;color:#555;margin-top:4px;">${label} · ${totalExc.size} stylists reached excellence in at least one measure</div>
+      <div style="font-size:22px;font-weight:700;color:#03654e;">${(label.split(' ')[0]||'Monthly')} Standouts 🏆</div>
+      <div style="font-size:15px;color:#555;margin-top:4px;">${label} · ${totalExc.size} people reached excellence in at least one measure</div>
     </div>
     ${topCard ? `<div style="margin-bottom:16px;">${topCard}</div>` : ''}
     <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start;">${cardHTML}</div>
@@ -4607,7 +4814,7 @@ function exportExcellenceJPEG(periodKey){
     .then(canvas=>{
       document.body.removeChild(printDiv);
       const link = document.createElement('a');
-      link.download = 'Excellence_Leaders_' + label.replace(' ','_') + '.jpeg';
+      link.download = (label.split(' ')[0]||'Monthly') + '_Standouts_' + (label.split(' ')[1]||'') + '.jpeg';
       link.href = canvas.toDataURL('image/jpeg', 0.92);
       link.click();
     }).catch(err=>{
