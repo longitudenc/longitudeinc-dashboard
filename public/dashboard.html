@@ -1883,7 +1883,9 @@ function drillBack(){
 let S_trendMetric = 'cc';
 let S_trendWindow = 20; // Trends weeks shown: 20 | 52 | 'ytd' | 'all' (default: recent 20)
 let S_trendChart = null;
+let S_trendPriorYear = false; // Overlay prior-year (−52wk) line on trend charts
 function setTrendWindow(w){ S_trendWindow = w; renderTrends(); }
+function toggleTrendPriorYear(){ S_trendPriorYear = !S_trendPriorYear; renderTrends(); }
 // First Friday of January of the fiscal year a given week-ending (YYYY-MM-DD) falls in.
 // Fiscal wk1 ends the first Friday of January; YTD = weeks on/after that anchor.
 // Weeks in the fiscal year of the currently selected week, up to and
@@ -2081,6 +2083,56 @@ function selectTrendMetric(key, btn, overrideSalon){
   salonDatasets.sort((a,b)=>lastVal(b.data)-lastVal(a.data));
   datasets.push(...salonDatasets);
 
+  // ── Prior-year overlay ─────────────────────────────────────────
+  // When the Prior Year toggle is on, add a dashed line per visible salon using
+  // the value from ~52 weeks earlier (−364 days, matching the fiscal calendar's
+  // same-weekday alignment) for the SAME window. Lets you eyeball YoY/WoW.
+  if(S_trendPriorYear){
+    // index weeks by date for fast −364d lookup
+    const byDate = {};
+    S.weekHistory.forEach(w=>{ byDate[w.weekEnding] = w; });
+    const priorWeekOf = (iso)=>{
+      const d = new Date(iso+'T00:00:00');
+      d.setDate(d.getDate()-364);
+      const pIso = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      return byDate[pIso] || null;
+    };
+    const pyValForSalon = (snum, wIso)=>{
+      const pw = priorWeekOf(wIso);
+      if(!pw) return null;
+      const row = pw.salons.find(r=>r.salonNum.trim()===snum);
+      if(!row) return null;
+      if(key==='lyDiff'){ return null; } // LY-diff vs prior year isn't meaningful
+      if(!rowField) return null;
+      const raw = row[rowField];
+      if(raw===undefined||raw===null||raw==='') return null;
+      const v = parseFloat(raw);
+      return isNaN(v)?null:parseFloat(v.toFixed(2));
+    };
+    salonDatasets.forEach(ds=>{
+      // match the salon by label back to its salonNum
+      const snum = Object.keys(SALON_NAMES).find(k=>(SALON_NAMES[k]||k)===ds.label) || ds.label;
+      const pyData = weeks.map(w=>pyValForSalon(snum, w.weekEnding));
+      if(pyData.every(v=>v===null)) return; // no prior-year data — skip
+      datasets.push({
+        label: ds.label+' (PY)',
+        data: pyData,
+        borderColor: ds.borderColor,
+        backgroundColor: ds.borderColor,
+        borderWidth: 1.5,
+        borderDash: [4,3],
+        pointStyle: ds.pointStyle,
+        pointRadius: 0,
+        pointHoverRadius: 5,
+        tension: 0.3,
+        fill: false,
+        type: 'line',
+        order: 4,
+        hidden: ds.hidden // mirror the focus salon's visibility
+      });
+    });
+  }
+
   // AM average — bold (hidden in drill mode)
   if(!drillSalon){
     const amAvgData = weeks.map(w=>getVal(calcAvgs(salonsByAM(S.currentAM,w))));
@@ -2186,7 +2238,11 @@ function selectTrendMetric(key, btn, overrideSalon){
         <div class="trend-chart-title">${chartTitle}</div>
         <div class="trend-chart-sub">${chartSub}</div>
       </div>
-      <div style="margin-left:auto;display:flex;gap:4px;">
+      <div style="margin-left:auto;display:flex;gap:4px;align-items:center;">
+        <button onclick="toggleTrendPriorYear()" title="Overlay the same window from the previous year"
+          style="padding:4px 12px;border-radius:16px;border:1px solid ${S_trendPriorYear?'var(--primary)':'var(--border)'};font-size:11px;font-weight:600;cursor:pointer;background:${S_trendPriorYear?'var(--primary)':'white'};color:${S_trendPriorYear?'white':'var(--text)'};margin-right:8px;">
+          ${S_trendPriorYear?'✓ ':''}Prior Year
+        </button>
         ${[{w:20,l:'20 wk'},{w:52,l:'52 wk'},{w:'ytd',l:'YTD'},{w:'all',l:'All'}].map(o=>{
           const arg = typeof o.w === 'string' ? "'"+o.w+"'" : o.w;
           const active = S_trendWindow===o.w;
