@@ -26,6 +26,7 @@ import {
   getManagerTable,
   getAMAssignments,
   getEmployeeProfiles,
+  getSalonRoster,
 } from './sheets'
 
 export type Role =
@@ -48,16 +49,29 @@ const norm = (s: unknown) => String(s ?? '').trim().toLowerCase()
 // Which salons does an AM currently manage? Derived from AMAssignments
 // (effective-dated). "Current" = assignment with no endPeriod, or whose window
 // includes today. amKey matches the AreaManagers key.
-function currentSalonsForAm(amKey: string, assignments: any[]): string[] {
+function currentSalonsForAm(amKey: string, assignments: any[], roster: any[]): string[] {
   const key = norm(amKey)
   const out = new Set<string>()
+  let sawOverride = false
   for (const a of assignments) {
     if (norm(a.amKey) !== key) continue
+    sawOverride = true
     // An assignment is "current" if it has no end, i.e. still in effect.
-    // (Effective-dating by period is enforced elsewhere for historical views;
-    // for access we only care about the present assignment.)
     if (!String(a.endPeriod || '').trim()) {
       if (a.salonNum) out.add(String(a.salonNum).trim())
+    }
+  }
+  // FALLBACK: AMAssignments is an override/change log — it only contains rows
+  // for AMs whose assignments have CHANGED (e.g. the Dawn step-down). Most AMs
+  // have no rows at all. When an AM has no override rows, derive their current
+  // salons from the SalonRoster `am` column (the maintained salon→AM mapping).
+  // This way unchanged AMs still resolve correctly without manual backfill.
+  if (!sawOverride && Array.isArray(roster)) {
+    for (const r of roster) {
+      if (norm(r.am) !== key) continue
+      const status = norm(r.status || 'active')
+      if (status === 'sold' || status === 'closed') continue // not a current salon
+      if (r.salonNum) out.add(String(r.salonNum).trim())
     }
   }
   return [...out]
@@ -69,13 +83,14 @@ export async function resolveAccess(email: string): Promise<Access | null> {
   if (!e) return null
 
   // Load the inputs. Each reader tolerates a missing tab (returns []).
-  const [users, areaManagers, managerTable, amAssignments, profiles] =
+  const [users, areaManagers, managerTable, amAssignments, profiles, roster] =
     await Promise.all([
       getUsers(),
       getAreaManagers(),
       getManagerTable(),
       getAMAssignments(),
       getEmployeeProfiles(),
+      getSalonRoster(),
     ])
 
   // 1) Manual list (owner / admin / viewer / exceptions). Wins over everything.
@@ -120,7 +135,7 @@ export async function resolveAccess(email: string): Promise<Access | null> {
   //    condition (b) fails → they fall through to manager/stylist below.
   const am = areaManagers.find((a: any) => String(a.globalId || '').trim() === globalId)
   if (am) {
-    const salons = currentSalonsForAm(am.amKey || am.key || '', amAssignments)
+    const salons = currentSalonsForAm(am.amKey || am.key || '', amAssignments, roster)
     if (salons.length > 0) {
       return { role: 'area_manager', globalId, salons }
     }

@@ -108,6 +108,16 @@ export async function getAMAssignments() {
     return []
   }
 }
+export async function getSalonRoster() {
+  // SalonRoster maps each salon → its AM (the `am` column) + status. Used as
+  // the baseline salon→AM mapping when AMAssignments has no override rows for
+  // an AM. Tolerant of a missing tab.
+  try {
+    return rowsToObjects(await readSheet('SalonRoster'))
+  } catch {
+    return []
+  }
+}
 export async function getAreaManagers() {
   // AM identity (key, name, init, color, globalId, payId). Editable source of
   // truth that replaces the hardcoded AMS constant. Salons are NOT stored here
