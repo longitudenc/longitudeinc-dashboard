@@ -89,7 +89,7 @@
 
   /* Data tables */
   .data-table{width:100%;border-collapse:collapse;font-size:12.5px;}
-  .data-table th{background:var(--primary-dark);color:#d8efe8;font-size:10px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;padding:9px 8px;text-align:left;border-bottom:2px solid #024d3c;white-space:nowrap;cursor:pointer;user-select:none;}
+  .data-table th{background:var(--primary-dark);color:#d8efe8;font-size:12px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;padding:9px 8px;text-align:left;border-bottom:2px solid #024d3c;white-space:nowrap;cursor:pointer;user-select:none;}
   .data-table th:hover{background:#3a3a5e;color:white;}
   .data-table th .si{margin-left:4px;font-size:9px;opacity:.4;}
   .data-table th.sa .si::after{content:'▲';opacity:1;color:#d6ec9f;}
@@ -130,7 +130,7 @@
   .score-tier-name{font-weight:600;}
   .score-tier-range{color:var(--text-muted);font-size:11px;}
   .sc-table{width:100%;border-collapse:collapse;font-size:13px;}
-  .sc-table thead tr:first-child th{background:var(--primary-dark);color:white;font-size:11px;padding:10px 12px;text-align:left;letter-spacing:.04em;}
+  .sc-table thead tr:first-child th{background:var(--primary-dark);color:white;font-size:12px;padding:10px 12px;text-align:left;letter-spacing:.04em;}
   .sc-table tbody tr{border-bottom:1px solid #f5f4f1;}
   .sc-table tbody tr:last-child{border-bottom:none;}
   .sc-table tbody tr:hover td{background:#faf9f7;}
@@ -157,7 +157,7 @@
 
   /* Employee table */
   .emp-table{width:100%;border-collapse:collapse;font-size:12px;}
-  .emp-table th{background:var(--primary-dark);color:#d8efe8;font-size:10px;text-transform:uppercase;letter-spacing:.06em;padding:9px 8px;text-align:left;border-bottom:2px solid #024d3c;white-space:nowrap;cursor:pointer;user-select:none;}
+  .emp-table th{background:var(--primary-dark);color:#d8efe8;font-size:12px;text-transform:uppercase;letter-spacing:.06em;padding:9px 8px;text-align:left;border-bottom:2px solid #024d3c;white-space:nowrap;cursor:pointer;user-select:none;}
   .emp-table th:hover{background:#3a3a5e;color:white;}
   .emp-table th .si{margin-left:4px;font-size:9px;opacity:.5;}
   .emp-table th.sa .si::after{content:'▲';opacity:1;color:#d6ec9f;}
@@ -168,7 +168,7 @@
 
   /* Co scorecard */
   .co-score-table{width:100%;border-collapse:collapse;font-size:13px;}
-  .co-score-table th{background:var(--primary-dark);color:#d8efe8;font-size:10px;text-transform:uppercase;letter-spacing:.06em;padding:9px 10px;text-align:left;border-bottom:2px solid #024d3c;white-space:nowrap;}
+  .co-score-table th{background:var(--primary-dark);color:#d8efe8;font-size:12px;text-transform:uppercase;letter-spacing:.06em;padding:9px 10px;text-align:left;border-bottom:2px solid #024d3c;white-space:nowrap;}
   .co-score-table td{padding:9px 10px;border-bottom:1px solid #f0efec;vertical-align:middle;}
   .co-score-table tbody tr:hover td{background:#f5f4f0;}
   .score-bar-wrap{width:100px;height:10px;background:#eee;border-radius:5px;overflow:hidden;display:inline-block;vertical-align:middle;}
@@ -267,7 +267,7 @@
   .bonus-stat-n{font-size:20px;font-weight:700;color:var(--primary);}
   .bonus-stat-l{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-top:3px;}
   .ytd-bonus-table{width:100%;border-collapse:collapse;font-size:12px;}
-  .ytd-bonus-table th{background:var(--primary-dark);color:#d8efe8;font-size:10px;text-transform:uppercase;padding:8px;text-align:left;border-bottom:2px solid #024d3c;}
+  .ytd-bonus-table th{background:var(--primary-dark);color:#d8efe8;font-size:12px;text-transform:uppercase;padding:8px;text-align:left;border-bottom:2px solid #024d3c;}
   .ytd-bonus-table td{padding:7px 8px;border-bottom:1px solid #f0efec;}
   .ytd-bonus-table tbody tr:hover td{background:#f5f4f0;}
   .salon-link:hover{color:var(--accent);}
@@ -3060,7 +3060,7 @@ function buildBonusMonth(){
         <td>${isNaN(pts)?'—':pts}</td>
         <td>${e.perPt?'$'+e.perPt:'—'}</td>
         <td>${potential>0?fmtMoney(potential):'$0'}</td>
-        <td class="${(discIneligible||inact)?'bv-red':pC}">${inact?'<s style="color:#999;">'+fmtMoney(payout)+'</s>':discIneligible?'$0.00':fmtMoney(payout)}</td>
+        <td class="${(discIneligible||inact)?'bv-red':pC}">${(inact||discIneligible)?'<s style="color:#999;">'+fmtMoney(payout)+'</s>':fmtMoney(payout)}</td>
         <td class="${discIneligible?'bv-red':pC}">${discIneligible?'Ineligible':potential>0?Math.round(pp*100)+'%':'—'}</td>
         <td style="font-size:10px;color:#666;">${notes.join('; ')}</td>
       </tr>`;
@@ -3083,10 +3083,17 @@ function buildBonusMonth(){
 function buildBonusYTD(){
   if(!S_bonusPeriods.length) return '<div class="no-data">No bonus periods loaded</div>';
 
-  // Get all employees for this AM across all periods
+  // Fiscal-year filter: YTD defaults to the latest fiscal year, with a year
+  // selector when more than one year of data exists (mirrors the manager YTD).
+  const years = [...new Set(S_bonusPeriods.map(p=>periodYear(p.periodKey)))].sort((a,b)=>b-a);
+  if(S_bonusStyYear === null && years.length) S_bonusStyYear = years[0];
+  const fyPeriods = S_bonusPeriods.filter(p=>periodYear(p.periodKey) === S_bonusStyYear);
+  const periods = fyPeriods.length ? fyPeriods : S_bonusPeriods;
+
+  // Get all employees for this AM across the selected year's periods
   const empMap = {}; // empName -> {periods: {pk: bonusRow}}
 
-  S_bonusPeriods.forEach(p=>{
+  periods.forEach(p=>{
     const emps = bonusByAM(S.currentAM, p.periodKey).filter(e=>e.position!=='M');
     emps.forEach(e=>{
       if(!empMap[e.empName]) empMap[e.empName] = {salonNum:e.salonNum, periods:{}};
@@ -3094,10 +3101,14 @@ function buildBonusYTD(){
     });
   });
 
-  const periods = S_bonusPeriods;
   const empNames = Object.keys(empMap).sort();
 
-  let html = `<div class="table-card"><div style="overflow-x:auto;"><table class="ytd-bonus-table">
+  const yearBar = years.length > 1 ? `<div style="display:flex;gap:6px;align-items:center;margin:0 0 10px 2px;">
+    <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);">Fiscal Year:</span>
+    ${years.map(y=>`<button onclick="S_bonusStyYear=${y};renderBonusContent();" style="padding:3px 12px;border-radius:14px;border:1px solid ${S_bonusStyYear===y?'var(--primary)':'var(--border)'};font-size:12px;font-weight:600;cursor:pointer;background:${S_bonusStyYear===y?'var(--primary)':'white'};color:${S_bonusStyYear===y?'white':'var(--text)'};">${y}</button>`).join('')}
+  </div>` : '';
+
+  let html = `${yearBar}<div class="table-card"><div style="overflow-x:auto;"><table class="ytd-bonus-table">
     <thead><tr>
       <th>Employee</th><th>Salon</th>
       ${periods.map(p=>`<th style="text-align:center;">${formatBonusPeriod(p.periodKey)}<br><span style="font-size:9px;font-weight:400;opacity:.7;">${p.weeksN}wks</span></th>`).join('')}
@@ -3112,10 +3123,11 @@ function buildBonusYTD(){
       if(!row) return '<td style="color:#ccc;">—</td>';
       const payout = parseFloat(row.payout)||0;
       const potential = parseFloat(row.potential)||0;
-      ytdPay += payout; ytdPot += potential;
+      const blk = activeDiscPoints(row.globalId, p.periodKey) >= 4;
+      ytdPay += blk?0:payout; ytdPot += potential;
       const pp = potential>0?payout/potential:0;
-      const cls = payout>0?(pp<0.5?'bv-yellow':'bv-green'):'bv-red';
-      return `<td class="${cls}">${fmtMoney(payout)}</td>`;
+      const cls = blk?'bv-red':(payout>0?(pp<0.5?'bv-yellow':'bv-green'):'bv-red');
+      return `<td class="${cls}">${blk?'<s style="color:#999;">'+fmtMoney(payout)+'</s>':fmtMoney(payout)}</td>`;
     }).join('');
 
     const ytdPP = ytdPot>0?Math.round(ytdPay/ytdPot*100)+'%':'—';
@@ -4586,6 +4598,7 @@ let S_coMgrView = 'period';   // 'period' | 'ytd'
 let S_coMgrPeriod = null;     // selected SS period key
 let S_coMgrDrillSalon = null; // salon being drilled into
 let S_coMgrYear = null;       // YTD fiscal year filter (e.g. 2026); null = latest
+let S_bonusStyYear = null;    // Stylist YTD fiscal-year filter (e.g. 2026); null = latest
 // Fiscal year of a bonus period label ("May 26" → 2026).
 function periodYear(pk){ const p=String(pk||'').trim().split(/\s+/); return 2000 + (parseInt(p[1],10)||0); }
 // Distinct fiscal years present in the loaded summary periods, newest first.
@@ -5417,7 +5430,7 @@ function buildCompanyBonusAllStylists(){
       <td class="${(hc>=BONUS_CFG.HC_E_LO&&hc<=BONUS_CFG.HC_E_HI)?'bv-green':(hc>=BONUS_CFG.HC_G_LO1&&hc<=BONUS_CFG.HC_G_HI2)?'bv-yellow':'bv-red'}">${fmtN1(hc)}</td>
       <td style="font-weight:700;">${e.points||'—'}</td>
       <td>${potential>0?fmtMoney(potential):'$0'}</td>
-      <td class="${(discInelig||inact)?'bv-red':pCls}" style="font-weight:700;">${inact?'<s style="color:#999;">'+fmtMoney(payout)+'</s>':discInelig?'$0.00':fmtMoney(payout)}</td>
+      <td class="${(discInelig||inact)?'bv-red':pCls}" style="font-weight:700;">${(inact||discInelig)?'<s style="color:#999;">'+fmtMoney(payout)+'</s>':fmtMoney(payout)}</td>
       <td class="${discInelig?'bv-red':pCls}">${discInelig?'Ineligible':pp}</td>
       <td style="font-size:10px;color:#666;">${notes.join('; ')}</td>
     </tr>`;
@@ -5783,6 +5796,11 @@ function buildProfile(globalId, name){
     return emp ? {period:p.periodKey, ...emp} : null;
   }).filter(Boolean);
 
+  // A period counts as disc-ineligible if the person had 4+ active points as of
+  // that period. We still SHOW the would-be payout (struck through) but exclude
+  // it from the YTD bonus total — same treatment as the bonus tables.
+  const discBlockedPeriod = (r)=> activeDiscPoints(r.globalId, r.period) >= 4;
+
   const pos = empRows.length ? empRows[empRows.length-1].position : '—';
   const posLabel = pos==='M'?'Manager':pos==='S'?'Stylist':'—';
 
@@ -5793,7 +5811,7 @@ function buildProfile(globalId, name){
   const ytdNR   = empRows.length ? (empRows.reduce((s,r)=>s+p(r.nr),0)/empRows.length).toFixed(1)+'%' : '—';
   const ytdRR   = empRows.length ? (empRows.reduce((s,r)=>s+p(r.rr),0)/empRows.length).toFixed(1)+'%' : '—';
   const ytdHrs  = empRows.length ? (empRows.reduce((s,r)=>s+n(r.floorHours),0)/empRows.length).toFixed(1) : '—';
-  const ytdBonus = bonusRows.reduce((s,r)=>s+(parseFloat(r.payout)||0),0);
+  const ytdBonus = bonusRows.reduce((s,r)=>s+(discBlockedPeriod(r)?0:(parseFloat(r.payout)||0)),0);
 
   // Build LI company avg per week for each metric
   // For each week, average the metric across ALL employees in the system
@@ -5921,6 +5939,7 @@ function buildProfile(globalId, name){
             <tbody>
               ${bonusRows.map((r,i)=>{
                 const pay=parseFloat(r.payout)||0, pot=parseFloat(r.potential)||0;
+                const blk=discBlockedPeriod(r);
                 const prod=parseFloat(r.product)||0, nr=parseFloat(r.nr)||0, rr=parseFloat(r.rr)||0, mbc=parseFloat(r.mbc)||0;
                 const pp=pot>0?Math.round(pay/pot*100)+'%':'—';
                 const payCls=pay>0?(pay/pot>=0.5?'bv-green':'bv-yellow'):'bv-red';
@@ -5930,7 +5949,7 @@ function buildProfile(globalId, name){
                 const mbcCls=mbc<=BONUS_CFG.MBC_2?'bv-green':mbc<=BONUS_CFG.MBC_1?'bv-yellow':'bv-red';
                 const bg=i%2?'#f8f7f4':'white';
                 return `<tr style="background:${bg};">
-                  <td style="padding:8px 12px;font-weight:600;">${formatBonusPeriod(r.period)}</td>
+                  <td style="padding:8px 12px;font-weight:600;">${formatBonusPeriod(r.period)}${blk?' <span style="color:#9C0006;font-size:10px;font-weight:600;">⚠ ineligible</span>':''}</td>
                   <td style="padding:8px 12px;text-align:center;">${fmtN1(r.avgWkHrs)}</td>
                   <td class="${prodCls}" style="padding:8px 12px;text-align:center;">${fmtPct(r.product)}</td>
                   <td class="${nrCls}" style="padding:8px 12px;text-align:center;">${fmtPct(r.nr)}</td>
@@ -5938,12 +5957,12 @@ function buildProfile(globalId, name){
                   <td class="${mbcCls}" style="padding:8px 12px;text-align:center;">${fmtN1(r.mbc)}</td>
                   <td style="padding:8px 12px;text-align:center;font-weight:700;">${r.points||'—'}</td>
                   <td style="padding:8px 12px;text-align:center;">${pot>0?fmtMoney(pot):'$0'}</td>
-                  <td class="${payCls}" style="padding:8px 12px;text-align:center;font-weight:700;">${fmtMoney(pay)}</td>
+                  <td class="${blk?'bv-red':payCls}" style="padding:8px 12px;text-align:center;font-weight:700;">${blk?'<s style="color:#999;">'+fmtMoney(pay)+'</s>':fmtMoney(pay)}</td>
                   <td class="${payCls}" style="padding:8px 12px;text-align:center;">${pp}</td>
                 </tr>`;
               }).join('')}
               ${(()=>{
-                const totPay = bonusRows.reduce((s,r)=>s+(parseFloat(r.payout)||0),0);
+                const totPay = bonusRows.reduce((s,r)=>s+(discBlockedPeriod(r)?0:(parseFloat(r.payout)||0)),0);
                 const totPot = bonusRows.reduce((s,r)=>s+(parseFloat(r.potential)||0),0);
                 const ytdPP = totPot>0?Math.round(totPay/totPot*100)+'%':'—';
                 const ytdCls = totPay>0?(totPay/totPot>=0.5?'bv-green':'bv-yellow'):'bv-red';
