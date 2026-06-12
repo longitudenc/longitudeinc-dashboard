@@ -3373,6 +3373,18 @@ function buildManagerBonusPeriod(amSalonNums){
   return html;
 }
 
+// From the AM Manager YTD table, clicking a salon/result jumps to the This
+// Period card view and scrolls that salon's bonus card into view.
+function amMgrDrillToCard(snum){
+  S_bonusView = 'period';
+  S_amMgrFocusSalon = String(snum);
+  renderBonusContent();
+  setTimeout(()=>{
+    const card = document.getElementById('mgr-card-'+snum);
+    if(card){ card.scrollIntoView({behavior:'smooth', block:'center'}); card.style.outline='2px solid var(--primary)'; setTimeout(()=>{card.style.outline='';}, 1600); }
+  }, 60);
+}
+let S_amMgrFocusSalon = null;
 function buildManagerBonusYTD(amSalonNums){
   if(!S_salonSummaryPeriods.length) return '<div class="no-data">No salon summary data loaded.</div>';
 
@@ -3402,12 +3414,24 @@ function buildManagerBonusYTD(amSalonNums){
     });
   });
 
-  const periods = S_salonSummaryPeriods.map(p=>normPeriodLabel(p.periodLabel));
+  // Fiscal-year filter: YTD shows one fiscal year (default latest), with a
+  // year selector when more than one year of data exists. Reuses S_coMgrYear.
+  const years = availableMgrYears();
+  if(S_coMgrYear === null && years.length) S_coMgrYear = years[0];
+  const allPeriods = S_salonSummaryPeriods.map(p=>normPeriodLabel(p.periodLabel));
+  const fyPeriods = allPeriods.filter(lbl=>periodYear(lbl) === S_coMgrYear);
+  const periods = fyPeriods.length ? fyPeriods : allPeriods;
 
-  let html = `<div class="table-card"><div style="overflow-x:auto;"><table class="ytd-bonus-table">
+  const yearBar = years.length > 1 ? `<div style="display:flex;gap:6px;align-items:center;margin:0 0 10px 2px;">
+    <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);">Fiscal Year:</span>
+    ${years.map(y=>`<button onclick="S_coMgrYear=${y};renderBonusContent();" style="padding:3px 12px;border-radius:14px;border:1px solid ${S_coMgrYear===y?'var(--primary)':'var(--border)'};font-size:12px;font-weight:600;cursor:pointer;background:${S_coMgrYear===y?'var(--primary)':'white'};color:${S_coMgrYear===y?'white':'var(--text)'};">${y}</button>`).join('')}
+  </div>` : '';
+
+  let html = `${yearBar}<div style="font-size:11px;color:var(--text-muted);margin:0 0 8px 2px;">Each period cell shows <strong>Payout</strong> | <strong>Potential</strong> | <strong>% Earned</strong> — click a salon or any cell to open its bonus card.</div>
+  <div class="table-card"><div style="overflow-x:auto;"><table class="ytd-bonus-table">
     <thead><tr>
       <th>Salon</th><th>Manager</th>
-      ${periods.map(p=>`<th style="text-align:center;">${p}<br><span style="font-size:9px;opacity:.7;">Pay | Pot | %</span></th>`).join('')}
+      ${periods.map(p=>`<th style="text-align:center;">${p}</th>`).join('')}
       <th style="text-align:center;">YTD Payout</th>
       <th style="text-align:center;">YTD Potential</th>
       <th style="text-align:center;">Earn %</th>
@@ -3427,13 +3451,13 @@ function buildManagerBonusYTD(amSalonNums){
       ytdPay+=pay; ytdPot+=pot;
       const pp=pot>0?Math.round(pay/pot*100)+'%':'—';
       const cls=pay>0?(pay/pot<0.4?'bv-yellow':'bv-green'):'bv-red';
-      return `<td class="${cls}" style="text-align:center;font-size:11px;">${fmtMoney(pay)}<br><span style="opacity:.7;">${fmtMoney(pot)}</span><br><strong>${pp}</strong></td>`;
+      return `<td class="${cls}" style="text-align:center;font-size:11px;cursor:pointer;" onclick="amMgrDrillToCard('${snum}')" title="View bonus card">${fmtMoney(pay)}<br><span style="opacity:.7;">${fmtMoney(pot)}</span><br><strong>${pp}</strong></td>`;
     }).join('');
     grandPay+=ytdPay; grandPot+=ytdPot;
     const ytdPP=ytdPot>0?Math.round(ytdPay/ytdPot*100)+'%':'—';
     const ytdCls=ytdPay>0?'bv-green':'';
     html+=`<tr>
-      <td><strong>${salonDisplay(snum)}</strong></td>
+      <td><strong><span class="salon-link" onclick="amMgrDrillToCard('${snum}')" title="View ${salonDisplay(snum)} bonus card">${salonDisplay(snum)}</span></strong></td>
       <td>${fmtName(mgrName)}</td>
       ${cells}
       <td class="${ytdCls}" style="text-align:center;font-weight:700;">${fmtMoney(ytdPay)}</td>
@@ -3476,7 +3500,7 @@ function renderMgrSalonCard(snum, salonRow, result, mgrInfo, bonusMgrRow, isAMFa
     : (!hasMgrData ? ' <span style="color:#c8a800;font-weight:600;">⚠ no bonus file match</span>' : '');
 
   // ── Header: manager name + salon on the left, the payout headline on the right ──
-  let card = `<div class="table-card" style="margin:0;overflow:hidden;">
+  let card = `<div class="table-card" id="mgr-card-${snum}" style="margin:0;overflow:hidden;transition:outline .2s;">
     <div style="padding:1.1rem 1.25rem;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px;">
       <div style="min-width:200px;">
         <div style="font-size:16px;font-weight:700;color:var(--primary);line-height:1.2;">${salonDisplay(snum)}</div>
@@ -3873,15 +3897,17 @@ function renderManagerTableInner(el, uniqueSalons){
 
   _homeEmployees.forEach(e=>{
     if(amGlobalIds.has(e.globalId)){
-      amEmps.push({...e, displayName: `${e.name} — ${amByGlobalId[e.globalId]} (AM)`});
+      // The employee IS an AM — show their name once with the (AM) tag, no
+      // duplication (was "Name — Name (AM)").
+      amEmps.push({...e, displayName: `${fmtName(e.name)} (AM)`});
     } else {
-      regularEmps.push({...e, displayName: e.name});
+      regularEmps.push({...e, displayName: fmtName(e.name)});
     }
   });
 
   // Add any AMs not in home file
   Object.values(AMS).filter(a=>a.globalId && !_homeEmployees.find(e=>e.globalId===a.globalId))
-    .forEach(a=>amEmps.push({name:a.name, globalId:a.globalId, salon:'AM', displayName:`${a.name} (AM)`}));
+    .forEach(a=>amEmps.push({name:a.name, globalId:a.globalId, salon:'AM', displayName:`${fmtName(a.name)} (AM)`}));
 
   amEmps.sort((a,b)=>a.displayName.localeCompare(b.displayName));
   regularEmps.sort((a,b)=>a.displayName.localeCompare(b.displayName));
@@ -5590,17 +5616,28 @@ let profileCharts = []; // track Chart instances for cleanup
 
 // Convert "Last, First" (SD3 format) → "First Last" for display. Handles
 // suffixes after a second comma (e.g. "Smith, John, Jr" → "John Smith Jr"),
-// already-correct names (no comma → returned as-is), and blanks.
+// already-correct names (no comma → returned as-is), and blanks. Also safely
+// preserves a trailing "(AM...)" annotation without mangling or duplicating it.
 function fmtName(name){
   if(!name) return '';
-  const s = String(name).trim();
-  if(s.indexOf(',') === -1) return s; // already "First Last" or single token
-  const parts = s.split(',').map(p=>p.trim()).filter(Boolean);
-  if(parts.length < 2) return s;
-  const last = parts[0];
-  const first = parts[1];
-  const rest = parts.slice(2).join(' '); // suffixes like Jr/III
-  return (first + ' ' + last + (rest ? ' ' + rest : '')).trim();
+  let s = String(name).trim();
+  // Peel off a trailing parenthetical annotation like "(AM)" or
+  // "(AM — no manager assigned)" so the comma-flip doesn't scramble it.
+  let suffix = '';
+  const m = s.match(/\s*(\([^)]*\))\s*$/);
+  if(m){ suffix = ' ' + m[1]; s = s.slice(0, m.index).trim(); }
+  let flipped;
+  if(s.indexOf(',') === -1){
+    flipped = s; // already "First Last" or single token
+  } else {
+    const parts = s.split(',').map(p=>p.trim()).filter(Boolean);
+    if(parts.length < 2){ flipped = s; }
+    else {
+      const last = parts[0], first = parts[1], rest = parts.slice(2).join(' ');
+      flipped = (first + ' ' + last + (rest ? ' ' + rest : '')).trim();
+    }
+  }
+  return (flipped + suffix).trim();
 }
 function stylistLink(globalId, name){
   const disp = fmtName(name);
