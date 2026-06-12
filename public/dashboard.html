@@ -3912,12 +3912,14 @@ function renderManagerTableInner(el, uniqueSalons){
   amEmps.sort((a,b)=>a.displayName.localeCompare(b.displayName));
   regularEmps.sort((a,b)=>a.displayName.localeCompare(b.displayName));
 
-  // Build option groups
+  // Build option groups. IMPORTANT: data-name uses the CLEAN name (fmtName),
+  // never the annotated displayName — otherwise "(AM)" annotations get saved
+  // into ManagerTable and compound on every re-save.
   const amOptions = amEmps.length
-    ? `<optgroup label="── Area Managers ──">${amEmps.map(e=>`<option value="${e.globalId}" data-name="${e.displayName}">${e.displayName}</option>`).join('')}</optgroup>`
+    ? `<optgroup label="── Area Managers ──">${amEmps.map(e=>`<option value="${e.globalId}" data-name="${fmtName(e.name)}">${e.displayName}</option>`).join('')}</optgroup>`
     : '';
-  const regularOptions = regularEmps.map(e=>`<option value="${e.globalId}" data-name="${e.displayName}">${e.displayName}</option>`).join('');
-  const empOptions = _homeEmployees.map(e=>`<option value="${e.globalId}" data-name="${e.name}">${e.name} (${e.salon})</option>`).join('');
+  const regularOptions = regularEmps.map(e=>`<option value="${e.globalId}" data-name="${fmtName(e.name)}">${e.displayName}</option>`).join('');
+  const empOptions = _homeEmployees.map(e=>`<option value="${e.globalId}" data-name="${fmtName(e.name)}">${e.name} (${e.salon})</option>`).join('');
 
   let tbl = `<table style="width:100%;border-collapse:collapse;font-size:12px;">
     <thead><tr style="background:#f0efec;">
@@ -3936,7 +3938,7 @@ function renderManagerTableInner(el, uniqueSalons){
           <option value="">— Select manager —</option>
           ${amOptions}
           <optgroup label="── Stylists ──">
-            ${regularEmps.map(e=>`<option value="${e.globalId}" data-name="${e.displayName}" ${e.globalId===current.globalId?'selected':''}>${e.displayName}</option>`).join('')}
+            ${regularEmps.map(e=>`<option value="${e.globalId}" data-name="${fmtName(e.name)}" ${e.globalId===current.globalId?'selected':''}>${e.displayName}</option>`).join('')}
           </optgroup>
         </select>
       </td>
@@ -5621,6 +5623,19 @@ let profileCharts = []; // track Chart instances for cleanup
 function fmtName(name){
   if(!name) return '';
   let s = String(name).trim();
+  // Repair already-corrupted doubled names from earlier saves, e.g.
+  // "Bridgette Stout (AM) — Bridgette Stout (AM)" or "Jane Doe — Jane Doe".
+  // If the string is "A — B" and A and B are the same (ignoring an (AM…) tag),
+  // collapse to a single copy.
+  const dashSplit = s.split(/\s+—\s+/);
+  if(dashSplit.length === 2){
+    const strip = x => x.replace(/\s*\([^)]*\)\s*$/,'').trim().toLowerCase();
+    if(strip(dashSplit[0]) === strip(dashSplit[1]) && strip(dashSplit[0])){
+      // Keep whichever copy carries the (AM…) annotation, else the first.
+      s = /\([^)]*\)\s*$/.test(dashSplit[0]) ? dashSplit[0].trim()
+        : (/\([^)]*\)\s*$/.test(dashSplit[1]) ? dashSplit[1].trim() : dashSplit[0].trim());
+    }
+  }
   // Peel off a trailing parenthetical annotation like "(AM)" or
   // "(AM — no manager assigned)" so the comma-flip doesn't scramble it.
   let suffix = '';
@@ -6708,6 +6723,86 @@ function openBulkPrintWindow(data){
 
 // ── Start ─────────────────────────────────────────────────────
 init();
+</script>
+<!-- Feedback button + modal -->
+<button id="feedback-fab" onclick="openFeedback()" title="Share feedback or report an issue"
+  style="position:fixed;bottom:20px;right:20px;z-index:900;background:var(--primary);color:white;border:none;border-radius:24px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 3px 12px rgba(0,0,0,.25);display:flex;align-items:center;gap:7px;transition:transform .15s;">
+  💬 Feedback
+</button>
+<div id="feedback-modal" style="display:none;position:fixed;inset:0;background:rgba(26,26,46,.55);z-index:1100;align-items:center;justify-content:center;padding:16px;">
+  <div style="background:white;border-radius:14px;max-width:440px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,.3);overflow:hidden;">
+    <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
+      <div style="font-size:16px;font-weight:700;color:var(--primary);">Share Feedback</div>
+      <button onclick="closeFeedback()" style="background:none;border:none;font-size:22px;line-height:1;cursor:pointer;color:var(--text-muted);">×</button>
+    </div>
+    <div style="padding:18px 20px;">
+      <div style="font-size:13px;color:var(--text-muted);margin-bottom:14px;">Found a bug, have an idea, or something's confusing? Let us know — it helps shape the dashboard.</div>
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:6px;">Type</div>
+      <div id="feedback-cat" style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;">
+        <button type="button" data-cat="idea"     onclick="setFeedbackCat(this)" class="fb-cat fb-cat-active">💡 Idea</button>
+        <button type="button" data-cat="bug"      onclick="setFeedbackCat(this)" class="fb-cat">🐞 Bug</button>
+        <button type="button" data-cat="question" onclick="setFeedbackCat(this)" class="fb-cat">❓ Question</button>
+        <button type="button" data-cat="other"    onclick="setFeedbackCat(this)" class="fb-cat">💬 Other</button>
+      </div>
+      <textarea id="feedback-text" rows="5" placeholder="What's on your mind?"
+        style="width:100%;border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:14px;font-family:inherit;resize:vertical;box-sizing:border-box;"></textarea>
+      <div id="feedback-status" style="font-size:12px;margin-top:8px;min-height:16px;"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;">
+        <button onclick="closeFeedback()" style="padding:8px 16px;border-radius:8px;border:1px solid var(--border);background:white;font-size:13px;font-weight:600;cursor:pointer;color:var(--text);">Cancel</button>
+        <button id="feedback-send" onclick="submitFeedback()" style="padding:8px 18px;border-radius:8px;border:none;background:var(--primary);color:white;font-size:13px;font-weight:700;cursor:pointer;">Send</button>
+      </div>
+    </div>
+  </div>
+</div>
+<style>
+  .fb-cat{padding:6px 12px;border-radius:16px;border:1px solid var(--border);background:white;font-size:12px;font-weight:600;cursor:pointer;color:var(--text);transition:all .15s;}
+  .fb-cat-active{background:var(--primary);color:white;border-color:var(--primary);}
+  #feedback-fab:hover{transform:translateY(-2px);}
+</style>
+<script>
+let _feedbackCat = 'idea';
+function setFeedbackCat(btn){
+  _feedbackCat = btn.getAttribute('data-cat');
+  document.querySelectorAll('#feedback-cat .fb-cat').forEach(b=>b.classList.remove('fb-cat-active'));
+  btn.classList.add('fb-cat-active');
+}
+function currentFeedbackPage(){
+  const active = document.querySelector('.page.active');
+  if(active && active.id) return active.id.replace('page-','');
+  return (typeof S !== 'undefined' && S.currentAM) ? ('AM:'+S.currentAM) : 'dashboard';
+}
+function openFeedback(){
+  document.getElementById('feedback-status').textContent = '';
+  document.getElementById('feedback-text').value = '';
+  const sb = document.getElementById('feedback-send');
+  sb.disabled = false; sb.textContent = 'Send';
+  document.getElementById('feedback-modal').style.display = 'flex';
+  setTimeout(()=>document.getElementById('feedback-text').focus(), 50);
+}
+function closeFeedback(){ document.getElementById('feedback-modal').style.display = 'none'; }
+function submitFeedback(){
+  const msg = document.getElementById('feedback-text').value.trim();
+  const statusEl = document.getElementById('feedback-status');
+  if(!msg){ statusEl.style.color = '#b83232'; statusEl.textContent = 'Please enter a message.'; return; }
+  const btn = document.getElementById('feedback-send');
+  btn.disabled = true; btn.textContent = 'Sending…';
+  statusEl.style.color = 'var(--text-muted)'; statusEl.textContent = '';
+  fetch('/api/gs/saveFeedback', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ message: msg, category: _feedbackCat, page: currentFeedbackPage() })
+  }).then(r=>r.json()).then(res=>{
+    if(res && res.success){
+      statusEl.style.color = '#2d7a1a'; statusEl.textContent = '✓ Thanks — your feedback was sent.';
+      setTimeout(closeFeedback, 1100);
+    } else {
+      btn.disabled = false; btn.textContent = 'Send';
+      statusEl.style.color = '#b83232'; statusEl.textContent = (res && res.error) ? res.error : 'Could not send — try again.';
+    }
+  }).catch(()=>{
+    btn.disabled = false; btn.textContent = 'Send';
+    statusEl.style.color = '#b83232'; statusEl.textContent = 'Network error — try again.';
+  });
+}
 </script>
 </body>
 </html>
