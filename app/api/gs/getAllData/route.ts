@@ -13,12 +13,14 @@ export async function GET() {
     if (cache && Date.now() - cache.timestamp < CACHE_TTL) {
       return NextResponse.json({ ...cache.data, cached: true })
     }
-    const [raw, scrapedWeeks, rosterRows] = await Promise.all([
+    const [raw, scrapedWeeks, rosterRows, inactiveMap] = await Promise.all([
       getAllDashboardData(),
       getDashboardWeeks(),
       fetchSalonRoster(),
+      fetchInactiveMap(),
     ])
     const data = formatAllData(raw, scrapedWeeks, rosterRows)
+    data.inactiveMap = inactiveMap
     cache = { data, timestamp: Date.now() }
     return NextResponse.json(data)
   } catch (e: any) {
@@ -56,6 +58,33 @@ async function fetchSalonRoster(): Promise<any[]> {
   } catch (err) {
     console.warn('[getAllData] SalonRoster fetch failed, continuing without it:', err)
     return []
+  }
+}
+
+/**
+ * Build a globalId → { inactive, inactiveDate } map from EmployeeProfile.
+ *
+ * PRIVACY: deliberately extracts ONLY the inactive flag + date and the join
+ * key. The email (PII) stays server-side and is NEVER included here, so this
+ * map is safe to send to the client. The dashboard uses it to mark inactive
+ * employees in bonus views and to exclude them from the ADP export.
+ */
+async function fetchInactiveMap(): Promise<Record<string, { inactive: boolean; inactiveDate: string }>> {
+  try {
+    const rows = rowsToObjects(await readSheet('EmployeeProfile'))
+    const map: Record<string, { inactive: boolean; inactiveDate: string }> = {}
+    for (const r of rows) {
+      const gid = String((r as any).globalId || '').trim()
+      if (!gid) continue
+      map[gid] = {
+        inactive: String((r as any).inactive || '').trim().toLowerCase() === 'true',
+        inactiveDate: String((r as any).inactiveDate || '').trim(),
+      }
+    }
+    return map
+  } catch (err) {
+    console.warn('[getAllData] inactive map fetch failed, continuing without it:', err)
+    return {}
   }
 }
 

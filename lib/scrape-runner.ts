@@ -605,6 +605,9 @@ const EMP_PROFILE_TAB = 'EmployeeProfile'
 const PROFILE_COLUMNS = [
   'globalId',       // join key — from globalEmployeeKey (e.g. "2023-0000-7354")
   'email',          // emailAddress, lowercased — AUTH USE ONLY (see PII note below)
+  'inactive',       // 'true'/'false' — SD3 inactive flag (termed/left). Excludes
+                    // from ADP export + marks in bonus views; access auto-revokes.
+  'inactiveDate',   // YYYY-MM-DD or '' — when they went inactive
   'dateOfHire',     // YYYY-MM-DD
   'rehireDate',     // YYYY-MM-DD or ''
   'homeStoreNum',   // public salon number, from primaryStoreDict.n (e.g. "2554")
@@ -644,6 +647,8 @@ function profileRow(e: any): Record<string, any> | null {
   return {
     globalId,
     email: e?.emailAddress ? String(e.emailAddress).trim().toLowerCase() : '',
+    inactive: e?.inactive === true ? 'true' : 'false',
+    inactiveDate: e?.inactiveDate ? String(e.inactiveDate).trim() : '',
     dateOfHire: e?.dateOfHire ? String(e.dateOfHire).trim() : '',
     rehireDate: e?.rehireDate ? String(e.rehireDate).trim() : '',
     homeStoreNum: home?.n != null ? String(home.n).trim() : '',

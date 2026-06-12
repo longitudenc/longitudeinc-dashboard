@@ -808,6 +808,12 @@ function salonDisplay(salonNum){ return SALON_NAMES[salonNum] || salonNum; }
 // The hardcoded AMS/NAMED/SALON_NAMES above are the fallback if the roster
 // is ever unavailable, so the dashboard degrades to today's behavior.
 let ROSTER = [];
+// globalId → {inactive:boolean, inactiveDate:string}. Populated from getAllData.
+let INACTIVE_MAP = {};
+// Is this employee currently inactive (termed/left)? Used to exclude from the
+// ADP export and to mark in bonus views. History is preserved either way.
+function isInactive(globalId){ const r = INACTIVE_MAP[String(globalId||'').trim()]; return !!(r && r.inactive); }
+function inactiveSince(globalId){ const r = INACTIVE_MAP[String(globalId||'').trim()]; return r ? (r.inactiveDate||'') : ''; }
 let ACTIVE_SALONS = [...new Set([
   ...Object.values(AMS).flatMap(am=>am.salons||[]),
   ...Object.keys(SALON_NAMES)
@@ -1128,6 +1134,11 @@ function onDataLoaded(data){
     // Salon roster — source of truth for active/sold/closed + AM assignment.
     ROSTER = data.salonRoster || [];
     const _rosterOk = rebuildFromRoster(ROSTER);
+
+    // Inactive map (globalId → {inactive, inactiveDate}) from EmployeeProfile.
+    // Used to mark inactive employees in bonus views and exclude them from the
+    // ADP export. No PII — email stays server-side.
+    INACTIVE_MAP = data.inactiveMap || {};
     console.log('[ROSTER] ' + ROSTER.length + ' rows — ' +
       ROSTER.filter(r=>(r.status||'active')==='active').length + ' active, ' +
       ROSTER.filter(r=>r.status==='sold').length + ' sold, ' +
@@ -2757,12 +2768,14 @@ function buildBonusMonth(){
       const mbC = mbc<=BONUS_CFG.MBC_2?'bv-green':mbc<=BONUS_CFG.MBC_1?'bv-yellow':'bv-red';
       const hcC = (hc>=BONUS_CFG.HC_E_LO&&hc<=BONUS_CFG.HC_E_HI)?'bv-green':(hc>=BONUS_CFG.HC_G_LO1&&hc<=BONUS_CFG.HC_G_HI2)?'bv-yellow':'bv-red';
       const notes = [];
+      const inact = isInactive(e.globalId);
+      if(inact){ const since = inactiveSince(e.globalId); notes.push('⛔ Inactive'+(since?' since '+fmtWeek(since):'')+' — not paid'); }
       if(discIneligible) notes.push('⚠ Disc. ineligible ('+discPtsActive+' pts)');
       if(e.prodPenalty==='true'||e.prodPenalty===true) notes.push('Prod <4% → ×0.25');
       if((e.eligible==='false'||e.eligible===false)&&potential>0) notes.push('<5 pts');
       if(potential===0) notes.push('Hrs <10');
 
-      html += `<tr${discIneligible?' style="opacity:0.8;"':''}>
+      html += `<tr${(discIneligible||inact)?' style="opacity:0.8;"':''}>
         <td>${stylistLink(e.globalId,e.empName)}</td>
         <td>${fmtN1(avgWkHrs)}</td>
         <td class="${prC}">${fmtPct(prod)}</td>
@@ -4583,6 +4596,7 @@ function buildAdpCsv(periodKey){
   if(bp){
     (bp.employees||[]).filter(e=>e.position!=='M').forEach(e=>{
       if(activeDiscPoints(e.globalId, bonusLabel) >= 4) return; // disc-ineligible
+      if(isInactive(e.globalId)) return; // inactive (termed/left) — must be employed at payout
       push(String(e.payId||'').trim(), '2', parseFloat(e.payout)||0, tempDeptForSalon(e.salonNum), (e.empName||'')+' (stylist '+e.salonNum+')');
     });
   }
@@ -4596,6 +4610,7 @@ function buildAdpCsv(periodKey){
       if(!(payout > 0)) return;
       const gid = (S_managerTable[snum] && S_managerTable[snum].globalId) || (entry.bonusMgrRow && entry.bonusMgrRow.globalId) || '';
       if(activeDiscPoints(gid, bonusLabel) >= 4) return; // managers subject to disc too
+      if(isInactive(gid)) return; // inactive manager — excluded from payout
       push(payIdForGlobalId(gid, bonusLabel), 'MGR', payout, tempDeptForSalon(snum), ((S_managerTable[snum]&&S_managerTable[snum].name)||'Manager')+' (MGR '+snum+')');
     });
   }
@@ -4606,6 +4621,7 @@ function buildAdpCsv(periodKey){
     if(!r || !(r.totalPayout > 0)) return;
     const gid = AMS[amId].globalId;
     if(activeDiscPoints(gid, bonusLabel) >= 4) return;
+    if(isInactive(gid)) return; // inactive AM — excluded from payout
     const dept = amId==='kayla' ? '000001' : '000004';
     push(payIdForGlobalId(gid, bonusLabel), 'GMB', r.totalPayout, dept, AMS[amId].name+' (GMB)');
   });
@@ -4796,7 +4812,7 @@ function excellenceLeadersFor(measure, stys){
 function buildExcellenceLeaders(){
   const period = S_bonusPeriods.find(p=>p.periodKey===S_bonusPeriod);
   if(!period) return '<div class="no-data" style="padding:2rem;">Select a period.</div>';
-  const stys = (period.employees||[]); // Monthly Standouts includes everyone with individual numbers (stylists + working managers)
+  const stys = (period.employees||[]).filter(e=>!isInactive(e.globalId)); // Monthly Standouts: everyone with individual numbers, excluding inactive (recognition only)
 
   const measures = excellenceMeasures();
   const cardMeasures = excellenceCards();
@@ -4884,7 +4900,7 @@ function exportExcellenceJPEG(periodKey){
   if(typeof html2canvas==='undefined'){ alert('Image library not loaded — try a hard refresh.'); return; }
 
   const label = formatBonusPeriod(periodKey);
-  const stys = (period.employees||[]); // Monthly Standouts includes everyone with individual numbers (stylists + working managers)
+  const stys = (period.employees||[]).filter(e=>!isInactive(e.globalId)); // Monthly Standouts: everyone with individual numbers, excluding inactive (recognition only)
   const measures = excellenceMeasures();
   const cardMeasures = excellenceCards();
   const EXC_CAP = 25;
