@@ -249,11 +249,13 @@
   .bonus-subtab{padding:6px 14px;border-radius:8px;font-size:12px;cursor:pointer;border:none;background:none;color:var(--text-muted);transition:all .15s;font-weight:600;}
   .bonus-subtab.active{background:white;color:var(--primary);font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,.1);}
   .bonus-table{width:100%;border-collapse:collapse;font-size:12px;}
-  .bonus-table th{background:var(--primary-dark);color:white;font-size:10px;text-transform:uppercase;letter-spacing:.06em;padding:8px 8px;text-align:center;border-right:1px solid rgba(255,255,255,.15);white-space:pre-line;line-height:1.3;}
+  .bonus-table th{background:var(--primary-dark);color:white;font-size:12px;text-transform:uppercase;letter-spacing:.06em;padding:8px 8px;text-align:center;border-right:1px solid rgba(255,255,255,.15);white-space:pre-line;line-height:1.3;}
   .bonus-table th:first-child{text-align:left;}
   .bonus-table td{padding:6px 8px;border-bottom:1px solid #f0efec;text-align:center;white-space:nowrap;}
   .bonus-table td:first-child{text-align:left;font-weight:500;}
-  .bonus-table tr.bonus-salon-header td{background:#03654e!important;color:white;font-weight:700;font-size:14px;padding:8px 12px;text-align:left;}
+  .bonus-table tr.bonus-salon-header td{background:#03654e!important;color:white;font-weight:700;font-size:13px;padding:8px 12px;text-align:left;}
+  .bonus-table tr.bonus-salon-header td .salon-link{color:white;border-bottom-color:rgba(255,255,255,.5);}
+  .bonus-table tr.bonus-salon-header td .salon-link:hover{color:#d8f0e8;}
   .bonus-table tr:hover td{filter:brightness(.97);}
   .bv-green{background:#C6EFCE!important;color:#375623!important;font-weight:600;}
   .bv-yellow{background:#FFEB9C!important;color:#7D6608!important;font-weight:600;}
@@ -1280,6 +1282,11 @@ function setupSidebar(){
       html += `<button class="am-btn active" onclick="switchAM('${amId}')" id="btn-${amId}">
         <div class="am-avatar" style="background:${am.color}22;color:${am.color};">${am.init}</div>${am.name}
       </button>`;
+      html += '<div style="border-top:1px solid var(--border);margin:.5rem 0;"></div>';
+      html += '<div class="sidebar-label">Company</div>';
+      html += `<button class="am-btn" onclick="switchToCompany()" id="btn-company">
+        <div class="am-avatar" style="background:#e8eaf5;color:#3a4a9a;">CO</div>All Salons
+      </button>`;
     }
   }
 
@@ -1567,6 +1574,30 @@ function updateHeadSort(thead,ci,asc){ thead.querySelectorAll('th').forEach((th,
 
 function salonLink(salonNum, label, fromTab){
   return `<span class="salon-link" onclick="drillIntoSalon('${salonNum}','${fromTab}')" title="View ${label} trends">${label}</span>`;
+}
+// Can the CURRENT user drill into this salon?
+//  - owner/admin/viewer: any salon
+//  - area_manager: only their own salons
+//  - manager/stylist: none (read-only company view)
+function canDrillSalon(salonNum){
+  if(canSeeAllSalons()) return true;
+  if(isAMRole()){
+    const amId = String(USER_AM_ID||'').replace(/["']/g,'').trim();
+    const own = (AMS[amId] && AMS[amId].salons) || [];
+    return own.includes(String(salonNum).trim());
+  }
+  return false;
+}
+// Role-aware salon cell: clickable link if allowed, plain text otherwise.
+function salonLinkGated(salonNum, label, fromTab){
+  return canDrillSalon(salonNum) ? salonLink(salonNum, label, fromTab) : `<span>${label}</span>`;
+}
+// Role-aware AM chip: clickable only if the current user may view that AM.
+function amChipGated(am){
+  if(!am) return '';
+  if(canSeeAllSalons()) return amChip(am);
+  // AMs/managers/stylists don't navigate to other AMs from the company table.
+  return `<span class="am-chip"><span class="chip-dot" style="background:${am.color}"></span>${amFirst(am)}</span>`;
 }
 function fmtWeek(iso){
   // Convert YYYY-MM-DD → M/D/YYYY. Falls back to original string if not parseable.
@@ -2472,6 +2503,24 @@ function selectTrendMetric(key, btn, overrideSalon){
 // ── Company page ──────────────────────────────────────────────
 function renderCompany(){
   try {
+    // Role-gate the Company page sections. Owner/admin/viewer see everything.
+    // AMs (and later managers/stylists) see only the All Salons Detail + the
+    // Monthly Standouts — NOT the AM rankings, per-AM performance, or company
+    // bonus summary (other people's pay/rankings).
+    const fullCompany = canSeeAllSalons();
+    const hideForLimited = (id, hide) => { const el = document.getElementById(id); if(el) el.style.display = hide ? 'none' : ''; };
+    hideForLimited('section-scorecard', !fullCompany);
+    hideForLimited('section-am-perf', !fullCompany);
+    // Bonus section: for limited roles, hide the stylist/manager/AM pay toggle
+    // and retitle it "Recognition" (it shows only Standouts).
+    ['co-bonus-type-stylist','co-bonus-type-manager','co-bonus-type-am'].forEach(id=>{
+      const el=document.getElementById(id); if(el) el.style.display = fullCompany ? '' : 'none';
+    });
+    const bonusTitle = document.querySelector('#section-bonus .card-title');
+    if(bonusTitle) bonusTitle.textContent = fullCompany ? 'Company Bonus Summary 💰' : 'Monthly Standouts 🏆';
+    // Company summary cards (company-wide averages) are fine to show; the
+    // bonus section we restrict to Standouts-only for limited roles (handled
+    // in renderCompanyBonus via the role check).
     const isYTD = S_globalMode === 'ytd';
     const snap=getSnap();
     const all = isYTD
@@ -2553,8 +2602,8 @@ function renderCompany(){
 
     // All salons detail
     const allCols=[
-      {k:'salon',lbl:'Salon',sv:r=>r.salonName||r.salonNum,fv:r=>`<strong>${r.salonName||r.salonNum}</strong>`,cl:()=>''},
-      {k:'am',lbl:'AM',sv:r=>amOf(r.salonNum),fv:r=>{ const a=AMS[amOf(r.salonNum)]||{color:'#999',name:'?'}; return amChip(a); },cl:()=>''}, 
+      {k:'salon',lbl:'Salon',sv:r=>r.salonName||r.salonNum,fv:r=>salonLinkGated(r.salonNum, `<strong>${r.salonName||r.salonNum}</strong>`, 'company'),cl:()=>''},
+      {k:'am',lbl:'AM',sv:r=>amOf(r.salonNum),fv:r=>{ const a=AMS[amOf(r.salonNum)]||{color:'#999',name:'?'}; return amChipGated(a); },cl:()=>''}, 
       ...SALON_COLS.slice(1)
     ];
     const coAllSort = S.sortState['co-all'];
@@ -3385,7 +3434,7 @@ function buildManagerBonusYTD(amSalonNums){
     const ytdCls=ytdPay>0?'bv-green':'';
     html+=`<tr>
       <td><strong>${salonDisplay(snum)}</strong></td>
-      <td>${mgrName}</td>
+      <td>${fmtName(mgrName)}</td>
       ${cells}
       <td class="${ytdCls}" style="text-align:center;font-weight:700;">${fmtMoney(ytdPay)}</td>
       <td style="text-align:center;color:var(--text-muted);">${fmtMoney(ytdPot)}</td>
@@ -4045,10 +4094,17 @@ function renderCompanyBonus(){
     return;
   }
 
+  // Limited roles (AM/manager/stylist) only get Monthly Standouts here — not
+  // the stylist/manager/AM pay breakdowns. Force the view and trim the options.
+  const limitedRole = !canSeeAllSalons();
+  if(limitedRole) window.S_coBonusView = 'excellence';
+
   const coView = window.S_coBonusView || 'period';
 
   // View selector
-  const views = [
+  const views = limitedRole ? [
+    {k:'excellence', lbl:'🏆 Monthly Standouts'},
+  ] : [
     {k:'period',     lbl:'This Period'},
     {k:'excellence', lbl:'🏆 Monthly Standouts'},
     {k:'ytd-stylist',lbl:'YTD by Stylist'},
@@ -4447,6 +4503,11 @@ function renderCompanyAMBonus(){
 let S_coMgrView = 'period';   // 'period' | 'ytd'
 let S_coMgrPeriod = null;     // selected SS period key
 let S_coMgrDrillSalon = null; // salon being drilled into
+let S_coMgrYear = null;       // YTD fiscal year filter (e.g. 2026); null = latest
+// Fiscal year of a bonus period label ("May 26" → 2026).
+function periodYear(pk){ const p=String(pk||'').trim().split(/\s+/); return 2000 + (parseInt(p[1],10)||0); }
+// Distinct fiscal years present in the loaded summary periods, newest first.
+function availableMgrYears(){ const ys=[...new Set(S_salonSummaryPeriods.map(p=>periodYear(p.periodLabel||p.periodKey)))]; return ys.sort((a,b)=>b-a); }
 
 function renderCompanyManagerBonus(){
   const el = document.getElementById('co-bonus-container');
@@ -4574,7 +4635,7 @@ function buildCoMgrPeriod(){
     if(result.productPenalty && !result.hoursDisqualified) penNotes.push('Product −25%');
     html += `<tr style="cursor:pointer;" onclick="coMgrDrillInto('${snum}')" title="Click to drill down">
       <td style="font-weight:600;color:var(--primary);text-decoration:underline dotted;">${salonDisplay(snum)}</td>
-      <td style="font-size:12px;">${mgrName}${isAMFallback?'':''}</td>
+      <td style="font-size:12px;">${fmtName(mgrName)}</td>
       <td>${amChip(am)}</td>
       <td style="text-align:center;">${Math.round(result.cc)}</td>
       <td style="text-align:center;${result.hoursUnknown?'color:#c8a800;':result.floorHrsOk?'':'color:#9C0006;'}" title="${result.hoursUnknown?'Load Payroll Consolidated for hours':'Floor+Vac+Holiday'}">${result.floorHrs!==null?result.floorHrs.toFixed(1):'—'}</td>
@@ -4608,15 +4669,29 @@ function buildCoMgrYTD(){
 
   const allSalons = allActiveSalons();
 
-  const periods = S_salonSummaryPeriods.map(p=>p.periodKey);
-  const periodLabels = S_salonSummaryPeriods.map(p=>p.periodLabel);
+  // Default the YTD year to the latest fiscal year present.
+  const years = availableMgrYears();
+  if(S_coMgrYear === null && years.length) S_coMgrYear = years[0];
+  // Only include this fiscal year's periods (YTD shouldn't mix prior years).
+  const fyPeriods = S_salonSummaryPeriods.filter(p=>periodYear(p.periodLabel||p.periodKey) === S_coMgrYear);
+  const usePeriods = fyPeriods.length ? fyPeriods : S_salonSummaryPeriods;
 
-  let html = `<div style="overflow-x:auto;"><table class="ytd-bonus-table">
+  const periods = usePeriods.map(p=>p.periodKey);
+  const periodLabels = usePeriods.map(p=>p.periodLabel);
+
+  // Year selector (only shown when more than one fiscal year of data exists).
+  const yearBar = years.length > 1 ? `<div style="display:flex;gap:6px;align-items:center;margin:0 0 10px 2px;">
+    <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);">Fiscal Year:</span>
+    ${years.map(y=>`<button onclick="S_coMgrYear=${y};renderCompanyManagerBonus();" style="padding:3px 12px;border-radius:14px;border:1px solid ${S_coMgrYear===y?'var(--primary)':'var(--border)'};font-size:12px;font-weight:600;cursor:pointer;background:${S_coMgrYear===y?'var(--primary)':'white'};color:${S_coMgrYear===y?'white':'var(--text)'};">${y}</button>`).join('')}
+  </div>` : '';
+
+  let html = `${yearBar}<div style="font-size:11px;color:var(--text-muted);margin:0 0 8px 2px;">Each period cell shows <strong>Payout</strong> | <strong>% Earned</strong> — click a salon or any cell to open its bonus card.</div>
+  <div style="overflow-x:auto;"><table class="ytd-bonus-table">
     <thead><tr>
       <th>Salon</th>
       <th>Manager</th>
       <th>AM</th>
-      ${periodLabels.map(lbl=>`<th style="text-align:center;">${lbl}<br><span style="font-size:9px;font-weight:400;opacity:.7;">Pay | % Earned</span></th>`).join('')}
+      ${periodLabels.map(lbl=>`<th style="text-align:center;">${lbl}</th>`).join('')}
       <th style="text-align:center;">YTD Payout</th>
       <th style="text-align:center;">YTD Potential</th>
       <th style="text-align:center;">Earn %</th>
@@ -4654,7 +4729,7 @@ function buildCoMgrYTD(){
 
     html += `<tr>
       <td style="font-weight:600;color:var(--primary);cursor:pointer;text-decoration:underline dotted;" onclick="coMgrDrillInto('${snum}')">${salonDisplay(snum)}</td>
-      <td style="font-size:12px;">${mgrName}</td>
+      <td style="font-size:12px;">${fmtName(mgrName)}</td>
       <td>${amChip(am)}</td>
       ${cells}
       <td class="${ytdCls}" style="text-align:center;font-weight:700;">${fmtMoney(ytdPay)}</td>
@@ -4698,7 +4773,7 @@ function buildCoMgrDrill(snum){
       <div>
         <div style="font-size:18px;font-weight:700;color:var(--primary);">${salonDisplay(snum)}</div>
         <div style="font-size:13px;color:var(--text-muted);margin-top:3px;">
-          Manager: <strong>${mgrName}</strong>
+          Manager: <strong>${fmtName(mgrName)}</strong>
           &nbsp;·&nbsp;
           <span class="am-chip"><span class="chip-dot" style="background:${am.color};display:inline-block;width:10px;height:10px;border-radius:50%;"></span> ${am.name}</span>
         </div>
@@ -5513,8 +5588,23 @@ function buildCoBonusYTDSalon(){
 // ── Stylist Profile Drawer ───────────────────────────────────
 let profileCharts = []; // track Chart instances for cleanup
 
+// Convert "Last, First" (SD3 format) → "First Last" for display. Handles
+// suffixes after a second comma (e.g. "Smith, John, Jr" → "John Smith Jr"),
+// already-correct names (no comma → returned as-is), and blanks.
+function fmtName(name){
+  if(!name) return '';
+  const s = String(name).trim();
+  if(s.indexOf(',') === -1) return s; // already "First Last" or single token
+  const parts = s.split(',').map(p=>p.trim()).filter(Boolean);
+  if(parts.length < 2) return s;
+  const last = parts[0];
+  const first = parts[1];
+  const rest = parts.slice(2).join(' '); // suffixes like Jr/III
+  return (first + ' ' + last + (rest ? ' ' + rest : '')).trim();
+}
 function stylistLink(globalId, name){
-  return `<span class="stylist-link" onclick="openProfile('${globalId}','${name.replace(/'/g,"\\'")}');event.stopPropagation();">${name}</span>`;
+  const disp = fmtName(name);
+  return `<span class="stylist-link" onclick="openProfile('${globalId}','${String(name).replace(/'/g,"\\'")}');event.stopPropagation();">${disp}</span>`;
 }
 
 function openProfile(globalId, name){
@@ -5627,7 +5717,7 @@ function buildProfile(globalId, name){
       <!-- Header -->
       <div class="profile-header" style="position:relative;flex-shrink:0;">
         <button class="profile-close" onclick="closeProfile()">✕</button>
-        <div class="profile-name">${name}
+        <div class="profile-name">${fmtName(name)}
           ${tenureStr ? `<span class="tenure-chip">${tenureStr}</span>` : ''}
         </div>
         <div class="profile-meta">
