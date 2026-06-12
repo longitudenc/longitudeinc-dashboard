@@ -680,6 +680,17 @@
         </div>
       </div>
     </div>
+
+    <div class="page" id="page-comingsoon">
+      <div style="text-align:center;padding:4rem 2rem;">
+        <div style="font-size:48px;margin-bottom:1rem;">🚧</div>
+        <h2 style="color:var(--primary);margin-bottom:8px;">Your dashboard is coming soon</h2>
+        <p style="color:var(--text-muted);max-width:460px;margin:0 auto;">You're signed in as <strong><span id="comingsoon-email"></span></strong>. Your personalized view is being built and will be available shortly. Thanks for your patience!</p>
+        <div style="margin-top:1.75rem;">
+          <button onclick="logout()" style="padding:9px 20px;border-radius:8px;border:1px solid var(--border);background:white;font-size:13px;font-weight:600;cursor:pointer;color:var(--text);">Sign out</button>
+        </div>
+      </div>
+    </div>
   </main>
 </div>
 
@@ -1226,9 +1237,15 @@ function onDataLoaded(data){
       } else if(canSeeAllSalons()){
         switchToCompany();
       } else if(role === 'manager' || role === 'stylist'){
-        // Manager/stylist: limited views (own salon / own data). For now route
-        // to company overview; data-scoping (Layer 2) will narrow what shows.
-        switchToCompany();
+        // AM-first beta: manager/stylist views aren't built yet. Show a clean
+        // "coming soon" screen rather than the half-built company view, so no
+        // unintended data shows and they know their access is valid.
+        clearActive();
+        document.getElementById('page-comingsoon').classList.add('active');
+        const cse = document.getElementById('comingsoon-email');
+        if(cse) cse.textContent = USER_EMAIL;
+        const fab = document.getElementById('feedback-fab');
+        if(fab) fab.style.display = 'none';
       } else {
         showPage('noaccess');
         document.getElementById('no-access-email').textContent = USER_EMAIL;
@@ -1588,6 +1605,30 @@ function canDrillSalon(salonNum){
   }
   return false;
 }
+// Which salon(s) does a person (by globalId) appear in across loaded data?
+function salonsForPerson(globalId){
+  const gid = String(globalId||'').trim();
+  if(!gid) return [];
+  const out = new Set();
+  // AMs themselves
+  Object.values(AMS).forEach(a=>{ if(a.globalId===gid) (a.salons||[]).forEach(s=>out.add(String(s).trim())); });
+  // From bonus periods (employees carry salonNum)
+  (S_bonusPeriods||[]).forEach(p=>{ (p.employees||[]).forEach(e=>{ if(String(e.globalId||'').trim()===gid && e.salonNum) out.add(String(e.salonNum).trim()); }); });
+  // From weekly history salons' employees if present
+  (S.weekHistory||[]).forEach(w=>{ (w.salons||[]).forEach(s=>{ (s.employees||[]).forEach(e=>{ if(String(e.globalId||'').trim()===gid && s.salonNum) out.add(String(s.salonNum).trim()); }); }); });
+  return [...out];
+}
+// SECURITY: may the current user open this person's profile? Owner/admin: yes.
+// Limited roles: only if the person works in a salon the user may see, OR it's
+// the user themselves.
+function canViewPerson(globalId){
+  if(canSeeAllSalons()) return true;
+  const gid = String(globalId||'').trim();
+  if(gid && gid === String(SESSION.globalId||'').trim()) return true; // self
+  const salons = salonsForPerson(gid);
+  if(!salons.length) return false; // unknown person → deny for limited roles
+  return salons.some(s=>canDrillSalon(s));
+}
 // Role-aware salon cell: clickable link if allowed, plain text otherwise.
 function salonLinkGated(salonNum, label, fromTab){
   return canDrillSalon(salonNum) ? salonLink(salonNum, label, fromTab) : `<span>${label}</span>`;
@@ -1867,6 +1908,11 @@ let S_drillSalon = null;   // salonNum being drilled into
 let S_drillBack = null;    // {tab, amId} to return to
 
 function drillIntoSalon(salonNum, fromTab){
+  // SECURITY: enforce scope at the destination, not just on the links. A
+  // limited-role user (area_manager/manager/stylist) may only drill into a
+  // salon they're allowed to see. This blocks every path in, including any
+  // ungated link elsewhere.
+  if(!canDrillSalon(salonNum)){ return; }
   const amId = amOf(salonNum);
   S_drillSalon = salonNum;
 
@@ -5656,10 +5702,15 @@ function fmtName(name){
 }
 function stylistLink(globalId, name){
   const disp = fmtName(name);
+  // Don't render a clickable link to a person the current user can't view.
+  if(!canViewPerson(globalId)) return `<span>${disp}</span>`;
   return `<span class="stylist-link" onclick="openProfile('${globalId}','${String(name).replace(/'/g,"\\'")}');event.stopPropagation();">${disp}</span>`;
 }
 
 function openProfile(globalId, name){
+  // SECURITY: limited-role users may only open profiles of people in their own
+  // salons (or themselves). Blocks every link path into the profile drawer.
+  if(!canViewPerson(globalId)){ return; }
   _reviewGlobalId = globalId;
   _reviewName     = name;
   _reviewYear     = new Date().getFullYear();

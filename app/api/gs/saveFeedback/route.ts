@@ -15,10 +15,17 @@
 import { NextResponse } from 'next/server'
 import { google } from 'googleapis'
 import { requireSignedIn } from '@/lib/require-role'
+import { Resend } from 'resend'
 
 const SHEET_ID = '1uLjwGXzDc3jtmXkUn4yFiJiYlgx5SEs3zbdFWhwuGDE'
 const TAB = 'Feedback'
 const HEADER = ['id', 'submittedAt', 'email', 'role', 'page', 'category', 'message', 'status']
+
+// Email notification settings. FROM must be the Resend-verified sender (same as
+// the login emails). NOTIFY_TO is where feedback alerts go — defaults to the
+// owner address, overridable via the FEEDBACK_NOTIFY_EMAIL env var.
+const FROM = 'Longitude Dashboard <noreply@mail.longitudenc.com>'
+const NOTIFY_TO = process.env.FEEDBACK_NOTIFY_EMAIL || 'tbullard1013@gmail.com'
 
 function client() {
   const auth = new google.auth.GoogleAuth({
@@ -90,6 +97,37 @@ export async function POST(req: Request) {
       insertDataOption: 'INSERT_ROWS',
       requestBody: { values: [row] },
     })
+
+    // Email a notification (best-effort — never fail the submission if mail
+    // hiccups; the row is already safely in the sheet).
+    if (process.env.RESEND_API_KEY) {
+      try {
+        const catLabel: Record<string, string> = { idea: '💡 Idea', bug: '🐞 Bug', question: '❓ Question', other: '💬 Other' }
+        const esc = (t: string) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        const resend = new Resend(process.env.RESEND_API_KEY)
+        await resend.emails.send({
+          from: FROM,
+          to: NOTIFY_TO,
+          replyTo: gate.email, // reply goes straight to the submitter
+          subject: `Dashboard feedback (${catLabel[category] || category}) from ${gate.email}`,
+          html: `
+            <div style="font-family:Arial,sans-serif;max-width:540px;margin:0 auto;color:#222;">
+              <h2 style="color:#03654e;margin-bottom:2px;">New Dashboard Feedback</h2>
+              <p style="color:#777;font-size:13px;margin-top:0;">A tester submitted feedback from the dashboard.</p>
+              <table style="border-collapse:collapse;font-size:14px;margin:12px 0;">
+                <tr><td style="padding:3px 10px 3px 0;color:#888;">Type</td><td style="padding:3px 0;font-weight:600;">${catLabel[category] || esc(category)}</td></tr>
+                <tr><td style="padding:3px 10px 3px 0;color:#888;">From</td><td style="padding:3px 0;">${esc(gate.email)} <span style="color:#999;">(${esc(gate.access.role)})</span></td></tr>
+                <tr><td style="padding:3px 10px 3px 0;color:#888;">Page</td><td style="padding:3px 0;">${esc(page) || '—'}</td></tr>
+              </table>
+              <div style="background:#eef6f2;border-radius:10px;padding:14px 16px;font-size:15px;line-height:1.5;white-space:pre-wrap;">${esc(safeMessage)}</div>
+              <p style="color:#999;font-size:12px;margin-top:16px;">Reply to this email to respond directly to ${esc(gate.email)}. All feedback is also logged in the Feedback tab of your dashboard sheet.</p>
+            </div>
+          `,
+        })
+      } catch (mailErr) {
+        console.error('feedback email notify failed (row still saved):', mailErr)
+      }
+    }
 
     return NextResponse.json({ success: true })
   } catch (e: any) {
