@@ -4067,9 +4067,11 @@ function buildCompanyBonusAll(){
     const amId=amOf(e.salonNum);
     const am=AMS[amId]||{name:'?',color:'#999'};
     const notes=[];
+    const inact=isInactive(e.globalId);
+    if(inact){ const since=inactiveSince(e.globalId); notes.push('⛔ Inactive'+(since?' since '+fmtWeek(since):'')+' — not paid'); }
     if(e.prodPenalty==='true'||e.prodPenalty===true) notes.push('Prod <4%→×0.25');
     if((e.eligible==='false'||e.eligible===false)&&potential>0) notes.push('<5 pts');
-    html+=`<tr>
+    html+=`<tr${inact?' style="opacity:0.8;"':''}>
       <td><strong>${e.empName}</strong></td>
       <td>${salonDisplay(e.salonNum)}</td>
       <td><span class="am-chip"><span class="chip-dot" style="background:${am.color}"></span>${amFirst(am)}</span></td>
@@ -5045,6 +5047,8 @@ function buildCompanyBonusAllStylists(){
     const discPtsA = activeDiscPoints(e.globalId, S_bonusPeriod);
     const discInelig = discPtsA >= 4;
     const notes=[];
+    const inact=isInactive(e.globalId);
+    if(inact){ const since=inactiveSince(e.globalId); notes.push('⛔ Inactive'+(since?' since '+fmtWeek(since):'')+' — not paid'); }
     if(discInelig) notes.push('⚠ Disc. ineligible ('+discPtsA+' pts)');
     if(e.prodPenalty==='true'||e.prodPenalty===true) notes.push('Prod <4%→×0.25');
     if((e.eligible==='false'||e.eligible===false)&&potential>0) notes.push('<5 pts');
