@@ -19,7 +19,7 @@ export async function GET() {
       fetchSalonRoster(),
       fetchInactiveMap(),
     ])
-    const data = formatAllData(raw, scrapedWeeks, rosterRows)
+    const data: any = formatAllData(raw, scrapedWeeks, rosterRows)
     data.inactiveMap = inactiveMap
     cache = { data, timestamp: Date.now() }
     return NextResponse.json(data)
