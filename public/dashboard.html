@@ -1963,14 +1963,26 @@ function selectTrendMetric(key, btn, overrideSalon){
   // Drill mode: S_drillSalon takes priority, then overrideSalon param
   const drillSalon = S_drillSalon || overrideSalon || null;
 
-  // Get salon list. In drill mode we still plot ALL of the AM's salons so the
-  // multi-line view + clickable legend work (you can add/remove salons without
-  // going back). The drilled salon is just the default context; Chart.js legend
-  // toggling handles showing/hiding the others. This also fixes the prior bug
-  // where drilling locked the chart to one salon until a hard refresh.
-  const allAMSalons = S.currentAM==='kayla'
-    ? [...new Set(S.weekHistory.flatMap(w=>w.salons.map(r=>r.salonNum.trim())).filter(s=>!NAMED.has(s)))]
-    : (AMS[S.currentAM]?.salons||[]);
+  // Get salon list. In drill mode we plot a set of salons so the multi-line
+  // view + clickable legend work (add/remove without going back); the drilled
+  // salon is the default focus, the rest start hidden and toggle via legend.
+  //
+  // Scope by role: owner/admin/viewer drilling get ALL company salons available
+  // in the legend (they oversee everything). An area_manager gets just their own
+  // salons. Kayla (un-managed pool) gets the un-managed set.
+  const allCompanySalons = [...new Set(
+    S.weekHistory.flatMap(w=>w.salons.map(r=>r.salonNum.trim()))
+  )].filter(Boolean);
+  let allAMSalons;
+  if(drillSalon && canSeeAllSalons()){
+    allAMSalons = allCompanySalons;
+  } else if(S.currentAM==='kayla'){
+    allAMSalons = allCompanySalons.filter(s=>!NAMED.has(s));
+  } else {
+    allAMSalons = (AMS[S.currentAM]?.salons||[]);
+  }
+  // Ensure the focus salon is always present even if scoping missed it.
+  if(drillSalon && !allAMSalons.includes(drillSalon)) allAMSalons = [drillSalon, ...allAMSalons];
   const amSalons = allAMSalons;
 
   const palette = ['#4e79a7','#f28e2b','#e15759','#76b7b2','#59a14f','#edc948','#b07aa1','#ff9da7','#9c755f','#bab0ac'];
@@ -2202,8 +2214,12 @@ function selectTrendMetric(key, btn, overrideSalon){
       item.appendChild(swatch);
       item.appendChild(labelEl);
 
-      // Toggle on click
-      let hidden = false;
+      // Toggle on click. Initialize from the dataset's ACTUAL starting
+      // visibility so the legend and chart agree — otherwise datasets that
+      // start hidden (drill focus) needed two clicks to show.
+      let hidden = ds.hidden === true;
+      item.style.opacity = hidden ? '0.3' : '1';
+      item.style.textDecoration = hidden ? 'line-through' : 'none';
       item.addEventListener('click', ()=>{
         hidden = !hidden;
         chart.setDatasetVisibility(idx, !hidden);
