@@ -220,6 +220,8 @@
   .salon-link{color:var(--primary);cursor:pointer;font-weight:600;text-decoration:none;border-bottom:1px dashed var(--accent);transition:color .15s;}
   .stylist-link{color:var(--primary);cursor:pointer;font-weight:600;text-decoration:none;border-bottom:1px dashed rgba(79,107,187,.4);transition:color .15s;}
   .stylist-link:hover{color:var(--accent);border-bottom-color:var(--accent);}
+  .am-link{cursor:pointer;transition:opacity .15s;}
+  .am-link:hover{opacity:.65;}
 
   /* Profile Drawer */
   .profile-header{background:var(--primary);color:white;padding:20px 24px 16px;}
@@ -966,6 +968,21 @@ const n=v=>parseFloat(v||0)||0;
 const avg=arr=>arr.length?arr.reduce((a,b)=>a+b,0)/arr.length:0;
 function tc(v){return v>0?'up':v<0?'dn':'fl';}
 function amFirst(am){ return am && am.name ? String(am.name).split(' ')[0] : '?'; }
+// Resolve an am object back to its amKey (amId) for routing.
+function amKeyOf(am){ if(!am) return null; const k = Object.keys(AMS).find(kk=>AMS[kk]===am || (am.globalId && AMS[kk].globalId===am.globalId) || AMS[kk].name===am.name); return k||null; }
+// Clickable AM name → switches to that AM's view (respects role gating in switchAM).
+function amLink(amKey, label){
+  if(!amKey || !AMS[amKey]) return label||'';
+  const txt = (label!==undefined && label!==null) ? label : AMS[amKey].name;
+  return `<span class="am-link" onclick="switchAM('${amKey}');event.stopPropagation();" title="View ${AMS[amKey].name}">${txt}</span>`;
+}
+// Clickable AM chip (dot + first name) → that AM's view.
+function amChip(am){
+  if(!am) return '';
+  const k = amKeyOf(am);
+  const inner = `<span class="am-chip"><span class="chip-dot" style="background:${am.color}"></span>${amFirst(am)}</span>`;
+  return k ? `<span class="am-link" onclick="switchAM('${k}');event.stopPropagation();" title="View ${am.name}">${inner}</span>` : inner;
+}
 function sgn(v,dec=1){return(v>0?'+':'')+v.toFixed(dec);}
 
 // ── Data accessors ────────────────────────────────────────────
@@ -1568,7 +1585,7 @@ function buildSalonRow(r,cols,showAM=false){
   const amId=amOf(r.salonNum), am=AMS[amId]||{color:'#999',name:'Unknown'};
   const fromTab = showAM ? 'salon' : 'salon';
   const nameCell = `<td class="${cols[0].cl(r)}">${salonLink(r.salonNum, cols[0].fv(r), fromTab)}</td>`;
-  const amCell=showAM?`<td><span class="am-chip"><span class="chip-dot" style="background:${am.color}"></span>${amFirst(am)}</span></td>`:'';
+  const amCell=showAM?`<td>${amChip(am)}</td>`:'';
   if(showAM) return `<tr>${nameCell}${amCell}${cols.slice(1).map(c=>`<td class="${c.cl(r)}">${c.fv(r)}</td>`).join('')}</tr>`;
   return `<tr>${nameCell}${cols.slice(1).map(c=>`<td class="${c.cl(r)}">${c.fv(r)}</td>`).join('')}</tr>`;
 }
@@ -1741,7 +1758,7 @@ function renderIndividual(){
     if(sfv) filtered = filtered.filter(e=>e.salonNum===sfv);
 
     tbody.innerHTML = filtered.map(e=>`<tr>
-      <td><strong>${e.empName}</strong></td>
+      <td><strong>${stylistLink(e.globalId, e.empName)}</strong></td>
       <td>${salonLink(e.salonNum, salonDisplay(e.salonNum), 'individual')}</td>
       <td class="${tierHC(parseFloat(e.hcTime))}">${e.hcTime}</td>
       <td class="${tierMBC(parseFloat(e.mbc))}">${e.mbc}</td>
@@ -2092,9 +2109,9 @@ function selectTrendMetric(key, btn, overrideSalon){
     });
   });
 
-  // Rank salon lines highest-first by each salon's most recent value (item #7).
-  const lastVal = arr => { for(let i=arr.length-1;i>=0;i--){ const x=arr[i]; if(x!==null&&x!==undefined&&!isNaN(x)) return x; } return -Infinity; };
-  salonDatasets.sort((a,b)=>lastVal(b.data)-lastVal(a.data));
+  // Order salon lines numerically by salon number (stable, predictable order).
+  const salonNumOf = ds => { const k = Object.keys(SALON_NAMES).find(kk=>(SALON_NAMES[kk]||kk)===ds.label) || ds.label; const n = parseInt(String(k).replace(/\D/g,''),10); return isNaN(n)?999999:n; };
+  salonDatasets.sort((a,b)=>salonNumOf(a)-salonNumOf(b));
   datasets.push(...salonDatasets);
 
   // ── Prior-year overlay ─────────────────────────────────────────
@@ -2199,31 +2216,15 @@ function selectTrendMetric(key, btn, overrideSalon){
 
   const salonName = drillSalon ? (SALON_NAMES[drillSalon]||drillSalon) : null;
   const chartTitle = drillSalon
-    ? `${metric.label} — ${am.name} (focus: ${salonName})`
+    ? `${metric.label} — ${am.name}<span id="trend-focus-label"></span>`
     : `${metric.label} — ${am.name}`;
   const chartSub = drillSalon
-    ? `Focused on ${salonName} · click the legend to add or remove salons · ${weeks.length} weeks`
+    ? `Click the legend to add or remove salons · ${weeks.length} weeks`
     : `Each salon · AM average (bold) · Company average (dashed) · ${weeks.length} weeks`;
   const backBtn = drillSalon
     ? `<button class="back-btn" onclick="drillBack()">← Back</button>`
     : '';
 
-  // Period averages — for the visible weeks
-  const meanOfArr = arr => { const v=arr.filter(x=>x!==null&&x!==undefined&&!isNaN(x)); return v.length?v.reduce((s,x)=>s+x,0)/v.length:null; };
-  // Salon Avg tile = drilled salon's avg, or AM avg if not drilled
-  let salonAvgLineData;
-  if(drillSalon){
-    // datasets[0] is the salon line
-    salonAvgLineData = datasets[0]?.data || [];
-  } else {
-    // AM avg dataset was pushed after all per-salon datasets
-    const amAvgDs = datasets.find(d => d.label === am.name+' Avg');
-    salonAvgLineData = amAvgDs ? amAvgDs.data : [];
-  }
-  const coAvgDs = datasets.find(d => d.label === 'Company Avg');
-  const coAvgLineData = coAvgDs ? coAvgDs.data : [];
-  const salonPeriodAvg = meanOfArr(salonAvgLineData);
-  const coPeriodAvg    = meanOfArr(coAvgLineData);
   const unit = metric.unit || '';
   const dec = (key==='cph') ? 2 : (unit==='%' ? 1 : (key==='cc' ? 0 : 1));
   const fmtTile = v => {
@@ -2231,16 +2232,22 @@ function selectTrendMetric(key, btn, overrideSalon){
     if(key==='lyDiff') return (v>=0?'+':'')+v.toFixed(0);
     return v.toFixed(dec)+unit;
   };
-  const salonTileLabel = drillSalon ? `${salonName} Avg (${weeks.length}wk)` : `${am.name} Avg (${weeks.length}wk)`;
+  // Avg boxes are populated dynamically by updateTrendStats() so they reflect
+  // whichever salons are currently selected (visible) in the legend, plus a
+  // prior-year box when that overlay is on.
   const periodStatsHtml = `
     <div id="trend-period-stats" style="display:flex;gap:10px;margin:8px 0 12px 0;flex-wrap:wrap;">
-      <div style="flex:1;min-width:180px;background:#f7f6f3;border:1px solid var(--border);border-radius:8px;padding:10px 14px;">
-        <div style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);">${salonTileLabel}</div>
-        <div style="font-size:20px;font-weight:700;color:${am.color};margin-top:2px;">${fmtTile(salonPeriodAvg)}</div>
+      <div id="trend-stat-salon" style="flex:1;min-width:170px;background:#f7f6f3;border:1px solid var(--border);border-radius:8px;padding:10px 14px;">
+        <div style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);">—</div>
+        <div style="font-size:20px;font-weight:700;color:${am.color};margin-top:2px;">—</div>
       </div>
-      <div style="flex:1;min-width:180px;background:#f7f6f3;border:1px solid var(--border);border-radius:8px;padding:10px 14px;">
+      <div id="trend-stat-py" style="display:none;flex:1;min-width:170px;background:#f7f6f3;border:1px dashed var(--border);border-radius:8px;padding:10px 14px;">
+        <div style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);">—</div>
+        <div style="font-size:20px;font-weight:700;color:#888;margin-top:2px;">—</div>
+      </div>
+      <div id="trend-stat-co" style="flex:1;min-width:170px;background:#f7f6f3;border:1px solid var(--border);border-radius:8px;padding:10px 14px;">
         <div style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);">Company Avg (${weeks.length}wk)</div>
-        <div style="font-size:20px;font-weight:700;color:#555;margin-top:2px;">${fmtTile(coPeriodAvg)}</div>
+        <div style="font-size:20px;font-weight:700;color:#555;margin-top:2px;">—</div>
       </div>
     </div>`;
 
@@ -2271,6 +2278,65 @@ function selectTrendMetric(key, btn, overrideSalon){
   if(S_trendChart){ try{S_trendChart.destroy();}catch(e){} S_trendChart=null; }
   const ctx = document.getElementById('trend-canvas');
   if(!ctx) return;
+
+  // Recompute the focus label + avg boxes from the salons currently VISIBLE in
+  // the legend (so they reflect your selection, not just the build-time focus).
+  function updateTrendStats(){
+    if(!S_trendChart) return;
+    const mean = arr => { const v=arr.filter(x=>x!==null&&x!==undefined&&!isNaN(x)); return v.length?v.reduce((s,x)=>s+x,0)/v.length:null; };
+    // Visible salon datasets (exclude PY, avg, target lines)
+    const visSalons = [];
+    S_trendChart.data.datasets.forEach((ds,i)=>{
+      const lbl = ds.label||'';
+      if(lbl.endsWith(' (PY)')) return;
+      if(lbl.includes(' Avg')) return;
+      if(metric.targets.some(t=>t.label===lbl)) return;
+      if(!S_trendChart.isDatasetVisible(i)) return;
+      visSalons.push({label:lbl, data:ds.data});
+    });
+    // Salon box: average across all visible salons' points
+    const salonPts = [];
+    visSalons.forEach(s=>s.data.forEach(v=>{ if(v!==null&&v!==undefined&&!isNaN(v)) salonPts.push(v); }));
+    const salonAvg = salonPts.length ? salonPts.reduce((a,b)=>a+b,0)/salonPts.length : null;
+    // Focus label = the selected salon names (or AM name if none/all)
+    let focusLabel;
+    if(visSalons.length===0) focusLabel = '—';
+    else if(visSalons.length===1) focusLabel = visSalons[0].label;
+    else if(visSalons.length<=3) focusLabel = visSalons.map(s=>s.label).join(', ');
+    else focusLabel = visSalons.length+' salons';
+    // Update salon avg box
+    const salonBox = document.getElementById('trend-stat-salon');
+    if(salonBox){
+      salonBox.querySelector('div:first-child').textContent = focusLabel+' Avg ('+weeks.length+'wk)';
+      salonBox.querySelector('div:last-child').textContent = fmtTile(salonAvg);
+    }
+    // Company avg box
+    const coDs = S_trendChart.data.datasets.find(d=>d.label==='Company Avg');
+    const coBox = document.getElementById('trend-stat-co');
+    if(coBox) coBox.querySelector('div:last-child').textContent = fmtTile(mean(coDs?coDs.data:[]));
+    // Prior-year box: shown only when PY overlay is on; avg across visible (PY) lines
+    const pyBox = document.getElementById('trend-stat-py');
+    if(pyBox){
+      if(S_trendPriorYear){
+        const pyPts = [];
+        S_trendChart.data.datasets.forEach((ds,i)=>{
+          if(!(ds.label||'').endsWith(' (PY)')) return;
+          if(!S_trendChart.isDatasetVisible(i)) return;
+          ds.data.forEach(v=>{ if(v!==null&&v!==undefined&&!isNaN(v)) pyPts.push(v); });
+        });
+        const pyAvg = pyPts.length ? pyPts.reduce((a,b)=>a+b,0)/pyPts.length : null;
+        pyBox.style.display = '';
+        pyBox.querySelector('div:first-child').textContent = 'Prior Year Avg ('+weeks.length+'wk)';
+        pyBox.querySelector('div:last-child').textContent = fmtTile(pyAvg);
+      } else {
+        pyBox.style.display = 'none';
+      }
+    }
+    // Also update the chart heading focus text if present
+    const focusEl = document.getElementById('trend-focus-label');
+    if(focusEl) focusEl.textContent = drillSalon ? ('  (focus: '+focusLabel+')') : '';
+  }
+  window._updateTrendStats = updateTrendStats;
 
   // Point shape SVG swatches for legend
   function pointSVG(style, color){
@@ -2342,6 +2408,7 @@ function selectTrendMetric(key, btn, overrideSalon){
         chart.update();
         item.style.opacity = hidden ? '0.3' : '1';
         item.style.textDecoration = hidden ? 'line-through' : 'none';
+        if(window._updateTrendStats) window._updateTrendStats();
       });
 
       legendEl.appendChild(item);
@@ -2399,6 +2466,7 @@ function selectTrendMetric(key, btn, overrideSalon){
     S_trendVisSnapshot = null;
   }
   buildCustomLegend(S_trendChart);
+  updateTrendStats();
 }
 
 // ── Company page ──────────────────────────────────────────────
@@ -2444,7 +2512,7 @@ function renderCompany(){
     document.getElementById('co-score-tbody').innerHTML=scoreData.map(d=>{
       const tier=scoreTierLabel(d.total); const bp=(d.total/30*100).toFixed(0);
       return `<tr>
-        <td><span class="am-chip"><span class="chip-dot" style="background:${d.am.color}"></span><strong>${amFirst(d.am)}</strong></span></td>
+        <td>${amChip(d.am)}</td>
         <td><strong style="font-size:16px;">${d.total}</strong><span style="font-size:11px;color:var(--text-muted);">/30</span></td>
         <td><div class="score-bar-wrap"><div class="score-bar-fill" style="width:${bp}%;background:${tierColors[tier.cls]};"></div></div></td>
         <td><span style="padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;background:${tierBgs[tier.cls]};color:${tierTxts[tier.cls]};">${tier.label}</span></td>
@@ -2463,7 +2531,7 @@ function renderCompany(){
     }).filter(Boolean);
 
     const CO_COLS=[
-      {k:'am',lbl:'AM',sv:r=>r.am.name,fv:r=>`<span class="am-chip"><span class="chip-dot" style="background:${r.am.color}"></span><strong>${amFirst(r.am)}</strong></span>`,cl:()=>''},
+      {k:'am',lbl:'AM',sv:r=>r.am.name,fv:r=>amChip(r.am),cl:()=>''},
       {k:'n', lbl:'#', sv:r=>r.cnt, fv:r=>r.cnt, cl:()=>''},
       {k:'cc', lbl:'Avg CC',    sv:r=>r.cc,  fv:r=>Math.round(r.cc),           cl:r=>tierCC(Math.round(r.cc))},
       {k:'lyDiff', lbl:'CC +/- LY', sv:r=>(r.lyDiff===null||r.lyDiff===undefined)?-9999:r.lyDiff, fv:r=>(r.lyDiff===null||r.lyDiff===undefined)?'<span style="color:#aaa">—</span>':`<span class="${tc(r.lyDiff)}">${sgn(r.lyDiff,0)}</span>`, cl:()=>''},
@@ -2486,7 +2554,7 @@ function renderCompany(){
     // All salons detail
     const allCols=[
       {k:'salon',lbl:'Salon',sv:r=>r.salonName||r.salonNum,fv:r=>`<strong>${r.salonName||r.salonNum}</strong>`,cl:()=>''},
-      {k:'am',lbl:'AM',sv:r=>amOf(r.salonNum),fv:r=>{ const a=AMS[amOf(r.salonNum)]||{color:'#999',name:'?'}; return `<span class="am-chip"><span class="chip-dot" style="background:${a.color}"></span>${amFirst(a)}</span>`; },cl:()=>''}, 
+      {k:'am',lbl:'AM',sv:r=>amOf(r.salonNum),fv:r=>{ const a=AMS[amOf(r.salonNum)]||{color:'#999',name:'?'}; return amChip(a); },cl:()=>''}, 
       ...SALON_COLS.slice(1)
     ];
     const coAllSort = S.sortState['co-all'];
@@ -2838,7 +2906,7 @@ function buildBonusMonth(){
     </tr></thead><tbody>`;
 
   Object.keys(bySalon).sort((a,b)=>parseFloat(a)-parseFloat(b)||a.localeCompare(b)).forEach(sn=>{
-    html += `<tr class="bonus-salon-header"><td colspan="13">${salonDisplay(sn)}</td></tr>`;
+    html += `<tr class="bonus-salon-header"><td colspan="13">${salonLink(sn, salonDisplay(sn), 'bonus')}</td></tr>`;
     bySalon[sn].sort((a,b)=>a.empName.localeCompare(b.empName)).forEach(e=>{
       const payout = parseFloat(e.payout)||0;
       const potential = parseFloat(e.potential)||0;
@@ -2852,7 +2920,7 @@ function buildBonusMonth(){
       const avgWkHrs = parseFloat(e.avgWkHrs)||0;
 
       if(e.position==='M'){
-        html += `<tr><td>${e.empName}</td><td>${fmtN1(avgWkHrs)}</td>
+        html += `<tr><td>${stylistLink(e.globalId, e.empName)}</td><td>${fmtN1(avgWkHrs)}</td>
           <td>${fmtPct(prod)}</td><td>${fmtPct(nr)}</td><td>${fmtPct(rr)}</td>
           <td>${fmtN1(mbc)}</td><td>${fmtN1(hc)}</td>
           <td colspan="5" style="color:#888;font-style:italic;text-align:center;">Manager — not eligible</td><td></td></tr>`;
@@ -2951,7 +3019,7 @@ function buildBonusYTD(){
     const ytdCls = ytdPay>0?'bv-green':'';
     html += `<tr>
       <td><strong>${name}</strong></td>
-      <td>${salonDisplay(emp.salonNum)}</td>
+      <td>${salonLink(emp.salonNum, salonDisplay(emp.salonNum), 'bonus')}</td>
       ${cells}
       <td class="${ytdCls}" style="font-weight:700;">${fmtMoney(ytdPay)}</td>
       <td style="color:var(--text-muted);">${fmtMoney(ytdPot)}</td>
@@ -3355,64 +3423,60 @@ function renderMgrSalonCard(snum, salonRow, result, mgrInfo, bonusMgrRow, isAMFa
     : (mgrInfo ? mgrInfo.name : '—');
   const hasMgrData = !!bonusMgrRow;
   const mgrWarning = isAMFallback
-    ? ' <span style="color:#185FA5;">ℹ using AM individual metrics</span>'
-    : (!hasMgrData ? ' <span style="color:#c8a800;">⚠ no bonus file match</span>' : '');
+    ? ' <span style="color:#185FA5;font-weight:600;">ℹ using AM individual metrics</span>'
+    : (!hasMgrData ? ' <span style="color:#c8a800;font-weight:600;">⚠ no bonus file match</span>' : '');
 
-  let card = `<div class="table-card" style="margin:0;">
-    <div style="padding:.85rem 1rem;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
-      <div>
-        <div style="font-size:14px;font-weight:700;color:var(--primary);">${salonDisplay(snum)}</div>
-        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">
-          Manager: <strong>${mgrName}</strong>${mgrWarning}
-          &nbsp;·&nbsp; CC: ${Math.round(result.cc)} → ${sl.min}–${sl.max}
-          &nbsp;·&nbsp; Payroll goal: ≤${sl.grwPay}%G / ≤${sl.excPay}%E
-          &nbsp;·&nbsp; CPH: ${sl.cph}
-        </div>
-        <div style="font-size:11px;color:${hoursUnknown?'#c8a800':floorHrsOk?'#2d7a1a':'#9C0006'};margin-top:2px;">
-          Qualifying hrs/wk: ${floorHrs!==null?floorHrs.toFixed(1):'—'}
-          ${hoursUnknown
-            ? `⚠ Payroll Consolidated not loaded — hours unverified`
-            : floorHrsOk
-              ? (hoursWaived && floorHrs < hoursThreshold
-                  ? `⚠ <${hoursThreshold} <span style="background:#E6F1FB;color:#185FA5;font-size:10px;padding:1px 6px;border-radius:4px;font-weight:700;">WAIVED</span>`
-                  : `✓ ≥${hoursThreshold}`)
-              : `⚠ <${hoursThreshold} → disqualified`}
-        </div>
-        ${waiverNotes?`<div style="font-size:11px;color:#185FA5;margin-top:2px;">📋 Waiver note: ${waiverNotes}</div>`:''}
+  // ── Header: manager name + salon on the left, the payout headline on the right ──
+  let card = `<div class="table-card" style="margin:0;overflow:hidden;">
+    <div style="padding:1.1rem 1.25rem;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px;">
+      <div style="min-width:200px;">
+        <div style="font-size:16px;font-weight:700;color:var(--primary);line-height:1.2;">${salonDisplay(snum)}</div>
+        <div style="font-size:13px;color:var(--text);margin-top:5px;">Manager: <strong>${(mgrInfo&&mgrInfo.globalId&&!isAMFallback)?stylistLink(mgrInfo.globalId,mgrName):mgrName}</strong>${mgrWarning}</div>
       </div>
-      <div style="text-align:right;">
-        <div style="font-size:20px;font-weight:700;color:${barColor};">${fmtMoney(finalPayout)}</div>
-        <div style="font-size:11px;color:var(--text-muted);">of ${fmtMoney(totalPotential)} potential</div>
-        <div style="width:120px;height:6px;background:#eee;border-radius:3px;margin-top:4px;overflow:hidden;display:inline-block;">
-          <div style="width:${pctPct}%;height:100%;background:${barColor};border-radius:3px;"></div>
+      <div style="text-align:right;min-width:150px;">
+        <div style="font-size:28px;font-weight:800;color:${barColor};line-height:1;">${fmtMoney(finalPayout)}</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">of ${fmtMoney(totalPotential)} potential</div>
+        <div style="width:100%;max-width:160px;height:8px;background:#eee;border-radius:4px;margin:7px 0 4px auto;overflow:hidden;">
+          <div style="width:${pctPct}%;height:100%;background:${barColor};border-radius:4px;"></div>
         </div>
-        <div style="font-size:11px;font-weight:700;color:${barColor};">${pctPct}% earned</div>
+        <div style="font-size:13px;font-weight:700;color:${barColor};">${pctPct}% earned</div>
       </div>
     </div>`;
 
+  // ── Context strip: the goals/setup this salon was measured against ──
+  card += `<div style="padding:.7rem 1.25rem;background:#faf9f6;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:18px;font-size:12px;color:var(--text-muted);">
+    <span>CC band <strong style="color:var(--text);">${Math.round(result.cc)}</strong> <span style="opacity:.7;">(${sl.min}–${sl.max})</span></span>
+    <span>Payroll goal <strong style="color:var(--text);">≤${sl.grwPay}%</strong> G / <strong style="color:var(--text);">≤${sl.excPay}%</strong> E</span>
+    <span>CPH goal <strong style="color:var(--text);">${sl.cph}</strong></span>
+    <span>Qualifying hrs/wk
+      <strong style="color:${hoursUnknown?'#c8a800':floorHrsOk?'#2d7a1a':'#9C0006'};">${floorHrs!==null?floorHrs.toFixed(1):'—'}</strong>
+      ${hoursUnknown
+        ? `<span style="color:#c8a800;">⚠ unverified</span>`
+        : floorHrsOk
+          ? (hoursWaived && floorHrs < hoursThreshold
+              ? `<span style="background:#E6F1FB;color:#185FA5;font-size:10px;padding:1px 6px;border-radius:4px;font-weight:700;">WAIVED</span>`
+              : `<span style="color:#2d7a1a;">✓</span>`)
+          : `<span style="color:#9C0006;">⚠ disqualified</span>`}
+    </span>
+  </div>`;
+  if(waiverNotes) card += `<div style="padding:.5rem 1.25rem;background:#f3f8fd;border-bottom:1px solid var(--border);font-size:12px;color:#185FA5;">📋 Waiver note: ${waiverNotes}</div>`;
+
+  // ── Disqualified banner (full stop) ──
   if(hoursDisqualified){
-    card+=`<div style="padding:6px 1rem;background:#fff5f5;border-bottom:1px solid #fcc;font-size:11px;">
-      <span style="color:#9C0006;font-weight:600;">⚠ Below ${hoursThreshold}hr/wk threshold → Bonus disqualified ($0)</span>
+    card+=`<div style="padding:.6rem 1.25rem;background:#fff5f5;border-bottom:1px solid #fcc;font-size:12px;">
+      <span style="color:#9C0006;font-weight:700;">⚠ Below ${hoursThreshold}hr/wk threshold → bonus disqualified ($0)</span>
     </div>`;
   }
-  if(payrollMissed||productPenalty){
-    card+=`<div style="padding:6px 1rem;background:#fff5f5;border-bottom:1px solid #fcc;font-size:11px;">`;
-    if(payrollMissed){
-      if(payrollWaived) card+=`<span style="color:#185FA5;font-weight:600;margin-right:12px;">✓ Payroll goal missed → penalty <span style="background:#E6F1FB;padding:1px 6px;border-radius:4px;">WAIVED</span></span>`;
-      else card+=`<span style="color:#9C0006;font-weight:600;margin-right:12px;">⚠ Payroll goal missed → −50%</span>`;
-    }
-    if(productPenalty) card+=`<span style="color:#9C0006;font-weight:600;">⚠ Manager product &lt;4% → −25%</span>`;
-    card+=`</div>`;
-  }
 
-  card+=`<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:11.5px;">
+  // ── Scored metrics table ──
+  card+=`<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:13px;">
     <thead><tr style="background:#f5f4f1;">
-      <th style="padding:5px 8px;text-align:left;font-size:10px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;">Metric</th>
-      <th style="padding:5px 8px;text-align:center;font-size:10px;font-weight:600;color:var(--text-muted);text-transform:uppercase;">Actual</th>
-      <th style="padding:5px 8px;text-align:center;font-size:10px;font-weight:600;color:var(--text-muted);text-transform:uppercase;">Growth</th>
-      <th style="padding:5px 8px;text-align:center;font-size:10px;font-weight:600;color:var(--text-muted);text-transform:uppercase;">Excellence</th>
-      <th style="padding:5px 8px;text-align:center;font-size:10px;font-weight:600;color:var(--text-muted);text-transform:uppercase;">Result</th>
-      <th style="padding:5px 8px;text-align:right;font-size:10px;font-weight:600;color:var(--text-muted);text-transform:uppercase;">Payout</th>
+      <th style="padding:8px 12px;text-align:left;font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;">Metric</th>
+      <th style="padding:8px 10px;text-align:center;font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;">Actual</th>
+      <th style="padding:8px 10px;text-align:center;font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;">Growth</th>
+      <th style="padding:8px 10px;text-align:center;font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;">Excellence</th>
+      <th style="padding:8px 10px;text-align:center;font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;">Result</th>
+      <th style="padding:8px 12px;text-align:right;font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;">Payout</th>
     </tr></thead><tbody>`;
 
   metrics.forEach(m=>{
@@ -3421,54 +3485,56 @@ function renderMgrSalonCard(snum, salonRow, result, mgrInfo, bonusMgrRow, isAMFa
     const btx=r==='exc'?'#375623':r==='grw'?'#7D6608':'#9C0006';
     const atx=r==='exc'?'#375623':r==='grw'?'#185FA5':'var(--text-muted)';
     card+=`<tr style="border-top:1px solid #f0efec;">
-      <td style="padding:5px 8px;color:var(--text-muted);">${label}</td>
-      <td style="padding:5px 8px;text-align:center;font-weight:600;">${fmt(actual)}</td>
-      <td style="padding:5px 8px;text-align:center;color:var(--text-muted);">${fmtG}</td>
-      <td style="padding:5px 8px;text-align:center;color:var(--text-muted);">${fmtE}</td>
-      <td style="padding:5px 8px;text-align:center;"><span style="background:${bbg};color:${btx};font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;">${r==='exc'?'Excellence':r==='grw'?'Growth':'Miss'}</span></td>
-      <td style="padding:5px 8px;text-align:right;font-weight:600;color:${atx};">${amt>0?fmtMoney(amt):'—'}</td>
+      <td style="padding:9px 12px;color:var(--text);font-weight:600;">${label}</td>
+      <td style="padding:9px 10px;text-align:center;font-weight:700;">${fmt(actual)}</td>
+      <td style="padding:9px 10px;text-align:center;color:var(--text-muted);">${fmtG}</td>
+      <td style="padding:9px 10px;text-align:center;color:var(--text-muted);">${fmtE}</td>
+      <td style="padding:9px 10px;text-align:center;"><span style="background:${bbg};color:${btx};font-size:10.5px;font-weight:700;padding:3px 10px;border-radius:5px;">${r==='exc'?'Excellence':r==='grw'?'Growth':'Miss'}</span></td>
+      <td style="padding:9px 12px;text-align:right;font-weight:700;color:${atx};">${amt>0?fmtMoney(amt):'—'}</td>
     </tr>`;
   });
 
+  // CPH (binary)
   const cphBbg=cphResult==='hit'?'#C6EFCE':'#FFC7CE';
   const cphBtx=cphResult==='hit'?'#375623':'#9C0006';
   card+=`<tr style="border-top:1px solid #f0efec;">
-    <td style="padding:5px 8px;color:var(--text-muted);">Cuts per Hour</td>
-    <td style="padding:5px 8px;text-align:center;font-weight:600;">${cphVal.toFixed(1)}</td>
-    <td style="padding:5px 8px;text-align:center;color:var(--text-muted);" colspan="2">${sl.cph} (binary)</td>
-    <td style="padding:5px 8px;text-align:center;"><span style="background:${cphBbg};color:${cphBtx};font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;">${cphResult==='hit'?'Hit':'Miss'}</span></td>
-    <td style="padding:5px 8px;text-align:right;font-weight:600;color:${cphResult==='hit'?'#375623':'var(--text-muted)'};">${cphResult==='hit'?fmtMoney(cphAmt):'—'}</td>
-  </tr>
-  <tr style="border-top:1px solid #f0efec;background:#fafaf8;">
-    <td style="padding:5px 8px;color:var(--text-muted);" colspan="4">
-      NR% kicker — Mgr personal: <strong>${mgrNR.toFixed(1)}%</strong>
-      (${nrResult==='exc'?'Excellence $50':nrResult==='grw'?'Growth $25':'not earned'})
-    </td>
-    <td></td>
-    <td style="padding:5px 8px;text-align:right;font-weight:600;color:${nrKicker>0?'#375623':'var(--text-muted)'};">${nrKicker>0?fmtMoney(nrKicker):'—'}</td>
-  </tr>
-  <tr style="border-top:1px solid #f0efec;background:#fafaf8;">
-    <td style="padding:5px 8px;color:var(--text-muted);font-style:italic;" colspan="5">
-      Mgr personal metrics — Product: <strong>${mgrProduct.toFixed(1)}%</strong>
-      ${productPenalty?'<span style="color:#9C0006;"> ⚠ &lt;4% penalty applies</span>':''}
-      &nbsp;·&nbsp; NR%: <strong>${mgrNR.toFixed(1)}%</strong> (kicker only)
-    </td>
-    <td></td>
+    <td style="padding:9px 12px;color:var(--text);font-weight:600;">Cuts per Hour</td>
+    <td style="padding:9px 10px;text-align:center;font-weight:700;">${cphVal.toFixed(1)}</td>
+    <td style="padding:9px 10px;text-align:center;color:var(--text-muted);" colspan="2">target ${sl.cph}</td>
+    <td style="padding:9px 10px;text-align:center;"><span style="background:${cphBbg};color:${cphBtx};font-size:10.5px;font-weight:700;padding:3px 10px;border-radius:5px;">${cphResult==='hit'?'Hit':'Miss'}</span></td>
+    <td style="padding:9px 12px;text-align:right;font-weight:700;color:${cphResult==='hit'?'#375623':'var(--text-muted)'};">${cphResult==='hit'?fmtMoney(cphAmt):'—'}</td>
   </tr>`;
 
+  // NR% kicker — visually grouped as a "bonus add-on"
+  card+=`<tr style="border-top:1px solid #f0efec;background:#fafaf8;">
+    <td style="padding:9px 12px;color:var(--text);" colspan="4">
+      <strong>NR% kicker</strong> — manager personal <strong>${mgrNR.toFixed(1)}%</strong>
+      <span style="color:var(--text-muted);">(${nrResult==='exc'?'Excellence +$50':nrResult==='grw'?'Growth +$25':'not earned'})</span>
+    </td>
+    <td></td>
+    <td style="padding:9px 12px;text-align:right;font-weight:700;color:${nrKicker>0?'#375623':'var(--text-muted)'};">${nrKicker>0?fmtMoney(nrKicker):'—'}</td>
+  </tr>`;
+
+  // Penalties — clearly separated, red zone
   if(payrollMissed) card+=`<tr style="border-top:1px solid #fcc;background:#fff5f5;">
-    <td style="padding:5px 8px;color:#9C0006;" colspan="4">−50% payroll penalty</td><td></td>
-    <td style="padding:5px 8px;text-align:right;font-weight:600;color:#9C0006;">−${fmtMoney(payPenAmt)}</td>
+    <td style="padding:9px 12px;color:#9C0006;font-weight:600;" colspan="4">${payrollWaived?'Payroll goal missed → penalty WAIVED':'−50% payroll penalty (goal missed)'}</td><td></td>
+    <td style="padding:9px 12px;text-align:right;font-weight:700;color:#9C0006;">${payrollWaived?'—':'−'+fmtMoney(payPenAmt)}</td>
   </tr>`;
   if(productPenalty) card+=`<tr style="border-top:1px solid #fcc;background:#fff5f5;">
-    <td style="padding:5px 8px;color:#9C0006;" colspan="4">−25% manager product penalty</td><td></td>
-    <td style="padding:5px 8px;text-align:right;font-weight:600;color:#9C0006;">−${fmtMoney(prodPenAmt)}</td>
+    <td style="padding:9px 12px;color:#9C0006;font-weight:600;" colspan="4">−25% manager product penalty (&lt;4%)</td><td></td>
+    <td style="padding:9px 12px;text-align:right;font-weight:700;color:#9C0006;">−${fmtMoney(prodPenAmt)}</td>
   </tr>`;
 
+  // Total
   card+=`<tr style="border-top:2px solid var(--border);background:var(--primary);">
-    <td colspan="4" style="padding:7px 8px;font-weight:700;color:white;">Total payout earned</td><td></td>
-    <td style="padding:7px 8px;text-align:right;font-weight:700;color:${finalPayout>0?'#7ee8a2':'#f4a0a0'};">${fmtMoney(finalPayout)}</td>
+    <td colspan="4" style="padding:11px 12px;font-weight:700;color:white;font-size:13.5px;">Total payout earned</td><td></td>
+    <td style="padding:11px 12px;text-align:right;font-weight:800;font-size:15px;color:${finalPayout>0?'#7ee8a2':'#f4a0a0'};">${fmtMoney(finalPayout)}</td>
   </tr>`;
+
+  // Footnote: personal metrics (quiet, below the line)
+  card+=`<tr><td colspan="6" style="padding:8px 12px;font-size:11px;color:var(--text-muted);font-style:italic;background:#fafaf8;border-top:1px solid #f0efec;">
+    Manager personal metrics — Product: <strong>${mgrProduct.toFixed(1)}%</strong>${productPenalty?' <span style="color:#9C0006;">⚠ &lt;4% penalty applies</span>':''} &nbsp;·&nbsp; NR%: <strong>${mgrNR.toFixed(1)}%</strong> (kicker only)
+  </td></tr>`;
 
   card+=`</tbody></table></div></div>`;
   return card;
@@ -3512,7 +3578,7 @@ function renderWaiverTable(){
     </tr></thead><tbody>`;
   S_penaltyWaivers.forEach((w,i)=>{
     html += `<tr style="border-bottom:1px solid #f0efec;">
-      <td style="padding:5px 8px;font-weight:600;">${salonDisplay(w.salonNum)}</td>
+      <td style="padding:5px 8px;font-weight:600;">${salonLink(w.salonNum, salonDisplay(w.salonNum), 'bonus')}</td>
       <td style="padding:5px 8px;">${w.period}</td>
       <td style="padding:5px 8px;text-align:center;">${w.payroll?'✅':'—'}</td>
       <td style="padding:5px 8px;text-align:center;">${w.hours?'✅':'—'}</td>
@@ -3633,7 +3699,7 @@ function renderAMAssignTable(){
     const amName = a.amKey ? (AMS[a.amKey]?.name || a.amKey) : 'Un-managed';
     const win = (a.startPeriod || 'beginning') + ' → ' + (a.endPeriod || 'ongoing');
     return `<tr>
-      <td style="padding:4px 10px;">${salonDisplay(a.salonNum)}</td>
+      <td style="padding:4px 10px;">${salonLink(a.salonNum, salonDisplay(a.salonNum), 'bonus')}</td>
       <td style="padding:4px 10px;">${amName}</td>
       <td style="padding:4px 10px;">${win}</td>
       <td style="padding:4px 10px;color:var(--text-muted);">${a.notes||''}</td>
@@ -3788,7 +3854,7 @@ function renderManagerTableInner(el, uniqueSalons){
   uniqueSalons.forEach(snum=>{
     const current = S_managerTable[snum] || {name:'', globalId:''};
     tbl += `<tr style="border-bottom:1px solid #f0efec;">
-      <td style="padding:5px 8px;font-weight:600;">${salonDisplay(snum)}</td>
+      <td style="padding:5px 8px;font-weight:600;">${salonLink(snum, salonDisplay(snum), 'bonus')}</td>
       <td style="padding:5px 8px;">
         <select style="width:100%;font-size:12px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:white;color:var(--text);"
           id="mgr-sel-${snum}" onchange="onMgrSelect('${snum}',this)">
@@ -3903,7 +3969,7 @@ function buildAMBonusCard(r){
   let card = `<div class="table-card" style="margin:0;">
     <div style="padding:.85rem 1rem;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
       <div>
-        <div style="font-size:15px;font-weight:700;color:var(--primary);">${am.name} — AM Bonus</div>
+        <div style="font-size:15px;font-weight:700;color:var(--primary);">${amLink(amKeyOf(am), am.name)} — AM Bonus</div>
         <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">
           ${isKayla?'50% of all salons · No hours requirement':'30% override on non-managed salons · 29hr/wk threshold'}
         </div>
@@ -3939,7 +4005,7 @@ function buildAMBonusCard(r){
     if(d.payrollMissed) penNotes.push('Payroll');
     if(d.productPenalty) penNotes.push('Product');
     card+=`<tr style="border-top:1px solid #f0efec;">
-      <td style="padding:5px 8px;font-weight:600;">${salonDisplay(d.snum)}${penNotes.length?` <span style="font-size:10px;color:#9C0006;">(${penNotes.join('+')} pen.)</span>`:''}</td>
+      <td style="padding:5px 8px;font-weight:600;">${salonLink(d.snum, salonDisplay(d.snum), 'bonus')}${penNotes.length?` <span style="font-size:10px;color:#9C0006;">(${penNotes.join('+')} pen.)</span>`:''}</td>
       <td style="padding:5px 8px;text-align:center;font-size:11px;color:${d.role==='manager'?'var(--primary)':'var(--text-muted)'};">${roleLbl}</td>
       <td style="padding:5px 8px;text-align:right;color:var(--text-muted);">${fmtMoney(d.preHoursPayout)}</td>
       <td style="padding:5px 8px;text-align:center;color:var(--text-muted);">${d.role==='manager'?'100%':d.pct+'%'}</td>
@@ -4072,7 +4138,7 @@ function buildCompanyBonusMonth(){
     const pp = pot>0?Math.round(pay/pot*100)+'%':'—';
     const cls = pay>0?(pay/pot<0.5?'bv-yellow':'bv-green'):'';
     html += `<tr>
-      <td><span class="am-chip"><span class="chip-dot" style="background:${am.color}"></span>${amFirst(am)}</span></td>
+      <td>${amChip(am)}</td>
       <td>${amEmps.length}</td><td>${earnedN}</td>
       <td class="${cls}">${fmtMoney(pay)}</td>
       <td>${fmtMoney(pot)}</td>
@@ -4120,7 +4186,7 @@ function buildCompanyBonusYTD(){
     grandPay+=ytdPay; grandPot+=ytdPot;
     const ytdCls=ytdPay>0?'bv-green':'';
     html+=`<tr>
-      <td><span class="am-chip"><span class="chip-dot" style="background:${am.color}"></span>${amFirst(am)}</span></td>
+      <td>${amChip(am)}</td>
       ${cells}
       <td class="${ytdCls}" style="text-align:center;font-weight:700;">${fmtMoney(ytdPay)}</td>
       <td style="text-align:center;color:var(--text-muted);">${fmtMoney(ytdPot)}</td>
@@ -4175,9 +4241,9 @@ function buildCompanyBonusAll(){
     if(e.prodPenalty==='true'||e.prodPenalty===true) notes.push('Prod <4%→×0.25');
     if((e.eligible==='false'||e.eligible===false)&&potential>0) notes.push('<5 pts');
     html+=`<tr${inact?' style="opacity:0.8;"':''}>
-      <td><strong>${e.empName}</strong></td>
-      <td>${salonDisplay(e.salonNum)}</td>
-      <td><span class="am-chip"><span class="chip-dot" style="background:${am.color}"></span>${amFirst(am)}</span></td>
+      <td><strong>${stylistLink(e.globalId, e.empName)}</strong></td>
+      <td>${salonLink(e.salonNum, salonDisplay(e.salonNum), 'bonus')}</td>
+      <td>${amChip(am)}</td>
       <td>${fmtN1(e.avgWkHrs)}</td>
       <td class="${parseFloat(e.product)<BONUS_CFG.PROD_1?'bv-orange':parseFloat(e.product)<BONUS_CFG.PROD_2?'bv-yellow':'bv-green'}">${fmtPct(e.product)}</td>
       <td class="${parseFloat(e.nr)>=BONUS_CFG.NR_2?'bv-green':parseFloat(e.nr)>=BONUS_CFG.NR_1?'bv-yellow':'bv-red'}">${fmtPct(e.nr)}</td>
@@ -4259,8 +4325,8 @@ function buildCompanyBonusAllYTD(){
     const ytdPP = ytdPot>0?Math.round(ytdPay/ytdPot*100)+'%':'—';
 
     html+=`<tr>
-      <td><strong>${emp.empName}</strong></td>
-      <td>${salonDisplay(emp.salonNum)}</td>
+      <td><strong>${stylistLink(emp.globalId, emp.empName)}</strong></td>
+      <td>${salonLink(emp.salonNum, salonDisplay(emp.salonNum), 'bonus')}</td>
       <td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${am.color};margin-right:4px;"></span>${amFirst(am)}</td>
       ${cells}
       <td class="${ytdCls}" style="text-align:center;font-weight:700;">${fmtMoney(ytdPay)}</td>
@@ -4509,7 +4575,7 @@ function buildCoMgrPeriod(){
     html += `<tr style="cursor:pointer;" onclick="coMgrDrillInto('${snum}')" title="Click to drill down">
       <td style="font-weight:600;color:var(--primary);text-decoration:underline dotted;">${salonDisplay(snum)}</td>
       <td style="font-size:12px;">${mgrName}${isAMFallback?'':''}</td>
-      <td><span class="am-chip"><span class="chip-dot" style="background:${am.color}"></span>${amFirst(am)}</span></td>
+      <td>${amChip(am)}</td>
       <td style="text-align:center;">${Math.round(result.cc)}</td>
       <td style="text-align:center;${result.hoursUnknown?'color:#c8a800;':result.floorHrsOk?'':'color:#9C0006;'}" title="${result.hoursUnknown?'Load Payroll Consolidated for hours':'Floor+Vac+Holiday'}">${result.floorHrs!==null?result.floorHrs.toFixed(1):'—'}</td>
       <td style="text-align:center;${result.payrollMissed?'color:#9C0006;font-weight:700;':''}">${result.payroll.toFixed(1)}%</td>
@@ -4589,7 +4655,7 @@ function buildCoMgrYTD(){
     html += `<tr>
       <td style="font-weight:600;color:var(--primary);cursor:pointer;text-decoration:underline dotted;" onclick="coMgrDrillInto('${snum}')">${salonDisplay(snum)}</td>
       <td style="font-size:12px;">${mgrName}</td>
-      <td><span class="am-chip"><span class="chip-dot" style="background:${am.color}"></span>${amFirst(am)}</span></td>
+      <td>${amChip(am)}</td>
       ${cells}
       <td class="${ytdCls}" style="text-align:center;font-weight:700;">${fmtMoney(ytdPay)}</td>
       <td style="text-align:center;color:var(--text-muted);">${fmtMoney(ytdPot)}</td>
@@ -4843,7 +4909,7 @@ function exportBonusJPEG(periodKey){
       const bg=idx2%2===0?'#ffffff':'#f5f5f5';
 
       rows += `<tr style="background:${bg};font-size:13px;">
-        <td style="padding:7px 10px;font-weight:600;">${e.empName}</td>
+        <td style="padding:7px 10px;font-weight:600;">${stylistLink(e.globalId, e.empName)}</td>
         <td style="padding:7px 10px;">${e.salonNum}</td>
         <td style="padding:7px 10px;text-align:center;">${fmtN1(e.avgWkHrs)}</td>
         <td style="padding:7px 10px;text-align:center;background:${prodBg};">${fmtPct(prod)}</td>
@@ -4948,7 +5014,7 @@ function buildExcellenceLeaders(){
     const rows = shown.map((e,i)=>`<tr style="${i%2?'background:#f6faf4;':''}">
         <td style="padding:5px 8px;color:var(--text-muted);width:24px;text-align:right;">${i+1}</td>
         <td style="padding:5px 8px;">${stylistLink(e.globalId, e.empName)}</td>
-        <td style="padding:5px 8px;color:var(--text-muted);font-size:11px;">${salonDisplay(e.salonNum)}</td>
+        <td style="padding:5px 8px;color:var(--text-muted);font-size:11px;">${salonLink(e.salonNum, salonDisplay(e.salonNum), 'bonus')}</td>
         <td style="padding:5px 8px;text-align:right;font-weight:700;" class="bv-green">${m.fmt(e)}</td>
       </tr>`).join('');
     const more = leaders.length>EXC_CAP ? `<div style="padding:6px 10px;font-size:11px;color:var(--text-muted);border-top:1px solid var(--border);">+${leaders.length-EXC_CAP} more reached excellence</div>` : '';
@@ -4970,7 +5036,7 @@ function buildExcellenceLeaders(){
     return `<tr style="${i%2?'background:#f6faf4;':''}">
       <td style="padding:6px 10px;width:30px;font-size:14px;">${medal}</td>
       <td style="padding:6px 10px;">${stylistLink(e.globalId, e.empName)}</td>
-      <td style="padding:6px 10px;color:var(--text-muted);font-size:11px;">${salonDisplay(e.salonNum)}</td>
+      <td style="padding:6px 10px;color:var(--text-muted);font-size:11px;">${salonLink(e.salonNum, salonDisplay(e.salonNum), 'bonus')}</td>
       <td style="padding:6px 10px;text-align:center;font-weight:700;" class="bv-green">${e._exc} ★</td>
       <td style="padding:6px 10px;color:var(--text-muted);font-size:11px;">${e._measLabels}</td>
       <td style="padding:6px 10px;text-align:right;color:var(--text-muted);">${e.points||0} pts</td>
@@ -5033,8 +5099,8 @@ function exportExcellenceJPEG(periodKey){
     const shown = leaders.slice(0, EXC_CAP);
     const rows = shown.map((e,i)=>`<tr style="${i%2?'background:#f6faf4;':''}">
         <td style="padding:5px 9px;color:#999;text-align:right;width:22px;">${i+1}</td>
-        <td style="padding:5px 9px;font-weight:600;white-space:nowrap;">${e.empName}</td>
-        <td style="padding:5px 9px;color:#777;font-size:11px;white-space:nowrap;">${salonDisplay(e.salonNum)}</td>
+        <td style="padding:5px 9px;font-weight:600;white-space:nowrap;">${stylistLink(e.globalId, e.empName)}</td>
+        <td style="padding:5px 9px;color:#777;font-size:11px;white-space:nowrap;">${salonLink(e.salonNum, salonDisplay(e.salonNum), 'bonus')}</td>
         <td style="padding:5px 9px;text-align:right;font-weight:700;color:#1a6b3f;white-space:nowrap;">${m.fmt(e)}</td>
       </tr>`).join('');
     const more = leaders.length>EXC_CAP ? `<div style="padding:5px 9px;font-size:10px;color:#999;border-top:1px solid #e3ece3;">+${leaders.length-EXC_CAP} more</div>` : '';
@@ -5055,8 +5121,8 @@ function exportExcellenceJPEG(periodKey){
     const medal = ['🥇','🥈','🥉'][i] || (i+1)+'.';
     return `<tr style="${i%2?'background:#f6faf4;':''}">
       <td style="padding:6px 11px;width:28px;font-size:15px;">${medal}</td>
-      <td style="padding:6px 11px;font-weight:600;white-space:nowrap;">${e.empName}</td>
-      <td style="padding:6px 11px;color:#777;font-size:11px;white-space:nowrap;">${salonDisplay(e.salonNum)}</td>
+      <td style="padding:6px 11px;font-weight:600;white-space:nowrap;">${stylistLink(e.globalId, e.empName)}</td>
+      <td style="padding:6px 11px;color:#777;font-size:11px;white-space:nowrap;">${salonLink(e.salonNum, salonDisplay(e.salonNum), 'bonus')}</td>
       <td style="padding:6px 11px;text-align:center;font-weight:700;color:#1a6b3f;">${e._exc} ★</td>
       <td style="padding:6px 11px;color:#777;font-size:11px;white-space:nowrap;">${e._measLabels}</td>
       <td style="padding:6px 11px;text-align:right;color:#777;">${e.points||0} pts</td>
@@ -5178,13 +5244,13 @@ function buildCompanyBonusAllStylists(){
     // Salon divider row — only when sorted by salon
     if(showSalonDividers && e.salonNum !== lastSalon){
       lastSalon = e.salonNum;
-      html += `<tr class="bonus-salon-header"><td colspan="14">${salonDisplay(e.salonNum)}</td></tr>`;
+      html += `<tr class="bonus-salon-header"><td colspan="14">${salonLink(e.salonNum, salonDisplay(e.salonNum), 'bonus')}</td></tr>`;
     }
 
     const bg = rowIdx%2===0?'':'style="background:#f8f7f4;"';
     html += `<tr ${bg}>
       <td>${stylistLink(e.globalId,e.empName)}</td>
-      <td>${e.salonNum}</td>
+      <td>${salonLink(e.salonNum, e.salonNum, 'bonus')}</td>
       <td><span style="display:inline-flex;align-items:center;gap:4px;"><span style="width:8px;height:8px;border-radius:50%;background:${am.color};display:inline-block;"></span>${amFirst(am)}</span></td>
       <td>${fmtN1(e.avgWkHrs)}</td>
       <td class="${prod<BONUS_CFG.PROD_1?'bv-orange':prod<BONUS_CFG.PROD_2?'bv-yellow':'bv-green'}">${fmtPct(prod)}</td>
@@ -5422,7 +5488,7 @@ function buildCoBonusYTDSalon(){
     const ytdCls=ytdPay>0?'bv-green':'';
     html+=`<tr>
       <td><strong>${sn}</strong></td>
-      <td><span class="am-chip"><span class="chip-dot" style="background:${am.color}"></span>${amFirst(am)}</span></td>
+      <td>${amChip(am)}</td>
       ${cells}
       <td class="${ytdCls}" style="text-align:center;font-weight:700;">${fmtMoney(ytdPay)}</td>
       <td style="text-align:center;color:var(--text-muted);">${fmtMoney(ytdPot)}</td>
