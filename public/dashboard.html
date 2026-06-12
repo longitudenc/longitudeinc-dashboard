@@ -706,14 +706,69 @@ const AMS = {
   kayla:     {name:'Kayla Medlin',       init:'KM', color:'#8a2a80', globalId:'2014-0001-2984', payId:'5446', salons:[]},
 };
 
-// Last year (2025) weekly avg CC per salon — sourced from 2025_AVGs.XLS
-// Scrapers will refresh this in Session 4
-const LY_AVG = {
+// Prior-fiscal-year average weekly CC per salon, computed DYNAMICALLY from
+// loaded week history. Replaces the old hardcoded 2025 constant so the metric
+// rolls forward automatically each fiscal year (e.g. once 2026 completes, 2027
+// weeks compare against 2026's per-salon averages — no manual update).
+//
+// LY_AVG is populated by computeLYAvg() whenever data loads or the selected
+// week changes. It maps salonNum → avg weekly CC across the fiscal year PRIOR
+// to the currently-viewed week's fiscal year.
+let LY_AVG = {};
+
+// Fallback seed (2025 averages from 2025_AVGs.XLS) — used only if history for
+// the prior fiscal year isn't loaded yet, so the metric never goes fully blank.
+const LY_AVG_SEED = {
   '1304':404.71,'2554':326.38,'3015':508.87,'3025':612.60,'3027':499.92,
   '3043':475.98,'3045':353.94,'3053':454.15,'3058':641.96,'3062':594.96,
   '3071':753.98,'3545':159.75,'3685':264.83,'4138':307.15,'7728':505.23,
   '8725':318.79,'9478':636.67,'9489':314.10,'9689':596.25
 };
+
+// Compute prior-FY average weekly CC per salon, relative to a reference week
+// (defaults to the currently selected week). Returns {salonNum: avgCC}.
+function computeLYAvg(refWeekIso){
+  const ref = refWeekIso || S.currentWeek ||
+    (S.weekHistory && S.weekHistory.length ? S.weekHistory[S.weekHistory.length-1].weekEnding : '');
+  if(!ref || !S.weekHistory || !S.weekHistory.length){
+    return { ...LY_AVG_SEED };
+  }
+  // The fiscal year of the reference week, and the prior fiscal year window.
+  const thisFYStart = fiscalYearStartIso(ref);            // e.g. 2026-01-03
+  // One day before this FY start is the last day of the prior FY.
+  const priorFYEnd = addDaysIso(thisFYStart, -1);          // e.g. 2026-01-02 (prior FY's last Friday)
+  const priorFYStart = fiscalYearStartIso(priorFYEnd);     // e.g. 2025-01-04
+
+  // Collect prior-FY CC values per salon from every week-snapshot in range.
+  const bySalon = {};
+  S.weekHistory.forEach(snap=>{
+    const we = snap.weekEnding;
+    if(we < priorFYStart || we > priorFYEnd) return;
+    (snap.salons||[]).forEach(r=>{
+      const sn = String(r.salonNum||'').trim();
+      const cc = n(r.ccThis);
+      if(!sn || !(cc>0)) return;
+      if(!bySalon[sn]) bySalon[sn] = [];
+      bySalon[sn].push(cc);
+    });
+  });
+
+  const out = {};
+  Object.keys(bySalon).forEach(sn=>{
+    const arr = bySalon[sn];
+    if(arr.length) out[sn] = arr.reduce((a,b)=>a+b,0)/arr.length;
+  });
+  // If the prior FY produced nothing (no history loaded for it), fall back to
+  // the seed so the column still renders.
+  return Object.keys(out).length ? out : { ...LY_AVG_SEED };
+}
+
+// Small ISO date helper (YYYY-MM-DD ± days).
+function addDaysIso(iso, days){
+  const d = new Date(iso + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
 
 const PAYROLL_MAP = {}; // Payroll map - populated by scrapers in future
 
@@ -1094,6 +1149,9 @@ function onDataLoaded(data){
       S.currentWeek = sorted[0].weekEnding;
     }
 
+    // Compute prior-fiscal-year average CC per salon for the CC +/- LY metric.
+    LY_AVG = computeLYAvg(S.currentWeek);
+
     updateWeekDropdown();
     document.getElementById('last-updated').textContent = new Date().toLocaleTimeString();
 
@@ -1244,6 +1302,9 @@ function updateWeekDropdown(){
 
 function selectWeek(wk){
   S.currentWeek = wk;
+  // Recompute prior-FY averages relative to the newly selected week (so a 2025
+  // week compares against 2024, a 2026 week against 2025, etc.).
+  LY_AVG = computeLYAvg(S.currentWeek);
   document.getElementById('week-dropdown').classList.remove('open');
   updateWeekDropdown();
 
@@ -1890,7 +1951,7 @@ function selectTrendMetric(key, btn, overrideSalon){
     return;
   }
 
-  const labels = weeks.map(w=>{ const d=new Date(w.weekEnding); return (d.getMonth()+1)+'/'+d.getDate(); });
+  const labels = weeks.map(w=>{ const parts=String(w.weekEnding).split('-'); return parseInt(parts[1],10)+'/'+parseInt(parts[2],10); });
   const keyMap = {cc:'cc',ccG:'ccG',sgr:'sgr',prod:'prod',nr:'nr',rr:'rr',hc:'hc',mbc:'mbc',ssW:'ssW',wts:'wts',noc:'noc',pay:'pay',cph:'cph',lyDiff:'lyDiff'};
   const getVal = (a) => {
     if(!a) return null;
@@ -1902,11 +1963,15 @@ function selectTrendMetric(key, btn, overrideSalon){
   // Drill mode: S_drillSalon takes priority, then overrideSalon param
   const drillSalon = S_drillSalon || overrideSalon || null;
 
-  // Get salon list — single salon in drill mode, all AM salons otherwise
+  // Get salon list. In drill mode we still plot ALL of the AM's salons so the
+  // multi-line view + clickable legend work (you can add/remove salons without
+  // going back). The drilled salon is just the default context; Chart.js legend
+  // toggling handles showing/hiding the others. This also fixes the prior bug
+  // where drilling locked the chart to one salon until a hard refresh.
   const allAMSalons = S.currentAM==='kayla'
     ? [...new Set(S.weekHistory.flatMap(w=>w.salons.map(r=>r.salonNum.trim())).filter(s=>!NAMED.has(s)))]
     : (AMS[S.currentAM]?.salons||[]);
-  const amSalons = drillSalon ? [drillSalon] : allAMSalons;
+  const amSalons = allAMSalons;
 
   const palette = ['#4e79a7','#f28e2b','#e15759','#76b7b2','#59a14f','#edc948','#b07aa1','#ff9da7','#9c755f','#bab0ac'];
   const pointStyles = ['circle','rect','triangle','star','rectRot','crossRot','cross','dash','rectRounded','circle'];
@@ -1953,7 +2018,10 @@ function selectTrendMetric(key, btn, overrideSalon){
       tension: 0.3,
       fill: false,
       type: 'line',
-      order: 3
+      order: 3,
+      // In drill mode, only the focus salon shows by default; the rest stay in
+      // the legend so you can quickly toggle/flip to another salon.
+      hidden: drillSalon ? (snum !== drillSalon) : false
     });
   });
 
@@ -2014,10 +2082,10 @@ function selectTrendMetric(key, btn, overrideSalon){
 
   const salonName = drillSalon ? (SALON_NAMES[drillSalon]||drillSalon) : null;
   const chartTitle = drillSalon
-    ? `${metric.label} — ${salonName}`
+    ? `${metric.label} — ${am.name} (focus: ${salonName})`
     : `${metric.label} — ${am.name}`;
   const chartSub = drillSalon
-    ? `Salon detail vs Company average · ${weeks.length} weeks`
+    ? `Focused on ${salonName} · click the legend to add or remove salons · ${weeks.length} weeks`
     : `Each salon · AM average (bold) · Company average (dashed) · ${weeks.length} weeks`;
   const backBtn = drillSalon
     ? `<button class="back-btn" onclick="drillBack()">← Back</button>`
