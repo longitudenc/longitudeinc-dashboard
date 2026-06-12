@@ -202,10 +202,21 @@ function bonusRowsFromMonthlyCsv(
   const validSalons = new Set(Object.values(storeToSalon).map(s => String(s).trim()))
   const objs = rowsToObjectsAt(parseCsv(csvText), EMP_HEADER_ROW_INDEX)
   const byEmp: Record<string, Record<string, string>[]> = {}
+  // SD3 emits a per-employee "Totals/Averages" row that holds SD3's OWN
+  // pre-computed combined NR/RR (rolling-window figures) across all the
+  // employee's salons. We drop it from the per-salon list (so hours/customers
+  // don't double-count), but capture it here so multi-salon employees can use
+  // SD3's authoritative NR/RR instead of an inaccurate weighted re-merge.
+  const totalsByEmp: Record<string, Record<string, string>> = {}
   for (const o of objs) {
     const gid = String(o['Global EE ID'] || '').trim()
     const salonNum = String(o['Salon #'] || '').trim()
-    if (!gid || !validSalons.has(salonNum)) continue // skip Totals/Averages + footnotes
+    if (!gid) continue
+    if (!validSalons.has(salonNum)) {
+      // Capture the Totals/Averages summary row (has NR/RR) — ignore footnotes.
+      if (/totals|averages/i.test(salonNum)) totalsByEmp[gid] = o
+      continue // skip Totals/Averages + footnotes from the per-salon list
+    }
     ;(byEmp[gid] ||= []).push(o)
   }
   const out: Record<string, any>[] = []
@@ -254,6 +265,18 @@ function bonusRowsFromMonthlyCsv(
       rr = rrC > 0 ? rrW / rrC : null
       prodPct = svc > 0 ? prodW / svc : null
       productivity = prtyH > 0 ? prtyW / prtyH : null
+
+      // NR/RR cannot be reconstructed by averaging across salons (SD3 computes
+      // them over a rolling 105-day window). If SD3 gave us a Totals/Averages
+      // row for this employee, use its authoritative combined NR/RR instead of
+      // the weighted re-merge above. (Other metrics keep the merge.)
+      const totalsRow = totalsByEmp[gid]
+      if (totalsRow) {
+        const tNr = vOrNull(returnRate(totalsRow['Stylist New Cust Return %']))
+        const tRr = vOrNull(returnRate(totalsRow['Stylist Repeat Cust Return %']))
+        if (tNr !== null) nr = tNr
+        if (tRr !== null) rr = tRr
+      }
     }
 
     const avgWkHrs = weeksN ? totalHrs / weeksN : 0
