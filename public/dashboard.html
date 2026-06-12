@@ -1590,6 +1590,14 @@ function sortRows(rows,cols,ci,asc){ if(ci<0||ci>=cols.length)return rows; retur
 function updateHeadSort(thead,ci,asc){ thead.querySelectorAll('th').forEach((th,i)=>{ th.classList.remove('sa','sd'); if(i===ci)th.classList.add(asc?'sa':'sd'); }); }
 
 function salonLink(salonNum, label, fromTab){
+  // Self-gate like stylistLink: render a clickable link only when the current
+  // user may actually drill into this salon. Owner/admin/viewer pass for every
+  // salon; an AM passes only for their own. Non-drillable salons render as
+  // plain text, so "who can and can't be clicked" reads consistently
+  // everywhere (Monthly Standouts, bonus tables, all-salons detail).
+  // drillIntoSalon re-checks canDrillSalon at the destination too, so this is
+  // display-consistency layered on top of the security gate.
+  if(!canDrillSalon(salonNum)) return `<span>${label}</span>`;
   return `<span class="salon-link" onclick="drillIntoSalon('${salonNum}','${fromTab}')" title="View ${label} trends">${label}</span>`;
 }
 // Can the CURRENT user drill into this salon?
