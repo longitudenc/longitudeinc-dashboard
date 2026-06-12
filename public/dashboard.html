@@ -770,7 +770,22 @@ function addDaysIso(iso, days){
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
 
-const PAYROLL_MAP = {}; // Payroll map - populated by scrapers in future
+// Payroll/CPH sliding scale by AVG weekly CC range. Each row:
+// [minCC, maxCC, excellencePayroll%, growthPayroll%, cphGoal]. The goal shown
+// for a salon is looked up by THAT salon's CC (not the company average).
+const PAYROLL_MAP = [
+  [0,   249, 49, 51, 1.6],
+  [250, 299, 48, 50, 1.8],
+  [300, 349, 44, 45, 2.0],
+  [350, 399, 40, 41, 2.2],
+  [400, 449, 38, 39, 2.4],
+  [450, 499, 38, 39, 2.5],
+  [500, 549, 37, 38, 2.6],
+  [550, 599, 37, 38, 2.7],
+  [600, 649, 36, 37, 2.8],
+  [650, 699, 36, 37, 2.8],
+  [700, 900, 35, 36, 2.9],
+];
 
 const NAMED = new Set(['3015','3058','4138','3062','3071','9489','1304','3043','3545','8725','3025','3027','7728','3053','3685','9689']);
 const AM_ORDER = ['cassi','dawn','luann','dana','bridgette','kayla'];
