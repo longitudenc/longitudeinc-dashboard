@@ -251,7 +251,7 @@
   .bonus-table th:first-child{text-align:left;}
   .bonus-table td{padding:6px 8px;border-bottom:1px solid #f0efec;text-align:center;white-space:nowrap;}
   .bonus-table td:first-child{text-align:left;font-weight:500;}
-  .bonus-table tr.bonus-salon-header td{background:#03654e!important;color:white;font-weight:700;font-size:12px;padding:6px 12px;text-align:left;}
+  .bonus-table tr.bonus-salon-header td{background:#03654e!important;color:white;font-weight:700;font-size:14px;padding:8px 12px;text-align:left;}
   .bonus-table tr:hover td{filter:brightness(.97);}
   .bv-green{background:#C6EFCE!important;color:#375623!important;font-weight:600;}
   .bv-yellow{background:#FFEB9C!important;color:#7D6608!important;font-weight:600;}
@@ -814,6 +814,19 @@ let INACTIVE_MAP = {};
 // ADP export and to mark in bonus views. History is preserved either way.
 function isInactive(globalId){ const r = INACTIVE_MAP[String(globalId||'').trim()]; return !!(r && r.inactive); }
 function inactiveSince(globalId){ const r = INACTIVE_MAP[String(globalId||'').trim()]; return r ? (r.inactiveDate||'') : ''; }
+// Is this person blocked from being PAID (inactive, or disc-ineligible)? If so
+// their earned payout shows struck-through and is excluded from salon/company
+// totals and the ADP export. They still appear (for tracking) with what they
+// would have earned.
+function payBlocked(e, periodKey){
+  if(isInactive(e.globalId)) return true;
+  if(activeDiscPoints(e.globalId, periodKey || S_bonusPeriod) >= 4) return true;
+  return false;
+}
+// The amount that actually counts toward totals/export: 0 if blocked.
+function payablePayout(e, periodKey){
+  return payBlocked(e, periodKey) ? 0 : (parseFloat(e.payout)||0);
+}
 let ACTIVE_SALONS = [...new Set([
   ...Object.values(AMS).flatMap(am=>am.salons||[]),
   ...Object.keys(SALON_NAMES)
@@ -2695,9 +2708,9 @@ function buildBonusMonth(){
 
   const period = S_bonusPeriods.find(p=>p.periodKey===S_bonusPeriod);
   const stys = emps.filter(e=>e.position!=='M');
-  const totPay = stys.reduce((s,e)=>s+(parseFloat(e.payout)||0),0);
+  const totPay = stys.reduce((s,e)=>s+payablePayout(e),0);
   const totPot = stys.reduce((s,e)=>s+(parseFloat(e.potential)||0),0);
-  const earned = stys.filter(e=>parseFloat(e.payout)>0).length;
+  const earned = stys.filter(e=>payablePayout(e)>0).length;
   const penalties = stys.filter(e=>e.prodPenalty==='true'||e.prodPenalty===true).length;
   const ineligible = stys.filter(e=>(e.eligible==='false'||e.eligible===false)&&parseFloat(e.potential)>0).length;
 
@@ -2786,7 +2799,7 @@ function buildBonusMonth(){
         <td>${isNaN(pts)?'—':pts}</td>
         <td>${e.perPt?'$'+e.perPt:'—'}</td>
         <td>${potential>0?fmtMoney(potential):'$0'}</td>
-        <td class="${discIneligible?'bv-red':pC}">${discIneligible?'$0.00':fmtMoney(payout)}</td>
+        <td class="${(discIneligible||inact)?'bv-red':pC}">${inact?'<s style="color:#999;">'+fmtMoney(payout)+'</s>':discIneligible?'$0.00':fmtMoney(payout)}</td>
         <td class="${discIneligible?'bv-red':pC}">${discIneligible?'Ineligible':potential>0?Math.round(pp*100)+'%':'—'}</td>
         <td style="font-size:10px;color:#666;">${notes.join('; ')}</td>
       </tr>`;
@@ -2859,7 +2872,7 @@ function buildBonusYTD(){
   // Totals row
   const grandTotals = periods.map(p=>{
     const emps = bonusByAM(S.currentAM, p.periodKey).filter(e=>e.position!=='M');
-    return emps.reduce((s,e)=>s+(parseFloat(e.payout)||0),0);
+    return emps.reduce((s,e)=>s+payablePayout(e),0);
   });
   const grandTotal = grandTotals.reduce((a,b)=>a+b,0);
   const grandPot = periods.reduce((s,p)=>{
@@ -2900,7 +2913,7 @@ function buildBonusSalon(){
     let ytdPay = 0, ytdPot = 0;
     const cells = S_bonusPeriods.map(p=>{
       const emps = (p.employees||[]).filter(e=>e.salonNum===sn&&e.position!=='M');
-      const pay = emps.reduce((s,e)=>s+(parseFloat(e.payout)||0),0);
+      const pay = emps.reduce((s,e)=>s+payablePayout(e),0);
       const pot = emps.reduce((s,e)=>s+(parseFloat(e.potential)||0),0);
       ytdPay+=pay; ytdPot+=pot;
       const pp = pot>0?Math.round(pay/pot*100)+'%':'—';
@@ -2924,7 +2937,7 @@ function buildBonusSalon(){
     <td>▸ AM Total</td>
     ${S_bonusPeriods.map(p=>{
       const emps = bonusByAM(S.currentAM, p.periodKey).filter(e=>e.position!=='M');
-      const pay = emps.reduce((s,e)=>s+(parseFloat(e.payout)||0),0);
+      const pay = emps.reduce((s,e)=>s+payablePayout(e),0);
       const pot = emps.reduce((s,e)=>s+(parseFloat(e.potential)||0),0);
       return `<td style="text-align:center;font-size:11px;">${fmtMoney(pay)}</td>`;
     }).join('')}
@@ -3936,9 +3949,9 @@ function buildCompanyBonusMonth(){
     <button class="btn btn-secondary btn-sm" onclick="exportBonusJPEG('${_pk}')">📷 Export Image (${_lbl})</button>
     <button class="btn btn-secondary btn-sm" onclick="exportPayrollCSV('${_pk}')">⬇ ADP Payroll CSV (${_lbl})</button>
   </div>`;
-  const totPay = stys.reduce((s,e)=>s+(parseFloat(e.payout)||0),0);
+  const totPay = stys.reduce((s,e)=>s+payablePayout(e),0);
   const totPot = stys.reduce((s,e)=>s+(parseFloat(e.potential)||0),0);
-  const earned = stys.filter(e=>parseFloat(e.payout)>0).length;
+  const earned = stys.filter(e=>payablePayout(e)>0).length;
 
   // Stats
   let html = exportBtns + `<div class="bonus-stat-grid" style="margin-top:1rem;">
@@ -3963,9 +3976,9 @@ function buildCompanyBonusMonth(){
       const salons = amId==='kayla' ? null : (am.salons||[]);
       return e.position!=='M' && (amId==='kayla' ? !NAMED.has(e.salonNum) : salons.includes(e.salonNum));
     });
-    const pay = amEmps.reduce((s,e)=>s+(parseFloat(e.payout)||0),0);
+    const pay = amEmps.reduce((s,e)=>s+payablePayout(e),0);
     const pot = amEmps.reduce((s,e)=>s+(parseFloat(e.potential)||0),0);
-    const earnedN = amEmps.filter(e=>parseFloat(e.payout)>0).length;
+    const earnedN = amEmps.filter(e=>payablePayout(e)>0).length;
     const pp = pot>0?Math.round(pay/pot*100)+'%':'—';
     const cls = pay>0?(pay/pot<0.5?'bv-yellow':'bv-green'):'';
     html += `<tr>
@@ -4008,7 +4021,7 @@ function buildCompanyBonusYTD(){
         const salons = amId==='kayla'?null:(am.salons||[]);
         return e.position!=='M'&&(amId==='kayla'?!NAMED.has(e.salonNum):salons.includes(e.salonNum));
       });
-      const pay=emps.reduce((s,e)=>s+(parseFloat(e.payout)||0),0);
+      const pay=emps.reduce((s,e)=>s+payablePayout(e),0);
       const pot=emps.reduce((s,e)=>s+(parseFloat(e.potential)||0),0);
       ytdPay+=pay; ytdPot+=pot;
       const cls=pay>0?(pay/pot<0.5?'bv-yellow':'bv-green'):'bv-red';
@@ -4028,7 +4041,7 @@ function buildCompanyBonusYTD(){
   html+=`<tr style="background:var(--primary);color:white;font-weight:700;">
     <td>▸ Company</td>
     ${S_bonusPeriods.map(p=>{
-      const pay=p.employees.filter(e=>e.position!=='M').reduce((s,e)=>s+(parseFloat(e.payout)||0),0);
+      const pay=p.employees.filter(e=>e.position!=='M').reduce((s,e)=>s+payablePayout(e),0);
       return `<td style="text-align:center;">${fmtMoney(pay)}</td>`;
     }).join('')}
     <td style="text-align:center;">${fmtMoney(grandPay)}</td>
@@ -4083,7 +4096,7 @@ function buildCompanyBonusAll(){
       <td>${fmtN1(e.hcTime)}</td>
       <td>${e.points||'—'}</td>
       <td>${potential>0?fmtMoney(potential):'$0'}</td>
-      <td class="${pCls}">${fmtMoney(payout)}</td>
+      <td class="${inact?'bv-red':pCls}">${inact?'<s style="color:#999;">'+fmtMoney(payout)+'</s>':fmtMoney(payout)}</td>
       <td class="${pCls}">${pp}</td>
       <td style="font-size:10px;color:#666;">${notes.join('; ')}</td>
     </tr>`;
@@ -4170,7 +4183,7 @@ function buildCompanyBonusAllYTD(){
   html += `<tr style="background:var(--primary);color:white;font-weight:700;">
     <td colspan="3">▸ Company Total — ${empList.length} stylists · ${grandEarned} earned</td>
     ${S_bonusPeriods.map(p=>{
-      const pay = p.employees.filter(e=>e.position!=='M').reduce((s,e)=>s+(parseFloat(e.payout)||0),0);
+      const pay = p.employees.filter(e=>e.position!=='M').reduce((s,e)=>s+payablePayout(e),0);
       return `<td style="text-align:center;">${fmtMoney(pay)}</td>`;
     }).join('')}
     <td style="text-align:center;">${fmtMoney(grandPay)}</td>
@@ -4617,7 +4630,12 @@ function buildAdpCsv(periodKey){
     });
   }
 
-  // 3) Area Managers — code GMB, one row per AM, reuse calcAMBonus
+  // 3) Area Managers — code GMB for their AM earnings. EXCEPTION: when an AM is
+  //    the 100% manager of a store (no separate manager, e.g. Cassi→3058,
+  //    Dana→7728), that store's manager bonus is split out as a separate MGR
+  //    row (under that salon's dept), and removed from the GMB total. The 30%/
+  //    50% override portions stay in GMB. Net pay is identical; only the code
+  //    split differs.
   Object.keys(AMS).forEach(amId=>{
     const r = calcAMBonus(amId, periodKey);
     if(!r || !(r.totalPayout > 0)) return;
@@ -4625,7 +4643,20 @@ function buildAdpCsv(periodKey){
     if(activeDiscPoints(gid, bonusLabel) >= 4) return;
     if(isInactive(gid)) return; // inactive AM — excluded from payout
     const dept = amId==='kayla' ? '000001' : '000004';
-    push(payIdForGlobalId(gid, bonusLabel), 'GMB', r.totalPayout, dept, AMS[amId].name+' (GMB)');
+    const payId = payIdForGlobalId(gid, bonusLabel);
+
+    // Split: 100%-manager salons → MGR rows; everything else → GMB remainder.
+    let gmbRemainder = r.totalPayout;
+    (r.salonDetails||[]).forEach(d=>{
+      if(d.role === 'manager' && d.amPayout > 0){
+        push(payId, 'MGR', d.amPayout, tempDeptForSalon(d.snum), AMS[amId].name+' (MGR '+d.snum+' — AM as mgr)');
+        gmbRemainder -= d.amPayout;
+      }
+    });
+    // Remaining AM earnings (overrides + AM-level) as GMB.
+    if(gmbRemainder > 0.005){
+      push(payId, 'GMB', gmbRemainder, dept, AMS[amId].name+' (GMB)');
+    }
   });
 
   const header = 'Co Code,Batch ID,File #,Earnings 4 Code,Earnings 4 Amount,Temp Dept';
@@ -4745,7 +4776,7 @@ function exportBonusJPEG(periodKey){
   printDiv.innerHTML = `
     <div style="text-align:center;margin-bottom:16px;border-bottom:3px solid #03654e;padding-bottom:12px;">
       <div style="font-size:22px;font-weight:700;color:#03654e;">Longitude Inc — Stylist Bonus</div>
-      <div style="font-size:16px;color:#555;margin-top:4px;">${label} · ${stys.length} Stylists · Total Payout: ${fmtMoney(stys.reduce((s,e)=>s+(parseFloat(e.payout)||0),0))}</div>
+      <div style="font-size:16px;color:#555;margin-top:4px;">${label} · ${stys.length} Stylists · Total Payout: ${fmtMoney(stys.reduce((s,e)=>s+payablePayout(e),0))}</div>
     </div>
     <table style="border-collapse:collapse;border:1px solid #ccc;">
       <thead>${headerHTML}</thead>
@@ -5002,9 +5033,9 @@ function buildCompanyBonusAllStylists(){
     stys = [...stys].sort((a,b)=>{ const sA=parseInt(a.salonNum)||0,sB=parseInt(b.salonNum)||0; return sA-sB||a.empName.localeCompare(b.empName); });
   }
 
-  const totPay = stys.reduce((s,e)=>s+(parseFloat(e.payout)||0),0);
+  const totPay = stys.reduce((s,e)=>s+payablePayout(e),0);
   const totPot = stys.reduce((s,e)=>s+(parseFloat(e.potential)||0),0);
-  const earned = stys.filter(e=>parseFloat(e.payout)>0).length;
+  const earned = stys.filter(e=>payablePayout(e)>0).length;
 
   const bTh2 = (i,lbl) => {
     const active = S_bonusSort.col===i;
@@ -5073,7 +5104,7 @@ function buildCompanyBonusAllStylists(){
       <td class="${(hc>=BONUS_CFG.HC_E_LO&&hc<=BONUS_CFG.HC_E_HI)?'bv-green':(hc>=BONUS_CFG.HC_G_LO1&&hc<=BONUS_CFG.HC_G_HI2)?'bv-yellow':'bv-red'}">${fmtN1(hc)}</td>
       <td style="font-weight:700;">${e.points||'—'}</td>
       <td>${potential>0?fmtMoney(potential):'$0'}</td>
-      <td class="${discInelig?'bv-red':pCls}" style="font-weight:700;">${discInelig?'$0.00':fmtMoney(payout)}</td>
+      <td class="${(discInelig||inact)?'bv-red':pCls}" style="font-weight:700;">${inact?'<s style="color:#999;">'+fmtMoney(payout)+'</s>':discInelig?'$0.00':fmtMoney(payout)}</td>
       <td class="${discInelig?'bv-red':pCls}">${discInelig?'Ineligible':pp}</td>
       <td style="font-size:10px;color:#666;">${notes.join('; ')}</td>
     </tr>`;
@@ -5186,7 +5217,7 @@ function buildCoBonusYTDStylist(){
   html+=`<tr style="background:var(--primary);color:white;font-weight:700;">
     <td colspan="2">▸ Company Total</td>
     ${S_bonusPeriods.map(p=>{
-      const pay=p.employees.filter(e=>e.position!=='M').reduce((s,e)=>s+(parseFloat(e.payout)||0),0);
+      const pay=p.employees.filter(e=>e.position!=='M').reduce((s,e)=>s+payablePayout(e),0);
       return `<td style="text-align:center;">${fmtMoney(pay)}</td>`;
     }).join('')}
     <td style="text-align:center;">${fmtMoney(grandPay)}</td>
@@ -5227,7 +5258,7 @@ function buildCoBonusYTDAM(){
         if(amId==='kayla') return !NAMED.has(e.salonNum);
         return (am.salons||[]).includes(e.salonNum);
       });
-      const pay=emps.reduce((s,e)=>s+(parseFloat(e.payout)||0),0);
+      const pay=emps.reduce((s,e)=>s+payablePayout(e),0);
       const pot=emps.reduce((s,e)=>s+(parseFloat(e.potential)||0),0);
       emps.forEach(e=>ytdStylists.add(e.empName));
       ytdEarned+=emps.filter(e=>parseFloat(e.payout)>0).length;
@@ -5251,7 +5282,7 @@ function buildCoBonusYTDAM(){
   html+=`<tr style="background:var(--primary);color:white;font-weight:700;">
     <td>▸ Company</td>
     ${S_bonusPeriods.map(p=>{
-      const pay=p.employees.filter(e=>e.position!=='M').reduce((s,e)=>s+(parseFloat(e.payout)||0),0);
+      const pay=p.employees.filter(e=>e.position!=='M').reduce((s,e)=>s+payablePayout(e),0);
       return `<td style="text-align:center;">${fmtMoney(pay)}</td>`;
     }).join('')}
     <td style="text-align:center;">${fmtMoney(grandPay)}</td>
@@ -5290,7 +5321,7 @@ function buildCoBonusYTDSalon(){
     let ytdPay=0, ytdPot=0;
     const cells = S_bonusPeriods.map(p=>{
       const emps=p.employees.filter(e=>e.salonNum===sn&&e.position!=='M');
-      const pay=emps.reduce((s,e)=>s+(parseFloat(e.payout)||0),0);
+      const pay=emps.reduce((s,e)=>s+payablePayout(e),0);
       const pot=emps.reduce((s,e)=>s+(parseFloat(e.potential)||0),0);
       ytdPay+=pay; ytdPot+=pot;
       if(!emps.length) return '<td style="color:#ccc;text-align:center;">—</td>';
@@ -5312,7 +5343,7 @@ function buildCoBonusYTDSalon(){
   html+=`<tr style="background:var(--primary);color:white;font-weight:700;">
     <td colspan="2">▸ Company</td>
     ${S_bonusPeriods.map(p=>{
-      const pay=p.employees.filter(e=>e.position!=='M').reduce((s,e)=>s+(parseFloat(e.payout)||0),0);
+      const pay=p.employees.filter(e=>e.position!=='M').reduce((s,e)=>s+payablePayout(e),0);
       return `<td style="text-align:center;">${fmtMoney(pay)}</td>`;
     }).join('')}
     <td style="text-align:center;">${fmtMoney(grandPay)}</td>
