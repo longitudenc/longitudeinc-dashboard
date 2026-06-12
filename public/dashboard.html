@@ -5170,7 +5170,7 @@ function buildExcellenceLeaders(){
     const shown = leaders.slice(0, EXC_CAP);
     const rows = shown.map((e,i)=>`<tr style="${i%2?'background:#f6faf4;':''}">
         <td style="padding:5px 8px;color:var(--text-muted);width:24px;text-align:right;">${i+1}</td>
-        <td style="padding:5px 8px;">${stylistLink(e.globalId, e.empName)}</td>
+        <td style="padding:5px 8px;">${stylistLink(e.globalId, e.empName, e.salonNum)}</td>
         <td style="padding:5px 8px;color:var(--text-muted);font-size:11px;">${salonLink(e.salonNum, salonDisplay(e.salonNum), 'bonus')}</td>
         <td style="padding:5px 8px;text-align:right;font-weight:700;" class="bv-green">${m.fmt(e)}</td>
       </tr>`).join('');
@@ -5192,7 +5192,7 @@ function buildExcellenceLeaders(){
     const medal = ['🥇','🥈','🥉'][i] || (i+1)+'.';
     return `<tr style="${i%2?'background:#f6faf4;':''}">
       <td style="padding:6px 10px;width:30px;font-size:14px;">${medal}</td>
-      <td style="padding:6px 10px;">${stylistLink(e.globalId, e.empName)}</td>
+      <td style="padding:6px 10px;">${stylistLink(e.globalId, e.empName, e.salonNum)}</td>
       <td style="padding:6px 10px;color:var(--text-muted);font-size:11px;">${salonLink(e.salonNum, salonDisplay(e.salonNum), 'bonus')}</td>
       <td style="padding:6px 10px;text-align:center;font-weight:700;" class="bv-green">${e._exc} ★</td>
       <td style="padding:6px 10px;color:var(--text-muted);font-size:11px;">${e._measLabels}</td>
@@ -5256,7 +5256,7 @@ function exportExcellenceJPEG(periodKey){
     const shown = leaders.slice(0, EXC_CAP);
     const rows = shown.map((e,i)=>`<tr style="${i%2?'background:#f6faf4;':''}">
         <td style="padding:5px 9px;color:#999;text-align:right;width:22px;">${i+1}</td>
-        <td style="padding:5px 9px;font-weight:600;white-space:nowrap;">${stylistLink(e.globalId, e.empName)}</td>
+        <td style="padding:5px 9px;font-weight:600;white-space:nowrap;">${stylistLink(e.globalId, e.empName, e.salonNum)}</td>
         <td style="padding:5px 9px;color:#777;font-size:11px;white-space:nowrap;">${salonLink(e.salonNum, salonDisplay(e.salonNum), 'bonus')}</td>
         <td style="padding:5px 9px;text-align:right;font-weight:700;color:#1a6b3f;white-space:nowrap;">${m.fmt(e)}</td>
       </tr>`).join('');
@@ -5278,7 +5278,7 @@ function exportExcellenceJPEG(periodKey){
     const medal = ['🥇','🥈','🥉'][i] || (i+1)+'.';
     return `<tr style="${i%2?'background:#f6faf4;':''}">
       <td style="padding:6px 11px;width:28px;font-size:15px;">${medal}</td>
-      <td style="padding:6px 11px;font-weight:600;white-space:nowrap;">${stylistLink(e.globalId, e.empName)}</td>
+      <td style="padding:6px 11px;font-weight:600;white-space:nowrap;">${stylistLink(e.globalId, e.empName, e.salonNum)}</td>
       <td style="padding:6px 11px;color:#777;font-size:11px;white-space:nowrap;">${salonLink(e.salonNum, salonDisplay(e.salonNum), 'bonus')}</td>
       <td style="padding:6px 11px;text-align:center;font-weight:700;color:#1a6b3f;">${e._exc} ★</td>
       <td style="padding:6px 11px;color:#777;font-size:11px;white-space:nowrap;">${e._measLabels}</td>
@@ -5708,10 +5708,22 @@ function fmtName(name){
   }
   return (flipped + suffix).trim();
 }
-function stylistLink(globalId, name){
+function stylistLink(globalId, name, salonNum){
   const disp = fmtName(name);
-  // Don't render a clickable link to a person the current user can't view.
-  if(!canViewPerson(globalId)) return `<span>${disp}</span>`;
+  // Clickability rule:
+  //  - WITH a salon context (e.g. the Standouts row's salon, which is the
+  //    person's PRIMARY salon for that period): clickable only if the current
+  //    user may drill THAT salon. This is stricter than canViewPerson, which
+  //    unions every salon a person has EVER appeared in across all history — so
+  //    a stylist whose primary salon isn't yours won't be clickable just
+  //    because they once picked up a shift in one of your salons.
+  //  - WITHOUT a salon context: fall back to canViewPerson (unchanged).
+  const hasSalon = salonNum !== undefined && salonNum !== null && String(salonNum).trim() !== '';
+  const isSelf   = globalId && String(globalId).trim() === String(SESSION.globalId||'').trim();
+  const allowed  = hasSalon
+    ? (canSeeAllSalons() || isSelf || canDrillSalon(salonNum))
+    : canViewPerson(globalId);
+  if(!allowed) return `<span>${disp}</span>`;
   return `<span class="stylist-link" onclick="openProfile('${globalId}','${String(name).replace(/'/g,"\\'")}');event.stopPropagation();">${disp}</span>`;
 }
 
