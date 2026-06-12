@@ -1885,7 +1885,21 @@ let S_trendWindow = 20; // Trends weeks shown: 20 | 52 | 'ytd' | 'all' (default:
 let S_trendChart = null;
 let S_trendPriorYear = false; // Overlay prior-year (−52wk) line on trend charts
 function setTrendWindow(w){ S_trendWindow = w; renderTrends(); }
-function toggleTrendPriorYear(){ S_trendPriorYear = !S_trendPriorYear; renderTrends(); }
+let S_trendVisSnapshot = null; // {label: visible} captured across PY-toggle rebuilds
+function toggleTrendPriorYear(){
+  // Capture current salon visibility so toggling PY doesn't snap back to the
+  // original focus salon (preserves whatever you've flipped to via the legend).
+  if(S_trendChart){
+    const snap = {};
+    S_trendChart.data.datasets.forEach((ds,i)=>{
+      if(ds.label && ds.label.endsWith(' (PY)')) return;
+      snap[ds.label] = S_trendChart.isDatasetVisible(i);
+    });
+    S_trendVisSnapshot = snap;
+  }
+  S_trendPriorYear = !S_trendPriorYear;
+  renderTrends();
+}
 // First Friday of January of the fiscal year a given week-ending (YYYY-MM-DD) falls in.
 // Fiscal wk1 ends the first Friday of January; YTD = weeks on/after that anchor.
 // Weeks in the fiscal year of the currently selected week, up to and
@@ -2282,6 +2296,10 @@ function selectTrendMetric(key, btn, overrideSalon){
     legendEl.innerHTML = '';
 
     chart.data.datasets.forEach((ds, idx)=>{
+      // Prior-year (PY) lines are paired to their parent salon — they follow the
+      // parent's legend toggle and don't get their own legend item (avoids
+      // clutter + the flip-salon visibility bug).
+      if(ds.label && ds.label.endsWith(' (PY)')) return;
       const isAMAvg = ds.label.includes(' Avg') && !ds.label.includes('Company');
       const isCoAvg = ds.label === 'Company Avg';
       const isTarget = metric.targets.some(t=>t.label===ds.label);
@@ -2309,15 +2327,18 @@ function selectTrendMetric(key, btn, overrideSalon){
       item.appendChild(swatch);
       item.appendChild(labelEl);
 
-      // Toggle on click. Initialize from the dataset's ACTUAL starting
-      // visibility so the legend and chart agree — otherwise datasets that
-      // start hidden (drill focus) needed two clicks to show.
-      let hidden = ds.hidden === true;
+      // Toggle on click. Initialize from the dataset's ACTUAL current
+      // visibility (respects restored snapshots + drill focus) so the legend
+      // and chart always agree — avoids the double-click and flip-back bugs.
+      let hidden = !chart.isDatasetVisible(idx);
       item.style.opacity = hidden ? '0.3' : '1';
       item.style.textDecoration = hidden ? 'line-through' : 'none';
       item.addEventListener('click', ()=>{
         hidden = !hidden;
         chart.setDatasetVisibility(idx, !hidden);
+        // Keep the paired prior-year (PY) line in lockstep with its parent salon.
+        const pyIdx = chart.data.datasets.findIndex(d=>d.label === ds.label+' (PY)');
+        if(pyIdx >= 0) chart.setDatasetVisibility(pyIdx, !hidden);
         chart.update();
         item.style.opacity = hidden ? '0.3' : '1';
         item.style.textDecoration = hidden ? 'line-through' : 'none';
@@ -2364,6 +2385,19 @@ function selectTrendMetric(key, btn, overrideSalon){
       }
     }
   });
+  // Restore visibility captured before a PY-toggle rebuild, so toggling Prior
+  // Year preserves whatever salon(s) you'd flipped to rather than snapping back
+  // to the original focus. Each salon's (PY) line follows its parent.
+  if(S_trendVisSnapshot){
+    S_trendChart.data.datasets.forEach((ds,i)=>{
+      const baseLabel = (ds.label||'').endsWith(' (PY)') ? ds.label.slice(0,-5) : ds.label;
+      if(Object.prototype.hasOwnProperty.call(S_trendVisSnapshot, baseLabel)){
+        S_trendChart.setDatasetVisibility(i, S_trendVisSnapshot[baseLabel]);
+      }
+    });
+    S_trendChart.update();
+    S_trendVisSnapshot = null;
+  }
   buildCustomLegend(S_trendChart);
 }
 
