@@ -109,26 +109,15 @@ export async function resolveAccess(email: string): Promise<Access | null> {
   }
   const globalId = String(profile.globalId).trim()
 
-  // 2) Manager? Checked BEFORE AreaManagers so that someone who CHANGED roles
-  //    (e.g. an AM who stepped down to manage a single salon) resolves to their
-  //    CURRENT role. Their historical AM data still computes correctly because
-  //    bonus math reads stored data, not this auth role.
-  const mgr = managerTable.find((m: any) => String(m.globalId || '').trim() === globalId)
-  if (mgr) {
-    return {
-      role: 'manager',
-      globalId,
-      salons: mgr.salonNum ? [String(mgr.salonNum).trim()] : [],
-    }
-  }
-
-  // 3) Area manager? Two conditions, so the ROLE is driven by the dated
-  //    assignment history rather than mere membership in AreaManagers:
+  // 2) Area manager FIRST — an active AM (with at least one current, un-ended
+  //    assignment) resolves as area_manager EVEN IF they are also the listed
+  //    manager of one of their salons (e.g. Cassi manages 3058, Dana manages
+  //    7728 — they're still AMs). Being an AM is the broader role.
+  //    Conditions, so the role is driven by dated assignment history:
   //      (a) their globalId is in AreaManagers (identity), AND
   //      (b) their amKey has at least one CURRENT (un-ended) AM assignment.
   //    When an AM's last assignment ends (they step down, like Dawn 5/30),
-  //    condition (b) fails and they stop resolving as area_manager — no manual
-  //    tab edit needed. AreaManagers stays as the identity/history record.
+  //    condition (b) fails → they fall through to manager/stylist below.
   const am = areaManagers.find((a: any) => String(a.globalId || '').trim() === globalId)
   if (am) {
     const salons = currentSalonsForAm(am.amKey || am.key || '', amAssignments)
@@ -137,6 +126,19 @@ export async function resolveAccess(email: string): Promise<Access | null> {
     }
     // Listed in AreaManagers but no current assignments → former AM. Fall
     // through to manager/stylist resolution below for their CURRENT role.
+  }
+
+  // 3) Manager? Reached only when the person is NOT an active AM. This covers
+  //    a true single-salon manager, or an AM who STEPPED DOWN to manage one
+  //    salon (no current AM assignments). Their historical AM data still
+  //    computes correctly because bonus math reads stored data, not this role.
+  const mgr = managerTable.find((m: any) => String(m.globalId || '').trim() === globalId)
+  if (mgr) {
+    return {
+      role: 'manager',
+      globalId,
+      salons: mgr.salonNum ? [String(mgr.salonNum).trim()] : [],
+    }
   }
 
   // 4) Otherwise a known employee → stylist, scoped to self.
