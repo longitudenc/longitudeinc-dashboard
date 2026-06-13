@@ -233,7 +233,7 @@
   .profile-section{padding:16px 24px;border-bottom:1px solid var(--border);}
   .profile-section-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);margin-bottom:12px;}
   .profile-stat-row{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin-bottom:4px;}
-  .profile-stat{background:var(--bg);border:1px solid #c2c7c2;border-radius:8px;padding:10px;text-align:center;box-shadow:0 1px 2px rgba(0,0,0,.05);}
+  .profile-stat{background:var(--bg);border:1.5px solid #9aa39a;border-radius:8px;padding:10px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.10);}
   .profile-stat-n{font-size:18px;font-weight:700;color:var(--primary);}
   .profile-stat-l{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-top:2px;}
   .profile-chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
@@ -1805,19 +1805,27 @@ function renderIndividual(){
     const allEmps = ytdEmpsByAM(S.currentAM);
     if(!allEmps.length){ tbody.innerHTML='<tr><td colspan="11" class="no-data"><div class="no-data-icon">👥</div>No employee data yet</td></tr>'; thead.innerHTML=''; return; }
 
-    // Group by empName+salonNum and average their metrics
+    // Consolidate by PERSON (globalId) across all their salons — multi-salon
+    // employees get ONE row, shown at their home salon, with all weeks combined.
     const grouped = {};
     allEmps.forEach(e=>{
-      const key = (e.empName||'') + '|' + (e.salonNum||'');
-      if(!grouped[key]) grouped[key] = {empName:e.empName, salonNum:e.salonNum, position:e.position, rows:[]};
-      grouped[key].rows.push(e);
+      const gid = (e.globalId||'').trim() || ('name:'+(e.empName||''));
+      if(!grouped[gid]) grouped[gid] = {globalId:(e.globalId||'').trim(), empName:e.empName, position:e.position, salons:new Set(), rows:[]};
+      grouped[gid].rows.push(e);
+      if(e.salonNum) grouped[gid].salons.add(String(e.salonNum));
     });
 
     const ytdEmps = Object.values(grouped).map(g=>{
       const rows = g.rows;
       const avgField = (fn) => avg(rows.map(fn).filter(v=>!isNaN(v)&&v!==0));
+      // Home salon: the SD3 home store if the person actually has data here, else
+      // the salon they logged the most weeks at (keeps the label and data aligned).
+      const homeRef = (S.homeDataMap && g.globalId && S.homeDataMap[g.globalId]) ? String(S.homeDataMap[g.globalId].homeSalon||'').trim() : '';
+      let homeSalon = (homeRef && g.salons.has(homeRef)) ? homeRef : '';
+      if(!homeSalon){ const cnt={}; rows.forEach(r=>{ if(r.salonNum){ const k=String(r.salonNum); cnt[k]=(cnt[k]||0)+1; } }); homeSalon = Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a])[0] || (rows[0]&&String(rows[0].salonNum)) || ''; }
       return {
-        empName: g.empName, salonNum: g.salonNum, position: g.position,
+        globalId: g.globalId, empName: g.empName, position: g.position,
+        salonNum: homeSalon, salonCount: g.salons.size,
         hcTime: avgField(r=>n(r.hcTime)).toFixed(1),
         mbc: avgField(r=>n(r.mbc)).toFixed(1),
         product: avgField(r=>p(r.product)).toFixed(1),
@@ -1852,8 +1860,8 @@ function renderIndividual(){
     if(sfv) filtered = filtered.filter(e=>e.salonNum===sfv);
 
     tbody.innerHTML = filtered.map(e=>`<tr>
-      <td><strong>${stylistLink(e.globalId, e.empName)}</strong></td>
-      <td>${salonLink(e.salonNum, salonDisplay(e.salonNum), 'individual')}</td>
+      <td><strong>${stylistLink(e.globalId, e.empName, e.salonNum)}</strong></td>
+      <td>${salonLink(e.salonNum, salonDisplay(e.salonNum), 'individual')}${e.salonCount>1?` <span style="font-size:10px;color:var(--text-muted);" title="Works ${e.salonCount} salons — data consolidated">+${e.salonCount-1}</span>`:''}</td>
       <td class="${tierHC(parseFloat(e.hcTime))}">${e.hcTime}</td>
       <td class="${tierMBC(parseFloat(e.mbc))}">${e.mbc}</td>
       <td class="${tierProd(parseFloat(e.product))}">${e.product}%</td>
@@ -6025,7 +6033,7 @@ function buildProfileSummaryHtml(globalId, empRows, bonusRows){
         </tr></thead><tbody>${lrows}</tbody></table>`;
   })();
 
-  const cardStyle = 'background:white;border:1px solid var(--border);border-radius:10px;padding:16px;';
+  const cardStyle = 'background:white;border:1.5px solid #9aa39a;border-radius:10px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,.08);';
   return `<div style="display:flex;flex-direction:column;gap:16px;max-width:920px;">
     <div style="${cardStyle}"><div class="card-title">Current Bonus Period</div>${curCard}</div>
     <div style="${cardStyle}"><div class="card-title">Last Closed Period</div>${lcCard}</div>
