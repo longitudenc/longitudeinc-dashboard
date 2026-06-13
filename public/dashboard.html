@@ -5971,7 +5971,7 @@ function buildProfileSummaryHtml(globalId, empRows, bonusRows){
        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
          <div class="profile-stat" style="flex:1;min-width:120px;"><div class="profile-stat-n">${atGoal}/5</div><div class="profile-stat-l">Metrics at goal</div></div>
          <div class="profile-stat" style="flex:1;min-width:120px;"><div class="profile-stat-n">${atExc}</div><div class="profile-stat-l">At excellence</div></div>
-         <div class="profile-stat" style="flex:1;min-width:140px;"><div class="profile-stat-n">${hrs===null?'—':hrs.toFixed(1)}</div><div class="profile-stat-l">Avg wkly hrs → ${tier}</div></div>
+         <div class="profile-stat" style="flex:1;min-width:140px;"><div class="profile-stat-n">${hrs===null?'—':hrs.toFixed(1)}</div><div class="profile-stat-l">Avg floor hrs/wk</div></div>
          <div class="profile-stat" style="flex:1;min-width:120px;"><div class="profile-stat-n" style="color:${inelig?'#9C0006':'inherit'};">${discPts}${inelig?' ⚠':''}</div><div class="profile-stat-l">Disc points${inelig?' (ineligible)':''}</div></div>
        </div>
        <table style="width:100%;border-collapse:collapse;font-size:13px;">
@@ -5984,7 +5984,7 @@ function buildProfileSummaryHtml(globalId, empRows, bonusRows){
          </tr></thead>
          <tbody>${metricRows}</tbody>
        </table>
-       <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">Reflects completed weeks only. NR % and RR % are SD3 weekly figures (105-day rolling) — they update weekly, not daily. Final points &amp; payout are set when the period closes.</div>`;
+       <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">Reflects completed weeks only. Hours shown are floor hours; the $100/$200 tier is set by qualifying hours (floor + vacation + holiday) at close. NR % and RR % are SD3 weekly figures (105-day rolling) — they update weekly, not daily. Final points &amp; payout are set when the period closes.</div>`;
 
   const lc = bonusRows.length ? bonusRows[bonusRows.length-1] : null;
   const lcCard = !lc ? '<div style="color:var(--text-muted);">No closed bonus period yet.</div>' : (()=>{
@@ -6009,8 +6009,9 @@ function buildProfileSummaryHtml(globalId, empRows, bonusRows){
     }).join('');
     return `<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
         <div style="font-weight:700;font-size:15px;color:var(--primary);">${formatBonusPeriod(lc.period)}</div>
-        <div style="font-size:13px;">${lc.points||0} pts · <span style="font-weight:700;">${payTxt}</span> of ${fmtMoney(pot)} (${pct}%)${blk?' <span style="color:#9C0006;font-size:11px;">⚠ ineligible</span>':''}</div>
+        <div style="font-size:13px;">${(lc.avgWkHrs!=null&&lc.avgWkHrs!=='')?fmtN1(lc.avgWkHrs)+' qual hrs/wk · ':''}${lc.points||0} pts · <span style="font-weight:700;">${payTxt}</span> of ${fmtMoney(pot)} (${pct}%)${blk?' <span style="color:#9C0006;font-size:11px;">⚠ ineligible</span>':''}</div>
       </div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">Avg wkly hrs: ${fmtN1(lc.avgWkHrs)}${(parseFloat(lc.avgWkHrs)||0)?(' → '+((parseFloat(lc.avgWkHrs)||0)>=BONUS_CFG.HRS_EXC?'$200 (Excellence)':'$100 (Growth)')+' tier'):''}</div>
       <table style="width:100%;border-collapse:collapse;font-size:13px;">
         <thead><tr style="background:var(--primary-dark);color:white;">
           <th style="padding:7px 10px;text-align:left;">Metric</th>
@@ -6061,14 +6062,21 @@ function buildProfile(globalId, name){
   const pos = empRows.length ? empRows[empRows.length-1].position : '—';
   const posLabel = pos==='M'?'Manager':pos==='S'?'Stylist':'—';
 
-  // Use p() logic: values stored as raw numbers (23 = 23%)
-  const ytdHC   = empRows.length ? (empRows.reduce((s,r)=>s+n(r.hcTime),0)/empRows.length).toFixed(1) : '—';
-  const ytdMBC  = empRows.length ? (empRows.reduce((s,r)=>s+n(r.mbc),0)/empRows.length).toFixed(1) : '—';
-  const ytdProd = empRows.length ? (empRows.reduce((s,r)=>s+p(r.product),0)/empRows.length).toFixed(1)+'%' : '—';
-  const ytdNR   = empRows.length ? (empRows.reduce((s,r)=>s+p(r.nr),0)/empRows.length).toFixed(1)+'%' : '—';
-  const ytdRR   = empRows.length ? (empRows.reduce((s,r)=>s+p(r.rr),0)/empRows.length).toFixed(1)+'%' : '—';
-  const ytdHrs  = empRows.length ? (empRows.reduce((s,r)=>s+n(r.floorHours),0)/empRows.length).toFixed(1) : '—';
-  const ytdBonus = bonusRows.reduce((s,r)=>s+(discBlockedPeriod(r)?0:(parseFloat(r.payout)||0)),0);
+  // YTD = current fiscal year only (first-Friday-of-Jan anchor). The strip is
+  // labeled YTD, so each tile must scope to this FY, not all loaded history.
+  const _fyStart = fiscalYearStartIso(S.currentWeek || (empRows.length?empRows[empRows.length-1].weekEnding:'') || new Date().toISOString().slice(0,10));
+  const _ytdYear = periodYear(periodKeyFromWeekEnd(S.currentWeek)) || (S_bonusPeriods.length ? Math.max(...S_bonusPeriods.map(pp=>periodYear(pp.periodKey))) : 0);
+  const ytdRows  = empRows.filter(r=>r.weekEnding >= _fyStart);
+  const _avg = (rows,fn)=> rows.length ? (rows.reduce((s,r)=>s+fn(r),0)/rows.length) : null;
+  const _f1  = v => v===null?'—':v.toFixed(1);
+  const _fp1 = v => v===null?'—':v.toFixed(1)+'%';
+  const ytdHC   = _f1(_avg(ytdRows,r=>n(r.hcTime)));
+  const ytdMBC  = _f1(_avg(ytdRows,r=>n(r.mbc)));
+  const ytdProd = _fp1(_avg(ytdRows,r=>p(r.product)));
+  const ytdNR   = _fp1(_avg(ytdRows,r=>p(r.nr)));
+  const ytdRR   = _fp1(_avg(ytdRows,r=>p(r.rr)));
+  const ytdHrs  = _f1(_avg(ytdRows,r=>n(r.floorHours)));
+  const ytdBonus = bonusRows.reduce((s,r)=>s+((periodYear(r.period)===_ytdYear && !discBlockedPeriod(r))?(parseFloat(r.payout)||0):0),0);
 
   // Build LI company avg per week for each metric
   // For each week, average the metric across ALL employees in the system
@@ -6135,8 +6143,7 @@ function buildProfile(globalId, name){
           <div class="profile-stat"><div class="profile-stat-n">${ytdProd}</div><div class="profile-stat-l">Product % YTD</div></div>
           <div class="profile-stat"><div class="profile-stat-n">${ytdNR}</div><div class="profile-stat-l">NR % YTD</div></div>
           <div class="profile-stat"><div class="profile-stat-n">${ytdRR}</div><div class="profile-stat-l">RR % YTD</div></div>
-          <div class="profile-stat"><div class="profile-stat-n">${ytdHrs}</div><div class="profile-stat-l">Avg Wkly Hrs</div></div>
-          <div class="profile-stat"><div class="profile-stat-n">${bonusRows.length}</div><div class="profile-stat-l">Bonus Periods</div></div>
+          <div class="profile-stat"><div class="profile-stat-n">${ytdHrs}</div><div class="profile-stat-l">Avg Floor Hrs</div></div>
           <div class="profile-stat"><div class="profile-stat-n">${fmtMoney(ytdBonus)}</div><div class="profile-stat-l">YTD Bonus</div></div>
         </div>
       </div>
