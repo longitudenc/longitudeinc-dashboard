@@ -4,9 +4,9 @@
 // person (resolveAccess != null), we issue a 6-digit code and email it via
 // Resend.
 //
-// PRIVACY: the response is ALWAYS the same ("if that email is registered, a
-// code was sent") whether or not the email is valid - so this endpoint can't
-// be used to discover who has an account.
+// NOTE: by request, this endpoint now tells the caller when an email is NOT
+// registered (so users know to ask a manager/AM to add them). This trades away
+// the prior privacy property of not revealing which emails have accounts.
 //
 // POST body: { email: string }
 
@@ -26,17 +26,19 @@ export async function POST(request: Request) {
     // fall through - empty email handled below
   }
 
-  // Generic response for BOTH success and "unknown email", so we never reveal
-  // which emails are valid.
-  const generic = NextResponse.json({
-    ok: true,
-    message: 'If that email is registered, a sign-in code has been sent.',
-  })
-
-  if (!email || !email.includes('@')) return generic
+  if (!email || !email.includes('@')) {
+    return NextResponse.json({ ok: false, reason: 'invalid', message: 'Enter a valid email address.' })
+  }
 
   const access = await resolveAccess(email)
-  if (!access) return generic // unknown - say nothing different
+  if (!access) {
+    // Per request: tell the user explicitly so they know to get their email added.
+    return NextResponse.json({
+      ok: false,
+      reason: 'not_registered',
+      message: "This email isn't registered. Please contact your manager or area manager to have your email added to the system.",
+    })
+  }
 
   try {
     const code = await issueCode(email)
@@ -58,5 +60,5 @@ export async function POST(request: Request) {
     console.error('request-code send failed')
   }
 
-  return generic
+  return NextResponse.json({ ok: true, message: 'A sign-in code has been sent to your email.' })
 }

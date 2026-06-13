@@ -306,6 +306,15 @@
     .emp-table td:first-child{background:#fff;z-index:2;}
     .emp-table tbody tr:hover td:first-child{background:#faf9f7;}
     .emp-table th:first-child{background:var(--primary-dark);z-index:3;}
+    /* freeze the first column on the company/salon tables too */
+    .data-table th:first-child,.data-table td:first-child,
+    .co-score-table th:first-child,.co-score-table td:first-child{position:sticky;left:0;box-shadow:1px 0 0 rgba(0,0,0,.08);}
+    .data-table td:first-child,.co-score-table td:first-child{background:#fff;z-index:2;}
+    .data-table tbody tr:hover td:first-child,.co-score-table tbody tr:hover td:first-child{background:#f5f4f0;}
+    .data-table th:first-child,.co-score-table th:first-child{background:var(--primary-dark);z-index:3;}
+    /* compact header bits so nothing wraps awkwardly */
+    .week-badge{white-space:nowrap;font-size:11px;padding:4px 10px;}
+    .user-chip{max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
     .export-bonus{display:none;}
     .bonus-period-bar{display:none;}
     .bonus-period-select{display:inline-block;}
@@ -1172,7 +1181,11 @@ function loginRequestCode(){
   btn.disabled = true; btn.textContent = 'Sending…';
   fetch('/api/auth/request-link',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})})
     .then(r=>r.json()).then(d=>{
-      loginMsg(d.message || 'If that email is registered, a code was sent.');
+      if(!d.ok){
+        loginMsg(d.message || "This email isn't registered. Contact your manager or area manager to have your email added to the system.", true);
+        return; // stay on the email step
+      }
+      loginMsg(d.message || 'A sign-in code has been sent.');
       document.getElementById('login-step-email').style.display='none';
       document.getElementById('login-step-code').style.display='block';
       document.getElementById('login-sub').textContent = 'Enter the 6-digit code sent to ' + email;
@@ -1650,7 +1663,7 @@ function salonLink(salonNum, label, fromTab){
   // drillIntoSalon re-checks canDrillSalon at the destination too, so this is
   // display-consistency layered on top of the security gate.
   if(!canDrillSalon(salonNum)) return `<span>${label}</span>`;
-  return `<span class="salon-link" onclick="drillIntoSalon('${salonNum}','${fromTab}')" title="View ${label} trends">${label}</span>`;
+  return `<span class="salon-link" onclick="drillIntoSalon('${salonNum}','${fromTab}')" title="View ${salonDisplay(salonNum)} trends">${label}</span>`;
 }
 // Can the CURRENT user drill into this salon?
 //  - owner/admin/viewer: any salon
@@ -2755,7 +2768,7 @@ function renderCompany(){
 
     // All salons detail
     const allCols=[
-      {k:'salon',lbl:'Salon',sv:r=>r.salonName||r.salonNum,fv:r=>salonLinkGated(r.salonNum, `<strong>${r.salonName||r.salonNum}</strong>`, 'company'),cl:()=>''},
+      {k:'salon',lbl:'Salon',sv:r=>r.salonName||r.salonNum,fv:r=>salonLinkGated(r.salonNum, `<strong><span class="salon-full">${r.salonName||r.salonNum}</span><span class="salon-num">${r.salonNum}</span></strong>`, 'company'),cl:()=>''},
       {k:'am',lbl:'AM',sv:r=>amOf(r.salonNum),fv:r=>{ const a=AMS[amOf(r.salonNum)]||{color:'#999',name:'?'}; return amChipGated(a); },cl:()=>''}, 
       ...SALON_COLS.slice(1)
     ];
@@ -3619,7 +3632,7 @@ function buildManagerBonusYTD(amSalonNums){
     const ytdCls=ytdPay>0?'bv-green':'';
     html+=`<tr>
       <td><strong><span class="salon-link" onclick="amMgrDrillToCard('${snum}')" title="View ${salonDisplay(snum)} bonus card">${salonDisplay(snum)}</span></strong></td>
-      <td>${fmtName(mgrName)}</td>
+      <td>${shortName(mgrName)}</td>
       ${cells}
       <td class="${ytdCls}" style="text-align:center;font-weight:700;">${fmtMoney(ytdPay)}</td>
       <td style="text-align:center;color:var(--text-muted);">${fmtMoney(ytdPot)}</td>
@@ -4941,7 +4954,7 @@ function buildCoMgrPeriod(){
     if(result.productPenalty && !result.hoursDisqualified) penNotes.push('Product −25%');
     html += `<tr style="cursor:pointer;" onclick="coMgrDrillInto('${snum}')" title="Click to drill down">
       <td style="font-weight:600;color:var(--primary);text-decoration:underline dotted;">${salonDisplay(snum)}</td>
-      <td style="font-size:12px;">${fmtName(mgrName)}</td>
+      <td style="font-size:12px;">${shortName(mgrName)}</td>
       <td>${amChip(am)}</td>
       <td style="text-align:center;">${Math.round(result.cc)}</td>
       <td style="text-align:center;${result.hoursUnknown?'color:#c8a800;':result.floorHrsOk?'':'color:#9C0006;'}" title="${result.hoursUnknown?'Load Payroll Consolidated for hours':'Floor+Vac+Holiday'}">${result.floorHrs!==null?result.floorHrs.toFixed(1):'—'}</td>
@@ -5028,7 +5041,7 @@ function buildCoMgrYTD(){
 
     html += `<tr>
       <td style="font-weight:600;color:var(--primary);cursor:pointer;text-decoration:underline dotted;" onclick="coMgrDrillInto('${snum}')">${salonDisplay(snum)}</td>
-      <td style="font-size:12px;">${fmtName(mgrName)}</td>
+      <td style="font-size:12px;">${shortName(mgrName)}</td>
       <td>${amChip(am)}</td>
       ${cells}
       <td class="${ytdCls}" style="text-align:center;font-weight:700;">${fmtMoney(ytdPay)}</td>
@@ -5073,7 +5086,7 @@ function buildCoMgrDrill(snum){
       <div>
         <div style="font-size:18px;font-weight:700;color:var(--primary);">${salonDisplay(snum)}</div>
         <div style="font-size:13px;color:var(--text-muted);margin-top:3px;">
-          Manager: <strong>${fmtName(mgrName)}</strong>
+          Manager: <strong>${shortName(mgrName)}</strong>
           &nbsp;·&nbsp;
           <span class="am-chip"><span class="chip-dot" style="background:${am.color};display:inline-block;width:10px;height:10px;border-radius:50%;"></span> ${am.name}</span>
         </div>
