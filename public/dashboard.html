@@ -532,6 +532,19 @@
           </div>
         </div>
     </div>
+
+      <!-- Monthly Standouts Section (recognition — separate from pay) -->
+      <div class="table-card" id="section-standouts" style="margin-top:1.5rem;">
+        <div class="table-card-header" style="cursor:pointer;" onclick="toggleSection('standouts')">
+          <div class="card-title" style="margin:0;">Monthly Standouts 🏆</div>
+          <span id="section-standouts-icon" style="font-size:16px;color:var(--text-muted);">▾</span>
+        </div>
+        <div id="section-standouts-body">
+          <div id="co-standouts-container">
+            <div class="no-data" style="padding:2rem;">No data loaded yet.</div>
+          </div>
+        </div>
+      </div>
     </div><!-- /page-company -->
 
     <!-- Stylist Profile Drawer -->
@@ -2565,13 +2578,9 @@ function renderCompany(){
     const hideForLimited = (id, hide) => { const el = document.getElementById(id); if(el) el.style.display = hide ? 'none' : ''; };
     hideForLimited('section-scorecard', !fullCompany);
     hideForLimited('section-am-perf', !fullCompany);
-    // Bonus section: for limited roles, hide the stylist/manager/AM pay toggle
-    // and retitle it "Recognition" (it shows only Standouts).
-    ['co-bonus-type-stylist','co-bonus-type-manager','co-bonus-type-am'].forEach(id=>{
-      const el=document.getElementById(id); if(el) el.style.display = fullCompany ? '' : 'none';
-    });
-    const bonusTitle = document.querySelector('#section-bonus .card-title');
-    if(bonusTitle) bonusTitle.textContent = fullCompany ? 'Company Bonus Summary 💰' : 'Monthly Standouts 🏆';
+    // Bonus pay (stylist/manager/AM breakdowns) is owner/admin/viewer only.
+    // Monthly Standouts is recognition — its own section, visible to everyone.
+    hideForLimited('section-bonus', !fullCompany);
     // Company summary cards (company-wide averages) are fine to show; the
     // bonus section we restrict to Standouts-only for limited roles (handled
     // in renderCompanyBonus via the role check).
@@ -2711,6 +2720,7 @@ function renderCompany(){
       document.getElementById('co-all-tbody').innerHTML=sortedAll.map(r=>buildSalonRow(r,SALON_COLS,true)).join('')+buildAvgRow(allA,'▸ This Week Avg',true)+coYtdRow(coYtdA);
     }
     renderCompanyBonus();
+    renderCompanyStandouts();
   } catch(err) {
     console.error('renderCompany error:', err);
   }
@@ -4181,6 +4191,9 @@ function setCoBonusType(type){
 function renderCompanyBonus(){
   const el = document.getElementById('co-bonus-container');
   if(!el) return;
+  // Bonus pay breakdowns are owner/admin/viewer only; limited roles use the
+  // separate Monthly Standouts section instead.
+  if(!canSeeAllSalons()){ el.innerHTML=''; return; }
   if(S_coBonusType==='manager'){ renderCompanyManagerBonus(); return; }
   if(S_coBonusType==='am'){ renderCompanyAMBonus(); return; }
   if(!S_bonusPeriods.length){
@@ -4188,30 +4201,24 @@ function renderCompanyBonus(){
     return;
   }
 
-  // Limited roles (AM/manager/stylist) only get Monthly Standouts here — not
-  // the stylist/manager/AM pay breakdowns. Force the view and trim the options.
-  const limitedRole = !canSeeAllSalons();
-  if(limitedRole) window.S_coBonusView = 'excellence';
+  // Stylist views mirror the AM-tab flow: This Period · YTD · By Salon.
+  const valid = ['period','ytd-stylist','ytd-salon'];
+  let coView = window.S_coBonusView;
+  if(!valid.includes(coView)) coView = 'period';
+  window.S_coBonusView = coView;
 
-  const coView = window.S_coBonusView || 'period';
-
-  // View selector
-  const views = limitedRole ? [
-    {k:'excellence', lbl:'🏆 Monthly Standouts'},
-  ] : [
+  const views = [
     {k:'period',     lbl:'This Period'},
-    {k:'excellence', lbl:'🏆 Monthly Standouts'},
-    {k:'ytd-stylist',lbl:'YTD by Stylist'},
-    {k:'ytd-am',     lbl:'YTD by AM'},
-    {k:'ytd-salon',  lbl:'YTD by Salon'},
+    {k:'ytd-stylist',lbl:'YTD'},
+    {k:'ytd-salon',  lbl:'By Salon'},
   ];
   const viewHtml = `<div class="bonus-subtabs" style="margin-bottom:0;">
     ${views.map(v=>`<button class="bonus-subtab ${coView===v.k?'active':''}"
       onclick="window.S_coBonusView='${v.k}';S_bonusSort={col:null,asc:true};renderCompanyBonus();">${v.lbl}</button>`).join('')}
   </div>`;
 
-  // Period selector — shown in "This Period" and "Monthly Standouts" views
-  const periodBar = (coView === 'period' || coView === 'excellence') ? `
+  // Period selector — only the "This Period" view is period-specific.
+  const periodBar = (coView === 'period') ? `
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
       <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);">Period:</span>
       ${S_bonusPeriods.map(p=>`<button class="bonus-period-btn ${S_bonusPeriod===p.periodKey?'active':''}"
@@ -4223,15 +4230,11 @@ function renderCompanyBonus(){
   const exportBtns = coView === 'period' ? `<div style="display:flex;gap:8px;">
     <button class="btn btn-secondary btn-sm" onclick="exportBonusJPEG('${_cpk}')">📷 Export Image (${_clbl})</button>
     <button class="btn btn-secondary btn-sm" onclick="exportPayrollCSV('${_cpk}')">⬇ ADP Payroll CSV (${_clbl})</button>
-  </div>` : coView === 'excellence' ? `<div style="display:flex;gap:8px;">
-    <button class="btn btn-secondary btn-sm" onclick="exportExcellenceJPEG('${_cpk}')">📷 Export Image (${_clbl})</button>
   </div>` : '';
 
   let bodyHtml = '';
-  if(coView === 'period')      bodyHtml = buildCompanyBonusAllStylists();
-  else if(coView === 'excellence')  bodyHtml = buildExcellenceLeaders();
+  if(coView === 'period')           bodyHtml = buildCompanyBonusAllStylists();
   else if(coView === 'ytd-stylist') bodyHtml = buildCoBonusYTDStylist();
-  else if(coView === 'ytd-am')      bodyHtml = buildCoBonusYTDAM();
   else if(coView === 'ytd-salon')   bodyHtml = buildCoBonusYTDSalon();
 
   el.innerHTML=`
@@ -4243,6 +4246,33 @@ function renderCompanyBonus(){
       ${periodBar ? `<div style="margin-bottom:.75rem;">${periodBar}</div>` : ''}
     </div>
     <div style="padding:0 1rem 1rem;">${bodyHtml}</div>`;
+}
+
+// Monthly Standouts — its own company section (recognition; visible to all roles).
+function renderCompanyStandouts(){
+  const el = document.getElementById('co-standouts-container');
+  if(!el) return;
+  if(!S_bonusPeriods.length){
+    el.innerHTML='<div class="no-data" style="padding:2rem;">No data loaded yet.</div>';
+    return;
+  }
+  if(!S_bonusPeriod) S_bonusPeriod = S_bonusPeriods[S_bonusPeriods.length-1].periodKey;
+  const _cpk = S_bonusPeriod || '';
+  const _clbl = formatBonusPeriod(_cpk);
+  const periodBar = `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+    <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);">Period:</span>
+    ${S_bonusPeriods.map(p=>`<button class="bonus-period-btn ${S_bonusPeriod===p.periodKey?'active':''}"
+      onclick="S_bonusPeriod='${p.periodKey}';renderCompanyStandouts();">${formatBonusPeriod(p.periodKey)}</button>`).join('')}
+  </div>`;
+  const exportBtn = `<button class="btn btn-secondary btn-sm" onclick="exportExcellenceJPEG('${_cpk}')">📷 Export Image (${_clbl})</button>`;
+  el.innerHTML = `
+    <div style="padding:1rem 1rem 0;">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:.75rem;">
+        ${periodBar}
+        ${exportBtn}
+      </div>
+    </div>
+    <div style="padding:0 1rem 1rem;">${buildExcellenceLeaders()}</div>`;
 }
 
 function buildCompanyBonusMonth(){
@@ -4570,6 +4600,7 @@ function buildAMBonusYTD(){
 
 // ── Company AM Bonus View ─────────────────────────────────────
 let S_coAMBonusPeriod = null;
+let S_coAMView = 'period';   // 'period' | 'ytd'
 
 function renderCompanyAMBonus(){
   const el = document.getElementById('co-bonus-container');
@@ -4581,6 +4612,17 @@ function renderCompanyAMBonus(){
   }
 
   if(!S_coAMBonusPeriod) S_coAMBonusPeriod = S_salonSummaryPeriods[S_salonSummaryPeriods.length-1].periodKey;
+  if(!S_coAMView) S_coAMView = 'period';
+
+  const viewBar = `<div style="display:flex;gap:2px;background:#eee;border-radius:10px;padding:3px;width:fit-content;">
+    <button onclick="S_coAMView='period';renderCompanyAMBonus();" style="padding:5px 14px;border-radius:8px;border:none;font-size:12px;cursor:pointer;transition:all .15s;${S_coAMView==='period'?'background:white;color:var(--primary);font-weight:700;':'background:none;color:var(--text-muted);font-weight:600;'}">This Period</button>
+    <button onclick="S_coAMView='ytd';renderCompanyAMBonus();" style="padding:5px 14px;border-radius:8px;border:none;font-size:12px;cursor:pointer;transition:all .15s;${S_coAMView==='ytd'?'background:white;color:var(--primary);font-weight:700;':'background:none;color:var(--text-muted);font-weight:600;'}">YTD Summary</button>
+  </div>`;
+
+  if(S_coAMView==='ytd'){
+    el.innerHTML = `<div style="padding:1rem;">${viewBar}<div style="margin-top:1rem;">${buildAMBonusYTD()}</div></div>`;
+    return;
+  }
 
   const periodBar = S_salonSummaryPeriods.map(p=>`
     <button class="bonus-period-btn ${S_coAMBonusPeriod===p.periodKey?'active':''}"
@@ -4600,6 +4642,7 @@ function renderCompanyAMBonus(){
 
   // Summary stat bar
   let html = `<div style="padding:1rem 1rem 0;">
+    <div style="margin-bottom:.75rem;">${viewBar}</div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:.75rem;">
       <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);">Period:</span>
       ${periodBar}
