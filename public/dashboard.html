@@ -4505,37 +4505,66 @@ function buildAMBonusYTD(){
   if(!S_salonSummaryPeriods.length)
     return '<div class="no-data">No Salon Summary data loaded.</div>';
 
-  // For AM tab: only current AM. For company overview: all AMs
-  const amOrder = S.currentAM ? [S.currentAM] : [];
+  // Owner/admin/viewer see every AM (a comparative YTD); a limited AM role sees
+  // only their own row. AM names are clickable → open that AM's dashboard.
+  const amOrder = canSeeAllSalons() ? AM_ORDER.slice() : (S.currentAM ? [S.currentAM] : []);
   if(!amOrder.length) return '<div class="no-data">No AM selected.</div>';
 
-  const periods = S_salonSummaryPeriods.map(p=>normPeriodLabel(p.periodLabel));
+  // Fiscal-year filter: default to the latest year, with a selector when more
+  // than one year of data exists (mirrors the manager/stylist YTD).
+  const years = availableMgrYears();
+  if(S_amBonusYear === null && years.length) S_amBonusYear = years[0];
+  const allPeriods = S_salonSummaryPeriods.map(p=>normPeriodLabel(p.periodLabel));
+  const fyPeriods = allPeriods.filter(lbl=>periodYear(lbl) === S_amBonusYear);
+  const periods = fyPeriods.length ? fyPeriods : allPeriods;
 
-  let html = `<div style="overflow-x:auto;"><table class="ytd-bonus-table">
+  const yearBar = years.length > 1 ? `<div style="display:flex;gap:6px;align-items:center;margin:0 0 10px 2px;">
+    <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);">Fiscal Year:</span>
+    ${years.map(y=>`<button onclick="S_amBonusYear=${y};renderBonusContent();" style="padding:3px 12px;border-radius:14px;border:1px solid ${S_amBonusYear===y?'var(--primary)':'var(--border)'};font-size:12px;font-weight:600;cursor:pointer;background:${S_amBonusYear===y?'var(--primary)':'white'};color:${S_amBonusYear===y?'white':'var(--text)'};">${y}</button>`).join('')}
+  </div>` : '';
+
+  let html = `${yearBar}<div style="font-size:11px;color:var(--text-muted);margin:0 0 8px 2px;">Click an Area Manager to open their dashboard and see how their salons are tracking toward bonus.</div>
+  <div class="table-card"><div style="overflow-x:auto;"><table class="ytd-bonus-table">
     <thead><tr>
       <th>Area Manager</th>
       ${periods.map(lbl=>`<th style="text-align:center;">${lbl}<br><span style="font-size:9px;font-weight:400;opacity:.7;">Payout</span></th>`).join('')}
       <th style="text-align:center;">YTD Total</th>
     </tr></thead><tbody>`;
 
+  const periodTotals = periods.map(()=>0);
+  let grandTotal = 0;
+
   amOrder.forEach(amId=>{
     const am = AMS[amId]; if(!am) return;
     let ytdTotal = 0;
-    const cells = periods.map(lbl=>{
+    const cells = periods.map((lbl,i)=>{
       const r = calcAMBonus(amId, lbl);
       if(!r) return `<td style="color:#ccc;text-align:center;">—</td>`;
       ytdTotal += r.totalPayout;
+      periodTotals[i] += r.totalPayout;
       const cls = r.totalPayout>0?(r.amHoursDisqualified?'bv-red':'bv-green'):'bv-red';
-      return `<td class="${cls}" style="text-align:center;font-size:12px;">${fmtMoney(r.totalPayout)}${r.amHoursDisqualified?' ⚠':''}</td>`;
+      const tip = r.amHoursDisqualified ? ' title="Below 29hr/wk threshold — AM bonus $0 this period"' : '';
+      return `<td class="${cls}" style="text-align:center;font-size:12px;"${tip}>${fmtMoney(r.totalPayout)}${r.amHoursDisqualified?' ⚠':''}</td>`;
     }).join('');
+    grandTotal += ytdTotal;
+    const ytdCls = ytdTotal>0?'bv-green':'';
     html += `<tr>
-      <td style="font-weight:600;">${am.name}</td>
+      <td style="font-weight:600;">${amLink(amId, am.name)}</td>
       ${cells}
-      <td style="text-align:center;font-weight:700;color:${ytdTotal>0?'#2d7a1a':'var(--text-muted)'};">${fmtMoney(ytdTotal)}</td>
+      <td class="${ytdCls}" style="text-align:center;font-weight:700;color:${ytdTotal>0?'#2d7a1a':'var(--text-muted)'};">${fmtMoney(ytdTotal)}</td>
     </tr>`;
   });
 
-  html += '</tbody></table></div>';
+  // Company totals row — only meaningful when more than one AM is shown.
+  if(amOrder.length > 1){
+    html += `<tr style="background:var(--primary);color:white;font-weight:700;">
+      <td>▸ All AMs</td>
+      ${periodTotals.map(t=>`<td style="text-align:center;">${fmtMoney(t)}</td>`).join('')}
+      <td style="text-align:center;">${fmtMoney(grandTotal)}</td>
+    </tr>`;
+  }
+
+  html += '</tbody></table></div></div>';
   return html;
 }
 
@@ -4599,6 +4628,7 @@ let S_coMgrPeriod = null;     // selected SS period key
 let S_coMgrDrillSalon = null; // salon being drilled into
 let S_coMgrYear = null;       // YTD fiscal year filter (e.g. 2026); null = latest
 let S_bonusStyYear = null;    // Stylist YTD fiscal-year filter (e.g. 2026); null = latest
+let S_amBonusYear = null;     // AM-bonus YTD fiscal-year filter (e.g. 2026); null = latest
 // Fiscal year of a bonus period label ("May 26" → 2026).
 function periodYear(pk){ const p=String(pk||'').trim().split(/\s+/); return 2000 + (parseInt(p[1],10)||0); }
 // Distinct fiscal years present in the loaded summary periods, newest first.
