@@ -5788,6 +5788,7 @@ let profileCharts = []; // track Chart instances for cleanup
 let S_profileTrendWindow = 20; // profile Trends window: 20 | 52 | 'ytd' | 'all' (default recent 20)
 let S_profileTrendPriorYear = false; // overlay the same window from the prior year (−364d)
 let S_profileBonusRange = 'ytd'; // profile Bonus History range: ytd | prior | r12 | all
+let S_profileWeeklyWindow = 20; // profile Weekly Data window: 20 | 52 | 'ytd' | 'all'
 
 // Convert "Last, First" (SD3 format) → "First Last" for display. Handles
 // suffixes after a second comma (e.g. "Smith, John, Jr" → "John Smith Jr"),
@@ -6118,6 +6119,60 @@ function renderProfileBonus(){
   if(el) el.innerHTML = profileBonusHtml(window._profileBonusRows, window._profileGlobalId);
 }
 
+function profileWeeklyBar(){
+  return [{w:20,l:'20 wk'},{w:52,l:'52 wk'},{w:'ytd',l:'YTD'},{w:'all',l:'All'}].map(o=>{
+    const arg = typeof o.w==='string'?"'"+o.w+"'":o.w;
+    const active = S_profileWeeklyWindow===o.w;
+    return `<button onclick="S_profileWeeklyWindow=${arg};renderProfileWeekly()" style="padding:3px 12px;border-radius:14px;border:1px solid ${active?'var(--primary)':'var(--border)'};font-size:12px;font-weight:600;cursor:pointer;background:${active?'var(--primary)':'white'};color:${active?'white':'var(--text)'};">${o.l}</button>`;
+  }).join('');
+}
+function profileWeeklyHtml(empRows){
+  empRows = empRows || window._profileEmpRows || [];
+  if(!empRows.length) return '<div style="color:var(--text-muted);">No weekly data on record.</div>';
+  const bar = `<div style="display:flex;gap:6px;align-items:center;margin:0 0 12px 0;flex-wrap:wrap;"><span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);">Range:</span>${profileWeeklyBar()}</div>`;
+  const W = S_profileWeeklyWindow;
+  let rows;
+  if(W==='all') rows = empRows.slice();
+  else if(W==='ytd'){ const anchor = fiscalYearStartIso(empRows[empRows.length-1].weekEnding); rows = empRows.filter(r=>r.weekEnding>=anchor); }
+  else rows = empRows.slice(Math.max(0, empRows.length - W));
+  rows = rows.slice().reverse(); // newest first
+  if(!rows.length) return bar + '<div style="color:var(--text-muted);padding:8px 2px;">No weeks in this range.</div>';
+  const fmtWE = iso=>{ const m=String(iso||'').match(/^(\d{4})-(\d{2})-(\d{2})/); return m?(+m[2])+'/'+(+m[3])+'/'+m[1].slice(2):iso; };
+  return bar + `<table style="width:100%;border-collapse:collapse;font-size:12px;">
+    <thead style="position:sticky;top:0;z-index:1;"><tr style="background:var(--primary-dark);color:white;">
+      <th style="padding:7px 10px;text-align:left;">Week Ending</th>
+      <th style="padding:7px 10px;text-align:left;">Period</th>
+      <th style="padding:7px 10px;text-align:center;">HC Time</th>
+      <th style="padding:7px 10px;text-align:center;">MBC</th>
+      <th style="padding:7px 10px;text-align:center;">Product %</th>
+      <th style="padding:7px 10px;text-align:center;">NR %</th>
+      <th style="padding:7px 10px;text-align:center;">RR %</th>
+      <th style="padding:7px 10px;text-align:center;">Floor Hrs</th>
+      <th style="padding:7px 10px;text-align:center;">Cust Count</th>
+      <th style="padding:7px 10px;text-align:center;">CPH</th>
+    </tr></thead>
+    <tbody>
+      ${rows.map((r,i)=>`
+      <tr style="background:${i%2?'#f8f7f4':'white'};">
+        <td style="padding:7px 10px;white-space:nowrap;font-weight:500;">${fmtWE(r.weekEnding)}</td>
+        <td style="padding:7px 10px;white-space:nowrap;color:var(--text-muted);">${formatBonusPeriod(periodKeyFromWeekEnd(r.weekEnding))}</td>
+        <td class="${tierHC(n(r.hcTime))}" style="padding:7px 10px;text-align:center;">${n(r.hcTime).toFixed(1)}</td>
+        <td class="${tierMBC(n(r.mbc))}" style="padding:7px 10px;text-align:center;">${n(r.mbc).toFixed(1)}</td>
+        <td class="${tierProd(p(r.product))}" style="padding:7px 10px;text-align:center;">${p(r.product).toFixed(1)}%</td>
+        <td class="${tierNR(p(r.nr))}" style="padding:7px 10px;text-align:center;">${p(r.nr).toFixed(1)}%</td>
+        <td class="${tierRR(p(r.rr))}" style="padding:7px 10px;text-align:center;">${p(r.rr).toFixed(1)}%</td>
+        <td style="padding:7px 10px;text-align:center;">${n(r.floorHours).toFixed(1)}</td>
+        <td style="padding:7px 10px;text-align:center;">${r.custCount||'—'}</td>
+        <td style="padding:7px 10px;text-align:center;">${n(r.cph).toFixed(2)}</td>
+      </tr>`).join('')}
+    </tbody>
+  </table>`;
+}
+function renderProfileWeekly(){
+  const el = document.getElementById('ptab-weekly-content');
+  if(el) el.innerHTML = profileWeeklyHtml(window._profileEmpRows);
+}
+
 function buildProfile(globalId, name){
   const el = document.getElementById('profile-content');
   el.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-muted);">Loading...</div>';
@@ -6292,35 +6347,7 @@ function buildProfile(globalId, name){
 
         <!-- Weekly tab -->
         <div id="ptab-weekly-content"  style="display:none;flex:1;overflow-y:auto;padding:20px;">
-          ${!empRows.length ?
-            '<div style="color:var(--text-muted);">No weekly data on record.</div>' :
-          `<table style="width:100%;border-collapse:collapse;font-size:12px;">
-            <thead style="position:sticky;top:0;z-index:1;"><tr style="background:var(--primary-dark);color:white;">
-              <th style="padding:7px 10px;text-align:left;">Week Ending</th>
-              <th style="padding:7px 10px;text-align:center;">HC Time</th>
-              <th style="padding:7px 10px;text-align:center;">MBC</th>
-              <th style="padding:7px 10px;text-align:center;">Product %</th>
-              <th style="padding:7px 10px;text-align:center;">NR %</th>
-              <th style="padding:7px 10px;text-align:center;">RR %</th>
-              <th style="padding:7px 10px;text-align:center;">Floor Hrs</th>
-              <th style="padding:7px 10px;text-align:center;">Cust Count</th>
-              <th style="padding:7px 10px;text-align:center;">CPH</th>
-            </tr></thead>
-            <tbody>
-              ${[...empRows].reverse().map((r,i)=>`
-              <tr style="background:${i%2?'#f8f7f4':'white'};">
-                <td style="padding:7px 10px;white-space:nowrap;font-weight:500;">${r.weekEnding}</td>
-                <td class="${tierHC(n(r.hcTime))}" style="padding:7px 10px;text-align:center;">${n(r.hcTime).toFixed(1)}</td>
-                <td class="${tierMBC(n(r.mbc))}" style="padding:7px 10px;text-align:center;">${n(r.mbc).toFixed(1)}</td>
-                <td class="${tierProd(p(r.product))}" style="padding:7px 10px;text-align:center;">${p(r.product).toFixed(1)}%</td>
-                <td class="${tierNR(p(r.nr))}" style="padding:7px 10px;text-align:center;">${p(r.nr).toFixed(1)}%</td>
-                <td class="${tierRR(p(r.rr))}" style="padding:7px 10px;text-align:center;">${p(r.rr).toFixed(1)}%</td>
-                <td style="padding:7px 10px;text-align:center;">${n(r.floorHours).toFixed(1)}</td>
-                <td style="padding:7px 10px;text-align:center;">${r.custCount||'—'}</td>
-                <td style="padding:7px 10px;text-align:center;">${n(r.cph).toFixed(2)}</td>
-              </tr>`).join('')}
-            </tbody>
-          </table>`}
+          ${profileWeeklyHtml(empRows)}
         </div>
 
       </div>
@@ -6332,6 +6359,7 @@ function buildProfile(globalId, name){
   window._activeProfileMetric = activeMetric;
   window._profileBonusRows = bonusRows;
   window._profileGlobalId = globalId;
+  window._profileEmpRows = empRows;
 
   // Chart draws when the Trends tab is first shown (the canvas must be visible
   // to size correctly). If disc points aren't loaded yet, load them and refresh
