@@ -1207,6 +1207,7 @@ function onDataLoaded(data){
     S.homeEffectiveDate = data.homeEffectiveDate || '';
     S.homeRetroUpdated = data.homeRetroUpdated || 0;
     S.homeDataMap = data.homeDataMap || {};
+    S.profileMap = data.profileMap || {};
     // Load bonus periods (sorted chronologically — re-run periods can arrive out of order)
     S_bonusPeriods = (data.bonusPeriods || []).slice().sort((a,b)=>periodSortKey(a.periodKey)-periodSortKey(b.periodKey));
     if(S_bonusPeriods.length > 0 && !S_bonusPeriod){
@@ -5931,7 +5932,7 @@ function buildProfileSummaryHtml(globalId, empRows, bonusRows){
   const curWeeks = empRows.filter(r=>periodKeyFromWeekEnd(r.weekEnding)===curKey);
   const cpa = (fn)=>{ const v=curWeeks.map(fn).filter(x=>!isNaN(x)&&x!==0); return v.length?v.reduce((a,b)=>a+b,0)/v.length:null; };
   const lastWE = curWeeks.length?curWeeks[curWeeks.length-1].weekEnding:'';
-  const fmtWE = iso=>{ const d=new Date(iso); return !isNaN(d.getTime())?(d.getMonth()+1)+'/'+d.getDate()+'/'+String(d.getFullYear()).slice(2):iso; };
+  const fmtWE = iso=>{ const m=String(iso||'').match(/^(\d{4})-(\d{2})-(\d{2})/); return m?(+m[2])+'/'+(+m[3])+'/'+m[1].slice(2):iso; };
 
   const M = [
     {k:'nr',   lbl:'NR %',      val:cpa(r=>p(r.nr)),      fmt:v=>v.toFixed(1)+'%', g:'≥24%',  e:'≥26%'},
@@ -5963,10 +5964,10 @@ function buildProfileSummaryHtml(globalId, empRows, bonusRows){
 
   const curCard = !curWeeks.length
     ? `<div style="color:var(--text-muted);">No completed weeks recorded yet for ${curKey?formatBonusPeriod(curKey):'the current period'}.</div>`
-    : `<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
+    : `<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;margin-bottom:4px;">
          <div style="font-weight:700;font-size:15px;color:var(--primary);">${formatBonusPeriod(curKey)} — in progress</div>
-         <div style="font-size:12px;color:var(--text-muted);">${curWeeks.length} completed week${curWeeks.length!==1?'s':''} · through ${fmtWE(lastWE)}</div>
        </div>
+       <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Completed weeks only — ${curWeeks.length} week${curWeeks.length!==1?'s':''} through ${fmtWE(lastWE)} (current partial week not yet included)</div>
        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
          <div class="profile-stat" style="flex:1;min-width:120px;"><div class="profile-stat-n">${atGoal}/5</div><div class="profile-stat-l">Metrics at goal</div></div>
          <div class="profile-stat" style="flex:1;min-width:120px;"><div class="profile-stat-n">${atExc}</div><div class="profile-stat-l">At excellence</div></div>
@@ -5976,14 +5977,14 @@ function buildProfileSummaryHtml(globalId, empRows, bonusRows){
        <table style="width:100%;border-collapse:collapse;font-size:13px;">
          <thead><tr style="background:var(--primary-dark);color:white;">
            <th style="padding:7px 10px;text-align:left;">Metric</th>
-           <th style="padding:7px 10px;text-align:center;">Actual (MTD)</th>
+           <th style="padding:7px 10px;text-align:center;">Actual (completed wks)</th>
            <th style="padding:7px 10px;text-align:center;">Growth</th>
            <th style="padding:7px 10px;text-align:center;">Excellence</th>
            <th style="padding:7px 10px;text-align:center;">On pace</th>
          </tr></thead>
          <tbody>${metricRows}</tbody>
        </table>
-       <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">NR % and RR % are SD3 weekly figures (105-day rolling) — they update weekly, not daily. Final points &amp; payout are set when the period closes.</div>`;
+       <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">Reflects completed weeks only. NR % and RR % are SD3 weekly figures (105-day rolling) — they update weekly, not daily. Final points &amp; payout are set when the period closes.</div>`;
 
   const lc = bonusRows.length ? bonusRows[bonusRows.length-1] : null;
   const lcCard = !lc ? '<div style="color:var(--text-muted);">No closed bonus period yet.</div>' : (()=>{
@@ -5991,10 +5992,33 @@ function buildProfileSummaryHtml(globalId, empRows, bonusRows){
     const blk=activeDiscPoints(globalId, lc.period)>=4;
     const pct=pot>0?Math.round(pay/pot*100):0;
     const payTxt = blk ? '<s style="color:#999;">'+fmtMoney(pay)+'</s>' : fmtMoney(pay);
-    return `<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;">
+    const num=v=>{ const x=parseFloat(v); return isNaN(x)?null:x; };
+    // Engine stores nr/rr/product as fractions (0.305) and hc/mbc absolute.
+    const LM=[
+      {k:'nr',  lbl:'NR %',      val:(lc.nr!=null&&lc.nr!=='')?num(lc.nr)*100:null,                fmt:v=>v.toFixed(1)+'%', g:'≥24%',  e:'≥26%'},
+      {k:'rr',  lbl:'RR %',      val:(lc.rr!=null&&lc.rr!=='')?num(lc.rr)*100:null,                fmt:v=>v.toFixed(1)+'%', g:'≥74%',  e:'≥77%'},
+      {k:'hc',  lbl:'HC Time',   val:num(lc.hcTime),                                               fmt:v=>v.toFixed(1),     g:'11–17', e:'12–15'},
+      {k:'mbc', lbl:'MBC',       val:num(lc.mbc),                                                  fmt:v=>v.toFixed(1),     g:'≤3.0',  e:'≤2.0'},
+      {k:'prod',lbl:'Product %', val:(lc.product!=null&&lc.product!=='')?num(lc.product)*100:null, fmt:v=>v.toFixed(1)+'%', g:'≥4%',   e:'≥6%'},
+    ];
+    const lrows=LM.map(m=>{
+      const c=_cpClass(m.k,m.val);
+      const valTxt=(m.val===null||isNaN(m.val))?'<span style="color:#bbb;">—</span>':m.fmt(m.val);
+      const badge=c.r==='—'?'<span style="color:#bbb;">—</span>':`<span class="${c.cls}" style="padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;">${c.r}</span>`;
+      return `<tr><td style="padding:7px 10px;font-weight:600;">${m.lbl}</td><td style="padding:7px 10px;text-align:center;font-weight:700;">${valTxt}</td><td style="padding:7px 10px;text-align:center;color:var(--text-muted);">${m.g}</td><td style="padding:7px 10px;text-align:center;color:var(--text-muted);">${m.e}</td><td style="padding:7px 10px;text-align:center;">${badge}</td></tr>`;
+    }).join('');
+    return `<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
         <div style="font-weight:700;font-size:15px;color:var(--primary);">${formatBonusPeriod(lc.period)}</div>
         <div style="font-size:13px;">${lc.points||0} pts · <span style="font-weight:700;">${payTxt}</span> of ${fmtMoney(pot)} (${pct}%)${blk?' <span style="color:#9C0006;font-size:11px;">⚠ ineligible</span>':''}</div>
-      </div>`;
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead><tr style="background:var(--primary-dark);color:white;">
+          <th style="padding:7px 10px;text-align:left;">Metric</th>
+          <th style="padding:7px 10px;text-align:center;">Final</th>
+          <th style="padding:7px 10px;text-align:center;">Growth</th>
+          <th style="padding:7px 10px;text-align:center;">Excellence</th>
+          <th style="padding:7px 10px;text-align:center;">Result</th>
+        </tr></thead><tbody>${lrows}</tbody></table>`;
   })();
 
   const cardStyle = 'background:white;border:1px solid var(--border);border-radius:10px;padding:16px;';
@@ -6012,7 +6036,11 @@ function buildProfile(globalId, name){
   const home = S.homeDataMap ? S.homeDataMap[globalId] : null;
   const homeSalon = home ? home.homeSalon : '—';
   const effDate   = home ? home.effectiveDate : '';
-  const tenureStr = tenure(effDate);
+  const prof = (S.profileMap && S.profileMap[globalId]) || {};
+  const hireDates = [prof.dateOfHire, prof.rehireDate].filter(Boolean).sort();
+  const hireRaw = hireDates.length ? hireDates[hireDates.length-1] : '';
+  const hireLabel = (prof.rehireDate && hireRaw===prof.rehireDate && prof.dateOfHire && prof.dateOfHire!==prof.rehireDate) ? 'Rehired' : 'Since';
+  const tenureStr = tenure(hireRaw);
   const amId = amOf(homeSalon);
   const am   = AMS[amId] || {name:'—', color:'#999'};
 
@@ -6094,7 +6122,7 @@ function buildProfile(globalId, name){
           <span>📍 ${salonDisplay(homeSalon)}</span>
           <span><span style="width:10px;height:10px;border-radius:50%;background:${am.color};display:inline-block;"></span>${am.name}</span>
           <span>👤 ${posLabel}</span>
-          ${effDate ? `<span>📅 Since ${(()=>{const d=new Date(effDate);return !isNaN(d.getTime())?(d.getMonth()+1)+'/'+d.getDate()+'/'+d.getFullYear():effDate;})()}</span>` : ''}
+          ${hireRaw ? `<span>📅 ${hireLabel} ${(()=>{const m=String(hireRaw).match(/^(\d{4})-(\d{2})-(\d{2})/);return m?(+m[2])+'/'+(+m[3])+'/'+m[1].slice(2):hireRaw;})()}</span>` : ''}
           <span>📊 ${empRows.length} week${empRows.length!==1?'s':''} on record</span>
         </div>
       </div>

@@ -21,6 +21,10 @@ export async function GET() {
     ])
     const data: any = formatAllData(raw, scrapedWeeks, rosterRows)
     data.inactiveMap = inactiveMap
+    // PII-safe: hire/rehire dates only (no email/address) for the profile header.
+    data.profileMap = Object.fromEntries(
+      Object.entries(inactiveMap).map(([gid, v]: any) => [gid, { dateOfHire: v.dateOfHire || '', rehireDate: v.rehireDate || '' }])
+    )
     cache = { data, timestamp: Date.now() }
     return NextResponse.json(data)
   } catch (e: any) {
@@ -69,16 +73,18 @@ async function fetchSalonRoster(): Promise<any[]> {
  * map is safe to send to the client. The dashboard uses it to mark inactive
  * employees in bonus views and to exclude them from the ADP export.
  */
-async function fetchInactiveMap(): Promise<Record<string, { inactive: boolean; inactiveDate: string }>> {
+async function fetchInactiveMap(): Promise<Record<string, { inactive: boolean; inactiveDate: string; dateOfHire: string; rehireDate: string }>> {
   try {
     const rows = rowsToObjects(await readSheet('EmployeeProfile'))
-    const map: Record<string, { inactive: boolean; inactiveDate: string }> = {}
+    const map: Record<string, { inactive: boolean; inactiveDate: string; dateOfHire: string; rehireDate: string }> = {}
     for (const r of rows) {
       const gid = String((r as any).globalId || '').trim()
       if (!gid) continue
       map[gid] = {
         inactive: String((r as any).inactive || '').trim().toLowerCase() === 'true',
         inactiveDate: String((r as any).inactiveDate || '').trim(),
+        dateOfHire: String((r as any).dateOfHire || '').trim(),
+        rehireDate: String((r as any).rehireDate || '').trim(),
       }
     }
     return map
