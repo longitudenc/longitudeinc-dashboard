@@ -232,8 +232,8 @@
   .profile-close:hover{background:rgba(255,255,255,.35);}
   .profile-section{padding:16px 24px;border-bottom:1px solid var(--border);}
   .profile-section-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);margin-bottom:12px;}
-  .profile-stat-row{display:grid;grid-template-columns:repeat(8,1fr);gap:8px;margin-bottom:4px;}
-  .profile-stat{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px;text-align:center;}
+  .profile-stat-row{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin-bottom:4px;}
+  .profile-stat{background:var(--bg);border:1px solid #c2c7c2;border-radius:8px;padding:10px;text-align:center;box-shadow:0 1px 2px rgba(0,0,0,.05);}
   .profile-stat-n{font-size:18px;font-weight:700;color:var(--primary);}
   .profile-stat-l{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-top:2px;}
   .profile-chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
@@ -4676,14 +4676,15 @@ function periodYear(pk){ const p=String(pk||'').trim().split(/\s+/); return 2000
 function availableMgrYears(){ const ys=[...new Set(S_salonSummaryPeriods.map(p=>periodYear(p.periodLabel||p.periodKey)))]; return ys.sort((a,b)=>b-a); }
 // ── Bonus time-range filter: YTD (default) · Prior Year · Rolling 12 · All ────
 let S_bonusRange = 'ytd';  // 'ytd' | 'prior' | 'r12' | 'all'
-function bonusRangeFilter(items, keyFn){
+function bonusRangeFilter(items, keyFn, range){
   const kf = keyFn || (x=>x);
+  const R = range || S_bonusRange;
   if(!items || !items.length) return items||[];
   const years = [...new Set(items.map(i=>periodYear(kf(i))))].sort((a,b)=>b-a);
   const latest = years[0];
-  if(S_bonusRange==='ytd')   return items.filter(i=>periodYear(kf(i))===latest);
-  if(S_bonusRange==='prior') return items.filter(i=>periodYear(kf(i))===latest-1);
-  if(S_bonusRange==='r12')   return items.slice(-12);
+  if(R==='ytd')   return items.filter(i=>periodYear(kf(i))===latest);
+  if(R==='prior') return items.filter(i=>periodYear(kf(i))===latest-1);
+  if(R==='r12')   return items.slice(-12);
   return items; // 'all'
 }
 function bonusPeriodsInRange(){ return bonusRangeFilter(S_bonusPeriods, p=>p.periodKey); }
@@ -5777,6 +5778,8 @@ function buildCoBonusYTDSalon(){
 // ── Stylist Profile Drawer ───────────────────────────────────
 let profileCharts = []; // track Chart instances for cleanup
 let S_profileTrendWindow = 20; // profile Trends window: 20 | 52 | 'ytd' | 'all' (default recent 20)
+let S_profileTrendPriorYear = false; // overlay the same window from the prior year (−364d)
+let S_profileBonusRange = 'ytd'; // profile Bonus History range: ytd | prior | r12 | all
 
 // Convert "Last, First" (SD3 format) → "First Last" for display. Handles
 // suffixes after a second comma (e.g. "Smith, John, Jr" → "John Smith Jr"),
@@ -6012,7 +6015,6 @@ function buildProfileSummaryHtml(globalId, empRows, bonusRows){
         <div style="font-weight:700;font-size:15px;color:var(--primary);">${formatBonusPeriod(lc.period)}</div>
         <div style="font-size:13px;">${(lc.avgWkHrs!=null&&lc.avgWkHrs!=='')?fmtN1(lc.avgWkHrs)+' floor hrs/wk · ':''}${lc.points||0} pts · <span style="font-weight:700;">${payTxt}</span> of ${fmtMoney(pot)} (${pct}%)${blk?' <span style="color:#9C0006;font-size:11px;">⚠ ineligible</span>':''}</div>
       </div>
-      <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">Avg wkly hrs: ${fmtN1(lc.avgWkHrs)}${(parseFloat(lc.avgWkHrs)||0)?(' → '+((parseFloat(lc.avgWkHrs)||0)>=BONUS_CFG.HRS_EXC?'$200 (Excellence)':'$100 (Growth)')+' tier'):''}</div>
       <table style="width:100%;border-collapse:collapse;font-size:13px;">
         <thead><tr style="background:var(--primary-dark);color:white;">
           <th style="padding:7px 10px;text-align:left;">Metric</th>
@@ -6029,6 +6031,83 @@ function buildProfileSummaryHtml(globalId, empRows, bonusRows){
     <div style="${cardStyle}"><div class="card-title">Last Closed Period</div>${lcCard}</div>
     <div id="profile-disc-card" style="${cardStyle}">${profileDiscCardHtml(globalId)}</div>
   </div>`;
+}
+
+function profileBonusRangeLabel(){
+  return S_profileBonusRange==='ytd'?'YTD':S_profileBonusRange==='prior'?'Prior Year':S_profileBonusRange==='r12'?'Rolling 12':'All-Time';
+}
+function profileBonusRangeBar(){
+  const opts=[['ytd','YTD'],['prior','Prior Year'],['r12','Rolling 12'],['all','All']];
+  return `<div style="display:flex;gap:6px;align-items:center;margin:0 0 12px 0;flex-wrap:wrap;">
+    <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);">Range:</span>
+    ${opts.map(([k,lbl])=>`<button onclick="S_profileBonusRange='${k}';renderProfileBonus()" style="padding:3px 12px;border-radius:14px;border:1px solid ${S_profileBonusRange===k?'var(--primary)':'var(--border)'};font-size:12px;font-weight:600;cursor:pointer;background:${S_profileBonusRange===k?'var(--primary)':'white'};color:${S_profileBonusRange===k?'white':'var(--text)'};">${lbl}</button>`).join('')}
+  </div>`;
+}
+function profileBonusHtml(bonusRows, globalId){
+  bonusRows = bonusRows || window._profileBonusRows || [];
+  globalId  = globalId  || window._profileGlobalId || '';
+  if(!bonusRows.length) return '<div style="color:var(--text-muted);">No bonus data on record.</div>';
+  const bar = profileBonusRangeBar();
+  const discBlockedPeriod = r=> activeDiscPoints(r.globalId||globalId, r.period) >= 4;
+  const rows = bonusRangeFilter(bonusRows, r=>r.period, S_profileBonusRange);
+  if(!rows.length) return bar + '<div style="color:var(--text-muted);padding:8px 2px;">No periods in this range.</div>';
+  const totLabel = profileBonusRangeLabel()+' Total';
+  return bar + `<table style="width:100%;border-collapse:collapse;font-size:13px;">
+    <thead><tr style="background:var(--primary-dark);color:white;">
+      <th style="padding:8px 12px;text-align:left;">Period</th>
+      <th style="padding:8px 12px;text-align:center;">Floor Hrs/Wk</th>
+      <th style="padding:8px 12px;text-align:center;">Prod%</th>
+      <th style="padding:8px 12px;text-align:center;">NR%</th>
+      <th style="padding:8px 12px;text-align:center;">RR%</th>
+      <th style="padding:8px 12px;text-align:center;">MBC</th>
+      <th style="padding:8px 12px;text-align:center;">Pts</th>
+      <th style="padding:8px 12px;text-align:center;">Potential</th>
+      <th style="padding:8px 12px;text-align:center;">Payout</th>
+      <th style="padding:8px 12px;text-align:center;">% of Pot.</th>
+    </tr></thead>
+    <tbody>
+      ${rows.map((r,i)=>{
+        const pay=parseFloat(r.payout)||0, pot=parseFloat(r.potential)||0;
+        const blk=discBlockedPeriod(r);
+        const prod=parseFloat(r.product)||0, nr=parseFloat(r.nr)||0, rr=parseFloat(r.rr)||0, mbc=parseFloat(r.mbc)||0;
+        const pp=pot>0?Math.round(pay/pot*100)+'%':'—';
+        const payCls=pay>0?(pay/pot>=0.5?'bv-green':'bv-yellow'):'bv-red';
+        const prodCls=prod<BONUS_CFG.PROD_1?'bv-orange':prod<BONUS_CFG.PROD_2?'bv-yellow':'bv-green';
+        const nrCls=nr>=BONUS_CFG.NR_2?'bv-green':nr>=BONUS_CFG.NR_1?'bv-yellow':'bv-red';
+        const rrCls=rr>=BONUS_CFG.RR_2?'bv-green':rr>=BONUS_CFG.RR_1?'bv-yellow':'bv-red';
+        const mbcCls=mbc<=BONUS_CFG.MBC_2?'bv-green':mbc<=BONUS_CFG.MBC_1?'bv-yellow':'bv-red';
+        const bg=i%2?'#f8f7f4':'white';
+        return `<tr style="background:${bg};">
+          <td style="padding:8px 12px;font-weight:600;">${formatBonusPeriod(r.period)}${blk?' <span style="color:#9C0006;font-size:10px;font-weight:600;">⚠ ineligible</span>':''}</td>
+          <td style="padding:8px 12px;text-align:center;">${fmtN1(r.avgWkHrs)}</td>
+          <td class="${prodCls}" style="padding:8px 12px;text-align:center;">${fmtPct(r.product)}</td>
+          <td class="${nrCls}" style="padding:8px 12px;text-align:center;">${fmtPct(r.nr)}</td>
+          <td class="${rrCls}" style="padding:8px 12px;text-align:center;">${fmtPct(r.rr)}</td>
+          <td class="${mbcCls}" style="padding:8px 12px;text-align:center;">${fmtN1(r.mbc)}</td>
+          <td style="padding:8px 12px;text-align:center;font-weight:700;">${r.points||'—'}</td>
+          <td style="padding:8px 12px;text-align:center;">${pot>0?fmtMoney(pot):'$0'}</td>
+          <td class="${blk?'bv-red':payCls}" style="padding:8px 12px;text-align:center;font-weight:700;">${blk?'<s style="color:#999;">'+fmtMoney(pay)+'</s>':fmtMoney(pay)}</td>
+          <td class="${payCls}" style="padding:8px 12px;text-align:center;">${pp}</td>
+        </tr>`;
+      }).join('')}
+      ${(()=>{
+        const totPay = rows.reduce((s,r)=>s+(discBlockedPeriod(r)?0:(parseFloat(r.payout)||0)),0);
+        const totPot = rows.reduce((s,r)=>s+(parseFloat(r.potential)||0),0);
+        const totPP = totPot>0?Math.round(totPay/totPot*100)+'%':'—';
+        return `<tr style="background:var(--primary);color:white;font-weight:700;">
+          <td style="padding:8px 12px;">${totLabel}</td>
+          <td colspan="6"></td>
+          <td style="padding:8px 12px;text-align:center;">${fmtMoney(totPot)}</td>
+          <td style="padding:8px 12px;text-align:center;">${fmtMoney(totPay)}</td>
+          <td style="padding:8px 12px;text-align:center;">${totPP}</td>
+        </tr>`;
+      })()}
+    </tbody>
+  </table>`;
+}
+function renderProfileBonus(){
+  const el = document.getElementById('ptab-bonus-content');
+  if(el) el.innerHTML = profileBonusHtml(window._profileBonusRows, window._profileGlobalId);
 }
 
 function buildProfile(globalId, name){
@@ -6144,7 +6223,7 @@ function buildProfile(globalId, name){
           <div class="profile-stat"><div class="profile-stat-n">${ytdProd}</div><div class="profile-stat-l">Product % YTD</div></div>
           <div class="profile-stat"><div class="profile-stat-n">${ytdNR}</div><div class="profile-stat-l">NR % YTD</div></div>
           <div class="profile-stat"><div class="profile-stat-n">${ytdRR}</div><div class="profile-stat-l">RR % YTD</div></div>
-          <div class="profile-stat"><div class="profile-stat-n">${ytdHrs}</div><div class="profile-stat-l">Avg Floor Hrs</div></div>
+          <div class="profile-stat"><div class="profile-stat-n">${ytdHrs}</div><div class="profile-stat-l">Avg Floor Hrs YTD</div></div>
           <div class="profile-stat"><div class="profile-stat-n">${fmtMoney(ytdBonus)}</div><div class="profile-stat-l">YTD Bonus</div></div>
         </div>
       </div>
@@ -6193,61 +6272,7 @@ function buildProfile(globalId, name){
 
         <!-- Bonus tab -->
         <div id="ptab-bonus-content" style="display:none;flex:1;overflow-y:auto;padding:20px;">
-          ${!bonusRows.length ?
-            '<div style="color:var(--text-muted);">No bonus data on record.</div>' :
-          `<table style="width:100%;border-collapse:collapse;font-size:13px;">
-            <thead><tr style="background:var(--primary-dark);color:white;">
-              <th style="padding:8px 12px;text-align:left;">Period</th>
-              <th style="padding:8px 12px;text-align:center;">Avg Wkly Hrs</th>
-              <th style="padding:8px 12px;text-align:center;">Prod%</th>
-              <th style="padding:8px 12px;text-align:center;">NR%</th>
-              <th style="padding:8px 12px;text-align:center;">RR%</th>
-              <th style="padding:8px 12px;text-align:center;">MBC</th>
-              <th style="padding:8px 12px;text-align:center;">Pts</th>
-              <th style="padding:8px 12px;text-align:center;">Potential</th>
-              <th style="padding:8px 12px;text-align:center;">Payout</th>
-              <th style="padding:8px 12px;text-align:center;">% of Pot.</th>
-            </tr></thead>
-            <tbody>
-              ${bonusRows.map((r,i)=>{
-                const pay=parseFloat(r.payout)||0, pot=parseFloat(r.potential)||0;
-                const blk=discBlockedPeriod(r);
-                const prod=parseFloat(r.product)||0, nr=parseFloat(r.nr)||0, rr=parseFloat(r.rr)||0, mbc=parseFloat(r.mbc)||0;
-                const pp=pot>0?Math.round(pay/pot*100)+'%':'—';
-                const payCls=pay>0?(pay/pot>=0.5?'bv-green':'bv-yellow'):'bv-red';
-                const prodCls=prod<BONUS_CFG.PROD_1?'bv-orange':prod<BONUS_CFG.PROD_2?'bv-yellow':'bv-green';
-                const nrCls=nr>=BONUS_CFG.NR_2?'bv-green':nr>=BONUS_CFG.NR_1?'bv-yellow':'bv-red';
-                const rrCls=rr>=BONUS_CFG.RR_2?'bv-green':rr>=BONUS_CFG.RR_1?'bv-yellow':'bv-red';
-                const mbcCls=mbc<=BONUS_CFG.MBC_2?'bv-green':mbc<=BONUS_CFG.MBC_1?'bv-yellow':'bv-red';
-                const bg=i%2?'#f8f7f4':'white';
-                return `<tr style="background:${bg};">
-                  <td style="padding:8px 12px;font-weight:600;">${formatBonusPeriod(r.period)}${blk?' <span style="color:#9C0006;font-size:10px;font-weight:600;">⚠ ineligible</span>':''}</td>
-                  <td style="padding:8px 12px;text-align:center;">${fmtN1(r.avgWkHrs)}</td>
-                  <td class="${prodCls}" style="padding:8px 12px;text-align:center;">${fmtPct(r.product)}</td>
-                  <td class="${nrCls}" style="padding:8px 12px;text-align:center;">${fmtPct(r.nr)}</td>
-                  <td class="${rrCls}" style="padding:8px 12px;text-align:center;">${fmtPct(r.rr)}</td>
-                  <td class="${mbcCls}" style="padding:8px 12px;text-align:center;">${fmtN1(r.mbc)}</td>
-                  <td style="padding:8px 12px;text-align:center;font-weight:700;">${r.points||'—'}</td>
-                  <td style="padding:8px 12px;text-align:center;">${pot>0?fmtMoney(pot):'$0'}</td>
-                  <td class="${blk?'bv-red':payCls}" style="padding:8px 12px;text-align:center;font-weight:700;">${blk?'<s style="color:#999;">'+fmtMoney(pay)+'</s>':fmtMoney(pay)}</td>
-                  <td class="${payCls}" style="padding:8px 12px;text-align:center;">${pp}</td>
-                </tr>`;
-              }).join('')}
-              ${(()=>{
-                const totPay = bonusRows.reduce((s,r)=>s+(discBlockedPeriod(r)?0:(parseFloat(r.payout)||0)),0);
-                const totPot = bonusRows.reduce((s,r)=>s+(parseFloat(r.potential)||0),0);
-                const ytdPP = totPot>0?Math.round(totPay/totPot*100)+'%':'—';
-                const ytdCls = totPay>0?(totPay/totPot>=0.5?'bv-green':'bv-yellow'):'bv-red';
-                return `<tr style="background:var(--primary);color:white;font-weight:700;">
-                  <td style="padding:8px 12px;">YTD Total</td>
-                  <td colspan="6"></td>
-                  <td style="padding:8px 12px;text-align:center;">${fmtMoney(totPot)}</td>
-                  <td style="padding:8px 12px;text-align:center;">${fmtMoney(totPay)}</td>
-                  <td style="padding:8px 12px;text-align:center;">${ytdPP}</td>
-                </tr>`;
-              })()}
-            </tbody>
-          </table>`}
+          ${profileBonusHtml(bonusRows, globalId)}
         </div>
 
         <!-- Review tab -->
@@ -6297,6 +6322,8 @@ function buildProfile(globalId, name){
   window._profileMetrics = PROFILE_METRICS;
   window._profileWeeks = weeks;
   window._activeProfileMetric = activeMetric;
+  window._profileBonusRows = bonusRows;
+  window._profileGlobalId = globalId;
 
   // Chart draws when the Trends tab is first shown (the canvas must be visible
   // to size correctly). If disc points aren't loaded yet, load them and refresh
@@ -6343,11 +6370,21 @@ function switchProfileMetric(mk){
 }
 
 function profileTrendBar(){
-  return [{w:20,l:'20 wk'},{w:52,l:'52 wk'},{w:'ytd',l:'YTD'},{w:'all',l:'All'}].map(o=>{
+  const py = `<button onclick="toggleProfileTrendPriorYear()" title="Overlay the same window from the previous year"
+      style="padding:4px 12px;border-radius:16px;border:1px solid ${S_profileTrendPriorYear?'var(--primary)':'var(--border)'};font-size:11px;font-weight:600;cursor:pointer;background:${S_profileTrendPriorYear?'var(--primary)':'white'};color:${S_profileTrendPriorYear?'white':'var(--text)'};margin-right:8px;">${S_profileTrendPriorYear?'✓ ':''}Prior Year</button>`;
+  const wins = [{w:20,l:'20 wk'},{w:52,l:'52 wk'},{w:'ytd',l:'YTD'},{w:'all',l:'All'}].map(o=>{
     const arg = typeof o.w==='string' ? "'"+o.w+"'" : o.w;
     const active = S_profileTrendWindow===o.w;
     return `<button onclick="setProfileTrendWindow(${arg})" style="padding:4px 12px;border-radius:16px;border:1px solid var(--border);font-size:11px;font-weight:600;cursor:pointer;background:${active?'var(--primary)':'white'};color:${active?'white':'var(--text)'};">${o.l}</button>`;
   }).join('');
+  return py + wins;
+}
+function toggleProfileTrendPriorYear(){
+  S_profileTrendPriorYear = !S_profileTrendPriorYear;
+  const bar = document.getElementById('profile-trend-bar');
+  if(bar) bar.innerHTML = profileTrendBar();
+  const mk = window._activeProfileMetric || ((window._profileMetrics||[])[0]||{}).k;
+  if(mk) drawProfileChart(mk);
 }
 function setProfileTrendWindow(w){
   S_profileTrendWindow = w;
@@ -6381,6 +6418,15 @@ function drawProfileChart(mk){
   const labels = idx.map(i=>{ const pr=String(fullWeeks[i]).split('-'); return pr.length>=3 ? (parseInt(pr[1],10)+'/'+parseInt(pr[2],10)) : fullWeeks[i]; });
   const data   = idx.map(i=>m.data[i]);
   const liData = m.liAvg ? idx.map(i=>m.liAvg[i]) : null;
+
+  // Prior-year overlay: this stylist's value ~364 days before each windowed week.
+  let pyData = null;
+  if(S_profileTrendPriorYear){
+    const isoToIdx = {}; fullWeeks.forEach((we,i)=>{ isoToIdx[we]=i; });
+    const priorIso = iso=>{ const d=new Date(iso+'T00:00:00'); d.setDate(d.getDate()-364); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
+    pyData = idx.map(i=>{ const pj=isoToIdx[priorIso(fullWeeks[i])]; if(pj===undefined) return null; const v=m.data[pj]; return (isNaN(v)||v===0)?null:v; });
+    if(pyData.every(v=>v===null)) pyData = null; // no prior-year data — don't draw an empty line
+  }
 
   // Compute stats over the windowed slice (so the cards match the chart)
   const vals = data.filter(v=>!isNaN(v)&&v!==0);
@@ -6438,6 +6484,19 @@ function drawProfileChart(mk){
           fill: false,
           spanGaps: true,
           order: 2
+        }] : []),
+        ...(pyData ? [{
+          label: m.label+' (PY)',
+          data: pyData,
+          borderColor: m.color+'66',
+          backgroundColor: 'transparent',
+          borderWidth: 2,
+          borderDash: [2,3],
+          pointRadius: 0,
+          pointHoverRadius: 4,
+          fill: false,
+          spanGaps: true,
+          order: 4
         }] : [])
       ]
     },
