@@ -274,6 +274,29 @@
   .back-btn{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid var(--border);background:white;color:var(--text);margin-bottom:1rem;transition:all .15s;}
   .back-btn:hover{background:var(--bg);border-color:var(--accent);color:var(--accent);}
   .drill-header{display:flex;align-items:center;gap:12px;margin-bottom:4px;}
+
+  /* ── Mobile (phones / narrow tablets) ─────────────────────────── */
+  #sidebar-backdrop{display:none;}
+  @media (max-width: 768px){
+    .app-header{padding:0 .75rem;}
+    .header-right{gap:6px;}
+    /* content takes the full width; the sidebar floats over it on demand */
+    .main-layout{grid-template-columns:1fr !important;}
+    .sidebar{position:fixed;top:56px;left:0;width:250px;max-width:82vw;height:calc(100vh - 56px);z-index:600;transform:translateX(0);transition:transform .2s ease;box-shadow:2px 0 18px rgba(0,0,0,.28);}
+    .main-layout.sidebar-collapsed .sidebar{transform:translateX(-100%);}
+    #sidebar-backdrop{position:fixed;inset:56px 0 0 0;background:rgba(0,0,0,.4);z-index:550;}
+    .main-layout:not(.sidebar-collapsed) #sidebar-backdrop{display:block;}
+    .content{padding:1rem;overflow-x:auto;}
+    /* KPI strip wraps instead of squeezing into 7 columns */
+    .profile-stat-row{grid-template-columns:repeat(auto-fit,minmax(92px,1fr));}
+    .profile-header{padding:16px 16px 12px;}
+    .profile-name{font-size:18px;}
+    .profile-meta{gap:10px;font-size:12px;}
+    /* tab strip and wide tables scroll sideways rather than breaking layout */
+    .profile-tabs{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+    .profile-tabs button{flex-shrink:0;}
+    #ptab-summary-content,#ptab-bonus-content,#ptab-weekly-content,#ptab-review-content,#ptab-trends-content{overflow-x:auto;-webkit-overflow-scrolling:touch;padding:14px;}
+  }
 </style>
 </head>
 <body>
@@ -335,6 +358,7 @@
 </header>
 
 <div class="main-layout">
+  <div id="sidebar-backdrop" onclick="toggleSidebar()"></div>
   <aside class="sidebar" id="sidebar">
     <!-- populated by JS based on role -->
   </aside>
@@ -3795,15 +3819,21 @@ function toggleSidebar(){
   const collapsed = layout.classList.toggle('sidebar-collapsed');
   try{ localStorage.setItem('sidebarCollapsed', collapsed ? '1' : '0'); }catch(e){}
 }
-// Restore preference on load
-try{
-  if(localStorage.getItem('sidebarCollapsed')==='1'){
-    document.addEventListener('DOMContentLoaded', ()=>{
-      const l = document.querySelector('.main-layout');
-      if(l) l.classList.add('sidebar-collapsed');
-    });
-  }
-}catch(e){}
+// Restore sidebar preference on load; on mobile, start collapsed (off-canvas)
+// so content shows first, and auto-close the overlay after a nav tap.
+document.addEventListener('DOMContentLoaded', ()=>{
+  const l = document.querySelector('.main-layout');
+  if(!l) return;
+  let pref = '0';
+  try{ pref = localStorage.getItem('sidebarCollapsed') || '0'; }catch(e){}
+  if(pref==='1' || window.innerWidth<=768){ l.classList.add('sidebar-collapsed'); }
+  const sb = document.getElementById('sidebar');
+  if(sb) sb.addEventListener('click', e=>{
+    if(window.innerWidth<=768 && e.target.closest('button')){
+      setTimeout(()=>{ l.classList.add('sidebar-collapsed'); }, 60); // let nav handler run first
+    }
+  });
+});
 
 // ── AM Reassignment Admin Panel ───────────────────────────────
 // Converts a periodSortKey number back to a "Mon YY" label.
@@ -6292,7 +6322,7 @@ function buildProfile(globalId, name){
       </div>
 
       <!-- Tabs -->
-      <div style="background:white;border-bottom:1px solid var(--border);padding:0 20px;flex-shrink:0;display:flex;gap:0;">
+      <div class="profile-tabs" style="background:white;border-bottom:1px solid var(--border);padding:0 20px;flex-shrink:0;display:flex;gap:0;">
         <button id="ptab-summary" onclick="switchProfileTab('summary')" style="padding:10px 16px;border:none;background:none;font-weight:700;font-size:13px;color:var(--primary);border-bottom:2px solid var(--primary);cursor:pointer;">Summary</button>
         <button id="ptab-trends" onclick="switchProfileTab('trends')" style="padding:10px 16px;border:none;background:none;font-weight:600;font-size:13px;color:var(--text-muted);border-bottom:2px solid transparent;cursor:pointer;">Trends</button>
         <button id="ptab-bonus" onclick="switchProfileTab('bonus')" style="padding:10px 16px;border:none;background:none;font-weight:600;font-size:13px;color:var(--text-muted);border-bottom:2px solid transparent;cursor:pointer;">Bonus History</button>
