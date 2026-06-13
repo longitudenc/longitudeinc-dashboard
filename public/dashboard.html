@@ -29,8 +29,8 @@
   .user-chip{font-size:12px;color:#ccc;background:rgba(255,255,255,.1);padding:4px 10px;border-radius:20px;}
 
   /* Week badge / dropdown */
-  .week-badge{background:rgba(154,203,58,.25);border:1px solid rgba(154,203,58,.55);color:#d6ec9f;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;position:relative;user-select:none;}
-  .week-badge:hover{background:rgba(154,203,58,.55);}
+  .week-badge{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.28);color:#fff;padding:5px 14px;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;position:relative;user-select:none;}
+  .week-badge:hover{background:rgba(255,255,255,.22);}
   .week-dropdown{position:absolute;top:calc(100% + 8px);right:0;background:white;border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);min-width:220px;z-index:200;max-height:60vh;overflow-y:auto;overflow-x:hidden;display:none;}
   .week-dropdown.open{display:block;}
   .week-dropdown-item{padding:9px 16px;font-size:13px;color:var(--text);cursor:pointer;border-bottom:1px solid #f0efec;}
@@ -288,7 +288,7 @@
     .main-layout.sidebar-collapsed .sidebar{transform:translateX(-100%);}
     #sidebar-backdrop{position:fixed;inset:56px 0 0 0;background:rgba(0,0,0,.4);z-index:550;}
     .main-layout:not(.sidebar-collapsed) #sidebar-backdrop{display:block;}
-    .content{padding:1rem;overflow-x:auto;}
+    .content{padding:1rem;}
     /* KPI strip wraps instead of squeezing into 7 columns */
     .profile-stat-row{grid-template-columns:repeat(auto-fit,minmax(92px,1fr));}
     .profile-header{padding:16px 16px 12px;}
@@ -1620,7 +1620,7 @@ function renderScorecard(){
 
 // ── Salon columns ─────────────────────────────────────────────
 const SALON_COLS=[
-  {k:'salon',  lbl:'Salon',        sv:r=>r.salonName||r.salonNum,  fv:r=>`<strong>${r.salonName||r.salonNum}</strong>`, cl:()=>''},
+  {k:'salon',  lbl:'Salon',        sv:r=>r.salonName||r.salonNum,  fv:r=>`<strong><span class="salon-full">${r.salonName||r.salonNum}</span><span class="salon-num">${r.salonNum}</span></strong>`, cl:()=>''},
   {k:'cc',     lbl:'CC',           sv:r=>n(r.ccThis),              fv:r=>Math.round(n(r.ccThis)),  cl:r=>tierCC(Math.round(n(r.ccThis)))},
   {k:'lyDiff', lbl:'CC +/- LY',    sv:r=>{ const l=LY_AVG[r.salonNum]; return l?n(r.ccThis)-l:-9999; }, fv:r=>{ const l=LY_AVG[r.salonNum]; if(!l)return'<span style="color:#aaa">—</span>'; const d=n(r.ccThis)-l; return `<span class="${tc(d)}">${sgn(d,0)}</span>`; }, cl:()=>''},
   {k:'ccG',    lbl:'CC Growth',    sv:r=>p(r.ccGrowth),            fv:r=>{ const v=p(r.ccGrowth); return `<span class="${tc(v)}">${sgn(v)}%</span>`; }, cl:r=>tierCCG(p(r.ccGrowth))},
@@ -4325,11 +4325,14 @@ function renderCompanyBonus(){
 
   // Period selector — only the "This Period" view is period-specific.
   const periodBar = (coView === 'period') ? `
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+    <div class="bonus-period-bar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
       <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);">Period:</span>
       ${S_bonusPeriods.map(p=>`<button class="bonus-period-btn ${S_bonusPeriod===p.periodKey?'active':''}"
         onclick="selectBonusPeriod('${p.periodKey}');renderCompanyBonus();">${formatBonusPeriod(p.periodKey)}</button>`).join('')}
-    </div>` : '';
+    </div>
+    <select class="bonus-period-select" onchange="selectBonusPeriod(this.value);renderCompanyBonus();" style="margin-top:.5rem;padding:6px 10px;border-radius:8px;border:1px solid var(--border);font-size:13px;font-weight:600;background:white;">
+      ${S_bonusPeriods.map(p=>`<option value="${p.periodKey}" ${S_bonusPeriod===p.periodKey?'selected':''}>${formatBonusPeriod(p.periodKey)}</option>`).join('')}
+    </select>` : '';
 
   const _cpk = S_bonusPeriod || '';
   const _clbl = formatBonusPeriod(_cpk);
@@ -4365,11 +4368,14 @@ function renderCompanyStandouts(){
   if(!S_bonusPeriod) S_bonusPeriod = S_bonusPeriods[S_bonusPeriods.length-1].periodKey;
   const _cpk = S_bonusPeriod || '';
   const _clbl = formatBonusPeriod(_cpk);
-  const periodBar = `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+  const periodBar = `<div class="bonus-period-bar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
     <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);">Period:</span>
     ${S_bonusPeriods.map(p=>`<button class="bonus-period-btn ${S_bonusPeriod===p.periodKey?'active':''}"
       onclick="S_bonusPeriod='${p.periodKey}';renderCompanyStandouts();">${formatBonusPeriod(p.periodKey)}</button>`).join('')}
-  </div>`;
+  </div>
+  <select class="bonus-period-select" onchange="S_bonusPeriod=this.value;renderCompanyStandouts();" style="margin-top:.5rem;padding:6px 10px;border-radius:8px;border:1px solid var(--border);font-size:13px;font-weight:600;background:white;">
+    ${S_bonusPeriods.map(p=>`<option value="${p.periodKey}" ${S_bonusPeriod===p.periodKey?'selected':''}>${formatBonusPeriod(p.periodKey)}</option>`).join('')}
+  </select>`;
   const exportBtn = `<button class="btn btn-secondary btn-sm export-bonus" onclick="exportExcellenceJPEG('${_cpk}')">📷 Export Image (${_clbl})</button>`;
   el.innerHTML = `
     <div style="padding:1rem 1rem 0;">
@@ -4742,10 +4748,13 @@ function renderCompanyAMBonus(){
   // Summary stat bar
   let html = `<div style="padding:1rem 1rem 0;">
     <div style="margin-bottom:.75rem;">${viewBar}</div>
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:.75rem;">
+    <div class="bonus-period-bar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:.75rem;">
       <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);">Period:</span>
       ${periodBar}
     </div>
+    <select class="bonus-period-select" onchange="S_coAMBonusPeriod=this.value;renderCompanyAMBonus();" style="margin-bottom:.75rem;padding:6px 10px;border-radius:8px;border:1px solid var(--border);font-size:13px;font-weight:600;background:white;">
+      ${S_salonSummaryPeriods.map(p=>`<option value="${p.periodKey}" ${S_coAMBonusPeriod===p.periodKey?'selected':''}>${normPeriodLabel(p.periodLabel)}</option>`).join('')}
+    </select>
     <div class="bonus-stat-grid" style="grid-template-columns:repeat(7,1fr);margin-bottom:1rem;">
       ${results.map(r=>`<div class="bonus-stat">
         <div class="bonus-stat-n" style="color:${r.amHoursDisqualified?'#9C0006':'inherit'};font-size:16px;">${fmtMoney(r.totalPayout)}</div>
@@ -4828,10 +4837,13 @@ function renderCompanyManagerBonus(){
       style="padding:5px 14px;border-radius:8px;border:none;font-size:12px;cursor:pointer;transition:all .15s;${S_coMgrView==='ytd'?'background:white;color:var(--primary);font-weight:700;':'background:none;color:var(--text-muted);font-weight:600;'}">YTD Summary</button>
   </div>`;
 
-  const periodBar = S_coMgrView==='period' ? `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:.75rem;">
+  const periodBar = S_coMgrView==='period' ? `<div class="bonus-period-bar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:.75rem;">
     <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);">Period:</span>
     ${S_salonSummaryPeriods.map(p=>`<button class="bonus-period-btn ${S_coMgrPeriod===p.periodKey?'active':''}" onclick="S_coMgrPeriod='${p.periodKey}';renderCompanyManagerBonus();">${p.periodLabel}</button>`).join('')}
-  </div>` : '';
+  </div>
+  <select class="bonus-period-select" onchange="S_coMgrPeriod=this.value;renderCompanyManagerBonus();" style="margin-top:.75rem;padding:6px 10px;border-radius:8px;border:1px solid var(--border);font-size:13px;font-weight:600;background:white;">
+    ${S_salonSummaryPeriods.map(p=>`<option value="${p.periodKey}" ${S_coMgrPeriod===p.periodKey?'selected':''}>${p.periodLabel}</option>`).join('')}
+  </select>` : '';
 
   const body = S_coMgrView==='ytd' ? buildCoMgrYTD() : buildCoMgrPeriod();
 
