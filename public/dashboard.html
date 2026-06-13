@@ -277,6 +277,8 @@
 
   /* ── Mobile (phones / narrow tablets) ─────────────────────────── */
   #sidebar-backdrop{display:none;}
+  .salon-num{display:none;}
+  .bonus-period-select{display:none;}
   @media (max-width: 768px){
     .app-header{padding:0 .75rem;}
     .header-right{gap:6px;}
@@ -296,6 +298,17 @@
     .profile-tabs{overflow-x:auto;-webkit-overflow-scrolling:touch;}
     .profile-tabs button{flex-shrink:0;}
     #ptab-summary-content,#ptab-bonus-content,#ptab-weekly-content,#ptab-review-content,#ptab-trends-content{overflow-x:auto;-webkit-overflow-scrolling:touch;padding:14px;}
+    /* show just the salon number to save width */
+    .salon-full{display:none;}
+    .salon-num{display:inline;}
+    /* freeze the Employee column while the rest of the row scrolls */
+    .emp-table th:first-child,.emp-table td:first-child{position:sticky;left:0;box-shadow:1px 0 0 rgba(0,0,0,.08);}
+    .emp-table td:first-child{background:#fff;z-index:2;}
+    .emp-table tbody tr:hover td:first-child{background:#faf9f7;}
+    .emp-table th:first-child{background:var(--primary-dark);z-index:3;}
+    .export-bonus{display:none;}
+    .bonus-period-bar{display:none;}
+    .bonus-period-select{display:inline-block;}
   }
 </style>
 </head>
@@ -1793,9 +1806,52 @@ function renderSalonTab(){
 function sortSalon(ci){ const cur=S.sortState['salon']; const asc=!(cur&&cur.col===ci&&cur.asc); S.sortState['salon']={col:ci,asc}; updateHeadSort(document.getElementById('salon-thead'),ci,asc); const sorted=sortRows(salonsByAM(S.currentAM),SALON_COLS,ci,asc); const a=calcAvgs(sorted); document.getElementById('salon-tbody').innerHTML=sorted.map(r=>buildSalonRow(r,SALON_COLS)).join('')+buildAvgRow(a,'▸ AM Average'); }
 
 // ── Individual tab ────────────────────────────────────────────
+// Salon cell that shows "1304 Northwoods" normally and just "1304" on mobile
+// (CSS toggles .salon-full / .salon-num).
+function salonLabelHtml(salonNum){
+  return `<span class="salon-full">${salonDisplay(salonNum)}</span><span class="salon-num">${salonNum}</span>`;
+}
+
+// Collapse per-salon employee rows into ONE row per person (globalId), shown at
+// their home salon. Used by the individual / Team's Performance view so someone
+// who works multiple salons isn't listed twice. p()/n() are idempotent
+// parseFloats, so storing display values here is safe for EMP_COLS too.
+function consolidateEmpsByPerson(emps){
+  const g = {};
+  (emps||[]).forEach(e=>{
+    const gid = (e.globalId||'').trim() || ('name:'+(e.empName||''));
+    if(!g[gid]) g[gid] = {globalId:(e.globalId||'').trim(), empName:e.empName, position:e.position, salons:new Set(), rows:[]};
+    g[gid].rows.push(e);
+    if(e.salonNum) g[gid].salons.add(String(e.salonNum).trim());
+  });
+  return Object.values(g).map(grp=>{
+    const rows = grp.rows;
+    if(rows.length===1){ const r=Object.assign({}, rows[0]); r.salonCount=grp.salons.size; return r; }
+    const numAvg = fn=>{ const vs=rows.map(fn).filter(v=>!isNaN(v)&&v!==0); return vs.length?vs.reduce((a,b)=>a+b,0)/vs.length:0; };
+    const homeRef = (S.homeDataMap && grp.globalId && S.homeDataMap[grp.globalId]) ? String(S.homeDataMap[grp.globalId].homeSalon||'').trim() : '';
+    let homeSalon = (homeRef && grp.salons.has(homeRef)) ? homeRef : '';
+    if(!homeSalon){ const cnt={}; rows.forEach(r=>{ if(r.salonNum){ const k=String(r.salonNum).trim(); cnt[k]=(cnt[k]||0)+1; } }); homeSalon = Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a])[0] || String((rows[0].salonNum||'')).trim(); }
+    const totCust = rows.reduce((a,r)=>a+n(r.custCount),0);
+    const totFloor = rows.reduce((a,r)=>a+n(r.floorHours),0);
+    return {
+      globalId: grp.globalId, empName: grp.empName, position: grp.position,
+      salonNum: homeSalon, salonCount: grp.salons.size,
+      hcTime: numAvg(r=>n(r.hcTime)).toFixed(1),
+      mbc: numAvg(r=>n(r.mbc)).toFixed(1),
+      product: numAvg(r=>p(r.product)).toFixed(1),
+      floorHours: totFloor.toFixed(1),
+      custCount: Math.round(totCust),
+      cph: totFloor>0 ? (totCust/totFloor).toFixed(2) : '0.00',
+      nr: numAvg(r=>p(r.nr)).toFixed(1),
+      rr: numAvg(r=>p(r.rr)).toFixed(1),
+      payroll: numAvg(r=>p(r.payroll)).toFixed(1),
+    };
+  });
+}
+
 const EMP_COLS=[
-  {k:'name', lbl:'Employee',   sv:e=>e.empName,          fv:e=>stylistLink(e.globalId,e.empName),                                                      cl:()=>''},
-  {k:'salon',lbl:'Salon',      sv:e=>e.salonNum,          fv:e=>salonLink(e.salonNum, salonDisplay(e.salonNum), 'individual'),                         cl:()=>''},
+  {k:'name', lbl:'Employee',   sv:e=>e.empName,          fv:e=>stylistLink(e.globalId,e.empName,e.salonNum),                                           cl:()=>''},
+  {k:'salon',lbl:'Salon',      sv:e=>e.salonNum,          fv:e=>salonLink(e.salonNum, salonLabelHtml(e.salonNum), 'individual')+(e.salonCount>1?` <span style="font-size:10px;color:var(--text-muted);" title="Works ${e.salonCount} salons — data consolidated">+${e.salonCount-1}</span>`:''),  cl:()=>''},
   // Position column removed
   {k:'hc',   lbl:'HC Time',    sv:e=>n(e.hcTime),         fv:e=>`${n(e.hcTime).toFixed(1)}`,                                                          cl:e=>tierHC(n(e.hcTime))},
   {k:'mbc',  lbl:'MBC',        sv:e=>n(e.mbc),            fv:e=>`${n(e.mbc).toFixed(1)}`,                                                             cl:e=>tierMBC(n(e.mbc))},
@@ -1885,7 +1941,7 @@ function renderIndividual(){
 
     tbody.innerHTML = filtered.map(e=>`<tr>
       <td><strong>${stylistLink(e.globalId, e.empName, e.salonNum)}</strong></td>
-      <td>${salonLink(e.salonNum, salonDisplay(e.salonNum), 'individual')}${e.salonCount>1?` <span style="font-size:10px;color:var(--text-muted);" title="Works ${e.salonCount} salons — data consolidated">+${e.salonCount-1}</span>`:''}</td>
+      <td>${salonLink(e.salonNum, salonLabelHtml(e.salonNum), 'individual')}${e.salonCount>1?` <span style="font-size:10px;color:var(--text-muted);" title="Works ${e.salonCount} salons — data consolidated">+${e.salonCount-1}</span>`:''}</td>
       <td class="${tierHC(parseFloat(e.hcTime))}">${e.hcTime}</td>
       <td class="${tierMBC(parseFloat(e.mbc))}">${e.mbc}</td>
       <td class="${tierProd(parseFloat(e.product))}">${e.product}%</td>
@@ -1898,7 +1954,7 @@ function renderIndividual(){
 
   } else {
     // Weekly mode — shows employees who worked the selected week
-    const emps=empsByAM(S.currentAM);
+    const emps=consolidateEmpsByPerson(empsByAM(S.currentAM));
     const noteEl = document.getElementById('indiv-count-note');
     if(noteEl) noteEl.textContent = emps.length ? emps.length + ' employees worked week ending ' + (S.currentWeek||'—') + ' · Switch to YTD for full roster' : '';
     if(!emps.length){ tbody.innerHTML='<tr><td colspan="9" class="no-data"><div class="no-data-icon">👥</div>No employee data for this week</td></tr>'; thead.innerHTML=''; return; }
@@ -1911,7 +1967,7 @@ function renderIndividual(){
 
 function filterEmps(){
   const s=document.getElementById('emp-search').value.toLowerCase(),sf=document.getElementById('emp-salon-filter').value;
-  let emps=empsByAM(S.currentAM);
+  let emps=consolidateEmpsByPerson(empsByAM(S.currentAM));
   if(s)emps=emps.filter(e=>(e.empName||'').toLowerCase().includes(s));
   if(sf)emps=emps.filter(e=>e.salonNum===sf);
   const cur=S.sortState['emp']; if(cur)emps=sortRows(emps,EMP_COLS,cur.col,cur.asc);
@@ -2926,14 +2982,20 @@ function renderBonus(){
         <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);">Period:</span>
         ${S_bonusPeriods.map(p=>`<button class="bonus-period-btn ${S_bonusPeriod===p.periodKey?'active':''}"
           onclick="selectBonusPeriod('${p.periodKey}')">${formatBonusPeriod(p.periodKey)}</button>`).join('')}
-      </div>`;
+      </div>
+      <select class="bonus-period-select" onchange="selectBonusPeriod(this.value)" style="margin-top:.75rem;padding:6px 10px;border-radius:8px;border:1px solid var(--border);font-size:13px;font-weight:600;background:white;">
+        ${S_bonusPeriods.map(p=>`<option value="${p.periodKey}" ${S_bonusPeriod===p.periodKey?'selected':''}>${formatBonusPeriod(p.periodKey)}</option>`).join('')}
+      </select>`;
     } else if(S_bonusType==='manager' && S_salonSummaryPeriods.length){
       const activePk = S_bonusType==='manager' ? S_mgrBonusPeriod : S_amBonusPeriod;
       periodBar = `<div class="bonus-period-bar" style="margin-top:.75rem;">
         <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);">Period:</span>
         ${S_salonSummaryPeriods.map(p=>`<button class="bonus-period-btn ${activePk===p.periodKey?'active':''}"
           onclick="selectMgrOrAMPeriod('${p.periodKey}')">${normPeriodLabel(p.periodLabel)}</button>`).join('')}
-      </div>`;
+      </div>
+      <select class="bonus-period-select" onchange="selectMgrOrAMPeriod(this.value)" style="margin-top:.75rem;padding:6px 10px;border-radius:8px;border:1px solid var(--border);font-size:13px;font-weight:600;background:white;">
+        ${S_salonSummaryPeriods.map(p=>`<option value="${p.periodKey}" ${activePk===p.periodKey?'selected':''}>${normPeriodLabel(p.periodLabel)}</option>`).join('')}
+      </select>`;
     }
   }
 
@@ -4271,8 +4333,8 @@ function renderCompanyBonus(){
   const _cpk = S_bonusPeriod || '';
   const _clbl = formatBonusPeriod(_cpk);
   const exportBtns = coView === 'period' ? `<div style="display:flex;gap:8px;">
-    <button class="btn btn-secondary btn-sm" onclick="exportBonusJPEG('${_cpk}')">📷 Export Image (${_clbl})</button>
-    <button class="btn btn-secondary btn-sm" onclick="exportPayrollCSV('${_cpk}')">⬇ ADP Payroll CSV (${_clbl})</button>
+    <button class="btn btn-secondary btn-sm export-bonus" onclick="exportBonusJPEG('${_cpk}')">📷 Export Image (${_clbl})</button>
+    <button class="btn btn-secondary btn-sm export-bonus" onclick="exportPayrollCSV('${_cpk}')">⬇ ADP Payroll CSV (${_clbl})</button>
   </div>` : '';
 
   let bodyHtml = '';
@@ -4307,7 +4369,7 @@ function renderCompanyStandouts(){
     ${S_bonusPeriods.map(p=>`<button class="bonus-period-btn ${S_bonusPeriod===p.periodKey?'active':''}"
       onclick="S_bonusPeriod='${p.periodKey}';renderCompanyStandouts();">${formatBonusPeriod(p.periodKey)}</button>`).join('')}
   </div>`;
-  const exportBtn = `<button class="btn btn-secondary btn-sm" onclick="exportExcellenceJPEG('${_cpk}')">📷 Export Image (${_clbl})</button>`;
+  const exportBtn = `<button class="btn btn-secondary btn-sm export-bonus" onclick="exportExcellenceJPEG('${_cpk}')">📷 Export Image (${_clbl})</button>`;
   el.innerHTML = `
     <div style="padding:1rem 1rem 0;">
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:.75rem;">
@@ -4325,8 +4387,8 @@ function buildCompanyBonusMonth(){
   const _pk = S_bonusPeriod || '';
   const _lbl = formatBonusPeriod(_pk);
   let exportBtns = `<div style="display:flex;gap:8px;margin-bottom:1rem;">
-    <button class="btn btn-secondary btn-sm" onclick="exportBonusJPEG('${_pk}')">📷 Export Image (${_lbl})</button>
-    <button class="btn btn-secondary btn-sm" onclick="exportPayrollCSV('${_pk}')">⬇ ADP Payroll CSV (${_lbl})</button>
+    <button class="btn btn-secondary btn-sm export-bonus" onclick="exportBonusJPEG('${_pk}')">📷 Export Image (${_lbl})</button>
+    <button class="btn btn-secondary btn-sm export-bonus" onclick="exportPayrollCSV('${_pk}')">⬇ ADP Payroll CSV (${_lbl})</button>
   </div>`;
   const totPay = stys.reduce((s,e)=>s+payablePayout(e),0);
   const totPot = stys.reduce((s,e)=>s+(parseFloat(e.potential)||0),0);
@@ -4440,8 +4502,8 @@ function buildCompanyBonusAll(){
   const _pk = S_bonusPeriod || '';
   const _lbl = formatBonusPeriod(_pk);
   let html = `<div style="display:flex;gap:8px;margin:1rem 0;">
-    <button class="btn btn-secondary btn-sm" onclick="exportBonusJPEG('${_pk}')">📷 Export Image (${_lbl})</button>
-    <button class="btn btn-secondary btn-sm" onclick="exportPayrollCSV('${_pk}')">⬇ ADP Payroll CSV (${_lbl})</button>
+    <button class="btn btn-secondary btn-sm export-bonus" onclick="exportBonusJPEG('${_pk}')">📷 Export Image (${_lbl})</button>
+    <button class="btn btn-secondary btn-sm export-bonus" onclick="exportPayrollCSV('${_pk}')">⬇ ADP Payroll CSV (${_lbl})</button>
   </div>`;
 
   html += `<div style="overflow-x:auto;"><table class="bonus-table" style="margin-top:1rem;">
@@ -5858,8 +5920,21 @@ function fmtName(name){
   }
   return (flipped + suffix).trim();
 }
+// "First Last (suffix)" -> "First L. (suffix)" for compact list/table displays.
+function shortName(name){
+  let s = fmtName(name);
+  if(!s) return '';
+  let suffix = '';
+  const m = s.match(/\s*(\([^)]*\))\s*$/);
+  if(m){ suffix = ' ' + m[1]; s = s.slice(0, m.index).trim(); }
+  const parts = s.split(/\s+/).filter(Boolean);
+  if(parts.length <= 1) return (s + suffix).trim();
+  const first = parts[0];
+  const lastInit = parts[parts.length-1].charAt(0).toUpperCase();
+  return (first + ' ' + lastInit + '.' + suffix).trim();
+}
 function stylistLink(globalId, name, salonNum){
-  const disp = fmtName(name);
+  const disp = shortName(name);
   // Clickability rule:
   //  - WITH a salon context (e.g. the Standouts row's salon, which is the
   //    person's PRIMARY salon for that period): clickable only if the current
