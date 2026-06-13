@@ -2886,7 +2886,7 @@ function renderBonus(){
 
   // Step 3: Period selector (only for non-YTD views)
   let periodBar = '';
-  if(S_bonusView !== 'ytd'){
+  if(S_bonusView !== 'ytd' && !(S_bonusType==='stylist' && S_bonusView==='salon')){
     if(S_bonusType==='stylist' && S_bonusPeriods.length){
       periodBar = `<div class="bonus-period-bar" style="margin-top:.75rem;">
         <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);">Period:</span>
@@ -2957,7 +2957,7 @@ function renderBonusContent(){
   if(S_bonusType==='stylist'){
     if(S_bonusView==='month')  el.innerHTML = buildBonusMonth();
     else if(S_bonusView==='ytd')   el.innerHTML = buildBonusYTD();
-    else if(S_bonusView==='salon') el.innerHTML = buildBonusSalon();
+    else if(S_bonusView==='salon') el.innerHTML = bonusRangeBar('rerenderBonusViews()') + buildBonusSalon();
   } else if(S_bonusType==='manager'){
     if(S_bonusView==='period') el.innerHTML = buildManagerBonusPeriod(getAMSalonNums());
     else if(S_bonusView==='ytd') el.innerHTML = buildManagerBonusYTD(getAMSalonNums());
@@ -3095,10 +3095,7 @@ function buildBonusYTD(){
 
   // Fiscal-year filter: YTD defaults to the latest fiscal year, with a year
   // selector when more than one year of data exists (mirrors the manager YTD).
-  const years = [...new Set(S_bonusPeriods.map(p=>periodYear(p.periodKey)))].sort((a,b)=>b-a);
-  if(S_bonusStyYear === null && years.length) S_bonusStyYear = years[0];
-  const fyPeriods = S_bonusPeriods.filter(p=>periodYear(p.periodKey) === S_bonusStyYear);
-  const periods = fyPeriods.length ? fyPeriods : S_bonusPeriods;
+  const periods = bonusPeriodsInRange();
 
   // Get all employees for this AM across the selected year's periods
   const empMap = {}; // empName -> {periods: {pk: bonusRow}}
@@ -3113,10 +3110,7 @@ function buildBonusYTD(){
 
   const empNames = Object.keys(empMap).sort();
 
-  const yearBar = years.length > 1 ? `<div style="display:flex;gap:6px;align-items:center;margin:0 0 10px 2px;">
-    <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);">Fiscal Year:</span>
-    ${years.map(y=>`<button onclick="S_bonusStyYear=${y};renderBonusContent();" style="padding:3px 12px;border-radius:14px;border:1px solid ${S_bonusStyYear===y?'var(--primary)':'var(--border)'};font-size:12px;font-weight:600;cursor:pointer;background:${S_bonusStyYear===y?'var(--primary)':'white'};color:${S_bonusStyYear===y?'white':'var(--text)'};">${y}</button>`).join('')}
-  </div>` : '';
+  const yearBar = bonusRangeBar('rerenderBonusViews()');
 
   let html = `${yearBar}<div class="table-card"><div style="overflow-x:auto;"><table class="ytd-bonus-table">
     <thead><tr>
@@ -3175,7 +3169,8 @@ function buildBonusYTD(){
 }
 
 function buildBonusSalon(){
-  if(!S_bonusPeriods.length) return '<div class="no-data">No bonus periods loaded</div>';
+  const S_bonusPeriods = bonusPeriodsInRange();
+  if(!S_bonusPeriods.length) return '<div class="no-data" style="padding:1rem;">No bonus data in this range.</div>';
 
   const amSalons = S.currentAM==='kayla'
     ? [...new Set(S_bonusPeriods.flatMap(p=>p.employees.map(e=>e.salonNum)).filter(s=>!NAMED.has(s)))]
@@ -3492,16 +3487,9 @@ function buildManagerBonusYTD(amSalonNums){
 
   // Fiscal-year filter: YTD shows one fiscal year (default latest), with a
   // year selector when more than one year of data exists. Reuses S_coMgrYear.
-  const years = availableMgrYears();
-  if(S_coMgrYear === null && years.length) S_coMgrYear = years[0];
-  const allPeriods = S_salonSummaryPeriods.map(p=>normPeriodLabel(p.periodLabel));
-  const fyPeriods = allPeriods.filter(lbl=>periodYear(lbl) === S_coMgrYear);
-  const periods = fyPeriods.length ? fyPeriods : allPeriods;
+  const periods = ssPeriodsInRange().map(p=>normPeriodLabel(p.periodLabel));
 
-  const yearBar = years.length > 1 ? `<div style="display:flex;gap:6px;align-items:center;margin:0 0 10px 2px;">
-    <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);">Fiscal Year:</span>
-    ${years.map(y=>`<button onclick="S_coMgrYear=${y};renderBonusContent();" style="padding:3px 12px;border-radius:14px;border:1px solid ${S_coMgrYear===y?'var(--primary)':'var(--border)'};font-size:12px;font-weight:600;cursor:pointer;background:${S_coMgrYear===y?'var(--primary)':'white'};color:${S_coMgrYear===y?'white':'var(--text)'};">${y}</button>`).join('')}
-  </div>` : '';
+  const yearBar = bonusRangeBar('rerenderBonusViews()');
 
   let html = `${yearBar}<div style="font-size:11px;color:var(--text-muted);margin:0 0 8px 2px;">Each period cell shows <strong>Payout</strong> | <strong>Potential</strong> | <strong>% Earned</strong> — click a salon or any cell to open its bonus card.</div>
   <div class="table-card"><div style="overflow-x:auto;"><table class="ytd-bonus-table">
@@ -4234,8 +4222,8 @@ function renderCompanyBonus(){
 
   let bodyHtml = '';
   if(coView === 'period')           bodyHtml = buildCompanyBonusAllStylists();
-  else if(coView === 'ytd-stylist') bodyHtml = buildCoBonusYTDStylist();
-  else if(coView === 'ytd-salon')   bodyHtml = buildCoBonusYTDSalon();
+  else if(coView === 'ytd-stylist') bodyHtml = bonusRangeBar('rerenderBonusViews()') + buildCoBonusYTDStylist();
+  else if(coView === 'ytd-salon')   bodyHtml = bonusRangeBar('rerenderBonusViews()') + buildCoBonusYTDSalon();
 
   el.innerHTML=`
     <div style="padding:1rem 1rem 0;">
@@ -4542,16 +4530,9 @@ function buildAMBonusYTD(){
 
   // Fiscal-year filter: default to the latest year, with a selector when more
   // than one year of data exists (mirrors the manager/stylist YTD).
-  const years = availableMgrYears();
-  if(S_amBonusYear === null && years.length) S_amBonusYear = years[0];
-  const allPeriods = S_salonSummaryPeriods.map(p=>normPeriodLabel(p.periodLabel));
-  const fyPeriods = allPeriods.filter(lbl=>periodYear(lbl) === S_amBonusYear);
-  const periods = fyPeriods.length ? fyPeriods : allPeriods;
+  const periods = ssPeriodsInRange().map(p=>normPeriodLabel(p.periodLabel));
 
-  const yearBar = years.length > 1 ? `<div style="display:flex;gap:6px;align-items:center;margin:0 0 10px 2px;">
-    <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);">Fiscal Year:</span>
-    ${years.map(y=>`<button onclick="S_amBonusYear=${y};renderBonusContent();" style="padding:3px 12px;border-radius:14px;border:1px solid ${S_amBonusYear===y?'var(--primary)':'var(--border)'};font-size:12px;font-weight:600;cursor:pointer;background:${S_amBonusYear===y?'var(--primary)':'white'};color:${S_amBonusYear===y?'white':'var(--text)'};">${y}</button>`).join('')}
-  </div>` : '';
+  const yearBar = bonusRangeBar('rerenderBonusViews()');
 
   let html = `${yearBar}<div style="font-size:11px;color:var(--text-muted);margin:0 0 8px 2px;">Click an Area Manager to open their dashboard and see how their salons are tracking toward bonus.</div>
   <div class="table-card"><div style="overflow-x:auto;"><table class="ytd-bonus-table">
@@ -4676,6 +4657,32 @@ let S_amBonusYear = null;     // AM-bonus YTD fiscal-year filter (e.g. 2026); nu
 function periodYear(pk){ const p=String(pk||'').trim().split(/\s+/); return 2000 + (parseInt(p[1],10)||0); }
 // Distinct fiscal years present in the loaded summary periods, newest first.
 function availableMgrYears(){ const ys=[...new Set(S_salonSummaryPeriods.map(p=>periodYear(p.periodLabel||p.periodKey)))]; return ys.sort((a,b)=>b-a); }
+// ── Bonus time-range filter: YTD (default) · Prior Year · Rolling 12 · All ────
+let S_bonusRange = 'ytd';  // 'ytd' | 'prior' | 'r12' | 'all'
+function bonusRangeFilter(items, keyFn){
+  const kf = keyFn || (x=>x);
+  if(!items || !items.length) return items||[];
+  const years = [...new Set(items.map(i=>periodYear(kf(i))))].sort((a,b)=>b-a);
+  const latest = years[0];
+  if(S_bonusRange==='ytd')   return items.filter(i=>periodYear(kf(i))===latest);
+  if(S_bonusRange==='prior') return items.filter(i=>periodYear(kf(i))===latest-1);
+  if(S_bonusRange==='r12')   return items.slice(-12);
+  return items; // 'all'
+}
+function bonusPeriodsInRange(){ return bonusRangeFilter(S_bonusPeriods, p=>p.periodKey); }
+function ssPeriodsInRange(){ return bonusRangeFilter(S_salonSummaryPeriods, p=>p.periodLabel||p.periodKey); }
+function bonusRangeBar(reRender){
+  const opts=[['ytd','YTD'],['prior','Prior Year'],['r12','Rolling 12'],['all','All']];
+  return `<div style="display:flex;gap:6px;align-items:center;margin:0 0 10px 2px;flex-wrap:wrap;">
+    <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);">Range:</span>
+    ${opts.map(([k,lbl])=>`<button onclick="S_bonusRange='${k}';${reRender}" style="padding:3px 12px;border-radius:14px;border:1px solid ${S_bonusRange===k?'var(--primary)':'var(--border)'};font-size:12px;font-weight:600;cursor:pointer;background:${S_bonusRange===k?'var(--primary)':'white'};color:${S_bonusRange===k?'white':'var(--text)'};">${lbl}</button>`).join('')}
+  </div>`;
+}
+function rerenderBonusViews(){
+  const companyActive = document.getElementById('page-company')?.classList.contains('active');
+  if(companyActive){ try{renderCompanyBonus();}catch(e){} try{renderCompanyStandouts();}catch(e){} }
+  else { try{renderBonusContent();}catch(e){} }
+}
 
 function renderCompanyManagerBonus(){
   const el = document.getElementById('co-bonus-container');
@@ -4838,20 +4845,13 @@ function buildCoMgrYTD(){
   const allSalons = allActiveSalons();
 
   // Default the YTD year to the latest fiscal year present.
-  const years = availableMgrYears();
-  if(S_coMgrYear === null && years.length) S_coMgrYear = years[0];
-  // Only include this fiscal year's periods (YTD shouldn't mix prior years).
-  const fyPeriods = S_salonSummaryPeriods.filter(p=>periodYear(p.periodLabel||p.periodKey) === S_coMgrYear);
-  const usePeriods = fyPeriods.length ? fyPeriods : S_salonSummaryPeriods;
+  const usePeriods = ssPeriodsInRange();
 
   const periods = usePeriods.map(p=>p.periodKey);
   const periodLabels = usePeriods.map(p=>p.periodLabel);
 
   // Year selector (only shown when more than one fiscal year of data exists).
-  const yearBar = years.length > 1 ? `<div style="display:flex;gap:6px;align-items:center;margin:0 0 10px 2px;">
-    <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);">Fiscal Year:</span>
-    ${years.map(y=>`<button onclick="S_coMgrYear=${y};renderCompanyManagerBonus();" style="padding:3px 12px;border-radius:14px;border:1px solid ${S_coMgrYear===y?'var(--primary)':'var(--border)'};font-size:12px;font-weight:600;cursor:pointer;background:${S_coMgrYear===y?'var(--primary)':'white'};color:${S_coMgrYear===y?'white':'var(--text)'};">${y}</button>`).join('')}
-  </div>` : '';
+  const yearBar = bonusRangeBar('rerenderBonusViews()');
 
   let html = `${yearBar}<div style="font-size:11px;color:var(--text-muted);margin:0 0 8px 2px;">Each period cell shows <strong>Payout</strong> | <strong>% Earned</strong> — click a salon or any cell to open its bonus card.</div>
   <div style="overflow-x:auto;"><table class="ytd-bonus-table">
@@ -4931,6 +4931,7 @@ function coMgrDrillInto(snum){
 }
 
 function buildCoMgrDrill(snum){
+  const S_salonSummaryPeriods = ssPeriodsInRange();
   const mgrInfo = S_managerTable[snum];
   const amId = amOfPeriod(snum, S_coMgrPeriod); const am = AMS[amId]||{name:'?',color:'#999'};
   const isAMFallback = !mgrInfo || !mgrInfo.name;
@@ -4946,7 +4947,8 @@ function buildCoMgrDrill(snum){
           <span class="am-chip"><span class="chip-dot" style="background:${am.color};display:inline-block;width:10px;height:10px;border-radius:50%;"></span> ${am.name}</span>
         </div>
       </div>
-    </div>`;
+    </div>
+    ${bonusRangeBar('rerenderBonusViews()')}`;
 
   // One card per period
   const cards = S_salonSummaryPeriods.map(ssPeriod=>{
@@ -4956,13 +4958,13 @@ function buildCoMgrDrill(snum){
     const cardHtml = renderMgrSalonCard(snum, salonRow, result, mgrInfo, bonusMgrRow, isFallback, am);
     // Wrap with period label header
     return `<div>
-      <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-bottom:6px;">${ssPeriod.periodLabel}</div>
+      <div style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--primary);margin:0 0 8px 2px;padding-bottom:6px;border-bottom:2px solid var(--border);">${ssPeriod.periodLabel}</div>
       ${cardHtml}
     </div>`;
   });
 
   // Layout: 2-up grid for multiple periods
-  html += `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(480px,1fr));gap:1.25rem;">${cards.join('')}</div>`;
+  html += `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(520px,1fr));gap:1.5rem;align-items:start;">${cards.join('')}</div>`;
   return html;
 }
 
@@ -5527,7 +5529,8 @@ function buildCompanyBonusAllStylists(){
 // ── Company Bonus YTD Views ───────────────────────────────────
 
 function buildCoBonusYTDStylist(){
-  if(!S_bonusPeriods.length) return '<div class="no-data">No bonus periods loaded</div>';
+  const S_bonusPeriods = bonusPeriodsInRange();
+  if(!S_bonusPeriods.length) return '<div class="no-data" style="padding:1rem;">No bonus data in this range.</div>';
 
   // Build map: empName+salon -> {periods}
   const empMap = {};
@@ -5694,7 +5697,8 @@ function buildCoBonusYTDAM(){
 }
 
 function buildCoBonusYTDSalon(){
-  if(!S_bonusPeriods.length) return '<div class="no-data">No bonus periods loaded</div>';
+  const S_bonusPeriods = bonusPeriodsInRange();
+  if(!S_bonusPeriods.length) return '<div class="no-data" style="padding:1rem;">No bonus data in this range.</div>';
 
   // Get all salon numbers across all periods
   const allSalons = [...new Set(S_bonusPeriods.flatMap(p=>p.employees.map(e=>e.salonNum)))].sort((a,b)=>parseInt(a)-parseInt(b));
