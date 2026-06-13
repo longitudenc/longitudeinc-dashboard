@@ -2879,7 +2879,8 @@ function renderBonus(){
   // Step 2: View selector
   const stylistViews = [{k:'month',lbl:'This Month'},{k:'ytd',lbl:'YTD History'},{k:'salon',lbl:'Salon Summary'}];
   const periodViews  = [{k:'period',lbl:'This Period'},{k:'ytd',lbl:'YTD Summary'}];
-  const views = S_bonusType==='stylist' ? stylistViews : periodViews;
+  const amViews      = [{k:'period',lbl:'Cards'},{k:'ytd',lbl:'YTD Summary'}];
+  const views = S_bonusType==='stylist' ? stylistViews : (S_bonusType==='am' ? amViews : periodViews);
   const viewBar = views.map(v=>`
     <button class="bonus-subtab ${S_bonusView===v.k?'active':''}"
       onclick="setBonusView('${v.k}')">${v.lbl}</button>`).join('');
@@ -2893,7 +2894,7 @@ function renderBonus(){
         ${S_bonusPeriods.map(p=>`<button class="bonus-period-btn ${S_bonusPeriod===p.periodKey?'active':''}"
           onclick="selectBonusPeriod('${p.periodKey}')">${formatBonusPeriod(p.periodKey)}</button>`).join('')}
       </div>`;
-    } else if(S_bonusType!=='stylist' && S_salonSummaryPeriods.length){
+    } else if(S_bonusType==='manager' && S_salonSummaryPeriods.length){
       const activePk = S_bonusType==='manager' ? S_mgrBonusPeriod : S_amBonusPeriod;
       periodBar = `<div class="bonus-period-bar" style="margin-top:.75rem;">
         <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);">Period:</span>
@@ -4035,6 +4036,13 @@ function saveManagerAssignments(){
 // ── AM Bonus ──────────────────────────────────────────────────
 let S_amBonusPeriod = null;
 
+// AM weekly qualifying-hours threshold. Default 28. Bridgette & Luann drop to
+// 25 starting June 2026 (periods Jun 26 onward). Kayla has no requirement.
+function amHoursThreshold(amId, periodLabel){
+  const reduced = (amId==='bridgette' || amId==='luann');
+  if(reduced && periodSortKey(periodLabel) >= periodSortKey('Jun 26')) return 25;
+  return 28;
+}
 function calcAMBonus(amId, periodLabel){
   const am = AMS[amId];
   if(!am) return null;
@@ -4044,7 +4052,8 @@ function calcAMBonus(amId, periodLabel){
   // AM's qualifying hours from payroll consolidated
   const pcEmp = am.globalId ? getPayrollHours(am.globalId, normLabel) : null;
   const amQualHrs = pcEmp ? pcEmp.avgWeeklyQualifying : null;
-  const amHrsOk = isKayla ? true : (amQualHrs === null ? null : amQualHrs >= 29);
+  const amThreshold = isKayla ? 0 : amHoursThreshold(amId, normLabel);
+  const amHrsOk = isKayla ? true : (amQualHrs === null ? null : amQualHrs >= amThreshold);
   const amHoursDisqualified = !isKayla && amHrsOk === false;
 
   const ssPeriod = S_salonSummaryPeriods.find(p=>normPeriodLabel(p.periodLabel)===normLabel||normPeriodLabel(p.periodKey)===normLabel);
@@ -4085,38 +4094,45 @@ function calcAMBonus(amId, periodLabel){
     }
   });
 
-  return {amId, am, isKayla, amQualHrs, amHrsOk, amHoursDisqualified,
+  return {amId, am, isKayla, amQualHrs, amThreshold, amHrsOk, amHoursDisqualified,
           salonDetails, totalPayout, periodLabel: normLabel};
 }
 
 function buildAMBonus(){
   if(!S_salonSummaryPeriods.length)
     return '<div class="no-data">No Salon Summary data loaded.</div>';
-  if(!S_amBonusPeriod) S_amBonusPeriod = S_salonSummaryPeriods[S_salonSummaryPeriods.length-1].periodKey;
-  const normLabel = normPeriodLabel(S_salonSummaryPeriods.find(p=>p.periodKey===S_amBonusPeriod)?.periodLabel||'');
-  const amOrder = S.currentAM ? [S.currentAM] : [];
-  const results = amOrder.map(amId=>calcAMBonus(amId, normLabel)).filter(Boolean);
-  if(!results.length)
-    return '<div class="no-data">No AM bonus data available for this period.</div>';
-  let html = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(540px,1fr));gap:1.25rem;">`;
-  results.forEach(r=>{ html += buildAMBonusCard(r); });
-  html += `</div>`;
-  return html;
+  const amId = S.currentAM;
+  if(!amId) return '<div class="no-data">No AM selected.</div>';
+
+  const rangeBar = bonusRangeBar('rerenderBonusViews()');
+  const periods = ssPeriodsInRange();              // range-filtered (default YTD), ascending
+  if(!periods.length)
+    return `${rangeBar}<div class="no-data" style="padding:1rem;">No AM bonus data in this range.</div>`;
+
+  // One detailed card per period for this AM, newest first.
+  const cards = periods.slice().reverse().map(p=>{
+    const r = calcAMBonus(amId, normPeriodLabel(p.periodLabel));
+    const head = `<div style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--primary);margin:0 0 8px 2px;padding-bottom:6px;border-bottom:2px solid var(--border);">${p.periodLabel}</div>`;
+    if(!r) return `<div>${head}<div class="table-card" style="margin:0;padding:1rem;color:var(--text-muted);font-size:13px;">No data for ${p.periodLabel}</div></div>`;
+    return `<div>${head}${buildAMBonusCard(r)}</div>`;
+  }).join('');
+
+  return `${rangeBar}<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(540px,1fr));gap:1.5rem;align-items:start;">${cards}</div>`;
 }
 
 function buildAMBonusCard(r){
-  const {am, amQualHrs, amHrsOk, amHoursDisqualified, salonDetails, totalPayout, isKayla} = r;
+  const {am, amQualHrs, amThreshold, amHrsOk, amHoursDisqualified, salonDetails, totalPayout, isKayla} = r;
 
   let card = `<div class="table-card" style="margin:0;">
     <div style="padding:.85rem 1rem;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
       <div>
         <div style="font-size:15px;font-weight:700;color:var(--primary);">${amLink(amKeyOf(am), am.name)} — AM Bonus</div>
         <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">
-          ${isKayla?'50% of all salons · No hours requirement':'30% override on non-managed salons · 29hr/wk threshold'}
+          ${isKayla?'50% of all salons · No hours requirement':'30% override on non-managed salons · '+amThreshold+'hr/wk threshold'}
         </div>
         ${!isKayla?`<div style="font-size:11px;margin-top:2px;color:${amHoursDisqualified?'#9C0006':amHrsOk?'#2d7a1a':'#c8a800'};">
           Qualifying hrs/wk: ${amQualHrs!==null?amQualHrs.toFixed(1):'—'}
-          ${amHoursDisqualified?'⚠ <29 → entire AM bonus $0':amHrsOk===true?'✓ ≥29':'⚠ No payroll consolidated data'}
+          ${amHoursDisqualified?'⚠ <'+amThreshold+' → entire AM bonus $0':amHrsOk===true?'✓ ≥'+amThreshold:'⚠ No payroll consolidated data'}
         </div>`:''}
       </div>
       <div style="text-align:right;">
@@ -4127,7 +4143,7 @@ function buildAMBonusCard(r){
 
   if(amHoursDisqualified){
     card+=`<div style="padding:6px 1rem;background:#fff5f5;border-bottom:1px solid #fcc;font-size:11px;color:#9C0006;font-weight:600;">
-      ⚠ Below 29hr/wk threshold — entire AM bonus disqualified ($0)
+      ⚠ Below ${amThreshold}hr/wk threshold — entire AM bonus disqualified ($0)
     </div>`;
   }
 
@@ -4554,7 +4570,7 @@ function buildAMBonusYTD(){
       ytdTotal += r.totalPayout;
       periodTotals[i] += r.totalPayout;
       const cls = r.totalPayout>0?(r.amHoursDisqualified?'bv-red':'bv-green'):'bv-red';
-      const tip = r.amHoursDisqualified ? ' title="Below 29hr/wk threshold — AM bonus $0 this period"' : '';
+      const tip = r.amHoursDisqualified ? ' title="Below '+r.amThreshold+'hr/wk threshold — AM bonus $0 this period"' : '';
       return `<td class="${cls}" style="text-align:center;font-size:12px;"${tip}>${fmtMoney(r.totalPayout)}${r.amHoursDisqualified?' ⚠':''}</td>`;
     }).join('');
     grandTotal += ytdTotal;
