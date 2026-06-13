@@ -5776,6 +5776,7 @@ function buildCoBonusYTDSalon(){
 
 // ── Stylist Profile Drawer ───────────────────────────────────
 let profileCharts = []; // track Chart instances for cleanup
+let S_profileTrendWindow = 20; // profile Trends window: 20 | 52 | 'ytd' | 'all' (default recent 20)
 
 // Convert "Last, First" (SD3 format) → "First Last" for display. Handles
 // suffixes after a second comma (e.g. "Smith, John, Jr" → "John Smith Jr"),
@@ -5984,7 +5985,7 @@ function buildProfileSummaryHtml(globalId, empRows, bonusRows){
          </tr></thead>
          <tbody>${metricRows}</tbody>
        </table>
-       <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">Reflects completed weeks only. Hours shown are floor hours; the $100/$200 tier is set by qualifying hours (floor + vacation + holiday) at close. NR % and RR % are SD3 weekly figures (105-day rolling) — they update weekly, not daily. Final points &amp; payout are set when the period closes.</div>`;
+       <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">Reflects completed weeks only. The stylist $100/$200 tier is based on floor hours. NR % and RR % are SD3 weekly figures (105-day rolling) — they update weekly, not daily. Final points &amp; payout are set when the period closes.</div>`;
 
   const lc = bonusRows.length ? bonusRows[bonusRows.length-1] : null;
   const lcCard = !lc ? '<div style="color:var(--text-muted);">No closed bonus period yet.</div>' : (()=>{
@@ -6009,7 +6010,7 @@ function buildProfileSummaryHtml(globalId, empRows, bonusRows){
     }).join('');
     return `<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
         <div style="font-weight:700;font-size:15px;color:var(--primary);">${formatBonusPeriod(lc.period)}</div>
-        <div style="font-size:13px;">${(lc.avgWkHrs!=null&&lc.avgWkHrs!=='')?fmtN1(lc.avgWkHrs)+' qual hrs/wk · ':''}${lc.points||0} pts · <span style="font-weight:700;">${payTxt}</span> of ${fmtMoney(pot)} (${pct}%)${blk?' <span style="color:#9C0006;font-size:11px;">⚠ ineligible</span>':''}</div>
+        <div style="font-size:13px;">${(lc.avgWkHrs!=null&&lc.avgWkHrs!=='')?fmtN1(lc.avgWkHrs)+' floor hrs/wk · ':''}${lc.points||0} pts · <span style="font-weight:700;">${payTxt}</span> of ${fmtMoney(pot)} (${pct}%)${blk?' <span style="color:#9C0006;font-size:11px;">⚠ ineligible</span>':''}</div>
       </div>
       <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">Avg wkly hrs: ${fmtN1(lc.avgWkHrs)}${(parseFloat(lc.avgWkHrs)||0)?(' → '+((parseFloat(lc.avgWkHrs)||0)>=BONUS_CFG.HRS_EXC?'$200 (Excellence)':'$100 (Growth)')+' tier'):''}</div>
       <table style="width:100%;border-collapse:collapse;font-size:13px;">
@@ -6182,6 +6183,7 @@ function buildProfile(globalId, name){
           </div>
           <!-- Chart area -->
           <div style="flex:1;padding:24px;overflow-y:auto;">
+            <div id="profile-trend-bar" style="display:flex;gap:4px;justify-content:flex-end;margin-bottom:12px;flex-wrap:wrap;">${profileTrendBar()}</div>
             <div id="profile-chart-area" style="position:relative;height:320px;">
               <canvas id="profile-main-chart"></canvas>
             </div>
@@ -6340,26 +6342,54 @@ function switchProfileMetric(mk){
   drawProfileChart(mk);
 }
 
+function profileTrendBar(){
+  return [{w:20,l:'20 wk'},{w:52,l:'52 wk'},{w:'ytd',l:'YTD'},{w:'all',l:'All'}].map(o=>{
+    const arg = typeof o.w==='string' ? "'"+o.w+"'" : o.w;
+    const active = S_profileTrendWindow===o.w;
+    return `<button onclick="setProfileTrendWindow(${arg})" style="padding:4px 12px;border-radius:16px;border:1px solid var(--border);font-size:11px;font-weight:600;cursor:pointer;background:${active?'var(--primary)':'white'};color:${active?'white':'var(--text)'};">${o.l}</button>`;
+  }).join('');
+}
+function setProfileTrendWindow(w){
+  S_profileTrendWindow = w;
+  const bar = document.getElementById('profile-trend-bar');
+  if(bar) bar.innerHTML = profileTrendBar();
+  const mk = window._activeProfileMetric || ((window._profileMetrics||[])[0]||{}).k;
+  if(mk) drawProfileChart(mk);
+}
+
 function drawProfileChart(mk){
   profileCharts.forEach(c=>{ try{c.destroy();}catch(e){} });
   profileCharts = [];
 
   const metrics = window._profileMetrics || [];
-  const weeks   = window._profileWeeks || [];
+  const fullWeeks = window._profileWeeks || [];
   const m = metrics.find(x=>x.k===mk);
-  if(!m || !weeks.length) return;
+  if(!m || !fullWeeks.length) return;
 
   const ctx = document.getElementById('profile-main-chart');
   if(!ctx) return;
 
-  // Compute stats
-  const vals = m.data.filter(v=>!isNaN(v)&&v!==0);
+  // Apply the selected window (20 | 52 | 'ytd' | 'all') to the aligned arrays.
+  // m.data and m.liAvg are parallel to fullWeeks, so we slice all three by index.
+  const W = (typeof S_profileTrendWindow!=='undefined') ? S_profileTrendWindow : 'all';
+  let idx;
+  if(W==='all'){ idx = fullWeeks.map((_,i)=>i); }
+  else if(W==='ytd'){ const anchor = fiscalYearStartIso(fullWeeks[fullWeeks.length-1]); idx = fullWeeks.map((we,i)=>we>=anchor?i:-1).filter(i=>i>=0); }
+  else { idx = fullWeeks.map((_,i)=>i).slice(Math.max(0, fullWeeks.length - W)); }
+  if(!idx.length) idx = fullWeeks.map((_,i)=>i);
+
+  const labels = idx.map(i=>{ const pr=String(fullWeeks[i]).split('-'); return pr.length>=3 ? (parseInt(pr[1],10)+'/'+parseInt(pr[2],10)) : fullWeeks[i]; });
+  const data   = idx.map(i=>m.data[i]);
+  const liData = m.liAvg ? idx.map(i=>m.liAvg[i]) : null;
+
+  // Compute stats over the windowed slice (so the cards match the chart)
+  const vals = data.filter(v=>!isNaN(v)&&v!==0);
   const avg  = vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : 0;
   const mn   = vals.length ? Math.min(...vals) : 0;
   const mx   = vals.length ? Math.max(...vals) : 0;
 
-  // LI avg for this metric
-  const liVals = (m.liAvg||[]).filter(v=>v!==null&&!isNaN(v));
+  // LI avg for this metric (windowed)
+  const liVals = (liData||[]).filter(v=>v!==null&&!isNaN(v));
   const liAvgVal = liVals.length ? liVals.reduce((a,b)=>a+b,0)/liVals.length : null;
 
   const statsEl = document.getElementById('profile-chart-stats');
@@ -6372,11 +6402,11 @@ function drawProfileChart(mk){
   const ch = new Chart(ctx, {
     type:'line',
     data:{
-      labels: weeks,
+      labels: labels,
       datasets:[
         {
           label: m.label,
-          data: m.data,
+          data: data,
           borderColor: m.color,
           backgroundColor: m.color+'18',
           borderWidth: 2.5,
@@ -6388,7 +6418,7 @@ function drawProfileChart(mk){
         },
         {
           label:'Personal Avg',
-          data: weeks.map(()=>avg),
+          data: labels.map(()=>avg),
           borderColor: m.color+'88',
           borderWidth: 1.5,
           borderDash: [6,4],
@@ -6396,9 +6426,9 @@ function drawProfileChart(mk){
           fill: false,
           order: 3
         },
-        ...(m.liAvg ? [{
+        ...(liData ? [{
           label:'LI Avg',
-          data: m.liAvg,
+          data: liData,
           borderColor: '#888888',
           backgroundColor: 'transparent',
           borderWidth: 1.5,
