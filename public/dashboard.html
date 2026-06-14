@@ -7095,7 +7095,7 @@ function renderReview(data){
               <td style="padding:5px 8px;font-weight:700;background:#f5f5f5;border:1px solid #ddd;">${m.lbl}</td>
               ${qVals.map(v=>`<td style="padding:5px 6px;text-align:center;border:1px solid #ddd;${v!==null?revCellColor(m.k,v):''}">${v!==null?m.fmt(v):'—'}</td>`).join('')}
               <td style="padding:5px 6px;text-align:center;font-weight:700;border:1px solid #ddd;${annVal!==null?revCellColor(m.k,annVal):"background:#D9E1F2;color:#03654e;"}">${annVal!==null?m.fmt(annVal):'—'}</td>
-              <td style="padding:5px 6px;text-align:center;font-weight:700;border:1px solid #ddd;background:${sc>=3?'#C6EFCE':sc===2?'#FFEB9C':'#FFC7CE'};color:${sc>=3?'#375623':sc===2?'#7D6608':'#9C0006'};">${sc}</td>
+              <td style="padding:5px 6px;text-align:center;font-weight:700;border:1px solid #ddd;background:${sc>=4?'#C6EFCE':sc===3?'#FFEB9C':sc===2?'#FCE4D6':'#FFC7CE'};color:${sc>=4?'#375623':sc===3?'#7D6608':sc===2?'#843C0C':'#9C0006'};">${sc}</td>
               <td style="padding:5px 6px;text-align:center;border:1px solid #ddd;color:#888;">4</td>
             </tr>`;
           }).join('')}
@@ -7341,7 +7341,7 @@ function openBulkPrintWindow(data){
               <td style="padding:4px 6px;font-weight:700;background:#f5f5f5;border:1px solid #ddd;">${m.lbl}</td>
               ${qv.map(v=>`<td style="padding:4px 6px;text-align:center;border:1px solid #ddd;${v!==null?cellColor(m.k,v):''}">${v!==null?m.fmt(v):'—'}</td>`).join('')}
               <td style="padding:4px 6px;text-align:center;font-weight:700;border:1px solid #ddd;background:#D9E1F2;color:#03654e;">${av!==null?m.fmt(av):'—'}</td>
-              <td style="padding:4px 6px;text-align:center;font-weight:700;border:1px solid #ddd;background:${sc>=3?'#C6EFCE':sc===2?'#FFEB9C':'#FFC7CE'};color:${sc>=3?'#375623':sc===2?'#7D6608':'#9C0006'};">${sc}</td>
+              <td style="padding:4px 6px;text-align:center;font-weight:700;border:1px solid #ddd;background:${sc>=4?'#C6EFCE':sc===3?'#FFEB9C':sc===2?'#FCE4D6':'#FFC7CE'};color:${sc>=4?'#375623':sc===3?'#7D6608':sc===2?'#843C0C':'#9C0006'};">${sc}</td>
               <td style="padding:4px 6px;text-align:center;border:1px solid #ddd;color:#888;">4</td>
             </tr>`;
           }).join('')}
