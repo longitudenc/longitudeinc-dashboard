@@ -6269,6 +6269,9 @@ function profileWeeklyHtml(empRows){
   rows = rows.slice().reverse(); // newest first
   if(!rows.length) return bar + '<div style="color:var(--text-muted);padding:8px 2px;">No weeks in this range.</div>';
   const fmtWE = iso=>{ const m=String(iso||'').match(/^(\d{4})-(\d{2})-(\d{2})/); return m?(+m[2])+'/'+(+m[3])+'/'+m[1].slice(2):iso; };
+  const avgW = fn=>{ const v=rows.map(fn).filter(x=>!isNaN(x)&&x!==0); return v.length?v.reduce((a,b)=>a+b,0)/v.length:null; };
+  const aHC=avgW(r=>n(r.hcTime)), aMBC=avgW(r=>n(r.mbc)), aProd=avgW(r=>p(r.product)), aNR=avgW(r=>p(r.nr)), aRR=avgW(r=>p(r.rr)), aFloor=avgW(r=>n(r.floorHours)), aCust=avgW(r=>n(r.custCount)), aCPH=avgW(r=>n(r.cph));
+  const fa=(v,d=1,s='')=>v===null?'—':v.toFixed(d)+s;
   return bar + `<table style="width:100%;border-collapse:collapse;font-size:12px;">
     <thead style="position:sticky;top:0;z-index:1;"><tr style="background:var(--primary-dark);color:white;">
       <th style="padding:7px 10px;text-align:left;">Week Ending</th>
@@ -6283,6 +6286,18 @@ function profileWeeklyHtml(empRows){
       <th style="padding:7px 10px;text-align:center;">CPH</th>
     </tr></thead>
     <tbody>
+      <tr style="background:#e9f1ea;font-weight:700;border-bottom:2px solid var(--primary);">
+        <td style="padding:7px 10px;white-space:nowrap;">Average</td>
+        <td style="padding:7px 10px;white-space:nowrap;color:var(--text-muted);font-weight:600;">${rows.length} wks</td>
+        <td style="padding:7px 10px;text-align:center;">${fa(aHC)}</td>
+        <td style="padding:7px 10px;text-align:center;">${fa(aMBC)}</td>
+        <td style="padding:7px 10px;text-align:center;">${fa(aProd,1,'%')}</td>
+        <td style="padding:7px 10px;text-align:center;">${fa(aNR,1,'%')}</td>
+        <td style="padding:7px 10px;text-align:center;">${fa(aRR,1,'%')}</td>
+        <td style="padding:7px 10px;text-align:center;">${fa(aFloor)}</td>
+        <td style="padding:7px 10px;text-align:center;">${aCust===null?'—':Math.round(aCust)}</td>
+        <td style="padding:7px 10px;text-align:center;">${fa(aCPH,2)}</td>
+      </tr>
       ${rows.map((r,i)=>`
       <tr style="background:${i%2?'#f8f7f4':'white'};">
         <td style="padding:7px 10px;white-space:nowrap;font-weight:500;">${fmtWE(r.weekEnding)}</td>
@@ -6318,6 +6333,14 @@ function buildProfile(globalId, name){
   const tenureStr = tenure(hireRaw);
   const amId = amOf(homeSalon);
   const am   = AMS[amId] || {name:'—', color:'#999'};
+
+  // Stylist switcher: everyone the current user may view (from the home roster),
+  // so you can flip between people without closing the drawer.
+  const viewableStylists = Object.entries(S.homeDataMap||{})
+    .map(([gid,row])=>({globalId:gid, name:String((row&&row.payrollName)||'').trim()}))
+    .filter(e=>e.name && canViewPerson(e.globalId))
+    .sort((a,b)=>fmtName(a.name).localeCompare(fmtName(b.name)));
+  if(!viewableStylists.find(e=>e.globalId===globalId)) viewableStylists.unshift({globalId, name});
 
   const empRows = S.weekHistory.flatMap(w=>
     (w.emps||[]).filter(e=>e.globalId && e.globalId.trim()===globalId)
@@ -6397,7 +6420,13 @@ function buildProfile(globalId, name){
       <!-- Header -->
       <div class="profile-header" style="position:relative;flex-shrink:0;">
         <button class="profile-close" onclick="closeProfile()">✕</button>
-        <div class="profile-name">${fmtName(name)}
+        <div class="profile-name">
+          <span style="position:relative;display:inline-block;">
+            <span style="cursor:pointer;">${fmtName(name)} <span style="font-size:.55em;vertical-align:middle;opacity:.85;">▾</span></span>
+            <select title="Switch stylist" onchange="if(this.value)openProfile(this.value, this.options[this.selectedIndex].dataset.name)" style="position:absolute;left:0;top:0;width:100%;height:100%;opacity:0;cursor:pointer;font-size:14px;color:#000;">
+              ${viewableStylists.map(e=>`<option value="${e.globalId}" data-name="${String(e.name).replace(/"/g,'&quot;')}" ${e.globalId===globalId?'selected':''}>${fmtName(e.name)}</option>`).join('')}
+            </select>
+          </span>
           ${tenureStr ? `<span class="tenure-chip">${tenureStr}</span>` : ''}
         </div>
         <div class="profile-meta">
@@ -6959,9 +6988,12 @@ function renderReview(data){
   const amId = amOf(data.homeSalon);
   const am   = AMS[amId] || {name:'—'};
 
-  // Year selector
+  // Year selector — only 2025 onward (no individual data before that).
   const currentYear = new Date().getFullYear();
-  const yearOptions = [currentYear, currentYear-1, currentYear-2, currentYear-3].map(y=>
+  const FIRST_REVIEW_YEAR = 2025;
+  const years = [];
+  for(let y=Math.max(currentYear, FIRST_REVIEW_YEAR); y>=FIRST_REVIEW_YEAR; y--) years.push(y);
+  const yearOptions = years.map(y=>
     `<option value="${y}" ${y===_reviewYear?'selected':''}>${y}</option>`).join('');
 
   // Months grid
