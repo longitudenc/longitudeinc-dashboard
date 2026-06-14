@@ -6856,39 +6856,84 @@ function revCellColor(metric, val){
   return 'background:#FFC7CE;color:#9C0006;';
 }
 
+function fmtReviewDate(raw){
+  const s=String(raw||'').trim(); if(!s) return '—';
+  let m=s.match(/^(\d{4})-(\d{2})-(\d{2})/); if(m) return (+m[2])+'/'+(+m[3])+'/'+m[1].slice(2);
+  m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/); if(m) return (+m[1])+'/'+(+m[2])+'/'+(m[3].length===4?m[3].slice(2):m[3]);
+  return s;
+}
+
+// Build the annual-review data shape from the weekly history we already have
+// (window._profileEmpRows), grouped by calendar month of the selected year.
+// Replaces the old getReviewData sheet read, which was empty.
+function computeReviewData(globalId, year){
+  const rows = (window._profileEmpRows||[]).filter(r=>{
+    const m = String(r.weekEnding||'').match(/^(\d{4})-(\d{2})/);
+    return m && parseInt(m[1],10)===year;
+  });
+  const keys = ['nr','rr','hc','mbc','prod'];
+  const valOf = (r,k)=>{
+    let v;
+    if(k==='nr')      v=p(r.nr);
+    else if(k==='rr') v=p(r.rr);
+    else if(k==='hc') v=n(r.hcTime);
+    else if(k==='mbc')v=n(r.mbc);
+    else              v=p(r.product);
+    return (isNaN(v)||v===0)?null:v; // treat 0 as missing-data
+  };
+  const avg = arr=>{ const v=arr.filter(x=>x!==null&&!isNaN(x)); return v.length?v.reduce((a,b)=>a+b,0)/v.length:null; };
+  const monthOf = r=>{ const m=String(r.weekEnding||'').match(/^\d{4}-(\d{2})/); return m?REVIEW_MONTHS[parseInt(m[1],10)-1]:''; };
+
+  // Monthly grid
+  const grid = {};
+  REVIEW_MONTHS.forEach(mo=>{
+    const mrows = rows.filter(r=>monthOf(r)===mo);
+    if(!mrows.length){ grid[mo]=null; return; }
+    const cell={}; keys.forEach(k=>{ cell[k]=avg(mrows.map(r=>valOf(r,k))); }); grid[mo]=cell;
+  });
+  // Annual + quarterly averages (over every week in the year, per metric)
+  const annualAvg={}; keys.forEach(k=>{ annualAvg[k]=avg(rows.map(r=>valOf(r,k))); });
+  const qAvgs={Q1:{},Q2:{},Q3:{},Q4:{}};
+  Object.entries(REVIEW_QUARTERS).forEach(([q,mons])=>{
+    const qrows = rows.filter(r=>mons.includes(monthOf(r)));
+    keys.forEach(k=>{ qAvgs[q][k]=avg(qrows.map(r=>valOf(r,k))); });
+  });
+  // Scores (from annual averages) → points → raise
+  const scoreFns={nr:scoreNR,rr:scoreRR,hc:scoreHC,mbc:scoreMBC,prod:scoreProd};
+  const scores={}; let totalPts=0;
+  keys.forEach(k=>{ const a=annualAvg[k]; const s=(a===null)?0:scoreFns[k](a); scores[k]=s; totalPts+=s; });
+  const raiseEarned = (totalPts>=REVIEW_MIN_PTS) ? (REVIEW_RAISE[totalPts]||0) : 0;
+  const monthsWorked = REVIEW_MONTHS.filter(mo=>grid[mo]).length;
+
+  // Identity
+  const home = S.homeDataMap ? S.homeDataMap[globalId] : null;
+  let homeSalon = home ? home.homeSalon : '';
+  if(!homeSalon){ const cnt={}; rows.forEach(r=>{ if(r.salonNum){ const kk=String(r.salonNum).trim(); cnt[kk]=(cnt[kk]||0)+1; } }); homeSalon = Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a])[0]||''; }
+  const prof = (S.profileMap||{})[globalId]||{};
+  const effectiveDate = fmtReviewDate(prof.rehireDate || prof.dateOfHire || '');
+
+  return { success:true, hasData:rows.length>0, grid, annualAvg, qAvgs, scores, totalPts, raiseEarned, monthsWorked, homeSalon, payrollName:_reviewName||'', effectiveDate };
+}
+
 function loadReview(){
   if(!_reviewGlobalId) return;
   const el = document.getElementById('review-body');
-  el.innerHTML = '<div style="padding:20px;color:var(--text-muted);">Loading review...</div>';
+  if(!el) return;
+  el.innerHTML = '<div style="padding:20px;color:var(--text-muted);">Loading review…</div>';
 
-  // Set a timeout safety net - if nothing happens in 15s show error
-  const timeout = setTimeout(()=>{
-    if(el.innerHTML.includes('Loading review')) {
-      el.innerHTML = '<div style="padding:20px;color:red;">Timed out loading review. Check that the disciplinary points sheet is accessible from this Google account, then try again.</div>';
+  const render = ()=>{
+    try {
+      const data = computeReviewData(_reviewGlobalId, _reviewYear);
+      if(!data.hasData){ el.innerHTML = '<div style="padding:20px;color:var(--text-muted);">No weekly data on record for '+_reviewYear+'. Pick another year above.</div>'; return; }
+      renderReview(data);
+    } catch(e){
+      el.innerHTML = '<div style="padding:20px;color:red;">Render error: '+e.message+'</div>';
     }
-  }, 15000);
-
-  // Load review data only — skip disc points for now, load separately
-  el.innerHTML = '<div style="padding:20px;color:var(--text-muted);">Loading review data...</div>';
-
-  // Load review data and disc points together
-  let reviewData = null, discDone = false, reviewDone = false;
-
-  const tryRender = () => {
-    if(!discDone || !reviewDone) return;
-    clearTimeout(timeout);
-    if(!reviewData || !reviewData.success){
-      el.innerHTML = '<div style="padding:20px;color:red;">Error: ' + ((reviewData&&reviewData.error)||'unknown') + '</div>';
-      return;
-    }
-    try { renderReview(reviewData); }
-    catch(e){ el.innerHTML = '<div style="padding:20px;color:red;">Render error: ' + e.message + '</div>'; }
   };
 
-  fetch('/api/gs/getReviewData',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({globalId:_reviewGlobalId,year:_reviewYear})}).then(r=>r.json()).then(data=>{ reviewData = data; reviewDone = true; tryRender(); }).catch(err=>{ reviewData = {success:false,error:String(err)}; reviewDone = true; tryRender(); });
-
-  // Always fetch fresh disc events
-  loadDiscPoints(()=>{ discDone = true; tryRender(); });
+  // Disc points feed the eligibility note — load once, then render from local data.
+  if(_discLoaded) render();
+  else loadDiscPoints(()=>render());
 }
 
 // "Mon YY" period key for a given week-ending ISO (its calendar month)
