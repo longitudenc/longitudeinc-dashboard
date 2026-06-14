@@ -92,6 +92,11 @@ export async function getSalonSummaries() {
 export async function getPayrollConsolidated() {
   return rowsToObjects(await readSheet('PayrollConsolidatedData'))
 }
+// Weekly payroll (SD_PAYROLL) — carries per-employee base wage, which the
+// consolidated table drops during aggregation. Used to surface current wage.
+export async function getPayrollWeekly() {
+  return rowsToObjects(await readSheet('SD_PAYROLL'))
+}
 export async function getManagerTable() {
   return rowsToObjects(await readSheet('ManagerTable'))
 }
@@ -167,6 +172,7 @@ export async function getAllDashboardData() {
     amAssignmentRows,
     homeRows,
     trackerRows,
+    payrollWeeklyRows,
   ] = await Promise.all([
     getSalonWeeks(),
     getEmployeeWeeks(),
@@ -178,6 +184,7 @@ export async function getAllDashboardData() {
     getAMAssignments(),
     getHomeData(),
     getTrackerData(),
+    getPayrollWeekly(),
   ])
 
   return {
@@ -191,6 +198,7 @@ export async function getAllDashboardData() {
     amAssignmentRows,
     homeRows,
     trackerRows,
+    payrollWeeklyRows,
   }
 }
 

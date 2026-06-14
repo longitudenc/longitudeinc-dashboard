@@ -241,6 +241,22 @@ function formatAllData(raw: any, scrapedWeeks: any[], rosterRows: any[]) {
     if (id) homeDataMap[id] = row
   })
 
+  // Current base wage per person: HomeData doesn't carry it and the consolidated
+  // payroll drops it, so take the most-recent weekly SD_PAYROLL row per globalId.
+  const wageOf: Record<string, { week: string; wage: any }> = {}
+  ;(raw.payrollWeeklyRows || []).forEach((row: any) => {
+    const gid = String(row.globalId || '').trim()
+    if (!gid) return
+    const wage = row.baseWage
+    if (wage === '' || wage == null) return
+    const wk = String(row.weekEnd || '')
+    if (!wageOf[gid] || wk > wageOf[gid].week) wageOf[gid] = { week: wk, wage }
+  })
+  Object.entries(wageOf).forEach(([gid, o]) => {
+    if (homeDataMap[gid]) homeDataMap[gid].baseWage = o.wage
+    else homeDataMap[gid] = { globalId: gid, baseWage: o.wage }
+  })
+
   return {
     success: true,
     weeks,
