@@ -873,6 +873,26 @@ const SALON_NAMES = {
 };
 function salonDisplay(salonNum){ return SALON_NAMES[salonNum] || salonNum; }
 
+// 2026 per-salon goals (provided by Trey, 6/14/26). prod = productivity goal
+// ($ service sales per floor hour); cph = cuts-per-hour goal.
+const SALON_GOALS_2026 = {
+  '1304':{cph:2.2,prod:41.9}, '2554':{cph:2.0,prod:38.6}, '3015':{cph:2.7,prod:51.8},
+  '3025':{cph:2.8,prod:53.6}, '3027':{cph:2.8,prod:53.4}, '3043':{cph:2.4,prod:46.0},
+  '3045':{cph:2.2,prod:42.8}, '3053':{cph:2.4,prod:46.3}, '3058':{cph:2.8,prod:54.1},
+  '3062':{cph:2.8,prod:53.5}, '3071':{cph:2.9,prod:56.7}, '4138':{cph:null,prod:38.4},
+  '3545':{cph:1.6,prod:31.1}, '3685':{cph:1.6,prod:31.1}, '7728':{cph:2.6,prod:50.2},
+  '8725':{cph:1.8,prod:32.7}, '9478':{cph:2.8,prod:53.0}, '9489':{cph:2.0,prod:38.5},
+  '9689':{cph:2.7,prod:52.2}
+};
+function salonProdGoal(sn){ const g=SALON_GOALS_2026[String(sn).trim()]; return g?g.prod:null; }
+function salonCphGoal(sn){ const g=SALON_GOALS_2026[String(sn).trim()]; return g?g.cph:null; }
+// Grade a value against a goal → tier color class (c4 green … c1 red).
+function gradeVsGoal(v, goal){
+  if(goal===null||goal===undefined||goal<=0||v===null||v===undefined||isNaN(v)) return '';
+  const r=v/goal;
+  return r>=1 ? 'c4' : r>=0.9 ? 'c3' : r>=0.8 ? 'c2' : 'c1';
+}
+
 // ── Salon roster (active/sold/closed + AM assignment) ───────────────
 // ROSTER is loaded from getAllData (data.salonRoster) in onDataLoaded and
 // becomes the source of truth for which salons are active and who owns them.
@@ -1474,11 +1494,12 @@ function switchToAdmin(){
   renderAMAssignTable();
 }
 
-// ── Daily drill (lives inside Salon Performance) ──────────────
-// Salon-level day strip (from SD_DAILY) + click-through to per-stylist detail
-// (from SD_EMP_DAILY), fetched on demand from /api/gs/getDaily for the current
-// week. Return data is intentionally excluded (105-day rolling, not per day).
-let S_dailyData = null;          // { start, end, salonDaily[], empDaily[] }
+// ── Daily drill (lives inside Salon Performance / Company All Salons) ──
+// Double drill: (1) a salon's per-day performance table for the current week,
+// (2) click a day → who worked that day + their performance. Click-through is
+// role/assignment-gated (canDrillSalon). Salon-level rates use the same SD3
+// formulas as the weekly recompute (lib/aggregate.ts). Return data excluded.
+let S_dailyData = null;          // { start, end, salonDaily[], empDaily[] }  (14-day window)
 let S_dailyDetail = null;        // { salonNum, date } currently open
 
 const DAILY_DAYNAMES = ['Sat','Sun','Mon','Tue','Wed','Thu','Fri'];
@@ -1489,76 +1510,115 @@ function dIsoAddDays(iso, nDays){
   dt.setUTCDate(dt.getUTCDate() + nDays);
   return dt.toISOString().slice(0,10);
 }
-function dailyWeekDates(weekEndIso){ // [Sat..Fri] for the week ending Friday
-  const out = [];
-  for(let i=6;i>=0;i--) out.push(dIsoAddDays(weekEndIso, -i));
-  return out;
-}
+function dailyWeekDates(weekEndIso){ const out=[]; for(let i=6;i>=0;i--) out.push(dIsoAddDays(weekEndIso,-i)); return out; }
 function dFmtMD(iso){ const [y,m,d]=String(iso).split('-').map(Number); return (m)+'/'+(d); }
 function dFmtMDY(iso){ const [y,m,d]=String(iso).split('-').map(Number); return (m)+'/'+(d)+'/'+String(y).slice(2); }
 
-function dailyCellNum(r, metric){
+// Salon-level daily rates from a raw SD_DAILY row — formulas match lib/aggregate.ts.
+function dSalonMetrics(r){
   if(!r) return null;
   const cc=n(r.customerCount), fh=n(r.floorHours), ss=n(r.serviceSales), ps=n(r.productSales);
-  if(metric==='cc') return isNaN(cc)?null:cc;
-  if(metric==='sales') return (isNaN(ss)?0:ss)+(isNaN(ps)?0:ps);
-  if(metric==='cph') return (fh>0 && !isNaN(cc)) ? cc/fh : null;
-  return null;
+  const total=(isNaN(ss)?0:ss)+(isNaN(ps)?0:ps);
+  const pay=n(r.approximatePayrollAmount);
+  const hcMin=n(r.haircutOnlyServiceMinutes), hcInv=n(r.haircutOnlyInvoiceCount);
+  const ncwm=n(r.nonCutWithCustWaitingMinutes), w15=n(r.waitOver15MinsCount);
+  return {
+    cc:isNaN(cc)?0:cc, sales:total, fh:isNaN(fh)?0:fh,
+    cph: fh>0 ? cc/fh : null,
+    hcTime: hcInv>0 ? hcMin/hcInv : null,
+    mbc: cc>0 ? ncwm/cc : null,
+    waitsPct: cc>0 ? (w15/cc)*100 : null,
+    payrollPct: total>0 ? (pay/total)*100 : null,
+    productPct: total>0 ? (ps/total)*100 : null,
+    productivity: fh>0 ? ss/fh : null,
+  };
 }
-function dailyFmt(v, metric){
+function dFmt(v, kind){
   if(v===null||v===undefined||isNaN(v)) return '—';
-  if(metric==='cc') return Math.round(v).toLocaleString();
-  if(metric==='sales') return '$'+Math.round(v).toLocaleString();
-  if(metric==='cph') return v.toFixed(1);
+  if(kind==='int') return Math.round(v).toLocaleString();
+  if(kind==='money') return '$'+Math.round(v).toLocaleString();
+  if(kind==='pct') return v.toFixed(1)+'%';
+  if(kind==='1') return v.toFixed(1);
+  if(kind==='2') return v.toFixed(2);
   return String(v);
 }
+function dChange(cur, prior){ return (prior&&prior>0&&cur!==null&&!isNaN(cur)) ? ((cur-prior)/prior)*100 : null; }
+function dChangeCell(ch){ return ch===null ? '<span style="color:#bbb;">—</span>' : `<span class="${tc(ch)}">${sgn(ch)}%</span>`; }
 
-// Open the daily breakdown for one salon (current week). hostId is the drill
-// container (AM: 'salon-drill'; Company All Salons: 'co-salon-drill').
+// LEVEL 1 — a salon's per-day table for the current week. hostId = drill container.
 function openSalonDaily(sn, hostId){
   hostId = hostId || 'salon-drill';
+  sn = String(sn).trim();
+  if(!canDrillSalon(sn)) return;            // role/assignment gate (defense in depth)
   const host = document.getElementById(hostId);
   if(!host) return;
   const weekEnd = S.currentWeek;
   if(!weekEnd){ host.innerHTML='<div class="table-card"><div class="no-data">No week selected</div></div>'; return; }
   const dates = dailyWeekDates(weekEnd);
-  const start = dates[0], end = dates[6];
+  const fetchStart = dIsoAddDays(weekEnd, -13);   // prior Sat → 14-day window (for wk-over-wk change)
+  const fetchEnd = weekEnd;
 
   const render = () => {
     const idx = {};
     S_dailyData.salonDaily.forEach(r=>{ idx[(r.salonNum||'').trim()+'|'+r.date] = r; });
-    let cards = '';
+    // Week totals (true calculated rates from summed raw)
+    let W={cc:0,fh:0,ss:0,ps:0,pay:0,hcMin:0,hcInv:0,ncwm:0,w15:0,any:false};
+    let head='<tr><th style="text-align:left;">Day</th><th>CC</th><th>Δ wk</th><th>Sales</th><th>Δ wk</th><th>CPH</th><th>HC Time</th><th>MBC</th><th>Waits %</th><th>Payroll %</th></tr>';
+    let body='';
     dates.forEach((dt,i)=>{
-      const r = idx[String(sn).trim()+'|'+dt];
-      const has = !!r;
-      const cc = dailyCellNum(r,'cc'), sales = dailyCellNum(r,'sales'), cph = dailyCellNum(r,'cph');
-      cards += `<div ${has?`onclick="openDayDetail('${sn}','${dt}','${hostId}-detail')" onmouseover="this.style.boxShadow='0 2px 8px rgba(0,0,0,.12)'" onmouseout="this.style.boxShadow='none'"`:''}
-        style="flex:1 1 92px;min-width:92px;border:1px solid #dfe3df;border-radius:10px;padding:8px 6px;text-align:center;${has?'cursor:pointer;background:#fff;':'background:#f6f6f4;color:#bbb;'}transition:box-shadow .15s;">
-        <div style="font-size:11px;font-weight:700;color:var(--text-muted);">${DAILY_DAYNAMES[i]} ${dFmtMD(dt)}</div>
-        <div style="font-size:20px;font-weight:800;color:${has?'var(--primary)':'#ccc'};margin:2px 0;">${dailyFmt(cc,'cc')}</div>
-        <div style="font-size:10px;color:var(--text-muted);">customers</div>
-        <div style="font-size:11px;margin-top:4px;color:var(--text-muted);">${dailyFmt(sales,'sales')} · ${dailyFmt(cph,'cph')} cph</div>
-      </div>`;
+      const r = idx[sn+'|'+dt];
+      const m = dSalonMetrics(r);
+      const pr = dSalonMetrics(idx[sn+'|'+dIsoAddDays(dt,-7)]);
+      if(r){
+        W.cc+=n(r.customerCount)||0; W.fh+=n(r.floorHours)||0; W.ss+=n(r.serviceSales)||0; W.ps+=n(r.productSales)||0;
+        W.pay+=n(r.approximatePayrollAmount)||0; W.hcMin+=n(r.haircutOnlyServiceMinutes)||0; W.hcInv+=n(r.haircutOnlyInvoiceCount)||0;
+        W.ncwm+=n(r.nonCutWithCustWaitingMinutes)||0; W.w15+=n(r.waitOver15MinsCount)||0; W.any=true;
+      }
+      const cc=Math.round(n(r&&r.customerCount));
+      const click = m ? `onclick="openDayDetail('${sn}','${dt}','${hostId}-detail')" style="cursor:pointer;"` : 'style="color:#bbb;"';
+      const ccChg = m ? dChange(m.cc, pr?pr.cc:null) : null;
+      const slChg = m ? dChange(m.sales, pr?pr.sales:null) : null;
+      body += m ? `<tr ${click}>
+        <td style="text-align:left;font-weight:600;">${DAILY_DAYNAMES[i]} ${dFmtMD(dt)}</td>
+        <td>${dFmt(m.cc,'int')}</td><td>${dChangeCell(ccChg)}</td>
+        <td>${dFmt(m.sales,'money')}</td><td>${dChangeCell(slChg)}</td>
+        <td class="${m.cph!==null?tierCPH(m.cph,Math.round(m.cc)):''}">${dFmt(m.cph,'2')}</td>
+        <td class="${m.hcTime!==null?tierHC(m.hcTime):''}">${dFmt(m.hcTime,'1')}</td>
+        <td class="${m.mbc!==null?tierMBC(m.mbc):''}">${dFmt(m.mbc,'1')}</td>
+        <td class="${m.waitsPct!==null?tierWaits(m.waitsPct):''}">${dFmt(m.waitsPct,'pct')}</td>
+        <td class="${m.payrollPct!==null?tierPayroll(m.payrollPct,Math.round(m.cc)):''}">${dFmt(m.payrollPct,'pct')}</td>
+      </tr>` : `<tr style="color:#bbb;"><td style="text-align:left;">${DAILY_DAYNAMES[i]} ${dFmtMD(dt)}</td><td colspan="9" style="text-align:center;">no data</td></tr>`;
     });
+    // Week total row (calculated)
+    const wTotal=(W.ss+W.ps), wCph=W.fh>0?W.cc/W.fh:null, wHc=W.hcInv>0?W.hcMin/W.hcInv:null,
+      wMbc=W.cc>0?W.ncwm/W.cc:null, wWaits=W.cc>0?(W.w15/W.cc)*100:null, wPay=wTotal>0?(W.pay/wTotal)*100:null;
+    const weekRow = W.any ? `<tr class="avg-row">
+      <td style="text-align:left;">Week Total</td>
+      <td>${dFmt(W.cc,'int')}</td><td></td>
+      <td>${dFmt(wTotal,'money')}</td><td></td>
+      <td>${dFmt(wCph,'2')}</td><td>${dFmt(wHc,'1')}</td><td>${dFmt(wMbc,'1')}</td>
+      <td>${dFmt(wWaits,'pct')}</td><td>${dFmt(wPay,'pct')}</td>
+    </tr>` : '';
+
     host.innerHTML = `<div class="table-card">
       <div class="table-card-header">
         <div class="card-title" style="margin:0;">${salonDisplay(sn)} — Daily · week ending ${fmtWeek(weekEnd)}</div>
         <button class="btn btn-secondary btn-sm" onclick="closeSalonDaily('${hostId}')">✕ Close</button>
       </div>
-      <div style="font-size:11px;color:var(--text-muted);padding:0 2px 8px;">Click a day to see who worked and how they performed.</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;">${cards}</div>
+      <div style="font-size:11px;color:var(--text-muted);padding:0 2px 8px;">Δ wk = change vs the same weekday the prior week. Click a day to see who worked and how they performed.</div>
+      <div style="overflow-x:auto;"><table class="data-table" style="min-width:760px;"><thead>${head}</thead><tbody>${body}${weekRow}</tbody></table></div>
       <div id="${hostId}-detail" style="margin-top:12px;"></div>
     </div>`;
     host.scrollIntoView({behavior:'smooth', block:'nearest'});
   };
 
-  if(S_dailyData && S_dailyData.start===start && S_dailyData.end===end){ render(); return; }
+  if(S_dailyData && S_dailyData.start===fetchStart && S_dailyData.end===fetchEnd){ render(); return; }
   host.innerHTML='<div class="table-card"><div class="no-data">Loading daily…</div></div>';
-  fetch(`/api/gs/getDaily?start=${start}&end=${end}`)
+  fetch(`/api/gs/getDaily?start=${fetchStart}&end=${fetchEnd}`)
     .then(r=>r.json())
     .then(d=>{
       if(!d || !d.success){ host.innerHTML='<div class="table-card"><div class="no-data">Error loading daily data: '+((d&&d.error)||'unknown')+'</div></div>'; return; }
-      S_dailyData = { start, end, salonDaily: d.salonDaily||[], empDaily: d.empDaily||[] };
+      S_dailyData = { start:fetchStart, end:fetchEnd, salonDaily:d.salonDaily||[], empDaily:d.empDaily||[] };
       render();
     })
     .catch(err=>{ host.innerHTML='<div class="table-card"><div class="no-data">Error: '+err.message+'</div></div>'; });
@@ -1568,54 +1628,62 @@ function closeSalonDaily(hostId){
   const h = document.getElementById(hostId||'salon-drill'); if(h) h.innerHTML='';
 }
 
-// Per-stylist detail for one salon+day. Renders into targetId (default the
-// salon-drill detail slot). Uses SD3-computed per-stylist metrics; sales is not
-// tracked per stylist daily (salon-level only).
+// LEVEL 2 — who worked a given salon+day. Bottom row uses TRUE calculated salon
+// figures (from the SD_DAILY salon-day row), not a naive average of stylists.
 function openDayDetail(sn, date, targetId){
+  sn = String(sn).trim();
   S_dailyDetail = { salonNum: sn, date };
+  const prodGoal = salonProdGoal(sn);
   const host = document.getElementById(targetId || 'salon-day-detail');
   if(!host || !S_dailyData) return;
   const emps = S_dailyData.empDaily
-    .filter(e=>(e.salonNum||'').trim()===String(sn).trim() && e.date===date)
+    .filter(e=>(e.salonNum||'').trim()===sn && e.date===date)
     .sort((a,b)=>n(b.floorHours)-n(a.floorHours));
+  const salonRow = S_dailyData.salonDaily.find(r=>(r.salonNum||'').trim()===sn && r.date===date);
+  const sm = dSalonMetrics(salonRow);
 
-  let rows='', sH=0, sC=0, aHC=[], aP=[], aM=[];
+  let rows='', sH=0, sC=0, prodWeighted=0, prodHours=0;
   emps.forEach(e=>{
-    const hrs=n(e.floorHours), cc=n(e.custCount), cph=n(e.cph), hc=n(e.hcTime), pr=p(e.productPct), mb=n(e.mbc);
+    const hrs=n(e.floorHours), cc=n(e.custCount), cph=n(e.cph), hc=n(e.hcTime), pr=p(e.productPct), mb=n(e.mbc), pay=p(e.payrollPct), pdv=n(e.productivity);
     if(!isNaN(hrs)) sH+=hrs; if(!isNaN(cc)) sC+=cc;
-    if(!isNaN(hc)&&hc>0) aHC.push(hc); if(!isNaN(pr)&&pr>0) aP.push(pr); if(!isNaN(mb)&&mb>0) aM.push(mb);
+    if(!isNaN(pdv)&&!isNaN(hrs)&&hrs>0){ prodWeighted+=pdv*hrs; prodHours+=hrs; }
     rows += `<tr>
       <td style="text-align:left;font-weight:600;">${shortName(e.employeeName||'')}</td>
       <td style="text-align:center;">${isNaN(hrs)?'—':hrs.toFixed(1)}</td>
       <td style="text-align:center;">${isNaN(cc)?'—':Math.round(cc)}</td>
       <td style="text-align:center;">${isNaN(cph)?'—':cph.toFixed(1)}</td>
-      <td style="text-align:center;">${isNaN(hc)||hc===0?'—':hc.toFixed(1)}</td>
+      <td style="text-align:center;" class="${(!isNaN(hc)&&hc>0)?tierHC(hc):''}">${isNaN(hc)||hc===0?'—':hc.toFixed(1)}</td>
       <td style="text-align:center;" class="${(!isNaN(pr)&&pr>0)?tierProd(pr):''}">${(isNaN(pr)||pr===0)?'—':pr.toFixed(1)+'%'}</td>
-      <td style="text-align:center;">${(isNaN(mb)||mb===0)?'—':mb.toFixed(1)}</td>
+      <td style="text-align:center;" class="${(!isNaN(mb)&&mb>0)?tierMBC(mb):''}">${(isNaN(mb)||mb===0)?'—':mb.toFixed(1)}</td>
+      <td style="text-align:center;">${(isNaN(pay)||pay===0)?'—':pay.toFixed(1)+'%'}</td>
+      <td style="text-align:center;" class="${(!isNaN(pdv))?gradeVsGoal(pdv, prodGoal):''}">${isNaN(pdv)?'—':'$'+pdv.toFixed(2)}</td>
     </tr>`;
   });
 
-  const avg = arr => arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : null;
   const tCph = sH>0 ? sC/sH : null;
-  const tHC = avg(aHC), tP = avg(aP), tM = avg(aM);
+  const tProd = prodHours>0 ? prodWeighted/prodHours : null;
+  // Rate metrics on the total line come from the salon's true daily totals.
   const totalRow = `<tr class="avg-row">
-    <td style="text-align:left;">Salon Total / Avg</td>
+    <td style="text-align:left;">Salon Total / Calc</td>
     <td style="text-align:center;">${sH.toFixed(1)}</td>
     <td style="text-align:center;">${Math.round(sC)}</td>
     <td style="text-align:center;">${tCph===null?'—':tCph.toFixed(1)}</td>
-    <td style="text-align:center;">${tHC===null?'—':tHC.toFixed(1)}</td>
-    <td style="text-align:center;">${tP===null?'—':tP.toFixed(1)+'%'}</td>
-    <td style="text-align:center;">${tM===null?'—':tM.toFixed(1)}</td>
+    <td style="text-align:center;">${sm&&sm.hcTime!==null?sm.hcTime.toFixed(1):'—'}</td>
+    <td style="text-align:center;">${sm&&sm.productPct!==null?sm.productPct.toFixed(1)+'%':'—'}</td>
+    <td style="text-align:center;">${sm&&sm.mbc!==null?sm.mbc.toFixed(1):'—'}</td>
+    <td style="text-align:center;">${sm&&sm.payrollPct!==null?sm.payrollPct.toFixed(1)+'%':'—'}</td>
+    <td style="text-align:center;" class="${tProd!==null?gradeVsGoal(tProd, prodGoal):''}">${tProd===null?'—':'$'+tProd.toFixed(2)}</td>
   </tr>`;
 
   const dn = DAILY_DAYNAMES[dailyWeekDates(S.currentWeek).indexOf(date)] || '';
   const bodyHtml = emps.length
-    ? `<table class="data-table" style="min-width:560px;">
+    ? `<table class="data-table" style="min-width:680px;">
         <thead><tr>
           <th style="text-align:left;">Stylist</th><th style="text-align:center;">Hours</th>
           <th style="text-align:center;">Customers</th><th style="text-align:center;">CPH</th>
           <th style="text-align:center;">HC Time</th><th style="text-align:center;">Product %</th>
-          <th style="text-align:center;">MBC</th>
+          <th style="text-align:center;">MBC</th><th style="text-align:center;">Payroll %</th>
+          <th style="text-align:center;">Productivity</th>
         </tr></thead>
         <tbody>${rows}${totalRow}</tbody>
       </table>`
@@ -1623,6 +1691,7 @@ function openDayDetail(sn, date, targetId){
 
   host.innerHTML = `<div style="border-top:2px solid #eee;padding-top:10px;">
     <div style="font-weight:700;color:var(--primary);margin-bottom:6px;">${dn} ${dFmtMDY(date)} — who worked</div>
+    <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Productivity = service sales per floor hour${prodGoal?` · salon 2026 goal $${prodGoal.toFixed(1)}/hr (green ≥ goal)`:' · no 2026 goal on file for this salon'}. Total line is calculated from the salon's true daily totals, not an average of stylists.</div>
     <div style="overflow-x:auto;">${bodyHtml}</div>
   </div>`;
   host.scrollIntoView({behavior:'smooth', block:'nearest'});
@@ -1944,9 +2013,11 @@ function fmtWeek(iso){
 function buildSalonRow(r,cols,showAM=false){
   const amId=amOf(r.salonNum), am=AMS[amId]||{color:'#999',name:'Unknown'};
   const fromTab = showAM ? 'salon' : 'salon';
-  // Daily-drill trigger. AM Salon Performance → 'salon-drill'; Company All Salons → 'co-salon-drill'.
+  // Daily-drill trigger — only for salons this user may drill into (role/assignment gate).
   const dailyHost = showAM ? 'co-salon-drill' : 'salon-drill';
-  const dailyBtn = ` <span class="salon-daily-link" onclick="event.stopPropagation();openSalonDaily('${r.salonNum}','${dailyHost}')" title="Daily breakdown for ${salonDisplay(r.salonNum)}" style="cursor:pointer;font-size:13px;opacity:.65;margin-left:3px;">📅</span>`;
+  const dailyBtn = canDrillSalon(r.salonNum)
+    ? ` <span class="salon-daily-link" onclick="event.stopPropagation();openSalonDaily('${r.salonNum}','${dailyHost}')" title="Daily breakdown for ${salonDisplay(r.salonNum)}" style="cursor:pointer;font-size:13px;opacity:.65;margin-left:3px;">📅</span>`
+    : '';
   const nameCell = `<td class="${cols[0].cl(r)}">${salonLink(r.salonNum, cols[0].fv(r), fromTab)}${dailyBtn}</td>`;
   const amCell=showAM?`<td>${amChip(am)}</td>`:'';
   if(showAM) return `<tr>${nameCell}${amCell}${cols.slice(1).map(c=>`<td class="${c.cl(r)}">${c.fv(r)}</td>`).join('')}</tr>`;
