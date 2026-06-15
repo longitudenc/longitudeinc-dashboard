@@ -1561,20 +1561,26 @@ function openSalonDaily(sn, hostId){
   const render = () => {
     const idx = {};
     S_dailyData.salonDaily.forEach(r=>{ idx[(r.salonNum||'').trim()+'|'+r.date] = r; });
-    // Week totals (true calculated rates from summed raw)
+    // First pass — this-week and prior-week totals. Payroll/CPH targets slide by
+    // the WEEK's CC (not a single day's), so we compute weekCC before coloring.
     let W={cc:0,fh:0,ss:0,ps:0,pay:0,hcMin:0,hcInv:0,ncwm:0,w15:0,any:false};
-    let head='<tr><th style="text-align:left;">Day</th><th>CC</th><th>Δ wk</th><th>Sales</th><th>Δ wk</th><th>CPH</th><th>HC Time</th><th>MBC</th><th>Waits %</th><th>Payroll %</th></tr>';
+    let PW={cc:0,ss:0,ps:0};
+    dates.forEach(dt=>{
+      const r=idx[sn+'|'+dt];
+      if(r){ W.cc+=n(r.customerCount)||0; W.fh+=n(r.floorHours)||0; W.ss+=n(r.serviceSales)||0; W.ps+=n(r.productSales)||0;
+        W.pay+=n(r.approximatePayrollAmount)||0; W.hcMin+=n(r.haircutOnlyServiceMinutes)||0; W.hcInv+=n(r.haircutOnlyInvoiceCount)||0;
+        W.ncwm+=n(r.nonCutWithCustWaitingMinutes)||0; W.w15+=n(r.waitOver15MinsCount)||0; W.any=true; }
+      const pr=idx[sn+'|'+dIsoAddDays(dt,-7)];
+      if(pr){ PW.cc+=n(pr.customerCount)||0; PW.ss+=n(pr.serviceSales)||0; PW.ps+=n(pr.productSales)||0; }
+    });
+    const weekCC = Math.round(W.cc);  // drives payroll & CPH targets (which slide by CC)
+
+    let head='<tr><th style="text-align:left;">Day</th><th>CC</th><th>CC Δ wk</th><th>Sales</th><th>Sales Δ wk</th><th>CPH</th><th>HC Time</th><th>MBC</th><th>Waits %</th><th>Payroll %</th></tr>';
     let body='';
     dates.forEach((dt,i)=>{
       const r = idx[sn+'|'+dt];
       const m = dSalonMetrics(r);
       const pr = dSalonMetrics(idx[sn+'|'+dIsoAddDays(dt,-7)]);
-      if(r){
-        W.cc+=n(r.customerCount)||0; W.fh+=n(r.floorHours)||0; W.ss+=n(r.serviceSales)||0; W.ps+=n(r.productSales)||0;
-        W.pay+=n(r.approximatePayrollAmount)||0; W.hcMin+=n(r.haircutOnlyServiceMinutes)||0; W.hcInv+=n(r.haircutOnlyInvoiceCount)||0;
-        W.ncwm+=n(r.nonCutWithCustWaitingMinutes)||0; W.w15+=n(r.waitOver15MinsCount)||0; W.any=true;
-      }
-      const cc=Math.round(n(r&&r.customerCount));
       const click = m ? `onclick="openDayDetail('${sn}','${dt}','${hostId}-detail')" style="cursor:pointer;"` : 'style="color:#bbb;"';
       const ccChg = m ? dChange(m.cc, pr?pr.cc:null) : null;
       const slChg = m ? dChange(m.sales, pr?pr.sales:null) : null;
@@ -1582,20 +1588,21 @@ function openSalonDaily(sn, hostId){
         <td style="text-align:left;font-weight:600;">${DAILY_DAYNAMES[i]} ${dFmtMD(dt)}</td>
         <td>${dFmt(m.cc,'int')}</td><td>${dChangeCell(ccChg)}</td>
         <td>${dFmt(m.sales,'money')}</td><td>${dChangeCell(slChg)}</td>
-        <td class="${m.cph!==null?tierCPH(m.cph,Math.round(m.cc)):''}">${dFmt(m.cph,'2')}</td>
+        <td class="${m.cph!==null?tierCPH(m.cph,weekCC):''}">${dFmt(m.cph,'2')}</td>
         <td class="${m.hcTime!==null?tierHC(m.hcTime):''}">${dFmt(m.hcTime,'1')}</td>
         <td class="${m.mbc!==null?tierMBC(m.mbc):''}">${dFmt(m.mbc,'1')}</td>
         <td class="${m.waitsPct!==null?tierWaits(m.waitsPct):''}">${dFmt(m.waitsPct,'pct')}</td>
-        <td class="${m.payrollPct!==null?tierPayroll(m.payrollPct,Math.round(m.cc)):''}">${dFmt(m.payrollPct,'pct')}</td>
+        <td class="${m.payrollPct!==null?tierPayroll(m.payrollPct,weekCC):''}">${dFmt(m.payrollPct,'pct')}</td>
       </tr>` : `<tr style="color:#bbb;"><td style="text-align:left;">${DAILY_DAYNAMES[i]} ${dFmtMD(dt)}</td><td colspan="9" style="text-align:center;">no data</td></tr>`;
     });
-    // Week total row (calculated)
+
     const wTotal=(W.ss+W.ps), wCph=W.fh>0?W.cc/W.fh:null, wHc=W.hcInv>0?W.hcMin/W.hcInv:null,
       wMbc=W.cc>0?W.ncwm/W.cc:null, wWaits=W.cc>0?(W.w15/W.cc)*100:null, wPay=wTotal>0?(W.pay/wTotal)*100:null;
+    const wCcChg=dChange(W.cc, PW.cc), wSlChg=dChange(wTotal, PW.ss+PW.ps);
     const weekRow = W.any ? `<tr class="avg-row">
       <td style="text-align:left;">Week Total</td>
-      <td>${dFmt(W.cc,'int')}</td><td></td>
-      <td>${dFmt(wTotal,'money')}</td><td></td>
+      <td>${dFmt(W.cc,'int')}</td><td>${dChangeCell(wCcChg)}</td>
+      <td>${dFmt(wTotal,'money')}</td><td>${dChangeCell(wSlChg)}</td>
       <td>${dFmt(wCph,'2')}</td><td>${dFmt(wHc,'1')}</td><td>${dFmt(wMbc,'1')}</td>
       <td>${dFmt(wWaits,'pct')}</td><td>${dFmt(wPay,'pct')}</td>
     </tr>` : '';
@@ -1683,15 +1690,14 @@ function openDayDetail(sn, date, targetId){
           <th style="text-align:center;">Customers</th><th style="text-align:center;">CPH</th>
           <th style="text-align:center;">HC Time</th><th style="text-align:center;">Product %</th>
           <th style="text-align:center;">MBC</th><th style="text-align:center;">Payroll %</th>
-          <th style="text-align:center;">Productivity</th>
+          <th style="text-align:center;">Productivity${prodGoal?'<br><span style="font-weight:400;font-size:10px;opacity:.85;">Goal $'+prodGoal.toFixed(1)+'</span>':''}</th>
         </tr></thead>
         <tbody>${rows}${totalRow}</tbody>
       </table>`
     : '<div class="no-data">No stylists recorded at this salon on this day.</div>';
 
-  host.innerHTML = `<div style="border-top:2px solid #eee;padding-top:10px;">
+  host.innerHTML = `<div style="border-top:2px solid #eee;border-left:3px solid var(--primary);margin:4px 0 0 14px;padding:12px 0 0 14px;">
     <div style="font-weight:700;color:var(--primary);margin-bottom:6px;">${dn} ${dFmtMDY(date)} — who worked</div>
-    <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Productivity = service sales per floor hour${prodGoal?` · salon 2026 goal $${prodGoal.toFixed(1)}/hr (green ≥ goal)`:' · no 2026 goal on file for this salon'}. Total line is calculated from the salon's true daily totals, not an average of stylists.</div>
     <div style="overflow-x:auto;">${bodyHtml}</div>
   </div>`;
   host.scrollIntoView({behavior:'smooth', block:'nearest'});
@@ -5454,7 +5460,9 @@ function buildAdpCsv(periodKey){
   const push = (payId, code, amount, dept, who) => {
     if(!(Number(amount) > 0)) return;     // skip $0 / ineligible — no row
     if(!payId){ rows._missing = (rows._missing||[]); rows._missing.push({who:who||'(unknown)', code, amount: fmt(amount)}); return; }
-    rows.push(['BSP','01',payId,code,fmt(amount),dept]);
+    // Quote File # and Temp Dept as text so leading zeros survive (e.g. AM dept
+    // 000004 / Kayla 000001, and any zero-padded pay IDs).
+    rows.push(['BSP','01','"'+payId+'"',code,fmt(amount),'"'+dept+'"']);
   };
 
   // 1) Stylists — BonusData, code 2, skip disc-ineligible (live, rolling 12mo)
