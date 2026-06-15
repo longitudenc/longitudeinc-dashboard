@@ -588,6 +588,9 @@
           </div>
         </div>
       </div>
+
+      <!-- Day Review — whole company for a single day (owner/admin/Kayla) -->
+      <div class="table-card" id="section-day-review" style="display:none;"></div>
     </div><!-- /page-company -->
 
     <!-- Stylist Profile Drawer -->
@@ -767,6 +770,8 @@ function isAdminRole(){ const r=roleClean(); return r==='owner'||r==='admin'; }
 function isViewerRole(){ return roleClean()==='viewer'; }
 function isAMRole(){ const r=roleClean(); return r==='area_manager'||r==='am'; }
 function canSeeAllSalons(){ return isAdminRole()||isViewerRole(); }
+// Day Review (whole-company single-day) is for owner/admin and Kayla specifically.
+function canSeeDayReview(){ return isAdminRole() || (isAMRole() && String(USER_AM_ID||'').replace(/["']/g,'').trim()==='kayla'); }
 
 const AMS = {
   cassi:     {name:'Cassi Sharpe',       init:'CS', color:'#a03030', globalId:'2014-0001-6376', salons:['3015','3058','4138']},
@@ -1378,6 +1383,7 @@ function setupSidebar(){
       <button class="am-btn company-subnav-btn" data-ctab="ams" onclick="showCompanyTab('ams')" style="font-size:13px;padding:7px 10px;">Area Managers</button>
       <button class="am-btn company-subnav-btn" data-ctab="bonus" onclick="showCompanyTab('bonus')" style="font-size:13px;padding:7px 10px;">Bonus 💰</button>
       <button class="am-btn company-subnav-btn" data-ctab="standouts" onclick="showCompanyTab('standouts')" style="font-size:13px;padding:7px 10px;">Standouts 🏆</button>
+      ${canSeeDayReview()?`<button class="am-btn company-subnav-btn" data-ctab="dayreview" onclick="showCompanyTab('dayreview')" style="font-size:13px;padding:7px 10px;">Day Review 📅</button>`:''}
     </div>`;
     if(isAdminRole()){
       html += `<button class="am-btn" onclick="switchToAdmin()" id="btn-admin">
@@ -1400,6 +1406,7 @@ function setupSidebar(){
       html += `<div id="company-subnav" style="display:none;padding-left:10px;border-left:2px solid var(--border);margin:2px 0 2px 14px;">
         <button class="am-btn company-subnav-btn active" data-ctab="allsalons" onclick="showCompanyTab('allsalons')" style="font-size:13px;padding:7px 10px;">All Salons</button>
         <button class="am-btn company-subnav-btn" data-ctab="standouts" onclick="showCompanyTab('standouts')" style="font-size:13px;padding:7px 10px;">Standouts 🏆</button>
+        ${canSeeDayReview()?`<button class="am-btn company-subnav-btn" data-ctab="dayreview" onclick="showCompanyTab('dayreview')" style="font-size:13px;padding:7px 10px;">Day Review 📅</button>`:''}
       </div>`;
     }
   }
@@ -1446,14 +1453,15 @@ const COMPANY_TAB_SECTIONS = {
   ams:       ['section-scorecard','section-am-perf'],
   bonus:     ['section-bonus'],
   standouts: ['section-standouts'],
+  dayreview: ['section-day-review'],
 };
 function applyCompanyTabVisibility(){
   const full = canSeeAllSalons();
   // Sections only owner/admin/viewer may see.
   const gated = new Set(['section-scorecard','section-am-perf','section-bonus']);
-  const roleOk = id => gated.has(id) ? full : true;
+  const roleOk = id => id==='section-day-review' ? canSeeDayReview() : (gated.has(id) ? full : true);
   const active = new Set(COMPANY_TAB_SECTIONS[S_companyTab] || COMPANY_TAB_SECTIONS.allsalons);
-  ['company-summary','section-scorecard','section-am-perf','section-all-salons','co-salon-drill','section-bonus','section-standouts'].forEach(id=>{
+  ['company-summary','section-scorecard','section-am-perf','section-all-salons','co-salon-drill','section-bonus','section-standouts','section-day-review'].forEach(id=>{
     const el = document.getElementById(id); if(!el) return;
     el.style.display = (active.has(id) && roleOk(id)) ? '' : 'none';
   });
@@ -1464,10 +1472,12 @@ function applyCompanyTabVisibility(){
   const csn = document.getElementById('company-subnav'); if(csn) csn.style.display = onCompany ? '' : 'none';
 }
 function showCompanyTab(name){
-  // Limited roles only get All Salons + Standouts.
-  if(!canSeeAllSalons() && !['allsalons','standouts'].includes(name)) name='allsalons';
+  if(name==='dayreview' && !canSeeDayReview()) name='allsalons';
+  // Limited roles only get All Salons + Standouts (+ Day Review for Kayla).
+  else if(!canSeeAllSalons() && !['allsalons','standouts','dayreview'].includes(name)) name='allsalons';
   S_companyTab = name;
   applyCompanyTabVisibility();
+  if(name==='dayreview') renderDayReview();
 }
 
 function switchToCompany(){ 
@@ -1689,7 +1699,7 @@ function openDayDetail(sn, date, targetId){
     <td style="text-align:center;" class="${tProd!==null?gradeVsGoal(tProd, prodGoal):''}">${tProd===null?'—':'$'+tProd.toFixed(2)}</td>
   </tr>`;
 
-  const dn = DAILY_DAYNAMES[dailyWeekDates(S.currentWeek).indexOf(date)] || '';
+  const dn = dDayName(date);
   const bodyHtml = emps.length
     ? `<table class="data-table" style="min-width:680px;">
         <thead><tr>
@@ -1712,6 +1722,102 @@ function openDayDetail(sn, date, targetId){
 function closeDayDetail(){
   S_dailyDetail = null;
   const host = document.getElementById('salon-day-detail'); if(host) host.innerHTML='';
+}
+
+// ── Day Review — whole company for a single day (owner/admin/Kayla) ──────────
+// Reuses getDaily (single day) + the openDayDetail stylist panel. Per-salon
+// CPH/payroll color uses that salon's WEEKLY CC (looked up from weekHistory for
+// the reviewed day's fiscal week), matching the sliding-scale rule everywhere.
+let S_dayReviewDate = null;
+function dDayName(dateIso){ return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][new Date(dateIso+'T00:00:00Z').getUTCDay()] || ''; }
+function dReviewDefaultDate(){ const d=new Date(); d.setDate(d.getDate()-1);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function dReviewWeekEnd(dateIso){  // Sat→Fri fiscal week → its ending Friday
+  const dow=new Date(dateIso+'T00:00:00Z').getUTCDay(); return dIsoAddDays(dateIso,(5-dow+7)%7); }
+function dReviewWeekCC(sn, dateIso){
+  const wk=(S.weekHistory||[]).find(w=>w.weekEnding===dReviewWeekEnd(dateIso)); if(!wk) return null;
+  const row=(wk.salons||[]).find(r=>(r.salonNum||'').trim()===sn); return row?Math.round(n(row.ccThis)):null;
+}
+function dReviewStep(delta){ const max=dReviewDefaultDate(); let nd=dIsoAddDays(S_dayReviewDate||max, delta); if(nd>max) nd=max; S_dayReviewDate=nd; renderDayReview(); }
+function dReviewPick(v){ if(!v) return; S_dayReviewDate=v; renderDayReview(); }
+
+function renderDayReview(){
+  const host=document.getElementById('section-day-review'); if(!host) return;
+  if(!canSeeDayReview()){ host.innerHTML=''; return; }
+  const max=dReviewDefaultDate();
+  if(!S_dayReviewDate) S_dayReviewDate=max;
+  if(S_dayReviewDate>max) S_dayReviewDate=max;
+  host.innerHTML=`<div class="table-card-header">
+      <div class="card-title" style="margin:0;">Day Review — all salons</div>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <button class="btn btn-secondary btn-sm" onclick="dReviewStep(-1)">‹ Prev</button>
+        <input type="date" id="day-review-date" value="${S_dayReviewDate}" max="${max}" onchange="dReviewPick(this.value)" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;font:inherit;">
+        <button class="btn btn-secondary btn-sm" onclick="dReviewStep(1)">Next ›</button>
+      </div>
+    </div>
+    <div id="day-review-body"><div class="no-data">Loading…</div></div>
+    <div id="day-review-detail" style="margin-top:12px;"></div>`;
+  loadDayReview(S_dayReviewDate);
+}
+
+function loadDayReview(dateIso){
+  const body=document.getElementById('day-review-body'); if(!body) return;
+  const det=document.getElementById('day-review-detail'); if(det) det.innerHTML='';
+  const cacheKey='dayreview|'+dateIso, py=dIsoAddDays(dateIso,-364);
+  if(S_dailyData && S_dailyData.key===cacheKey){ renderDayReviewTable(dateIso); return; }
+  body.innerHTML='<div class="no-data">Loading…</div>';
+  Promise.all([
+    fetch(`/api/gs/getDaily?start=${dateIso}&end=${dateIso}`).then(r=>r.json()),
+    fetch(`/api/gs/getDaily?start=${py}&end=${py}`).then(r=>r.json())
+  ]).then(([cur,pyd])=>{
+    if(!cur || !cur.success){ body.innerHTML='<div class="no-data">Error loading: '+((cur&&cur.error)||'unknown')+'</div>'; return; }
+    const pySalon=(pyd&&pyd.success)?(pyd.salonDaily||[]):[];
+    S_dailyData={ key:cacheKey, day:dateIso, salonDaily:[...(cur.salonDaily||[]),...pySalon], empDaily:cur.empDaily||[] };
+    renderDayReviewTable(dateIso);
+  }).catch(err=>{ body.innerHTML='<div class="no-data">Error: '+err.message+'</div>'; });
+}
+
+function renderDayReviewTable(dateIso){
+  const body=document.getElementById('day-review-body'); if(!body || !S_dailyData) return;
+  const pyIso=dIsoAddDays(dateIso,-364), idx={}, idxPY={};
+  S_dailyData.salonDaily.forEach(r=>{ const sn=(r.salonNum||'').trim();
+    if(r.date===dateIso) idx[sn]=r; else if(r.date===pyIso) idxPY[sn]=r; });
+  const sns=Object.keys(idx).sort((a,b)=>salonDisplay(a).localeCompare(salonDisplay(b)));
+  if(!sns.length){ body.innerHTML='<div class="no-data">No salon data for '+dFmtMDY(dateIso)+'. Pick another day — daily history is backfilled to late 2025.</div>'; return; }
+
+  let T={cc:0,fh:0,ss:0,ps:0,pay:0,hcMin:0,hcInv:0,ncwm:0,w15:0}, TPY={cc:0,ss:0,ps:0};
+  let rows='';
+  sns.forEach(sn=>{
+    const r=idx[sn], m=dSalonMetrics(r), py=dSalonMetrics(idxPY[sn]), wkCC=dReviewWeekCC(sn,dateIso);
+    T.cc+=n(r.customerCount)||0; T.fh+=n(r.floorHours)||0; T.ss+=n(r.serviceSales)||0; T.ps+=n(r.productSales)||0;
+    T.pay+=n(r.approximatePayrollAmount)||0; T.hcMin+=n(r.haircutOnlyServiceMinutes)||0; T.hcInv+=n(r.haircutOnlyInvoiceCount)||0;
+    T.ncwm+=n(r.nonCutWithCustWaitingMinutes)||0; T.w15+=n(r.waitOver15MinsCount)||0;
+    const pr=idxPY[sn]; if(pr){ TPY.cc+=n(pr.customerCount)||0; TPY.ss+=n(pr.serviceSales)||0; TPY.ps+=n(pr.productSales)||0; }
+    const ccChg=m?dChange(m.cc, py?py.cc:null):null, slChg=m?dChange(m.sales, py?py.sales:null):null;
+    rows += `<tr onclick="openDayDetail('${sn}','${dateIso}','day-review-detail')" style="cursor:pointer;">
+      <td style="text-align:left;font-weight:600;">${salonDisplay(sn)}</td>
+      <td>${dFmt(m.cc,'int')}</td><td>${dChangeCell(ccChg)}</td>
+      <td>${dFmt(m.sales,'money')}</td><td>${dChangeCell(slChg)}</td>
+      <td class="${(m.cph!==null&&wkCC!=null)?tierCPH(m.cph,wkCC):''}">${dFmt(m.cph,'2')}</td>
+      <td class="${m.hcTime!==null?tierHC(m.hcTime):''}">${dFmt(m.hcTime,'1')}</td>
+      <td class="${m.mbc!==null?tierMBC(m.mbc):''}">${dFmt(m.mbc,'1')}</td>
+      <td class="${m.waitsPct!==null?tierWaits(m.waitsPct):''}">${dFmt(m.waitsPct,'pct')}</td>
+      <td class="${(m.payrollPct!==null&&wkCC!=null)?tierPayroll(m.payrollPct,wkCC):''}">${dFmt(m.payrollPct,'pct')}</td>
+    </tr>`;
+  });
+  const tTotal=T.ss+T.ps, tCph=T.fh>0?T.cc/T.fh:null, tHc=T.hcInv>0?T.hcMin/T.hcInv:null,
+    tMbc=T.cc>0?T.ncwm/T.cc:null, tWaits=T.cc>0?(T.w15/T.cc)*100:null, tPay=tTotal>0?(T.pay/tTotal)*100:null;
+  const tCcChg=dChange(T.cc, TPY.cc), tSlChg=dChange(tTotal, TPY.ss+TPY.ps);
+  const totalRow=`<tr class="avg-row">
+    <td style="text-align:left;">Company Total</td>
+    <td>${dFmt(T.cc,'int')}</td><td>${dChangeCell(tCcChg)}</td>
+    <td>${dFmt(tTotal,'money')}</td><td>${dChangeCell(tSlChg)}</td>
+    <td>${dFmt(tCph,'2')}</td><td>${dFmt(tHc,'1')}</td><td>${dFmt(tMbc,'1')}</td>
+    <td>${dFmt(tWaits,'pct')}</td><td>${dFmt(tPay,'pct')}</td>
+  </tr>`;
+  const head=`<tr><th style="text-align:left;">Salon</th><th>CC</th><th>CC Δ LY</th><th>Sales</th><th>Sales Δ LY</th><th>CPH</th><th>HC Time</th><th>MBC</th><th>Waits %</th><th>Payroll %</th></tr>`;
+  body.innerHTML=`<div style="font-size:11px;color:var(--text-muted);padding:0 2px 8px;">${dDayName(dateIso)} ${dFmtMDY(dateIso)} · all salons. Δ LY = vs the same day last year. Click any salon to see who worked and how they performed.</div>
+    <div style="overflow-x:auto;"><table class="data-table" style="min-width:780px;"><thead>${head}</thead><tbody>${rows}${totalRow}</tbody></table></div>`;
 }
 
 function switchTab(tab,el){ 
