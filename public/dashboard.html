@@ -551,6 +551,7 @@
           <div style="overflow-x:auto;"><table class="data-table"><thead id="co-all-thead"></thead><tbody id="co-all-tbody"><tr><td colspan="16" class="no-data">Loading...</td></tr></tbody></table></div>
         </div>
       </div>
+      <div id="co-salon-drill"></div>
 
       <!-- Company Bonus Section -->
       <div class="table-card" id="section-bonus" style="margin-top:1.5rem;">
@@ -1352,6 +1353,12 @@ function setupSidebar(){
     html += `<button class="am-btn" onclick="switchToCompany()" id="btn-company">
       <div class="am-avatar" style="background:#e8eaf5;color:#3a4a9a;">CO</div>Company Overview
     </button>`;
+    html += `<div id="company-subnav" style="display:none;padding-left:10px;border-left:2px solid var(--border);margin:2px 0 2px 14px;">
+      <button class="am-btn company-subnav-btn active" data-ctab="allsalons" onclick="showCompanyTab('allsalons')" style="font-size:13px;padding:7px 10px;">All Salons</button>
+      <button class="am-btn company-subnav-btn" data-ctab="ams" onclick="showCompanyTab('ams')" style="font-size:13px;padding:7px 10px;">Area Managers</button>
+      <button class="am-btn company-subnav-btn" data-ctab="bonus" onclick="showCompanyTab('bonus')" style="font-size:13px;padding:7px 10px;">Bonus 💰</button>
+      <button class="am-btn company-subnav-btn" data-ctab="standouts" onclick="showCompanyTab('standouts')" style="font-size:13px;padding:7px 10px;">Standouts 🏆</button>
+    </div>`;
     if(isAdminRole()){
       html += `<button class="am-btn" onclick="switchToAdmin()" id="btn-admin">
         <div class="am-avatar" style="background:#eee;color:#555;">⚙</div>Admin / Upload
@@ -1370,6 +1377,10 @@ function setupSidebar(){
       html += `<button class="am-btn" onclick="switchToCompany()" id="btn-company">
         <div class="am-avatar" style="background:#e8eaf5;color:#3a4a9a;">CO</div>All Salons
       </button>`;
+      html += `<div id="company-subnav" style="display:none;padding-left:10px;border-left:2px solid var(--border);margin:2px 0 2px 14px;">
+        <button class="am-btn company-subnav-btn active" data-ctab="allsalons" onclick="showCompanyTab('allsalons')" style="font-size:13px;padding:7px 10px;">All Salons</button>
+        <button class="am-btn company-subnav-btn" data-ctab="standouts" onclick="showCompanyTab('standouts')" style="font-size:13px;padding:7px 10px;">Standouts 🏆</button>
+      </div>`;
     }
   }
 
@@ -1379,6 +1390,7 @@ function setupSidebar(){
 function clearActive(){ 
   document.querySelectorAll('.am-btn').forEach(b=>b.classList.remove('active')); 
   document.querySelectorAll('.page').forEach(pg=>pg.classList.remove('active')); 
+  const csn=document.getElementById('company-subnav'); if(csn) csn.style.display='none';
 }
 function showPage(id){ clearActive(); document.getElementById('page-'+id)?.classList.add('active'); }
 
@@ -1402,10 +1414,48 @@ function switchAM(id){
   document.getElementById('tab-salon').style.display='block';
   renderAM();
 }
+// ── Company sub-tabs (left-sidebar nav) ───────────────────────
+// Company view is split into sidebar sub-tabs instead of one long scroll:
+//   allsalons (default) — summary boxes + All Salons table + daily drill
+//   ams       — AM Scorecards + Performance by Area Manager (combined)
+//   bonus     — Company Bonus Summary
+//   standouts — Monthly Standouts
+let S_companyTab = 'allsalons';
+const COMPANY_TAB_SECTIONS = {
+  allsalons: ['company-summary','section-all-salons','co-salon-drill'],
+  ams:       ['section-scorecard','section-am-perf'],
+  bonus:     ['section-bonus'],
+  standouts: ['section-standouts'],
+};
+function applyCompanyTabVisibility(){
+  const full = canSeeAllSalons();
+  // Sections only owner/admin/viewer may see.
+  const gated = new Set(['section-scorecard','section-am-perf','section-bonus']);
+  const roleOk = id => gated.has(id) ? full : true;
+  const active = new Set(COMPANY_TAB_SECTIONS[S_companyTab] || COMPANY_TAB_SECTIONS.allsalons);
+  ['company-summary','section-scorecard','section-am-perf','section-all-salons','co-salon-drill','section-bonus','section-standouts'].forEach(id=>{
+    const el = document.getElementById(id); if(!el) return;
+    el.style.display = (active.has(id) && roleOk(id)) ? '' : 'none';
+  });
+  document.querySelectorAll('.company-subnav-btn').forEach(b=>b.classList.toggle('active', b.dataset.ctab===S_companyTab));
+  if(S_companyTab!=='allsalons'){ const d=document.getElementById('co-salon-drill'); if(d) d.innerHTML=''; }
+  // Sub-nav is visible whenever the Company page is active (covers all entry paths).
+  const onCompany = document.getElementById('page-company')?.classList.contains('active');
+  const csn = document.getElementById('company-subnav'); if(csn) csn.style.display = onCompany ? '' : 'none';
+}
+function showCompanyTab(name){
+  // Limited roles only get All Salons + Standouts.
+  if(!canSeeAllSalons() && !['allsalons','standouts'].includes(name)) name='allsalons';
+  S_companyTab = name;
+  applyCompanyTabVisibility();
+}
+
 function switchToCompany(){ 
   clearActive(); 
   const b=document.getElementById('btn-company'); if(b) b.classList.add('active'); 
   document.getElementById('page-company').classList.add('active'); 
+  const csn=document.getElementById('company-subnav'); if(csn) csn.style.display='';
+  S_companyTab = 'allsalons';
   renderCompany(); 
 }
 function switchToAdmin(){
@@ -1463,9 +1513,11 @@ function dailyFmt(v, metric){
   return String(v);
 }
 
-// Open the daily breakdown for one salon (current week) inside Salon Performance.
-function openSalonDaily(sn){
-  const host = document.getElementById('salon-drill');
+// Open the daily breakdown for one salon (current week). hostId is the drill
+// container (AM: 'salon-drill'; Company All Salons: 'co-salon-drill').
+function openSalonDaily(sn, hostId){
+  hostId = hostId || 'salon-drill';
+  const host = document.getElementById(hostId);
   if(!host) return;
   const weekEnd = S.currentWeek;
   if(!weekEnd){ host.innerHTML='<div class="table-card"><div class="no-data">No week selected</div></div>'; return; }
@@ -1480,7 +1532,7 @@ function openSalonDaily(sn){
       const r = idx[String(sn).trim()+'|'+dt];
       const has = !!r;
       const cc = dailyCellNum(r,'cc'), sales = dailyCellNum(r,'sales'), cph = dailyCellNum(r,'cph');
-      cards += `<div ${has?`onclick="openDayDetail('${sn}','${dt}','salon-day-detail')" onmouseover="this.style.boxShadow='0 2px 8px rgba(0,0,0,.12)'" onmouseout="this.style.boxShadow='none'"`:''}
+      cards += `<div ${has?`onclick="openDayDetail('${sn}','${dt}','${hostId}-detail')" onmouseover="this.style.boxShadow='0 2px 8px rgba(0,0,0,.12)'" onmouseout="this.style.boxShadow='none'"`:''}
         style="flex:1 1 92px;min-width:92px;border:1px solid #dfe3df;border-radius:10px;padding:8px 6px;text-align:center;${has?'cursor:pointer;background:#fff;':'background:#f6f6f4;color:#bbb;'}transition:box-shadow .15s;">
         <div style="font-size:11px;font-weight:700;color:var(--text-muted);">${DAILY_DAYNAMES[i]} ${dFmtMD(dt)}</div>
         <div style="font-size:20px;font-weight:800;color:${has?'var(--primary)':'#ccc'};margin:2px 0;">${dailyFmt(cc,'cc')}</div>
@@ -1491,11 +1543,11 @@ function openSalonDaily(sn){
     host.innerHTML = `<div class="table-card">
       <div class="table-card-header">
         <div class="card-title" style="margin:0;">${salonDisplay(sn)} — Daily · week ending ${fmtWeek(weekEnd)}</div>
-        <button class="btn btn-secondary btn-sm" onclick="closeSalonDaily()">✕ Close</button>
+        <button class="btn btn-secondary btn-sm" onclick="closeSalonDaily('${hostId}')">✕ Close</button>
       </div>
       <div style="font-size:11px;color:var(--text-muted);padding:0 2px 8px;">Click a day to see who worked and how they performed.</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">${cards}</div>
-      <div id="salon-day-detail" style="margin-top:12px;"></div>
+      <div id="${hostId}-detail" style="margin-top:12px;"></div>
     </div>`;
     host.scrollIntoView({behavior:'smooth', block:'nearest'});
   };
@@ -1511,9 +1563,9 @@ function openSalonDaily(sn){
     })
     .catch(err=>{ host.innerHTML='<div class="table-card"><div class="no-data">Error: '+err.message+'</div></div>'; });
 }
-function closeSalonDaily(){
+function closeSalonDaily(hostId){
   S_dailyDetail = null;
-  const h = document.getElementById('salon-drill'); if(h) h.innerHTML='';
+  const h = document.getElementById(hostId||'salon-drill'); if(h) h.innerHTML='';
 }
 
 // Per-stylist detail for one salon+day. Renders into targetId (default the
@@ -1892,8 +1944,9 @@ function fmtWeek(iso){
 function buildSalonRow(r,cols,showAM=false){
   const amId=amOf(r.salonNum), am=AMS[amId]||{color:'#999',name:'Unknown'};
   const fromTab = showAM ? 'salon' : 'salon';
-  // AM Salon Performance rows get a 📅 daily-drill trigger (company table omits it).
-  const dailyBtn = showAM ? '' : ` <span class="salon-daily-link" onclick="event.stopPropagation();openSalonDaily('${r.salonNum}')" title="Daily breakdown for ${salonDisplay(r.salonNum)}" style="cursor:pointer;font-size:13px;opacity:.65;margin-left:3px;">📅</span>`;
+  // Daily-drill trigger. AM Salon Performance → 'salon-drill'; Company All Salons → 'co-salon-drill'.
+  const dailyHost = showAM ? 'co-salon-drill' : 'salon-drill';
+  const dailyBtn = ` <span class="salon-daily-link" onclick="event.stopPropagation();openSalonDaily('${r.salonNum}','${dailyHost}')" title="Daily breakdown for ${salonDisplay(r.salonNum)}" style="cursor:pointer;font-size:13px;opacity:.65;margin-left:3px;">📅</span>`;
   const nameCell = `<td class="${cols[0].cl(r)}">${salonLink(r.salonNum, cols[0].fv(r), fromTab)}${dailyBtn}</td>`;
   const amCell=showAM?`<td>${amChip(am)}</td>`:'';
   if(showAM) return `<tr>${nameCell}${amCell}${cols.slice(1).map(c=>`<td class="${c.cl(r)}">${c.fv(r)}</td>`).join('')}</tr>`;
@@ -3005,6 +3058,7 @@ function renderCompany(){
     }
     renderCompanyBonus();
     renderCompanyStandouts();
+    applyCompanyTabVisibility();
   } catch(err) {
     console.error('renderCompany error:', err);
   }
