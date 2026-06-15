@@ -96,10 +96,18 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
   }
 
-  // Allow override via ?date=YYYY-MM-DD (useful for backfill / manual testing)
+  // Single day:  ?date=YYYY-MM-DD  (defaults to yesterday ET)
+  // Range backfill: ?start=YYYY-MM-DD&end=YYYY-MM-DD  — one SD3 call per salon
+  //   covers the whole window (dailystoresummary returns one row per day).
+  //   Run on localhost (no 60s cap) for prior-year backfills.
   const url = new URL(request.url)
   const dateParam = url.searchParams.get('date')
-  const date = dateParam || yesterdayET()
+  const startParam = url.searchParams.get('start')
+  const endParam = url.searchParams.get('end')
+  const isRange = !!(startParam && endParam)
+  const qStart = isRange ? (startParam as string) : (dateParam || yesterdayET())
+  const qEnd = isRange ? (endParam as string) : qStart
+  const date = isRange ? `${qStart}..${qEnd}` : qStart
 
   const results = {
     date,
@@ -125,7 +133,7 @@ export async function GET(request: Request) {
     // Promise.all over all 19 — SD3 handled this fine during testing
     const fetches = salons.map(async salon => {
       try {
-        const rows = await fetchDailyStoreSummary(session, salon.storeId, date, date)
+        const rows = await fetchDailyStoreSummary(session, salon.storeId, qStart, qEnd)
         if (rows.length === 0) {
           // Salon closed that day, or data not yet posted — not an error
           return { salon, rows: [] }
@@ -153,17 +161,22 @@ export async function GET(request: Request) {
       results.salonsProcessed++
     }
 
-    // 4. Upsert all rows to the Sheet by (date, storeId)
+    // 4. Upsert to the Sheet by (date, storeId), chunked so large backfills
+    //    don't push one massive write.
     if (allRows.length > 0) {
-      const upsertResult = await upsertSheet(
-        SD_DAILY_TAB,
-        [...COLUMNS],
-        ['date', 'storeId'],
-        allRows
-      )
-      results.rowsUpserted = allRows.length
-      results.updated = upsertResult.updated
-      results.inserted = upsertResult.inserted
+      const CHUNK = 2000
+      for (let i = 0; i < allRows.length; i += CHUNK) {
+        const slice = allRows.slice(i, i + CHUNK)
+        const upsertResult = await upsertSheet(
+          SD_DAILY_TAB,
+          [...COLUMNS],
+          ['date', 'storeId'],
+          slice
+        )
+        results.rowsUpserted += slice.length
+        results.updated += upsertResult.updated
+        results.inserted += upsertResult.inserted
+      }
     }
 
     const durationMs = Date.now() - startedAt

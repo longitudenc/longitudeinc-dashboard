@@ -993,8 +993,8 @@ function tierWaits(v) { return v<=15?'c4':v<=19?'c3':v<=23?'c2':'c1'; }
 function tierMBC(v)   { return v<=2.0?'c4':v<=3.0?'c3':v<=3.5?'c2':'c1'; }
 function tierProd(v)  { return v>=6?'c4':v>=4.0?'c3':v>=2.5?'c2':'c1'; }
 function tierHC(v)    { if(v>=12&&v<=15)return'c4'; if((v>=11&&v<12)||(v>15&&v<=17))return'c3'; if(v>17&&v<=18)return'c2'; return'c1'; }
-function tierPayroll(v,cc){ const t=payrollTargets(cc); return v<=t.exc?'c4':v<=t.grw?'c3':v<=t.grw+4?'c2':'c1'; }
-function tierCPH(v,cc)    { const t=payrollTargets(cc); return v>=t.cph?'c4':v>=t.cph-0.2?'c3':'c2'; }
+function tierPayroll(v,cc){ const t=payrollTargets(cc); return v<=t.exc?'c4':v<=t.grw?'c3':'c1'; }
+function tierCPH(v,cc)    { const t=payrollTargets(cc); return v>=t.cph?'c4':'c1'; }
 function tierToScore(t)   { return t==='c4'?2:t==='c3'?1:0; }
 
 const SALON_SCORE_METRICS = [
@@ -1554,36 +1554,37 @@ function openSalonDaily(sn, hostId){
   if(!host) return;
   const weekEnd = S.currentWeek;
   if(!weekEnd){ host.innerHTML='<div class="table-card"><div class="no-data">No week selected</div></div>'; return; }
-  const dates = dailyWeekDates(weekEnd);
-  const fetchStart = dIsoAddDays(weekEnd, -13);   // prior Sat → 14-day window (for wk-over-wk change)
-  const fetchEnd = weekEnd;
+  const dates = dailyWeekDates(weekEnd);            // current week Sat → Fri
+  const curStart = dates[0], curEnd = weekEnd;
+  const pyStart = dIsoAddDays(curStart,-364), pyEnd = dIsoAddDays(curEnd,-364);  // same week, prior year (−364d, the scorecard's YoY basis)
+  const cacheKey = curStart+'|'+curEnd+'|yoy';
 
   const render = () => {
     const idx = {};
     S_dailyData.salonDaily.forEach(r=>{ idx[(r.salonNum||'').trim()+'|'+r.date] = r; });
-    // First pass — this-week and prior-week totals. Payroll/CPH targets slide by
-    // the WEEK's CC (not a single day's), so we compute weekCC before coloring.
+    // First pass — current-week totals + prior-YEAR-week totals. Payroll/CPH
+    // targets slide by the WEEK's CC, so compute weekCC before coloring.
     let W={cc:0,fh:0,ss:0,ps:0,pay:0,hcMin:0,hcInv:0,ncwm:0,w15:0,any:false};
-    let PW={cc:0,ss:0,ps:0};
+    let PY={cc:0,ss:0,ps:0};
     dates.forEach(dt=>{
       const r=idx[sn+'|'+dt];
       if(r){ W.cc+=n(r.customerCount)||0; W.fh+=n(r.floorHours)||0; W.ss+=n(r.serviceSales)||0; W.ps+=n(r.productSales)||0;
         W.pay+=n(r.approximatePayrollAmount)||0; W.hcMin+=n(r.haircutOnlyServiceMinutes)||0; W.hcInv+=n(r.haircutOnlyInvoiceCount)||0;
         W.ncwm+=n(r.nonCutWithCustWaitingMinutes)||0; W.w15+=n(r.waitOver15MinsCount)||0; W.any=true; }
-      const pr=idx[sn+'|'+dIsoAddDays(dt,-7)];
-      if(pr){ PW.cc+=n(pr.customerCount)||0; PW.ss+=n(pr.serviceSales)||0; PW.ps+=n(pr.productSales)||0; }
+      const py=idx[sn+'|'+dIsoAddDays(dt,-364)];
+      if(py){ PY.cc+=n(py.customerCount)||0; PY.ss+=n(py.serviceSales)||0; PY.ps+=n(py.productSales)||0; }
     });
     const weekCC = Math.round(W.cc);  // drives payroll & CPH targets (which slide by CC)
 
-    let head='<tr><th style="text-align:left;">Day</th><th>CC</th><th>CC Δ wk</th><th>Sales</th><th>Sales Δ wk</th><th>CPH</th><th>HC Time</th><th>MBC</th><th>Waits %</th><th>Payroll %</th></tr>';
+    let head='<tr><th style="text-align:left;">Day</th><th>CC</th><th>CC Δ LY</th><th>Sales</th><th>Sales Δ LY</th><th>CPH</th><th>HC Time</th><th>MBC</th><th>Waits %</th><th>Payroll %</th></tr>';
     let body='';
     dates.forEach((dt,i)=>{
       const r = idx[sn+'|'+dt];
       const m = dSalonMetrics(r);
-      const pr = dSalonMetrics(idx[sn+'|'+dIsoAddDays(dt,-7)]);
+      const py = dSalonMetrics(idx[sn+'|'+dIsoAddDays(dt,-364)]);   // same weekday, prior year
       const click = m ? `onclick="openDayDetail('${sn}','${dt}','${hostId}-detail')" style="cursor:pointer;"` : 'style="color:#bbb;"';
-      const ccChg = m ? dChange(m.cc, pr?pr.cc:null) : null;
-      const slChg = m ? dChange(m.sales, pr?pr.sales:null) : null;
+      const ccChg = m ? dChange(m.cc, py?py.cc:null) : null;
+      const slChg = m ? dChange(m.sales, py?py.sales:null) : null;
       body += m ? `<tr ${click}>
         <td style="text-align:left;font-weight:600;">${DAILY_DAYNAMES[i]} ${dFmtMD(dt)}</td>
         <td>${dFmt(m.cc,'int')}</td><td>${dChangeCell(ccChg)}</td>
@@ -1598,7 +1599,11 @@ function openSalonDaily(sn, hostId){
 
     const wTotal=(W.ss+W.ps), wCph=W.fh>0?W.cc/W.fh:null, wHc=W.hcInv>0?W.hcMin/W.hcInv:null,
       wMbc=W.cc>0?W.ncwm/W.cc:null, wWaits=W.cc>0?(W.w15/W.cc)*100:null, wPay=wTotal>0?(W.pay/wTotal)*100:null;
-    const wCcChg=dChange(W.cc, PW.cc), wSlChg=dChange(wTotal, PW.ss+PW.ps);
+    // Week Total Δ ties to the salon scorecard's CC/Sales Growth (the canonical
+    // YoY metric); falls back to a direct prior-year sum if the row isn't loaded.
+    const wkRow=(getSnap()?.salons||[]).find(r=>(r.salonNum||'').trim()===sn);
+    const wCcChg = wkRow ? p(wkRow.ccGrowth) : dChange(W.cc, PY.cc);
+    const wSlChg = wkRow ? p(wkRow.salesGrowth) : dChange(wTotal, PY.ss+PY.ps);
     const weekRow = W.any ? `<tr class="avg-row">
       <td style="text-align:left;">Week Total</td>
       <td>${dFmt(W.cc,'int')}</td><td>${dChangeCell(wCcChg)}</td>
@@ -1612,23 +1617,25 @@ function openSalonDaily(sn, hostId){
         <div class="card-title" style="margin:0;">${salonDisplay(sn)} — Daily · week ending ${fmtWeek(weekEnd)}</div>
         <button class="btn btn-secondary btn-sm" onclick="closeSalonDaily('${hostId}')">✕ Close</button>
       </div>
-      <div style="font-size:11px;color:var(--text-muted);padding:0 2px 8px;">Δ wk = change vs the same weekday the prior week. Click a day to see who worked and how they performed.</div>
+      <div style="font-size:11px;color:var(--text-muted);padding:0 2px 8px;">Δ LY = change vs the same day/week last year (year-over-year). Week Total ties to the salon scorecard's CC/Sales Growth. Click a day to see who worked and how they performed.</div>
       <div style="overflow-x:auto;"><table class="data-table" style="min-width:760px;"><thead>${head}</thead><tbody>${body}${weekRow}</tbody></table></div>
       <div id="${hostId}-detail" style="margin-top:12px;"></div>
     </div>`;
     host.scrollIntoView({behavior:'smooth', block:'nearest'});
   };
 
-  if(S_dailyData && S_dailyData.start===fetchStart && S_dailyData.end===fetchEnd){ render(); return; }
+  if(S_dailyData && S_dailyData.key===cacheKey){ render(); return; }
   host.innerHTML='<div class="table-card"><div class="no-data">Loading daily…</div></div>';
-  fetch(`/api/gs/getDaily?start=${fetchStart}&end=${fetchEnd}`)
-    .then(r=>r.json())
-    .then(d=>{
-      if(!d || !d.success){ host.innerHTML='<div class="table-card"><div class="no-data">Error loading daily data: '+((d&&d.error)||'unknown')+'</div></div>'; return; }
-      S_dailyData = { start:fetchStart, end:fetchEnd, salonDaily:d.salonDaily||[], empDaily:d.empDaily||[] };
-      render();
-    })
-    .catch(err=>{ host.innerHTML='<div class="table-card"><div class="no-data">Error: '+err.message+'</div></div>'; });
+  Promise.all([
+    fetch(`/api/gs/getDaily?start=${curStart}&end=${curEnd}`).then(r=>r.json()),
+    fetch(`/api/gs/getDaily?start=${pyStart}&end=${pyEnd}`).then(r=>r.json())
+  ]).then(([cur, py])=>{
+    if(!cur || !cur.success){ host.innerHTML='<div class="table-card"><div class="no-data">Error loading daily data: '+((cur&&cur.error)||'unknown')+'</div></div>'; return; }
+    const pySalon = (py && py.success) ? (py.salonDaily||[]) : [];   // prior-year salon rows (empty until backfilled)
+    S_dailyData = { key:cacheKey, start:curStart, end:curEnd,
+      salonDaily:[...(cur.salonDaily||[]), ...pySalon], empDaily:cur.empDaily||[] };
+    render();
+  }).catch(err=>{ host.innerHTML='<div class="table-card"><div class="no-data">Error: '+err.message+'</div></div>'; });
 }
 function closeSalonDaily(hostId){
   S_dailyDetail = null;
