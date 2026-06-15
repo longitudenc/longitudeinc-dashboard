@@ -15,6 +15,7 @@ import {
   runMonthlyScrape,
   runRosterScrape,
   runEmployeeScrape,
+  runEmployeeDailyScrape,
   runPayrollScrape,
   runProfileScrape,
 } from '@/lib/scrape-runner'
@@ -44,7 +45,7 @@ export async function GET(request: Request) {
   const isSaturday = dayOfWeek(today) === 6
   const isMonthEnd = isLastFridayOfMonth(yesterday)
 
-  const fired: string[] = ['daily']
+  const fired: string[] = ['daily', 'employee-daily']
   if (isSaturday) fired.push('weekly')
   if (isMonthEnd) fired.push('monthly')
 
@@ -59,6 +60,8 @@ export async function GET(request: Request) {
   //    drops from EmployeeProfile within a day and their access is revoked.
   results.push({ name: 'daily', result: await runDailyScrape() })
   results.push({ name: 'profile', result: await runProfileScrape() })
+  // Per-stylist daily performance (single-day employee CSV → SD_EMP_DAILY).
+  results.push({ name: 'employee-daily', result: await runEmployeeDailyScrape() })
 
   // 2. Weekly — only on Saturday. Salon weekly first, then the three
   //    weekly-cadence entity scrapers. Each runner catches its own errors

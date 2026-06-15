@@ -20,7 +20,7 @@ import {
 import { upsertSheet, readSheet, rowsToObjects } from '@/lib/sheets'
 import { parseCsv, rowsToObjectsAt, num, returnRate } from '@/lib/csv'
 import { aggregatePeriod, type AggregatedPeriod } from '@/lib/aggregate'
-import { yesterdayET, lastCompletedFiscalWeek, lastCompletedFiscalMonth, todayET, isLastFridayOfMonth } from '@/lib/fiscal'
+import { yesterdayET, lastCompletedFiscalWeek, lastCompletedFiscalMonth, todayET, isLastFridayOfMonth, addDays } from '@/lib/fiscal'
 
 // ── Tab + column definitions ─────────────────────────────────
 
@@ -500,6 +500,141 @@ export async function runEmployeeScrape(weekStart?: string, weekEnd?: string): P
     result.ok = false
     result.error = err instanceof Error ? err.message : String(err)
     console.error('[scrape/employee] fatal:', result.error)
+  }
+  result.durationMs = Date.now() - startedAt
+  return result
+}
+
+// ── Employee performance (DAILY CSV) ─────────────────────────────────
+//
+// Same SD3 endpoint as the weekly employee scrape, but called with
+// start=end=a single calendar day, so it returns each stylist's numbers for
+// that one day. Stored in SD_EMP_DAILY, upserted by (date, storeId, payId).
+//
+// Deliberately OMITS nr/rr: SD3's New/Repeat Return % are 105-day rolling
+// figures and are meaningless for a single day, so they are not stored here.
+//
+// NOTE: assumes the single-day CSV has the same 4-line header preamble as the
+// weekly pull (EMP_HEADER_ROW_INDEX = 4). Verify on the first real pull.
+
+const SD_EMP_DAILY_TAB = 'SD_EMP_DAILY'
+const EMP_DAILY_COLUMNS = [
+  'date', 'salonNum', 'storeId', 'globalId', 'payId', 'employeeName',
+  'position', 'floorHours', 'custCount', 'hcTime', 'cph', 'productPct', 'mbc',
+  'nonCutMph', 'productivity', 'payrollPct', 'scrapedAt',
+] as const
+
+function empDailyRowFromCsv(o: Record<string, string>, date: string, storeIdMap: Record<string, number>): Record<string, any> | null {
+  const salonNum = (o['Salon #'] || '').trim()
+  const position = (o['Position'] || '').trim()
+  const storeId = storeIdMap[salonNum]
+  if (!storeId) return null
+  if (!position) return null
+  return {
+    date, salonNum, storeId,
+    globalId: (o['Global EE ID'] || '').trim(),
+    payId: (o['Pay ID'] || '').trim(),
+    employeeName: (o['Employee Name'] || '').trim(),
+    position,
+    floorHours: num(o['Floor Hours']) ?? '',
+    custCount: num(o['Cust Count']) ?? '',
+    hcTime: num(o['Avg HC Time']) ?? '',
+    cph: num(o['Cuts Per Hour']) ?? '',
+    productPct: num(o['Stnd Prod %']) ?? '',
+    mbc: num(o['Avg Min Btwn Cust w/ Cust Waiting']) ?? '',
+    nonCutMph: num(o['Total NonCut Time MPH']) ?? '',
+    productivity: num(o['Productivity']) ?? '',
+    payrollPct: num(o['Payroll %']) ?? '',
+    scrapedAt: new Date().toISOString(),
+  }
+}
+
+export async function runEmployeeDailyScrape(dateOverride?: string): Promise<EntityScrapeResult> {
+  const startedAt = Date.now()
+  const date = dateOverride || yesterdayET()
+  const result: EntityScrapeResult = {
+    ok: true, durationMs: 0, weekStart: date, weekEnd: date,
+    rowsUpserted: 0, updated: 0, inserted: 0, skipped: 0, processed: 0, error: null,
+  }
+  try {
+    const session = await authenticate()
+    const salons = await fetchSalons(session)
+    const storeIdMap: Record<string, number> = {}
+    for (const s of salons) storeIdMap[s.salonNum] = s.storeId
+    const storeIds = salons.map(s => s.storeId)
+    console.log(`[scrape/employee-daily] ${date} — single CSV pull, ${storeIds.length} salons`)
+
+    const csvText = await fetchEmployeePerformanceCsv(session, storeIds, date, date)
+    const objects = rowsToObjectsAt(parseCsv(csvText), EMP_HEADER_ROW_INDEX)
+    const dataRows: Record<string, any>[] = []
+    for (const o of objects) {
+      const row = empDailyRowFromCsv(o, date, storeIdMap)
+      if (row) dataRows.push(row); else result.skipped!++
+    }
+    result.processed = dataRows.length
+    if (dataRows.length > 0) {
+      const up = await upsertSheet(SD_EMP_DAILY_TAB, [...EMP_DAILY_COLUMNS], ['date', 'storeId', 'payId'], dataRows)
+      result.rowsUpserted = dataRows.length
+      result.updated = up.updated
+      result.inserted = up.inserted
+    }
+  } catch (err) {
+    result.ok = false
+    result.error = err instanceof Error ? err.message : String(err)
+    console.error('[scrape/employee-daily] fatal:', result.error)
+  }
+  result.durationMs = Date.now() - startedAt
+  return result
+}
+
+// Range backfill — authenticate + fetch the salon list ONCE, then pull every
+// day in [start, end] reusing that one session, buffering rows and flushing to
+// the sheet in batches. Far faster than looping the single-day runner (which
+// re-authenticates every day). Idempotent: re-running an overlapping range just
+// updates those rows in place (key = date+storeId+payId), so it's safe to
+// resume a partial run by re-issuing the remaining range.
+export async function runEmployeeDailyRange(start: string, end: string): Promise<EntityScrapeResult & { days?: number }> {
+  const startedAt = Date.now()
+  const result: EntityScrapeResult & { days?: number } = {
+    ok: true, durationMs: 0, weekStart: start, weekEnd: end,
+    rowsUpserted: 0, updated: 0, inserted: 0, skipped: 0, processed: 0, error: null, days: 0,
+  }
+  try {
+    const session = await authenticate()
+    const salons = await fetchSalons(session)
+    const storeIdMap: Record<string, number> = {}
+    for (const s of salons) storeIdMap[s.salonNum] = s.storeId
+    const storeIds = salons.map(s => s.storeId)
+
+    const FLUSH_AT = 2000
+    let buffer: Record<string, any>[] = []
+    const flush = async () => {
+      if (buffer.length === 0) return
+      const up = await upsertSheet(SD_EMP_DAILY_TAB, [...EMP_DAILY_COLUMNS], ['date', 'storeId', 'payId'], buffer)
+      result.rowsUpserted += buffer.length
+      result.updated! += up.updated
+      result.inserted! += up.inserted
+      buffer = []
+    }
+
+    let cur = start
+    for (let i = 0; i < 400 && cur <= end; i++) {
+      const csvText = await fetchEmployeePerformanceCsv(session, storeIds, cur, cur)
+      const objects = rowsToObjectsAt(parseCsv(csvText), EMP_HEADER_ROW_INDEX)
+      for (const o of objects) {
+        const row = empDailyRowFromCsv(o, cur, storeIdMap)
+        if (row) { buffer.push(row); result.processed!++ } else { result.skipped!++ }
+      }
+      result.days!++
+      if (buffer.length >= FLUSH_AT) await flush()
+      cur = addDays(cur, 1)
+    }
+    await flush()
+    console.log(`[scrape/employee-daily] range ${start}→${end}: ${result.days} days, ${result.processed} rows, ${result.inserted} inserted, ${result.updated} updated`)
+  } catch (err) {
+    result.ok = false
+    result.error = err instanceof Error ? err.message : String(err)
+    console.error('[scrape/employee-daily] range fatal:', result.error)
   }
   result.durationMs = Date.now() - startedAt
   return result

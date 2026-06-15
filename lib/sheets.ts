@@ -160,6 +160,38 @@ export async function getTrackerData() {
   }
 }
 
+/**
+ * On-demand daily reader for the Daily view. Reads salon-level (SD_DAILY) and
+ * per-stylist (SD_EMP_DAILY) rows for the [start, end] date window (inclusive,
+ * YYYY-MM-DD — lexicographic compare == chronological). Deliberately NOT part
+ * of getAllDashboardData: these tabs grow every day and are only needed when
+ * the Daily tab is opened.
+ *
+ * SD_DAILY is keyed by storeId only, so we join SalonRoster to attach salonNum
+ * to each salon-day row, making the response self-contained for the UI.
+ */
+export async function getDailyRange(start: string, end: string) {
+  const [salonRaw, empRaw, rosterRaw] = await Promise.all([
+    readSheet('SD_DAILY'),
+    readSheet('SD_EMP_DAILY'),
+    readSheet('SalonRoster'),
+  ])
+  const inRange = (d: string) => d >= start && d <= end
+
+  const salonNumByStore: Record<string, string> = {}
+  for (const r of rowsToObjects(rosterRaw)) {
+    const sid = String(r.storeId || '').trim()
+    if (sid) salonNumByStore[sid] = String(r.salonNum || '').trim()
+  }
+
+  const salonDaily = rowsToObjects(salonRaw)
+    .filter(r => inRange(String(r.date || '')))
+    .map(r => ({ ...r, salonNum: salonNumByStore[String(r.storeId || '').trim()] || '' }))
+  const empDaily = rowsToObjects(empRaw).filter(r => inRange(String(r.date || '')))
+
+  return { salonDaily, empDaily }
+}
+
 export async function getAllDashboardData() {
   const [
     salonRows,
