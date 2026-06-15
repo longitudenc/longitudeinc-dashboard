@@ -1521,14 +1521,19 @@ function collapseSalonsAvg(rows){
   const bySalon = {};
   (rows||[]).forEach(r=>{
     const k = String(r.salonNum||'').trim() || '?';
-    if(!bySalon[k]) bySalon[k] = { salonNum:k, _cc:[], _pay:[] };
+    if(!bySalon[k]) bySalon[k] = { salonNum:k, _cc:[], _pay:[], _prod:[], _ccg:[] };
     const cc = n(r.ccThis); if(cc>0) bySalon[k]._cc.push(cc);
     const pay = p(r.payroll); if(pay>0) bySalon[k]._pay.push(pay);
+    const prod = p(r.product); if(prod>0) bySalon[k]._prod.push(prod);
+    const ccg = p(r.ccGrowth); if(Number.isFinite(ccg)) bySalon[k]._ccg.push(ccg); // keep negatives
   });
+  const mean = a => a.length ? a.reduce((x,y)=>x+y,0)/a.length : 0;
   return Object.values(bySalon).map(s=>({
     salonNum: s.salonNum,
-    ccThis: s._cc.length ? s._cc.reduce((a,b)=>a+b,0)/s._cc.length : 0,
-    payroll: s._pay.length ? (s._pay.reduce((a,b)=>a+b,0)/s._pay.length) : 0,
+    ccThis: mean(s._cc),
+    payroll: mean(s._pay),
+    product: mean(s._prod),
+    ccGrowth: mean(s._ccg),
   }));
 }
 
@@ -2705,12 +2710,20 @@ function renderCompany(){
     // so counts reflect salons-that-did-X this period, not salon-weeks summed.
     const cards = isYTD ? collapseSalonsAvg(all) : all;
     const sumEl=document.getElementById('company-summary');
+    // Per-salon rating tier for each metric, counted across the period's salons.
+    const ccT   = r => tierCC(Math.round(n(r.ccThis)));
+    const payT  = r => tierPayroll(p(r.payroll), Math.round(n(r.ccThis)));
+    const prodT = r => tierProd(p(r.product));
+    const ccgT  = r => tierCCG(p(r.ccGrowth));
+    const cnt = (fn,tier) => cards.filter(r=>fn(r)===tier).length;
+    const ratingSub = (fn) => `<div class="metric-sub"><span style="color:var(--exc-text);font-weight:700;">${cnt(fn,'c4')}</span> rated 4 · <span style="color:var(--grw-text);font-weight:700;">${cnt(fn,'c3')}</span> rated 3</div>`;
+    const ccgVal = allA ? `${allA.ccG>=0?'+':''}${allA.ccG.toFixed(1)}%` : '—';
     sumEl.innerHTML=`
       <div class="metric-card"><div class="metric-label">Total Salons</div><div class="metric-value">${cards.length}</div><div class="metric-sub">In report</div></div>
-      <div class="metric-card"><div class="metric-label">Company Avg CC</div><div class="metric-value">${allA?Math.round(allA.cc):'—'}</div><div class="target-label">4: ≥520 · 3: 420–519</div></div>
-      <div class="metric-card"><div class="metric-label">Company Avg Payroll</div><div class="metric-value">${allA?allA.pay.toFixed(1)+'%':'—'}</div><div class="target-label">Sliding by CC</div></div>
-      <div class="metric-card"><div class="metric-label">CC at 4-Rating</div><div class="metric-value">${cards.filter(r=>n(r.ccThis)>=520).length}/${cards.length}</div><div class="metric-sub" style="color:var(--exc-text);">≥ 520</div></div>
-      <div class="metric-card"><div class="metric-label">Payroll at 4-Rating</div><div class="metric-value">${cards.filter(r=>{ const t=payrollTargets(Math.round(n(r.ccThis))); return p(r.payroll)<=t.exc; }).length}/${cards.length}</div><div class="metric-sub" style="color:var(--exc-text);">At excellence</div></div>`;
+      <div class="metric-card"><div class="metric-label">Company Avg CC</div><div class="metric-value">${allA?Math.round(allA.cc):'—'}</div>${ratingSub(ccT)}</div>
+      <div class="metric-card"><div class="metric-label">Company Avg Payroll</div><div class="metric-value">${allA?allA.pay.toFixed(1)+'%':'—'}</div>${ratingSub(payT)}</div>
+      <div class="metric-card"><div class="metric-label">Avg Product %</div><div class="metric-value">${allA?allA.prod.toFixed(1)+'%':'—'}</div>${ratingSub(prodT)}</div>
+      <div class="metric-card"><div class="metric-label">CC Growth %</div><div class="metric-value">${ccgVal}</div>${ratingSub(ccgT)}</div>`;
 
     // Scorecard ranking — YTD scores
     const tierColors={c4:'#2d7a1a',c3:'#c8a800',c2:'#d06010',c1:'#b83232'};
