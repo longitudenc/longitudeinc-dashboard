@@ -1919,11 +1919,12 @@ function collapseSalonsAvg(rows){
   const bySalon = {};
   (rows||[]).forEach(r=>{
     const k = String(r.salonNum||'').trim() || '?';
-    if(!bySalon[k]) bySalon[k] = { salonNum:k, _cc:[], _pay:[], _prod:[], _ccg:[] };
+    if(!bySalon[k]) bySalon[k] = { salonNum:k, _cc:[], _pay:[], _prod:[], _ccg:[], _sgr:[] };
     const cc = n(r.ccThis); if(cc>0) bySalon[k]._cc.push(cc);
     const pay = p(r.payroll); if(pay>0) bySalon[k]._pay.push(pay);
     const prod = p(r.product); if(prod>0) bySalon[k]._prod.push(prod);
     const ccg = p(r.ccGrowth); if(Number.isFinite(ccg)) bySalon[k]._ccg.push(ccg); // keep negatives
+    const sgr = p(r.salesGrowth); if(Number.isFinite(sgr)) bySalon[k]._sgr.push(sgr); // keep negatives
   });
   const mean = a => a.length ? a.reduce((x,y)=>x+y,0)/a.length : 0;
   return Object.values(bySalon).map(s=>({
@@ -1932,6 +1933,7 @@ function collapseSalonsAvg(rows){
     payroll: mean(s._pay),
     product: mean(s._prod),
     ccGrowth: mean(s._ccg),
+    salesGrowth: mean(s._sgr),
   }));
 }
 
@@ -2172,13 +2174,17 @@ function renderSalonTab(){
   const ccgT  = r => tierCCG(p(r.ccGrowth));
   const cnt = (fn,tier) => cards.filter(r=>fn(r)===tier).length;
   const ratingSub = (fn) => `<div class="metric-sub"><span style="color:var(--exc-text);font-weight:700;">${cnt(fn,'c4')}</span> rated 4 · <span style="color:var(--grw-text);font-weight:700;">${cnt(fn,'c3')}</span> rated 3</div>`;
-  const ccgVal = a ? `${a.ccG>=0?'+':''}${a.ccG.toFixed(1)}%` : '—';
+  const N = cards.length;
+  const posCnt = key => cards.filter(r=>{ const v=p(r[key]); return Number.isFinite(v)&&v>0; }).length;
+  const chgSub = posN => `<div class="metric-sub"><span style="color:var(--exc-text);font-weight:700;">${posN}</span> of ${N} salons positive</div>`;
+  const ccChgVal = a ? `${a.ccG>=0?'+':''}${a.ccG.toFixed(1)}%` : '—';
+  const slChgVal = a ? `${a.sgr>=0?'+':''}${a.sgr.toFixed(1)}%` : '—';
   sumEl.innerHTML=`
-    <div class="metric-card"><div class="metric-label">Salons</div><div class="metric-value">${cards.length}</div><div class="metric-sub">Assigned</div></div>
     <div class="metric-card"><div class="metric-label">Avg CC</div><div class="metric-value">${a?Math.round(a.cc):'—'}</div>${ratingSub(ccT)}</div>
     <div class="metric-card"><div class="metric-label">Avg Payroll %</div><div class="metric-value">${a?a.pay.toFixed(1)+'%':'—'}</div>${ratingSub(payT)}</div>
     <div class="metric-card"><div class="metric-label">Avg Product %</div><div class="metric-value">${a?a.prod.toFixed(1)+'%':'—'}</div>${ratingSub(prodT)}</div>
-    <div class="metric-card"><div class="metric-label">CC Growth %</div><div class="metric-value">${ccgVal}</div>${ratingSub(ccgT)}</div>`;
+    <div class="metric-card"><div class="metric-label">CC Change</div><div class="metric-value">${ccChgVal}</div>${chgSub(posCnt('ccGrowth'))}</div>
+    <div class="metric-card"><div class="metric-label">Sales Change</div><div class="metric-value">${slChgVal}</div>${chgSub(posCnt('salesGrowth'))}</div>`;
   thead.innerHTML=buildHead(SALON_COLS,'salon-table','sortSalon');
   // Update week label in salon tab header
   const swl = document.getElementById('salon-week-label');
@@ -3128,13 +3134,17 @@ function renderCompany(){
     const ccgT  = r => tierCCG(p(r.ccGrowth));
     const cnt = (fn,tier) => cards.filter(r=>fn(r)===tier).length;
     const ratingSub = (fn) => `<div class="metric-sub"><span style="color:var(--exc-text);font-weight:700;">${cnt(fn,'c4')}</span> rated 4 · <span style="color:var(--grw-text);font-weight:700;">${cnt(fn,'c3')}</span> rated 3</div>`;
-    const ccgVal = allA ? `${allA.ccG>=0?'+':''}${allA.ccG.toFixed(1)}%` : '—';
+    const N = cards.length;
+    const posCnt = key => cards.filter(r=>{ const v=p(r[key]); return Number.isFinite(v)&&v>0; }).length;
+    const chgSub = posN => `<div class="metric-sub"><span style="color:var(--exc-text);font-weight:700;">${posN}</span> of ${N} salons positive</div>`;
+    const ccChgVal = allA ? `${allA.ccG>=0?'+':''}${allA.ccG.toFixed(1)}%` : '—';
+    const slChgVal = allA ? `${allA.sgr>=0?'+':''}${allA.sgr.toFixed(1)}%` : '—';
     sumEl.innerHTML=`
-      <div class="metric-card"><div class="metric-label">Total Salons</div><div class="metric-value">${cards.length}</div><div class="metric-sub">In report</div></div>
       <div class="metric-card"><div class="metric-label">Company Avg CC</div><div class="metric-value">${allA?Math.round(allA.cc):'—'}</div>${ratingSub(ccT)}</div>
       <div class="metric-card"><div class="metric-label">Company Avg Payroll</div><div class="metric-value">${allA?allA.pay.toFixed(1)+'%':'—'}</div>${ratingSub(payT)}</div>
       <div class="metric-card"><div class="metric-label">Avg Product %</div><div class="metric-value">${allA?allA.prod.toFixed(1)+'%':'—'}</div>${ratingSub(prodT)}</div>
-      <div class="metric-card"><div class="metric-label">CC Growth %</div><div class="metric-value">${ccgVal}</div>${ratingSub(ccgT)}</div>`;
+      <div class="metric-card"><div class="metric-label">CC Change</div><div class="metric-value">${ccChgVal}</div>${chgSub(posCnt('ccGrowth'))}</div>
+      <div class="metric-card"><div class="metric-label">Sales Change</div><div class="metric-value">${slChgVal}</div>${chgSub(posCnt('salesGrowth'))}</div>`;
 
     // Scorecard ranking — YTD scores
     const tierColors={c4:'#2d7a1a',c3:'#c8a800',c2:'#d06010',c1:'#b83232'};
