@@ -6035,6 +6035,10 @@ function buildCompanyBonusAllStylists(){
 
   // Only show salon divider rows when sorted by salon (default or col 1)
   const showSalonDividers = S_bonusSort.col === null || S_bonusSort.col === 1;
+  // Per-salon paid-bonus subtotals — uses payablePayout (excludes inactive /
+  // ineligible) so the salon bars reconcile exactly to the Company Total row.
+  const salonPaid = {};
+  stys.forEach(e=>{ const k=e.salonNum||'?'; salonPaid[k]=(salonPaid[k]||0)+payablePayout(e); });
   let lastSalon = null;
   stys.forEach((e,rowIdx)=>{
     const payout=parseFloat(e.payout)||0;
@@ -6060,7 +6064,10 @@ function buildCompanyBonusAllStylists(){
     // Salon divider row — only when sorted by salon
     if(showSalonDividers && e.salonNum !== lastSalon){
       lastSalon = e.salonNum;
-      html += `<tr class="bonus-salon-header"><td colspan="14">${salonLink(e.salonNum, salonDisplay(e.salonNum), 'bonus')}</td></tr>`;
+      html += `<tr class="bonus-salon-header"><td colspan="14"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+        <span>${salonLink(e.salonNum, salonDisplay(e.salonNum), 'bonus')}</span>
+        <span style="font-weight:700;">Total Paid: ${fmtMoney(salonPaid[e.salonNum]||0)}</span>
+      </div></td></tr>`;
     }
 
     const bg = rowIdx%2===0?'':'style="background:#f8f7f4;"';
