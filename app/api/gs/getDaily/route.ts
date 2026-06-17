@@ -1,8 +1,8 @@
 // app/api/gs/getDaily/route.ts
 //
 // On-demand endpoint for the Daily view. Returns salon-level (SD_DAILY) and
-// per-stylist (SD_EMP_DAILY) rows for a date window. Read-only, public (same
-// posture as getAllData); the page itself is behind magic-link auth.
+// per-stylist (SD_EMP_DAILY) rows for a date window. Signed-in only; rows are
+// scoped to the caller's role (AMs get their salons; managers/stylists get none).
 //
 // NOT part of getAllData — only hit when the Daily tab is opened, so the main
 // dashboard load stays fast as these tabs grow.
@@ -22,11 +22,15 @@
 
 import { NextResponse } from 'next/server'
 import { getDailyRange } from '@/lib/sheets'
+import { requireSignedIn } from '@/lib/require-role'
+import { scopeDaily } from '@/lib/scope-filter'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 export async function GET(request: Request) {
+  const gate = await requireSignedIn()
+  if (!gate.ok) return gate.response
   try {
     const url = new URL(request.url)
     const start = url.searchParams.get('start')
@@ -45,7 +49,8 @@ export async function GET(request: Request) {
       )
     }
 
-    const { salonDaily, empDaily } = await getDailyRange(start, end)
+    const raw = await getDailyRange(start, end)
+    const { salonDaily, empDaily } = scopeDaily(raw.salonDaily, raw.empDaily, gate.access)
 
     return NextResponse.json({
       success: true,

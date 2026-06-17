@@ -12,8 +12,10 @@
 
 import { NextResponse } from 'next/server'
 import { readSheet, rowsToObjects } from '@/lib/sheets'
+import { requireSignedIn } from '@/lib/require-role'
 
 export async function GET() {
+  const gate = await requireSignedIn(); if (!gate.ok) return gate.response
   try {
     let data: any[] = []
     try {

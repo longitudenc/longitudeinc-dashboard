@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server'
 import { getAllDashboardData, readSheet, rowsToObjects } from '@/lib/sheets'
 import { getDashboardWeeks } from '@/lib/dashboard-data'
 import { AMS } from '@/lib/config'
+import { requireSignedIn } from '@/lib/require-role'
+import { scopeAllData } from '@/lib/scope-filter'
 
 const SALON_ROSTER_TAB = 'SalonRoster'
 
@@ -9,24 +11,32 @@ let cache: { data: any; timestamp: number } | null = null
 const CACHE_TTL = 3 * 60 * 1000
 
 export async function GET() {
+  // No anonymous access. gate.access carries { role, salons? } for scoping below.
+  const gate = await requireSignedIn()
+  if (!gate.ok) return gate.response
   try {
+    let full: any
     if (cache && Date.now() - cache.timestamp < CACHE_TTL) {
-      return NextResponse.json({ ...cache.data, cached: true })
+      full = cache.data
+    } else {
+      const [raw, scrapedWeeks, rosterRows, inactiveMap] = await Promise.all([
+        getAllDashboardData(),
+        getDashboardWeeks(),
+        fetchSalonRoster(),
+        fetchInactiveMap(),
+      ])
+      const data: any = formatAllData(raw, scrapedWeeks, rosterRows)
+      data.inactiveMap = inactiveMap
+      // PII-safe: hire/rehire dates only (no email/address) for the profile header.
+      data.profileMap = Object.fromEntries(
+        Object.entries(inactiveMap).map(([gid, v]: any) => [gid, { dateOfHire: v.dateOfHire || '', rehireDate: v.rehireDate || '' }])
+      )
+      cache = { data, timestamp: Date.now() }
+      full = data
     }
-    const [raw, scrapedWeeks, rosterRows, inactiveMap] = await Promise.all([
-      getAllDashboardData(),
-      getDashboardWeeks(),
-      fetchSalonRoster(),
-      fetchInactiveMap(),
-    ])
-    const data: any = formatAllData(raw, scrapedWeeks, rosterRows)
-    data.inactiveMap = inactiveMap
-    // PII-safe: hire/rehire dates only (no email/address) for the profile header.
-    data.profileMap = Object.fromEntries(
-      Object.entries(inactiveMap).map(([gid, v]: any) => [gid, { dateOfHire: v.dateOfHire || '', rehireDate: v.rehireDate || '' }])
-    )
-    cache = { data, timestamp: Date.now() }
-    return NextResponse.json(data)
+    // Cache holds the FULL payload; each caller gets a role-scoped view. scopeAllData
+    // never mutates `full`, so the cache stays intact for the next caller.
+    return NextResponse.json(scopeAllData(full, gate.access))
   } catch (e: any) {
     return NextResponse.json({ success: false, error: e.message }, { status: 500 })
   }

@@ -15,6 +15,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { google } from 'googleapis'
+import { requireAdmin } from '@/lib/require-role'
 
 const SHEET_ID = '1uLjwGXzDc3jtmXkUn4yFiJiYlgx5SEs3zbdFWhwuGDE'
 const TAB = 'AMAssignments'
@@ -45,6 +46,7 @@ async function ensureTab(sheets: any) {
 }
 
 export async function POST(req: NextRequest) {
+  const gate = await requireAdmin(); if (!gate.ok) return gate.response
   try {
     const { assignments, rosterUpdates } = await req.json()
     const sheets = client()

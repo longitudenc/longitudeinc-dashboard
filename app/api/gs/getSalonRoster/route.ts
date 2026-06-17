@@ -13,6 +13,7 @@
 
 import { NextResponse } from 'next/server'
 import { readSheet, rowsToObjects } from '@/lib/sheets'
+import { requireSignedIn } from '@/lib/require-role'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -20,6 +21,7 @@ export const dynamic = 'force-dynamic'
 const SALON_ROSTER_TAB = 'SalonRoster'
 
 export async function GET() {
+  const gate = await requireSignedIn(); if (!gate.ok) return gate.response
   try {
     const raw = await readSheet(SALON_ROSTER_TAB)
     const rows = rowsToObjects(raw)

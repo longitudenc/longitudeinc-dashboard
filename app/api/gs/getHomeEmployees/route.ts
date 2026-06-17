@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server'
 import { getHomeData } from '@/lib/sheets'
 import { AMS } from '@/lib/config'
+import { requireSignedIn } from '@/lib/require-role'
 
 export async function GET() {
+  const gate = await requireSignedIn(); if (!gate.ok) return gate.response
   try {
     const rows = await getHomeData()
     const employees = rows.map((row: any) => ({
