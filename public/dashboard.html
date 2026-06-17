@@ -1513,7 +1513,7 @@ function switchToAdmin(){
 // (2) click a day → who worked that day + their performance. Click-through is
 // role/assignment-gated (canDrillSalon). Salon-level rates use the same SD3
 // formulas as the weekly recompute (lib/aggregate.ts). Return data excluded.
-let S_dailyData = null;          // { start, end, salonDaily[], empDaily[] }  (14-day window)
+let S_dailyData = null;          // { start, end, salonDaily[], empDaily[], shifts[] }  (14-day window)
 let S_dailyDetail = null;        // { salonNum, date } currently open
 
 const DAILY_DAYNAMES = ['Sat','Sun','Mon','Tue','Wed','Thu','Fri'];
@@ -1650,7 +1650,7 @@ function openSalonDaily(sn, hostId){
     if(!cur || !cur.success){ host.innerHTML='<div class="table-card"><div class="no-data">Error loading daily data: '+((cur&&cur.error)||'unknown')+'</div></div>'; return; }
     const pySalon = (py && py.success) ? (py.salonDaily||[]) : [];   // prior-year salon rows (empty until backfilled)
     S_dailyData = { key:cacheKey, start:curStart, end:curEnd,
-      salonDaily:[...(cur.salonDaily||[]), ...pySalon], empDaily:cur.empDaily||[] };
+      salonDaily:[...(cur.salonDaily||[]), ...pySalon], empDaily:cur.empDaily||[], shifts:cur.shifts||[] };
     render();
   }).catch(err=>{ host.innerHTML='<div class="table-card"><div class="no-data">Error: '+err.message+'</div></div>'; });
 }
@@ -1661,6 +1661,51 @@ function closeSalonDaily(hostId){
 
 // LEVEL 2 — who worked a given salon+day. Bottom row uses TRUE calculated salon
 // figures (from the SD_DAILY salon-day row), not a naive average of stylists.
+
+// ── Shift block: scheduled vs actual (from SD_SHIFTS via getDaily) ──────────
+// TZ-safe time read: pull HH:MM straight from the naive ISO string (no Date()).
+function dClock(iso){ const m=String(iso||'').match(/T(\d{2}):(\d{2})/); if(!m) return '—'; let h=+m[1]; const mi=m[2]; const ap=h<12?'AM':'PM'; h=h%12||12; return h+':'+mi+' '+ap; }
+function dMinOfDay(iso){ const m=String(iso||'').match(/T(\d{2}):(\d{2})/); return m?(+m[1]*60 + +m[2]):null; }
+function dTitle(s){ s=String(s||'').toLowerCase(); return s.charAt(0).toUpperCase()+s.slice(1); }
+function dShiftName(f,l){ return (dTitle(f)+' '+dTitle(l)).trim(); }
+function dShiftBlock(sn, date){
+  const all = (S_dailyData && S_dailyData.shifts) ? S_dailyData.shifts : [];
+  const rows = all.filter(s=>(s.salonNum||'').trim()===String(sn).trim() && s.date===date)
+    .sort((a,b)=>{ const am=dMinOfDay(a.schedStart||a.actualStart), bm=dMinOfDay(b.schedStart||b.actualStart); return (am==null?9999:am)-(bm==null?9999:bm); });
+  if(!rows.length) return '<div style="font-size:11px;color:var(--text-muted);margin-top:12px;">No schedule data for this day.</div>';
+  let body='';
+  rows.forEach(s=>{
+    const hasSched=!!s.schedStart, hasAct=!!s.actualStart;
+    let badge, color;
+    if(hasSched && !hasAct){ badge='No show'; color='#c0392b'; }
+    else if(!hasSched && hasAct){ badge='Unscheduled'; color='#2980b9'; }
+    else {
+      const sd=dMinOfDay(s.actualStart)-dMinOfDay(s.schedStart);  // + = clocked in late
+      const ed=dMinOfDay(s.schedEnd)-dMinOfDay(s.actualEnd);      // + = left early
+      if(sd>5){ badge='Late '+sd+'m'; color='#e67e22'; }
+      else if(ed>5){ badge='Left early '+ed+'m'; color='#e67e22'; }
+      else if(sd<-5){ badge='Early '+(-sd)+'m'; color='#27ae60'; }
+      else { badge='On time'; color='#27ae60'; }
+    }
+    const sched = hasSched ? dClock(s.schedStart)+'–'+dClock(s.schedEnd) : '—';
+    const act   = hasAct   ? dClock(s.actualStart)+'–'+dClock(s.actualEnd) : '—';
+    const nf = (String(s.isNonFloor).toLowerCase()==='true') ? ' <span style="font-size:9px;color:var(--text-muted);">(non-floor)</span>' : '';
+    const note = s.notes ? ' title="'+String(s.notes).replace(/"/g,'&quot;')+'"' : '';
+    body += `<tr${note}>
+      <td style="text-align:left;font-weight:600;">${dShiftName(s.firstName,s.lastName)}${nf}</td>
+      <td style="text-align:center;">${sched}</td>
+      <td style="text-align:center;">${act}</td>
+      <td style="text-align:center;"><span style="background:${color};color:#fff;border-radius:10px;padding:1px 8px;font-size:10px;font-weight:700;white-space:nowrap;">${badge}</span></td>
+    </tr>`;
+  });
+  return `<div style="margin-top:14px;">
+    <div style="font-weight:700;color:var(--primary);margin-bottom:6px;">Shifts — scheduled vs actual</div>
+    <div style="overflow-x:auto;"><table class="data-table" style="min-width:480px;">
+      <thead><tr><th style="text-align:left;">Stylist</th><th style="text-align:center;">Scheduled</th><th style="text-align:center;">Actual</th><th style="text-align:center;">Variance</th></tr></thead>
+      <tbody>${body}</tbody></table></div>
+  </div>`;
+}
+
 function openDayDetail(sn, date, targetId){
   sn = String(sn).trim();
   S_dailyDetail = { salonNum: sn, date };
@@ -1723,6 +1768,7 @@ function openDayDetail(sn, date, targetId){
   host.innerHTML = `<div style="border-top:2px solid #eee;border-left:3px solid var(--primary);margin:4px 0 0 14px;padding:12px 0 0 14px;">
     <div style="font-weight:700;color:var(--primary);margin-bottom:6px;">${dn} ${dFmtMDY(date)} — who worked</div>
     <div style="overflow-x:auto;">${bodyHtml}</div>
+    ${dShiftBlock(sn, date)}
   </div>`;
   host.scrollIntoView({behavior:'smooth', block:'nearest'});
 }
@@ -1779,7 +1825,7 @@ function loadDayReview(dateIso){
   ]).then(([cur,pyd])=>{
     if(!cur || !cur.success){ body.innerHTML='<div class="no-data">Error loading: '+((cur&&cur.error)||'unknown')+'</div>'; return; }
     const pySalon=(pyd&&pyd.success)?(pyd.salonDaily||[]):[];
-    S_dailyData={ key:cacheKey, day:dateIso, salonDaily:[...(cur.salonDaily||[]),...pySalon], empDaily:cur.empDaily||[] };
+    S_dailyData={ key:cacheKey, day:dateIso, salonDaily:[...(cur.salonDaily||[]),...pySalon], empDaily:cur.empDaily||[], shifts:cur.shifts||[] };
     renderDayReviewTable(dateIso);
   }).catch(err=>{ body.innerHTML='<div class="no-data">Error: '+err.message+'</div>'; });
 }

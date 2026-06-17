@@ -192,6 +192,17 @@ export async function getDailyRange(start: string, end: string) {
   return { salonDaily, empDaily }
 }
 
+/**
+ * Read SD_SHIFTS rows in a date window. salonNum is already stored on each row
+ * (tagged at scrape time), so no roster join is needed here.
+ */
+export async function getShiftsRange(start: string, end: string) {
+  const raw = await readSheet('SD_SHIFTS')
+  const inRange = (d: string) => d >= start && d <= end
+  const shifts = rowsToObjects(raw).filter(r => inRange(String(r.date || '')))
+  return { shifts }
+}
+
 export async function getAllDashboardData() {
   const [
     salonRows,

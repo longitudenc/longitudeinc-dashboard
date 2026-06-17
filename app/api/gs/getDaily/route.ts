@@ -21,7 +21,7 @@
 // metrics in SD_EMP_DAILY are already computed by SD3 (cph, hcTime, productPct…).
 
 import { NextResponse } from 'next/server'
-import { getDailyRange } from '@/lib/sheets'
+import { getDailyRange, getShiftsRange } from '@/lib/sheets'
 import { requireSignedIn } from '@/lib/require-role'
 import { scopeDaily } from '@/lib/scope-filter'
 
@@ -50,7 +50,8 @@ export async function GET(request: Request) {
     }
 
     const raw = await getDailyRange(start, end)
-    const { salonDaily, empDaily } = scopeDaily(raw.salonDaily, raw.empDaily, gate.access)
+    const rawShifts = await getShiftsRange(start, end)
+    const { salonDaily, empDaily, shifts } = scopeDaily(raw.salonDaily, raw.empDaily, rawShifts.shifts, gate.access)
 
     return NextResponse.json({
       success: true,
@@ -58,8 +59,10 @@ export async function GET(request: Request) {
       end,
       salonDailyCount: salonDaily.length,
       empDailyCount: empDaily.length,
+      shiftsCount: shifts.length,
       salonDaily,
       empDaily,
+      shifts,
     })
   } catch (e: any) {
     return NextResponse.json({ success: false, error: e.message }, { status: 500 })

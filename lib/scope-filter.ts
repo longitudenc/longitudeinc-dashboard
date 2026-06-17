@@ -86,16 +86,18 @@ export function scopeAllData(data: any, access: Access): any {
 export function scopeDaily(
   salonDaily: any[],
   empDaily: any[],
+  shifts: any[],
   access: Access
-): { salonDaily: any[]; empDaily: any[] } {
-  if (seesEverything(access)) return { salonDaily, empDaily }
+): { salonDaily: any[]; empDaily: any[]; shifts: any[] } {
+  if (seesEverything(access)) return { salonDaily, empDaily, shifts }
   if (access.role === 'area_manager') {
     const salons = amSalonSet(access)
     const inScope = (sn: any) => salons.has(String(sn || '').trim())
     return {
       salonDaily: (salonDaily || []).filter(r => inScope(r.salonNum)),
       empDaily: (empDaily || []).filter(r => inScope(r.salonNum)),
+      shifts: (shifts || []).filter(r => inScope(r.salonNum)),
     }
   }
-  return { salonDaily: [], empDaily: [] } // manager / stylist: no daily
+  return { salonDaily: [], empDaily: [], shifts: [] } // manager / stylist: no daily
 }

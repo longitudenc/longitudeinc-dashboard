@@ -14,19 +14,34 @@ import {
   fetchEmployeePerformanceCsv,
   fetchPayrollCsv,
   fetchEmployeeReporting,
+  fetchShifts,
   batchMap,
   type SD3DailyStoreSummary,
+  type SD3ShiftVariance,
 } from '@/lib/sd3'
 import { upsertSheet, readSheet, rowsToObjects } from '@/lib/sheets'
 import { parseCsv, rowsToObjectsAt, num, returnRate } from '@/lib/csv'
 import { aggregatePeriod, type AggregatedPeriod } from '@/lib/aggregate'
-import { yesterdayET, lastCompletedFiscalWeek, lastCompletedFiscalMonth, todayET, isLastFridayOfMonth, addDays } from '@/lib/fiscal'
+import { yesterdayET, lastCompletedFiscalWeek, lastCompletedFiscalMonth, todayET, isLastFridayOfMonth, addDays, dayOfWeek } from '@/lib/fiscal'
 
 // ── Tab + column definitions ─────────────────────────────────
 
 const SD_DAILY_TAB = 'SD_DAILY'
 const SD_WEEKLY_TAB = 'SD_WEEKLY'
 const SD_MONTHLY_TAB = 'SD_MONTHLY'
+const SD_SHIFTS_TAB = 'SD_SHIFTS'
+
+// Schedule-variance rows: scheduled vs actual shift, per employee/day/shift.
+// No pay in this data — scoping it later is a simple salon filter.
+const SHIFTS_COLUMNS = [
+  'date', 'storeId', 'salonNum', 'employeePk', 'firstName', 'lastName',
+  'isSchedule', 'isNonFloor', 'varianceMask', 'notes',
+  'schedStart', 'schedEnd', 'actualStart', 'actualEnd',
+  'checkInDiff', 'checkOutDiff',
+  'checkInWaiting', 'checkInOciWaiting', 'checkOutWaiting', 'checkOutOciWaiting',
+  'estWaitAtTimeout', 'firstCustServed', 'lastCustOut', 'shiftLabelsMask',
+  'scrapedAt',
+] as const
 
 const DAILY_COLUMNS = [
   'date', 'storeId', 'customerCount', 'newCustomerCount', 'newCustomerVisitCount',
@@ -635,6 +650,114 @@ export async function runEmployeeDailyRange(start: string, end: string): Promise
     result.ok = false
     result.error = err instanceof Error ? err.message : String(err)
     console.error('[scrape/employee-daily] range fatal:', result.error)
+  }
+  result.durationMs = Date.now() - startedAt
+  return result
+}
+
+// ── Shifts (schedule variance: scheduled vs actual) ──────────────────
+
+/** null/undefined → '' ; everything else → String(v). Times kept as raw ISO. */
+function sStr(v: unknown): string {
+  return v === null || v === undefined ? '' : String(v)
+}
+
+/** Map one /rest/schedule/variance record to an SD_SHIFTS row. */
+function shiftRow(r: Record<string, any>, storeId: number, salonNum: string): Record<string, any> | null {
+  const date = sStr(r.date)
+  if (!date) return null
+  return {
+    date,
+    storeId,
+    salonNum,
+    employeePk: sStr(r.employeepk),
+    firstName: sStr(r.firstname),
+    lastName: sStr(r.lastname),
+    isSchedule: sStr(r.isschedule),
+    isNonFloor: sStr(r.isnonfloorshifts),
+    varianceMask: sStr(r.variancetypemask),
+    notes: sStr(r.notes),
+    schedStart: sStr(r.starttimes),
+    schedEnd: sStr(r.endtimes),
+    actualStart: sStr(r.starttime ?? r.checkintime),
+    actualEnd: sStr(r.endtime ?? r.checkouttime),
+    checkInDiff: sStr(r.checkinminutesdifference),
+    checkOutDiff: sStr(r.checkoutminutesdifference),
+    checkInWaiting: sStr(r.checkincustomerswaiting),
+    checkInOciWaiting: sStr(r.checkinocicustomerswaiting),
+    checkOutWaiting: sStr(r.checkoutcustomerswaiting),
+    checkOutOciWaiting: sStr(r.checkoutocicustomerswaiting),
+    estWaitAtTimeout: sStr(r.estwaitattimeout),
+    firstCustServed: sStr(r.firstcusttimeserved),
+    lastCustOut: sStr(r.lastcusttimeout),
+    shiftLabelsMask: sStr(r.shiftlabelsmasks),
+    scrapedAt: new Date().toISOString(),
+  }
+}
+
+/** The Saturday that begins the fiscal week containing `dateIso` (weeks run Sat→Fri). */
+function fiscalWeekStart(dateIso: string): string {
+  // dayOfWeek: Sun=0 … Sat=6. Days back to the week's Saturday:
+  return addDays(dateIso, -((dayOfWeek(dateIso) + 1) % 7))
+}
+
+/**
+ * Scrape schedule-variance rows into SD_SHIFTS.
+ *  - no args      → current fiscal week-to-date (its Saturday → yesterday ET).
+ *  - start & end  → that explicit range (backfill); one call per store.
+ * The endpoint accepts a date range directly, so each store is a single fetch.
+ * Upsert key (date, storeId, employeePk, schedStart) lets the week fill in
+ * progressively and re-pulls just update in place.
+ */
+export async function runShiftsScrape(
+  startOverride?: string,
+  endOverride?: string
+): Promise<EntityScrapeResult> {
+  const startedAt = Date.now()
+  const end = endOverride || yesterdayET()
+  const start = startOverride || fiscalWeekStart(end)
+  const result: EntityScrapeResult = {
+    ok: true, durationMs: 0, weekStart: start, weekEnd: end,
+    rowsUpserted: 0, updated: 0, inserted: 0, skipped: 0, processed: 0, error: null,
+  }
+  try {
+    const session = await authenticate()
+    const salons = await fetchSalons(session)
+    console.log(`[scrape/shifts] ${start}→${end} — ${salons.length} salons`)
+
+    const dataRows: Record<string, any>[] = []
+    for (const s of salons) {
+      let recs: SD3ShiftVariance[]
+      try {
+        recs = await fetchShifts(session, s.storeId, start, end)
+      } catch (e) {
+        // One bad store shouldn't sink the whole run.
+        console.error(`[scrape/shifts] store ${s.salonNum} (${s.storeId}) failed:`, e instanceof Error ? e.message : e)
+        continue
+      }
+      for (const r of recs) {
+        const row = shiftRow(r as Record<string, any>, s.storeId, s.salonNum)
+        if (row) dataRows.push(row)
+        else result.skipped!++
+      }
+    }
+
+    result.processed = dataRows.length
+    if (dataRows.length > 0) {
+      const up = await upsertSheet(
+        SD_SHIFTS_TAB,
+        [...SHIFTS_COLUMNS],
+        ['date', 'storeId', 'employeePk', 'schedStart'],
+        dataRows
+      )
+      result.rowsUpserted = dataRows.length
+      result.updated = up.updated
+      result.inserted = up.inserted
+    }
+  } catch (err) {
+    result.ok = false
+    result.error = err instanceof Error ? err.message : String(err)
+    console.error('[scrape/shifts] fatal:', result.error)
   }
   result.durationMs = Date.now() - startedAt
   return result

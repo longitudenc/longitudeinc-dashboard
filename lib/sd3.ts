@@ -229,6 +229,67 @@ function extractStoreId(row: Record<string, unknown>): number | undefined {
 }
 
 /**
+ * One reconciled shift-variance record from /rest/schedule/variance.
+ * Each record is per employee, per day, per shift, and carries BOTH the
+ * scheduled times (starttimes/endtimes) and the actual worked times
+ * (starttime/checktime…), plus SD3's pre-computed variance (minute diffs,
+ * a variancetypemask bitmask, and a human-readable notes string).
+ * The record has no store field — we tag it with the storeId we queried.
+ */
+export interface SD3ShiftVariance {
+  date: string
+  storeId: number
+  [key: string]: unknown
+}
+
+/** Pull a response that's either a bare array or an object wrapping one. */
+function asRowArray(json: unknown): Array<Record<string, unknown>> {
+  if (Array.isArray(json)) return json as Array<Record<string, unknown>>
+  if (json && typeof json === 'object') {
+    const obj = json as Record<string, unknown>
+    // Known/likely wrappers, then any array-valued property as a fallback.
+    for (const k of ['variances', 'detailedData', 'data', 'results', 'rows', 'shifts']) {
+      if (Array.isArray(obj[k])) return obj[k] as Array<Record<string, unknown>>
+    }
+    for (const v of Object.values(obj)) {
+      if (Array.isArray(v)) return v as Array<Record<string, unknown>>
+    }
+  }
+  return []
+}
+
+/**
+ * Pull schedule-variance rows for ONE store over a date range (inclusive).
+ * Dates are YYYY-MM-DD. Queried per-store so every row belongs to `storeId`.
+ * includeDetailedData=true is what returns the rich per-shift fields.
+ */
+export async function fetchShifts(
+  session: SD3Session,
+  storeId: number,
+  startDate: string,
+  endDate: string
+): Promise<SD3ShiftVariance[]> {
+  const url =
+    `${SD3_BASE}/rest/schedule/variance` +
+    `?storeIds=${storeId}&start=${startDate}&end=${endDate}` +
+    `&initial=true&employees=0&includeDetailedData=true`
+
+  const res = await fetch(url, { headers: jsonHeaders(session.token) })
+  if (!res.ok) {
+    throw new Error(
+      `schedule/variance failed for storeId=${storeId}: ${res.status} ${res.statusText}`
+    )
+  }
+
+  const rows = asRowArray(await res.json())
+  return rows.map(row => ({
+    ...row,
+    date: String(row.date ?? ''),
+    storeId,
+  })) as SD3ShiftVariance[]
+}
+
+/**
  * Pull employee performance CSV (Detail mode — one row per emp/salon/week).
  * Returns raw CSV text; CSV parsing happens in the scraper route.
  */

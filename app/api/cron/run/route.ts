@@ -18,6 +18,7 @@ import {
   runEmployeeDailyScrape,
   runPayrollScrape,
   runProfileScrape,
+  runShiftsScrape,
 } from '@/lib/scrape-runner'
 
 export const runtime = 'nodejs'
@@ -62,6 +63,9 @@ export async function GET(request: Request) {
   results.push({ name: 'profile', result: await runProfileScrape() })
   // Per-stylist daily performance (single-day employee CSV → SD_EMP_DAILY).
   results.push({ name: 'employee-daily', result: await runEmployeeDailyScrape() })
+  // Schedule variance (scheduled vs actual shift) → SD_SHIFTS. Defaults to the
+  // current fiscal week-to-date, so each day's run fills the week in place.
+  results.push({ name: 'shifts', result: await runShiftsScrape() })
 
   // 2. Weekly — only on Saturday. Salon weekly first, then the three
   //    weekly-cadence entity scrapers. Each runner catches its own errors
