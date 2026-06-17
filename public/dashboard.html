@@ -57,6 +57,8 @@
   .page-header{margin-bottom:1.5rem;}
   .page-header h2{font-size:22px;font-weight:700;color:var(--primary);}
   .page-header .sub{font-size:13px;color:var(--text-muted);margin-top:4px;}
+  /* Pin the column header while scrolling a table's own scroll region. */
+  .sticky-head-scroll thead th{position:sticky;top:0;z-index:2;}
 
   /* Cards */
   .card-title{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-bottom:1rem;}
@@ -548,7 +550,7 @@
           <span id="section-all-salons-icon" style="font-size:16px;color:var(--text-muted);">▾</span>
         </div>
         <div id="section-all-salons-body">
-          <div style="overflow-x:auto;"><table class="data-table"><thead id="co-all-thead"></thead><tbody id="co-all-tbody"><tr><td colspan="16" class="no-data">Loading...</td></tr></tbody></table></div>
+          <div class="sticky-head-scroll" style="overflow:auto;max-height:72vh;"><table class="data-table"><thead id="co-all-thead"></thead><tbody id="co-all-tbody"><tr><td colspan="16" class="no-data">Loading...</td></tr></tbody></table></div>
         </div>
       </div>
       <div id="co-salon-drill"></div>
@@ -1586,7 +1588,7 @@ function openSalonDaily(sn, hostId){
     });
     const weekCC = Math.round(W.cc);  // drives payroll & CPH targets (which slide by CC)
 
-    let head='<tr><th style="text-align:left;">Day</th><th>CC</th><th>CC Δ LY</th><th>Sales</th><th>Sales Δ LY</th><th>CPH</th><th>HC Time</th><th>MBC</th><th>Waits %</th><th>Payroll %</th></tr>';
+    let head='<tr><th style="text-align:left;">Day</th><th>CC</th><th>CC Δ LY</th><th>Sales</th><th>Sales Δ LY</th><th>CPH</th><th>HC Time</th><th>MBC</th><th>Product %</th><th>Waits %</th><th>Payroll %</th></tr>';
     let body='';
     dates.forEach((dt,i)=>{
       const r = idx[sn+'|'+dt];
@@ -1602,13 +1604,15 @@ function openSalonDaily(sn, hostId){
         <td class="${m.cph!==null?tierCPH(m.cph,weekCC):''}">${dFmt(m.cph,'2')}</td>
         <td class="${m.hcTime!==null?tierHC(m.hcTime):''}">${dFmt(m.hcTime,'1')}</td>
         <td class="${m.mbc!==null?tierMBC(m.mbc):''}">${dFmt(m.mbc,'1')}</td>
+        <td class="${m.productPct!==null?tierProd(m.productPct):''}">${dFmt(m.productPct,'pct')}</td>
         <td class="${m.waitsPct!==null?tierWaits(m.waitsPct):''}">${dFmt(m.waitsPct,'pct')}</td>
         <td class="${m.payrollPct!==null?tierPayroll(m.payrollPct,weekCC):''}">${dFmt(m.payrollPct,'pct')}</td>
-      </tr>` : `<tr style="color:#bbb;"><td style="text-align:left;">${DAILY_DAYNAMES[i]} ${dFmtMD(dt)}</td><td colspan="9" style="text-align:center;">no data</td></tr>`;
+      </tr>` : `<tr style="color:#bbb;"><td style="text-align:left;">${DAILY_DAYNAMES[i]} ${dFmtMD(dt)}</td><td colspan="10" style="text-align:center;">no data</td></tr>`;
     });
 
     const wTotal=(W.ss+W.ps), wCph=W.fh>0?W.cc/W.fh:null, wHc=W.hcInv>0?W.hcMin/W.hcInv:null,
-      wMbc=W.cc>0?W.ncwm/W.cc:null, wWaits=W.cc>0?(W.w15/W.cc)*100:null, wPay=wTotal>0?(W.pay/wTotal)*100:null;
+      wMbc=W.cc>0?W.ncwm/W.cc:null, wWaits=W.cc>0?(W.w15/W.cc)*100:null, wPay=wTotal>0?(W.pay/wTotal)*100:null,
+      wProd=wTotal>0?(W.ps/wTotal)*100:null;
     // Week Total Δ ties to the salon scorecard's CC/Sales Growth (the canonical
     // YoY metric); falls back to a direct prior-year sum if the row isn't loaded.
     const wkRow=(getSnap()?.salons||[]).find(r=>(r.salonNum||'').trim()===sn);
@@ -1619,6 +1623,7 @@ function openSalonDaily(sn, hostId){
       <td>${dFmt(W.cc,'int')}</td><td>${dChangeCell(wCcChg)}</td>
       <td>${dFmt(wTotal,'money')}</td><td>${dChangeCell(wSlChg)}</td>
       <td>${dFmt(wCph,'2')}</td><td>${dFmt(wHc,'1')}</td><td>${dFmt(wMbc,'1')}</td>
+      <td>${dFmt(wProd,'pct')}</td>
       <td>${dFmt(wWaits,'pct')}</td><td>${dFmt(wPay,'pct')}</td>
     </tr>` : '';
 
@@ -1628,7 +1633,7 @@ function openSalonDaily(sn, hostId){
         <button class="btn btn-secondary btn-sm" onclick="closeSalonDaily('${hostId}')">✕ Close</button>
       </div>
       <div style="font-size:11px;color:var(--text-muted);padding:0 2px 8px;">Δ LY = change vs the same day/week last year (year-over-year). Week Total ties to the salon scorecard's CC/Sales Growth. Click a day to see who worked and how they performed.</div>
-      <div style="overflow-x:auto;"><table class="data-table" style="min-width:760px;"><thead>${head}</thead><tbody>${body}${weekRow}</tbody></table></div>
+      <div style="overflow-x:auto;"><table class="data-table" style="min-width:820px;"><thead>${head}</thead><tbody>${body}${weekRow}</tbody></table></div>
       <div id="${hostId}-detail" style="margin-top:12px;"></div>
     </div>`;
     host.scrollIntoView({behavior:'smooth', block:'nearest'});
@@ -1801,23 +1806,26 @@ function renderDayReviewTable(dateIso){
       <td class="${(m.cph!==null&&wkCC!=null)?tierCPH(m.cph,wkCC):''}">${dFmt(m.cph,'2')}</td>
       <td class="${m.hcTime!==null?tierHC(m.hcTime):''}">${dFmt(m.hcTime,'1')}</td>
       <td class="${m.mbc!==null?tierMBC(m.mbc):''}">${dFmt(m.mbc,'1')}</td>
+      <td class="${m.productPct!==null?tierProd(m.productPct):''}">${dFmt(m.productPct,'pct')}</td>
       <td class="${m.waitsPct!==null?tierWaits(m.waitsPct):''}">${dFmt(m.waitsPct,'pct')}</td>
       <td class="${(m.payrollPct!==null&&wkCC!=null)?tierPayroll(m.payrollPct,wkCC):''}">${dFmt(m.payrollPct,'pct')}</td>
     </tr>`;
   });
   const tTotal=T.ss+T.ps, tCph=T.fh>0?T.cc/T.fh:null, tHc=T.hcInv>0?T.hcMin/T.hcInv:null,
-    tMbc=T.cc>0?T.ncwm/T.cc:null, tWaits=T.cc>0?(T.w15/T.cc)*100:null, tPay=tTotal>0?(T.pay/tTotal)*100:null;
+    tMbc=T.cc>0?T.ncwm/T.cc:null, tWaits=T.cc>0?(T.w15/T.cc)*100:null, tPay=tTotal>0?(T.pay/tTotal)*100:null,
+    tProd=tTotal>0?(T.ps/tTotal)*100:null;
   const tCcChg=dChange(T.cc, TPY.cc), tSlChg=dChange(tTotal, TPY.ss+TPY.ps);
   const totalRow=`<tr class="avg-row">
     <td style="text-align:left;">Company Total</td>
     <td>${dFmt(T.cc,'int')}</td><td>${dChangeCell(tCcChg)}</td>
     <td>${dFmt(tTotal,'money')}</td><td>${dChangeCell(tSlChg)}</td>
     <td>${dFmt(tCph,'2')}</td><td>${dFmt(tHc,'1')}</td><td>${dFmt(tMbc,'1')}</td>
+    <td>${dFmt(tProd,'pct')}</td>
     <td>${dFmt(tWaits,'pct')}</td><td>${dFmt(tPay,'pct')}</td>
   </tr>`;
-  const head=`<tr><th style="text-align:left;">Salon</th><th>CC</th><th>CC Δ LY</th><th>Sales</th><th>Sales Δ LY</th><th>CPH</th><th>HC Time</th><th>MBC</th><th>Waits %</th><th>Payroll %</th></tr>`;
+  const head=`<tr><th style="text-align:left;">Salon</th><th>CC</th><th>CC Δ LY</th><th>Sales</th><th>Sales Δ LY</th><th>CPH</th><th>HC Time</th><th>MBC</th><th>Product %</th><th>Waits %</th><th>Payroll %</th></tr>`;
   body.innerHTML=`<div style="font-size:11px;color:var(--text-muted);padding:0 2px 8px;">${dDayName(dateIso)} ${dFmtMDY(dateIso)} · all salons. Δ LY = vs the same day last year. Click any salon to see who worked and how they performed.</div>
-    <div style="overflow-x:auto;"><table class="data-table" style="min-width:780px;"><thead>${head}</thead><tbody>${rows}${totalRow}</tbody></table></div>`;
+    <div class="sticky-head-scroll" style="overflow:auto;max-height:72vh;"><table class="data-table" style="min-width:840px;"><thead>${head}</thead><tbody>${rows}${totalRow}</tbody></table></div>`;
 }
 
 function switchTab(tab,el){ 
