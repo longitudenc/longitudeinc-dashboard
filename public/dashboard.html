@@ -1513,7 +1513,7 @@ function switchToAdmin(){
 // (2) click a day → who worked that day + their performance. Click-through is
 // role/assignment-gated (canDrillSalon). Salon-level rates use the same SD3
 // formulas as the weekly recompute (lib/aggregate.ts). Return data excluded.
-let S_dailyData = null;          // { start, end, salonDaily[], empDaily[], shifts[] }  (14-day window)
+let S_dailyData = null;          // { start, end, salonDaily[], empDaily[], shifts[], halfHour[] }  (14-day window)
 let S_dailyDetail = null;        // { salonNum, date } currently open
 
 const DAILY_DAYNAMES = ['Sat','Sun','Mon','Tue','Wed','Thu','Fri'];
@@ -1636,6 +1636,7 @@ function openSalonDaily(sn, hostId){
       </div>
       <div style="font-size:11px;color:var(--text-muted);padding:0 2px 8px;">Δ LY = change vs the same day/week last year (year-over-year). Week Total ties to the salon scorecard's CC/Sales Growth. Click a day to see who worked and how they performed.</div>
       <div style="overflow-x:auto;"><table class="data-table" style="min-width:820px;"><thead>${head}</thead><tbody>${body}${weekRow}</tbody></table></div>
+      ${dHeatMap(sn, dates)}
       <div id="${hostId}-detail" style="margin-top:12px;"></div>
     </div>`;
     host.scrollIntoView({behavior:'smooth', block:'nearest'});
@@ -1650,7 +1651,7 @@ function openSalonDaily(sn, hostId){
     if(!cur || !cur.success){ host.innerHTML='<div class="table-card"><div class="no-data">Error loading daily data: '+((cur&&cur.error)||'unknown')+'</div></div>'; return; }
     const pySalon = (py && py.success) ? (py.salonDaily||[]) : [];   // prior-year salon rows (empty until backfilled)
     S_dailyData = { key:cacheKey, start:curStart, end:curEnd,
-      salonDaily:[...(cur.salonDaily||[]), ...pySalon], empDaily:cur.empDaily||[], shifts:cur.shifts||[] };
+      salonDaily:[...(cur.salonDaily||[]), ...pySalon], empDaily:cur.empDaily||[], shifts:cur.shifts||[], halfHour:cur.halfHour||[] };
     render();
   }).catch(err=>{ host.innerHTML='<div class="table-card"><div class="no-data">Error: '+err.message+'</div></div>'; });
 }
@@ -1704,6 +1705,55 @@ function dShiftBlock(sn, date){
       <thead><tr><th style="text-align:left;">Stylist</th><th style="text-align:center;">Scheduled</th><th style="text-align:center;">Actual</th><th style="text-align:center;">Variance</th></tr></thead>
       <tbody>${body}</tbody></table></div>
   </div>`;
+}
+
+// ── Half-hour staffing heat map (our optimal vs actual, from SD_HALFHOUR) ──
+// Slot index → clock label (×30 min from midnight). gap = worked − ourNeeded.
+// Our optimal: a customer occupies HC time + transition (MBC) of a stylist's
+// capacity, so cycle = HC + MBC. needed = round(demand × cycle ÷ 30 min).
+// Tune these two numbers to trade payroll vs. waits; everything follows.
+const HM_TARGET_HC = 14.5;   // target haircut minutes
+const HM_TARGET_MBC = 2;     // target minutes between customers (transition)
+function hmNeeded(cust){ const cycle=HM_TARGET_HC+HM_TARGET_MBC; return Math.round((n(cust)||0)*cycle/30); }
+function dHHLabel(hh){ const h=Math.floor(hh/2), mn=(hh%2)?'30':'00', ap=h<12?'a':'p', hr=h%12||12; return hr+':'+mn+ap; }
+function dGapColor(needed, worked){
+  if(needed<=0 && worked<=0) return {bg:'#fafafa', fg:'#ccc'};                 // closed / dead slot
+  const gap=worked-needed;
+  if(gap<0){ const a=Math.min(0.92, 0.30+0.20*Math.abs(gap)); return {bg:'rgba(192,57,43,'+a+')', fg:'#fff'}; }   // understaffed
+  if(gap>0){ const a=Math.min(0.80, 0.22+0.16*gap); return {bg:'rgba(41,128,185,'+a+')', fg:'#fff'}; }            // overstaffed
+  return {bg:'rgba(39,174,96,0.40)', fg:'#1b5e20'};                            // matched (had demand)
+}
+function dHeatMap(sn, dates){
+  const all=(S_dailyData&&S_dailyData.halfHour)?S_dailyData.halfHour:[];
+  const mine=all.filter(r=>(r.salonNum||'').trim()===String(sn).trim());
+  if(!mine.length) return '<div style="font-size:11px;color:var(--text-muted);margin-top:16px;">No half-hour staffing data for this week yet. Run the half-hour scrape to light up the heat map.</div>';
+  const byDate={}; let minHH=99, maxHH=0;
+  mine.forEach(r=>{ const hh=n(r.halfHour); if(isNaN(hh)) return;
+    (byDate[r.date]=byDate[r.date]||{})[hh]={needed:n(r.needed)||0, worked:n(r.worked)||0, cust:n(r.customerCount)||0};
+    if(((n(r.needed)||0)>0)||((n(r.worked)||0)>0)||((n(r.customerCount)||0)>0)){ if(hh<minHH)minHH=hh; if(hh>maxHH)maxHH=hh; }
+  });
+  if(minHH>maxHH) return '<div style="font-size:11px;color:var(--text-muted);margin-top:16px;">No staffed half-hours recorded this week.</div>';
+  let header='<th style="text-align:left;position:sticky;left:0;background:#fff;z-index:1;font-size:10px;">Day</th>';
+  for(let hh=minHH; hh<=maxHH; hh++){ header+='<th style="font-size:9px;padding:2px 0;font-weight:600;color:var(--text-muted);">'+(hh%2===0?dHHLabel(hh):'')+'</th>'; }
+  let rows='';
+  dates.forEach((dt,i)=>{
+    const day=byDate[dt]||{};
+    let cells='';
+    for(let hh=minHH; hh<=maxHH; hh++){
+      const c=day[hh];
+      if(!c){ cells+='<td style="background:#fafafa;min-width:18px;height:18px;"></td>'; continue; }
+      const need=hmNeeded(c.cust), col=dGapColor(need,c.worked), gap=c.worked-need;
+      const txt = gap<0 ? String(gap) : (gap>0 ? '+'+gap : '');
+      const tip = DAILY_DAYNAMES[i]+' '+dHHLabel(hh)+' — demand '+c.cust.toFixed(1)+', need '+need+', worked '+c.worked+(gap<0?' (short '+(-gap)+')':gap>0?' (over '+gap+')':' (matched)')+'  [SD3 rec '+c.needed+']';
+      cells+='<td title="'+tip+'" style="background:'+col.bg+';color:'+col.fg+';font-size:9px;font-weight:700;text-align:center;min-width:18px;height:18px;">'+txt+'</td>';
+    }
+    rows+='<tr><td style="text-align:left;font-weight:600;font-size:11px;position:sticky;left:0;background:#fff;white-space:nowrap;padding-right:8px;">'+DAILY_DAYNAMES[i]+' '+dFmtMD(dt)+'</td>'+cells+'</tr>';
+  });
+  return '<div style="margin-top:16px;">'
+    + '<div style="font-weight:700;color:var(--primary);margin-bottom:2px;">Staffing heat map — where hours missed demand</div>'
+    + '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Each cell is a half-hour, vs. our own target staffing (cycle '+(HM_TARGET_HC+HM_TARGET_MBC)+' min = '+HM_TARGET_HC+' cut + '+HM_TARGET_MBC+' transition). <span style="color:#c0392b;font-weight:700;">Red = understaffed</span> (got hurt), <span style="color:#2980b9;font-weight:700;">blue = overstaffed</span> (paid for idle), <span style="color:#1b5e20;font-weight:700;">green = matched</span>. Number is stylists over/short; hover for demand, our need, worked, and SD3\'s rec.</div>'
+    + '<div style="overflow-x:auto;"><table style="border-collapse:separate;border-spacing:1px;"><thead><tr>'+header+'</tr></thead><tbody>'+rows+'</tbody></table></div>'
+    + '</div>';
 }
 
 function openDayDetail(sn, date, targetId){
@@ -1825,7 +1875,7 @@ function loadDayReview(dateIso){
   ]).then(([cur,pyd])=>{
     if(!cur || !cur.success){ body.innerHTML='<div class="no-data">Error loading: '+((cur&&cur.error)||'unknown')+'</div>'; return; }
     const pySalon=(pyd&&pyd.success)?(pyd.salonDaily||[]):[];
-    S_dailyData={ key:cacheKey, day:dateIso, salonDaily:[...(cur.salonDaily||[]),...pySalon], empDaily:cur.empDaily||[], shifts:cur.shifts||[] };
+    S_dailyData={ key:cacheKey, day:dateIso, salonDaily:[...(cur.salonDaily||[]),...pySalon], empDaily:cur.empDaily||[], shifts:cur.shifts||[], halfHour:cur.halfHour||[] };
     renderDayReviewTable(dateIso);
   }).catch(err=>{ body.innerHTML='<div class="no-data">Error: '+err.message+'</div>'; });
 }

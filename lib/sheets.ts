@@ -203,6 +203,14 @@ export async function getShiftsRange(start: string, end: string) {
   return { shifts }
 }
 
+/** Read SD_HALFHOUR rows in a date window. salonNum is stored on each row. */
+export async function getHalfHourRange(start: string, end: string) {
+  const raw = await readSheet('SD_HALFHOUR')
+  const inRange = (d: string) => d >= start && d <= end
+  const halfHour = rowsToObjects(raw).filter(r => inRange(String(r.date || '')))
+  return { halfHour }
+}
+
 export async function getAllDashboardData() {
   const [
     salonRows,

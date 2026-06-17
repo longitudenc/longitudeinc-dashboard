@@ -290,6 +290,50 @@ export async function fetchShifts(
 }
 
 /**
+ * One half-hour optimal-staffing record from dailyhalfhouroptimal.
+ * Per store/day/half-hour: demand (customerCount), the model's optimal
+ * staffing (peakStylistNeeded), and who was actually on the floor
+ * (peakStylistWorked). halfHour is the slot index from midnight (×30 min).
+ */
+export interface SD3HalfHourOptimal {
+  date: string
+  storeId: number
+  halfHour: number
+  [key: string]: unknown
+}
+
+/**
+ * Pull half-hour optimal-vs-actual staffing for ONE store over a date range.
+ * Sibling of dailystoresummary under /rest/storeconfig/{id}/… ; storeId comes
+ * back nested in storeConfig, so we re-tag from extractStoreId with a fallback.
+ */
+export async function fetchHalfHourOptimal(
+  session: SD3Session,
+  storeId: number,
+  startDate: string,
+  endDate: string
+): Promise<SD3HalfHourOptimal[]> {
+  const url =
+    `${SD3_BASE}/rest/storeconfig/${storeId}/dailyhalfhouroptimal` +
+    `?date>=${startDate}&date<=${endDate}`
+
+  const res = await fetch(url, { headers: jsonHeaders(session.token) })
+  if (!res.ok) {
+    throw new Error(
+      `dailyhalfhouroptimal failed for storeId=${storeId}: ${res.status} ${res.statusText}`
+    )
+  }
+
+  const rows = asRowArray(await res.json())
+  return rows.map(row => ({
+    ...row,
+    date: String(row.date ?? ''),
+    halfHour: Number(row.halfHour ?? -1),
+    storeId: extractStoreId(row) ?? storeId,
+  })) as SD3HalfHourOptimal[]
+}
+
+/**
  * Pull employee performance CSV (Detail mode — one row per emp/salon/week).
  * Returns raw CSV text; CSV parsing happens in the scraper route.
  */

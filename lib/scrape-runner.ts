@@ -15,9 +15,11 @@ import {
   fetchPayrollCsv,
   fetchEmployeeReporting,
   fetchShifts,
+  fetchHalfHourOptimal,
   batchMap,
   type SD3DailyStoreSummary,
   type SD3ShiftVariance,
+  type SD3HalfHourOptimal,
 } from '@/lib/sd3'
 import { upsertSheet, readSheet, rowsToObjects } from '@/lib/sheets'
 import { parseCsv, rowsToObjectsAt, num, returnRate } from '@/lib/csv'
@@ -30,6 +32,15 @@ const SD_DAILY_TAB = 'SD_DAILY'
 const SD_WEEKLY_TAB = 'SD_WEEKLY'
 const SD_MONTHLY_TAB = 'SD_MONTHLY'
 const SD_SHIFTS_TAB = 'SD_SHIFTS'
+const SD_HALFHOUR_TAB = 'SD_HALFHOUR'
+
+// Half-hour optimal vs actual staffing, per store/day/half-hour. No pay/PII.
+// halfHour = slot index from midnight (×30 min). gap = worked − needed.
+const HALFHOUR_COLUMNS = [
+  'date', 'storeId', 'salonNum', 'halfHour',
+  'customerCount', 'needed', 'worked', 'demandStylists', 'recCpfh',
+  'threeFlag', 'weeklyPeak', 'scrapedAt',
+] as const
 
 // Schedule-variance rows: scheduled vs actual shift, per employee/day/shift.
 // No pay in this data — scoping it later is a simple salon filter.
@@ -758,6 +769,90 @@ export async function runShiftsScrape(
     result.ok = false
     result.error = err instanceof Error ? err.message : String(err)
     console.error('[scrape/shifts] fatal:', result.error)
+  }
+  result.durationMs = Date.now() - startedAt
+  return result
+}
+
+// ── Half-hour optimal vs actual staffing (heat map source) ───────────
+
+/** Map one dailyhalfhouroptimal record to an SD_HALFHOUR row. */
+function halfHourRow(r: Record<string, any>, storeId: number, salonNum: string): Record<string, any> | null {
+  const date = sStr(r.date)
+  const hh = Number(r.halfHour)
+  if (!date || !Number.isFinite(hh) || hh < 0) return null
+  return {
+    date,
+    storeId,
+    salonNum,
+    halfHour: hh,
+    customerCount: sStr(r.customerCount),
+    needed: sStr(r.peakStylistNeeded),
+    worked: sStr(r.peakStylistWorked),
+    demandStylists: sStr(r.stylists),
+    recCpfh: sStr(r.salonRecCpfh),
+    threeFlag: sStr(r.threeStylistsNeededFlag),
+    weeklyPeak: sStr(r.weeklyPeak),
+    scrapedAt: new Date().toISOString(),
+  }
+}
+
+/**
+ * Scrape half-hour optimal-vs-actual staffing into SD_HALFHOUR.
+ *  - no args     → current fiscal week-to-date (its Saturday → yesterday ET).
+ *  - start & end → that explicit range; one call per store.
+ * NOT wired into the nightly cron yet — half-hour grain is the volume we're
+ * moving to Supabase, so this is manual-pull only for prototyping until then.
+ * Upsert key (date, storeId, halfHour).
+ */
+export async function runHalfHourScrape(
+  startOverride?: string,
+  endOverride?: string
+): Promise<EntityScrapeResult> {
+  const startedAt = Date.now()
+  const end = endOverride || yesterdayET()
+  const start = startOverride || fiscalWeekStart(end)
+  const result: EntityScrapeResult = {
+    ok: true, durationMs: 0, weekStart: start, weekEnd: end,
+    rowsUpserted: 0, updated: 0, inserted: 0, skipped: 0, processed: 0, error: null,
+  }
+  try {
+    const session = await authenticate()
+    const salons = await fetchSalons(session)
+    console.log(`[scrape/halfhour] ${start}→${end} — ${salons.length} salons`)
+
+    const dataRows: Record<string, any>[] = []
+    for (const s of salons) {
+      let recs: SD3HalfHourOptimal[]
+      try {
+        recs = await fetchHalfHourOptimal(session, s.storeId, start, end)
+      } catch (e) {
+        console.error(`[scrape/halfhour] store ${s.salonNum} (${s.storeId}) failed:`, e instanceof Error ? e.message : e)
+        continue
+      }
+      for (const r of recs) {
+        const row = halfHourRow(r as Record<string, any>, s.storeId, s.salonNum)
+        if (row) dataRows.push(row)
+        else result.skipped!++
+      }
+    }
+
+    result.processed = dataRows.length
+    if (dataRows.length > 0) {
+      const up = await upsertSheet(
+        SD_HALFHOUR_TAB,
+        [...HALFHOUR_COLUMNS],
+        ['date', 'storeId', 'halfHour'],
+        dataRows
+      )
+      result.rowsUpserted = dataRows.length
+      result.updated = up.updated
+      result.inserted = up.inserted
+    }
+  } catch (err) {
+    result.ok = false
+    result.error = err instanceof Error ? err.message : String(err)
+    console.error('[scrape/halfhour] fatal:', result.error)
   }
   result.durationMs = Date.now() - startedAt
   return result
