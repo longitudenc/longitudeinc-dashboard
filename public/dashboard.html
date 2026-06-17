@@ -773,7 +773,9 @@ function isViewerRole(){ return roleClean()==='viewer'; }
 function isAMRole(){ const r=roleClean(); return r==='area_manager'||r==='am'; }
 function canSeeAllSalons(){ return isAdminRole()||isViewerRole(); }
 // Day Review (whole-company single-day) is for owner/admin and Kayla specifically.
-function canSeeDayReview(){ return isAdminRole() || (isAMRole() && String(USER_AM_ID||'').replace(/["']/g,'').trim()==='kayla'); }
+// Day Review (whole-company single-day) — owner/admin/viewer, plus Kayla as a
+// fallback in case her admin role hasn't been set in the users list yet.
+function canSeeDayReview(){ return canSeeAllSalons() || (isAMRole() && String(USER_AM_ID||'').replace(/["']/g,'').trim()==='kayla'); }
 
 const AMS = {
   cassi:     {name:'Cassi Sharpe',       init:'CS', color:'#a03030', globalId:'2014-0001-6376', salons:['3015','3058','4138']},
