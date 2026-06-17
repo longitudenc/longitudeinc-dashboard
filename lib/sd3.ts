@@ -314,8 +314,8 @@ export async function fetchHalfHourOptimal(
   endDate: string
 ): Promise<SD3HalfHourOptimal[]> {
   const url =
-    `${SD3_BASE}/rest/storeconfig/${storeId}/dailyhalfhouroptimal` +
-    `?date>=${startDate}&date<=${endDate}`
+    `${SD3_BASE}/rest/storeconfig/dailyhalfhouroptimal` +
+    `?storeConfig=${storeId}&date>=${startDate}&date<=${endDate}`
 
   const res = await fetch(url, { headers: jsonHeaders(session.token) })
   if (!res.ok) {

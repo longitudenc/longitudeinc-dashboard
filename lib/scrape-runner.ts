@@ -822,12 +822,17 @@ export async function runHalfHourScrape(
     console.log(`[scrape/halfhour] ${start}→${end} — ${salons.length} salons`)
 
     const dataRows: Record<string, any>[] = []
+    let firstErr = ''
+    let storesFailed = 0
     for (const s of salons) {
       let recs: SD3HalfHourOptimal[]
       try {
         recs = await fetchHalfHourOptimal(session, s.storeId, start, end)
       } catch (e) {
-        console.error(`[scrape/halfhour] store ${s.salonNum} (${s.storeId}) failed:`, e instanceof Error ? e.message : e)
+        storesFailed++
+        const msg = e instanceof Error ? e.message : String(e)
+        if (!firstErr) firstErr = msg
+        console.error(`[scrape/halfhour] store ${s.salonNum} (${s.storeId}) failed:`, msg)
         continue
       }
       for (const r of recs) {
@@ -838,6 +843,12 @@ export async function runHalfHourScrape(
     }
 
     result.processed = dataRows.length
+    // If nothing came back, say why instead of a silent ok:true / processed:0.
+    if (dataRows.length === 0) {
+      result.error = firstErr
+        ? `0 rows — ${storesFailed}/${salons.length} stores errored, first: ${firstErr}`
+        : '0 rows — every store returned an empty response (check the endpoint URL/params)'
+    }
     if (dataRows.length > 0) {
       const up = await upsertSheet(
         SD_HALFHOUR_TAB,
