@@ -211,6 +211,14 @@ export async function getHalfHourRange(start: string, end: string) {
   return { halfHour }
 }
 
+/** Read SD_DEMAND rows (real per-half-hour arrivals/waits) in a date window. */
+export async function getDemandRange(start: string, end: string) {
+  const raw = await readSheet('SD_DEMAND')
+  const inRange = (d: string) => d >= start && d <= end
+  const demand = rowsToObjects(raw).filter(r => inRange(String(r.date || '')))
+  return { demand }
+}
+
 export async function getAllDashboardData() {
   const [
     salonRows,

@@ -334,6 +334,58 @@ export async function fetchHalfHourOptimal(
 }
 
 /**
+ * A deliberately minimal, PII-FREE projection of an invoice. We read the raw
+ * /rest/invoice rows (which carry customer identifiers, names, OCI profile ids,
+ * etc.) but keep ONLY the operational timestamps needed to count demand and
+ * waits. Every identifying field is dropped here at the boundary, so no customer
+ * data ever leaves this function.
+ */
+export interface SD3InvoiceLite {
+  storeId: number
+  invoiceDate: string
+  timeIn: string | null      // arrival / joined-the-list timestamp (demand)
+  timeServed: string | null  // when service started (null = never served)
+  estWait: number | null     // posted estimated wait at arrival
+}
+
+function numOrNull(v: unknown): number | null {
+  const n = typeof v === 'number' ? v : parseFloat(String(v))
+  return Number.isFinite(n) ? n : null
+}
+
+/**
+ * Pull invoices for ONE store over a date range and return only the PII-free
+ * lite projection. The caller aggregates these to per-half-hour counts; the raw
+ * rows (with customer data) are discarded the moment this returns.
+ */
+export async function fetchInvoices(
+  session: SD3Session,
+  storeId: number,
+  startDate: string,
+  endDate: string
+): Promise<SD3InvoiceLite[]> {
+  const url =
+    `${SD3_BASE}/rest/invoice` +
+    `?storeConfig=${storeId}&invoiceDate>=${startDate}&invoiceDate<=${endDate}`
+
+  const res = await fetch(url, { headers: jsonHeaders(session.token) })
+  if (!res.ok) {
+    throw new Error(
+      `invoice failed for storeId=${storeId}: ${res.status} ${res.statusText}`
+    )
+  }
+
+  const rows = asRowArray(await res.json())
+  return rows.map(r => ({
+    storeId,
+    invoiceDate: String(r.invoiceDate ?? ''),
+    timeIn: r.timeIn ? String(r.timeIn) : null,
+    timeServed: r.timeServed ? String(r.timeServed) : null,
+    estWait: numOrNull(r.estimatedWaitMinutesAtArrival ?? r.originalEstWait),
+  }))
+}
+
+/**
  * Pull employee performance CSV (Detail mode — one row per emp/salon/week).
  * Returns raw CSV text; CSV parsing happens in the scraper route.
  */

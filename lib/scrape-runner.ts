@@ -16,10 +16,12 @@ import {
   fetchEmployeeReporting,
   fetchShifts,
   fetchHalfHourOptimal,
+  fetchInvoices,
   batchMap,
   type SD3DailyStoreSummary,
   type SD3ShiftVariance,
   type SD3HalfHourOptimal,
+  type SD3InvoiceLite,
 } from '@/lib/sd3'
 import { upsertSheet, readSheet, rowsToObjects } from '@/lib/sheets'
 import { parseCsv, rowsToObjectsAt, num, returnRate } from '@/lib/csv'
@@ -33,6 +35,16 @@ const SD_WEEKLY_TAB = 'SD_WEEKLY'
 const SD_MONTHLY_TAB = 'SD_MONTHLY'
 const SD_SHIFTS_TAB = 'SD_SHIFTS'
 const SD_HALFHOUR_TAB = 'SD_HALFHOUR'
+const SD_DEMAND_TAB = 'SD_DEMAND'
+
+// Real per-half-hour demand, aggregated from invoices (PII dropped at the SD3
+// boundary). arrivals = customers who joined the list in that slot (true,
+// uncensored demand, incl. those who later walked out). No customer data here.
+const DEMAND_COLUMNS = [
+  'date', 'storeId', 'salonNum', 'halfHour',
+  'arrivals', 'served', 'walkedOut', 'waitedOver15',
+  'avgWaitMin', 'avgEstWaitMin', 'scrapedAt',
+] as const
 
 // Half-hour optimal vs actual staffing, per store/day/half-hour. No pay/PII.
 // halfHour = slot index from midnight (×30 min). gap = worked − needed.
@@ -864,6 +876,123 @@ export async function runHalfHourScrape(
     result.ok = false
     result.error = err instanceof Error ? err.message : String(err)
     console.error('[scrape/halfhour] fatal:', result.error)
+  }
+  result.durationMs = Date.now() - startedAt
+  return result
+}
+
+// ── Real demand (invoices → per-half-hour arrivals/waits, PII-free) ──────
+
+function hhFromTime(iso: string | null): number | null {
+  if (!iso) return null
+  const m = iso.match(/T(\d{2}):(\d{2})/)
+  if (!m) return null
+  return parseInt(m[1], 10) * 2 + (parseInt(m[2], 10) >= 30 ? 1 : 0)
+}
+function waitMinutes(timeIn: string, timeServed: string): number | null {
+  const a = Date.parse(timeIn), b = Date.parse(timeServed)
+  if (isNaN(a) || isNaN(b)) return null
+  return (b - a) / 60000
+}
+
+interface DemandBucket {
+  arrivals: number; served: number; walkedOut: number; waitedOver15: number
+  sumWait: number; nWait: number; sumEst: number; nEst: number
+}
+
+/**
+ * Scrape real demand into SD_DEMAND by aggregating invoices to per-half-hour
+ * counts. Customers are bucketed by their arrival (timeIn) slot, so this is
+ * true demand — everyone who joined the list, including those who walked out.
+ * Only the rollup is written; no customer/PII data is ever stored.
+ *  - no args     → current fiscal week-to-date.
+ *  - start & end → explicit range (backfill); one call per store.
+ * Upsert key (date, storeId, halfHour).
+ */
+export async function runDemandScrape(
+  startOverride?: string,
+  endOverride?: string
+): Promise<EntityScrapeResult> {
+  const startedAt = Date.now()
+  const end = endOverride || yesterdayET()
+  const start = startOverride || fiscalWeekStart(end)
+  const result: EntityScrapeResult = {
+    ok: true, durationMs: 0, weekStart: start, weekEnd: end,
+    rowsUpserted: 0, updated: 0, inserted: 0, skipped: 0, processed: 0, error: null,
+  }
+  try {
+    const session = await authenticate()
+    const salons = await fetchSalons(session)
+    console.log(`[scrape/demand] ${start}→${end} — ${salons.length} salons`)
+
+    const dataRows: Record<string, any>[] = []
+    let firstErr = ''
+    let storesFailed = 0
+
+    for (const s of salons) {
+      let invoices: SD3InvoiceLite[]
+      try {
+        invoices = await fetchInvoices(session, s.storeId, start, end)
+      } catch (e) {
+        storesFailed++
+        const msg = e instanceof Error ? e.message : String(e)
+        if (!firstErr) firstErr = msg
+        console.error(`[scrape/demand] store ${s.salonNum} (${s.storeId}) failed:`, msg)
+        continue
+      }
+
+      // Aggregate this store's invoices into per (date, halfHour) buckets.
+      const buckets = new Map<string, DemandBucket>()
+      for (const inv of invoices) {
+        const hh = hhFromTime(inv.timeIn)
+        if (hh === null || !inv.invoiceDate) continue // no arrival time = not a floor demand event
+        const key = inv.invoiceDate + '|' + hh
+        let b = buckets.get(key)
+        if (!b) { b = { arrivals: 0, served: 0, walkedOut: 0, waitedOver15: 0, sumWait: 0, nWait: 0, sumEst: 0, nEst: 0 }; buckets.set(key, b) }
+        b.arrivals++
+        if (inv.timeServed) {
+          b.served++
+          const w = inv.timeIn ? waitMinutes(inv.timeIn, inv.timeServed) : null
+          if (w !== null) { b.sumWait += w; b.nWait++; if (w > 15) b.waitedOver15++ }
+        } else {
+          b.walkedOut++ // arrived, joined the list, never served
+        }
+        if (inv.estWait !== null && inv.estWait >= 0) { b.sumEst += inv.estWait; b.nEst++ }
+      }
+
+      for (const [key, b] of buckets) {
+        const [date, hhStr] = key.split('|')
+        dataRows.push({
+          date, storeId: s.storeId, salonNum: s.salonNum, halfHour: Number(hhStr),
+          arrivals: b.arrivals, served: b.served, walkedOut: b.walkedOut, waitedOver15: b.waitedOver15,
+          avgWaitMin: b.nWait ? (b.sumWait / b.nWait).toFixed(1) : '',
+          avgEstWaitMin: b.nEst ? (b.sumEst / b.nEst).toFixed(1) : '',
+          scrapedAt: new Date().toISOString(),
+        })
+      }
+    }
+
+    result.processed = dataRows.length
+    if (dataRows.length === 0) {
+      result.error = firstErr
+        ? `0 rows — ${storesFailed}/${salons.length} stores errored, first: ${firstErr}`
+        : '0 rows — no invoices with arrival times in range (check endpoint/params)'
+    }
+    if (dataRows.length > 0) {
+      const up = await upsertSheet(
+        SD_DEMAND_TAB,
+        [...DEMAND_COLUMNS],
+        ['date', 'storeId', 'halfHour'],
+        dataRows
+      )
+      result.rowsUpserted = dataRows.length
+      result.updated = up.updated
+      result.inserted = up.inserted
+    }
+  } catch (err) {
+    result.ok = false
+    result.error = err instanceof Error ? err.message : String(err)
+    console.error('[scrape/demand] fatal:', result.error)
   }
   result.durationMs = Date.now() - startedAt
   return result
