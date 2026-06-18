@@ -1513,7 +1513,7 @@ function switchToAdmin(){
 // (2) click a day → who worked that day + their performance. Click-through is
 // role/assignment-gated (canDrillSalon). Salon-level rates use the same SD3
 // formulas as the weekly recompute (lib/aggregate.ts). Return data excluded.
-let S_dailyData = null;          // { start, end, salonDaily[], empDaily[], shifts[], halfHour[], demand[] }  (14-day window)
+let S_dailyData = null;          // { start, end, salonDaily[], empDaily[], shifts[], halfHour[], demand[], chkinout[] }  (14-day window)
 let S_dailyDetail = null;        // { salonNum, date } currently open
 
 const DAILY_DAYNAMES = ['Sat','Sun','Mon','Tue','Wed','Thu','Fri'];
@@ -1651,7 +1651,7 @@ function openSalonDaily(sn, hostId){
     if(!cur || !cur.success){ host.innerHTML='<div class="table-card"><div class="no-data">Error loading daily data: '+((cur&&cur.error)||'unknown')+'</div></div>'; return; }
     const pySalon = (py && py.success) ? (py.salonDaily||[]) : [];   // prior-year salon rows (empty until backfilled)
     S_dailyData = { key:cacheKey, start:curStart, end:curEnd,
-      salonDaily:[...(cur.salonDaily||[]), ...pySalon], empDaily:cur.empDaily||[], shifts:cur.shifts||[], halfHour:cur.halfHour||[], demand:cur.demand||[] };
+      salonDaily:[...(cur.salonDaily||[]), ...pySalon], empDaily:cur.empDaily||[], shifts:cur.shifts||[], halfHour:cur.halfHour||[], demand:cur.demand||[], chkinout:cur.chkinout||[] };
     render();
   }).catch(err=>{ host.innerHTML='<div class="table-card"><div class="no-data">Error: '+err.message+'</div></div>'; });
 }
@@ -1709,19 +1709,19 @@ function dShiftBlock(sn, date){
 
 // ── Half-hour staffing heat map (our target vs actual coverage) ──
 // Slot index → clock label (×30 min from midnight). gap = worked − need.
-// need = round(SUSTAINED demand × cycle ÷ 30). Two modeling choices:
-//  • cycle = effective minutes a customer occupies a stylist = cut + transition.
-//    We CAP each piece at target but CREDIT genuine speed: a fast crew earns a
-//    lower need; a slow crew is a coaching issue, not a reason to add bodies, so
-//    slowness never inflates need. cycle = min(targetHC,actualHC)+min(targetMBC,actualMBC).
-//  • demand is SMOOTHED over a rolling window, because a haircut queue buffers a
-//    single-slot arrival burst into the next slot or two — so need should track
-//    the sustained rate, not an instantaneous spike (which produced false -7s).
-// Tune the three constants below to trade payroll vs. waits.
-const HM_TARGET_HC = 14.5;     // target haircut minutes
-const HM_TARGET_MBC = 2;       // target transition minutes between customers
+// need = round(SUSTAINED arrivals/hour ÷ (salon CPH goal + stretch)). The CPH
+// goal is the salon's volume-scaled productivity target, so the model self-
+// calibrates per salon; the stretch staffs slightly leaner than goal. Demand is
+// smoothed (the queue buffers bursts), so need tracks the sustained rate.
 const HM_SMOOTH_RADIUS = 1;    // ± slots averaged for sustained demand (1 = 90-min window)
-function hmNeeded(cust, cycle){ cycle = cycle || (HM_TARGET_HC+HM_TARGET_MBC); return Math.round((n(cust)||0)*cycle/30); }
+const HM_CPH_STRETCH   = 0.15; // staff to BEAT the CPH goal by this (lean dial)
+const HM_TARGET_HC = 14.5;     // target haircut min (for coaching "work-back", not need)
+const HM_TARGET_MBC = 2;       // target transition min (for coaching "work-back", not need)
+// Per-salon 2026 CPH goals (volume-scaled). Fallback 2.2 for any salon not listed.
+const HM_CPH_GOAL = {'1304':2.2,'2554':2.0,'3015':2.6,'3025':2.8,'3027':2.5,'3043':2.5,'3045':2.0,'3053':2.4,'3058':2.8,'3062':2.7,'3071':2.9,'3545':1.6,'3685':1.8,'4138':2.0,'7728':2.6,'8725':2.0,'9478':2.8,'9489':2.0,'9689':2.7};
+function hmCphGoal(sn){ return (HM_CPH_GOAL[String(sn).trim()] || 2.2) + HM_CPH_STRETCH; }
+// arrPer30 = sustained arrivals per 30-min slot → stylists needed at the CPH goal.
+function hmNeeded(arrPer30, sn){ return Math.round((n(arrPer30)||0) * 2 / hmCphGoal(sn)); }
 function dHHLabel(hh){ const h=Math.floor(hh/2), mn=(hh%2)?'30':'00', ap=h<12?'a':'p', hr=h%12||12; return hr+':'+mn+ap; }
 function dGapColor(needed, worked){
   if(needed<=0 && worked<=0) return {bg:'#fafafa', fg:'#ccc'};                 // closed / dead slot
@@ -1757,38 +1757,27 @@ function dHeatMap(sn, dates){
   const realDem={};
   (S_dailyData.demand||[]).forEach(r=>{ if((r.salonNum||'').trim()===String(sn).trim()) realDem[r.date+'|'+n(r.halfHour)]={arrivals:n(r.arrivals)||0, served:n(r.served)||0, walkedOut:n(r.walkedOut)||0, w15:n(r.waitedOver15)||0, aw:r.avgWaitMin}; });
   const hasReal = Object.keys(realDem).length>0;
-  // "worked" from the OPTIMAL endpoint is forecast-only (≈0 actuals), so derive
-  // real floor coverage from shift clock-times: for each half-hour, count the
-  // distinct on-floor stylists whose ACTUAL clocked interval overlaps the slot.
-  // No-shows have null actuals (drop out); receptionists are isNonFloor (skip).
+  // Floor coverage from ACTUAL clock punches (SD_CHKINOUT) — complete (every
+  // employee, every segment), unlike the SD_SHIFTS variance feed. For each
+  // half-hour, count distinct stylists whose punch interval overlaps the slot,
+  // counting ONLY asStylist segments (drops asRecept/asTraining/asAdmin time).
+  // Off-clock gaps between a person's segments (lunch) drop out automatically;
+  // a paid in-segment break (breakTime) isn't placeable, so it's a minor
+  // overcount in ~one slot — acceptable.
   const hmTrue=v=>{ const t=String(v==null?'':v).trim().toLowerCase(); return t==='true'||t==='1'||t==='yes'; };
   const workedByDate={};
-  (S_dailyData.shifts||[]).forEach(s=>{
+  (S_dailyData.chkinout||[]).forEach(s=>{
     if((s.salonNum||'').trim()!==String(sn).trim()) return;
-    if(hmTrue(s.isNonFloor)) return;                          // skip reception / non-floor
-    const a=dMinOfDay(s.actualStart), b=dMinOfDay(s.actualEnd);
-    if(a==null||b==null||b<=a) return;                        // no-show or bad row
+    if(!hmTrue(s.asStylist)) return;                          // floor-cutting segments only
+    if(hmTrue(s.absent)) return;
+    const a=dMinOfDay(s.checkInTime), b=dMinOfDay(s.checkOutTime);
+    if(a==null||b==null||b<=a) return;
     const wd=workedByDate[s.date]=workedByDate[s.date]||{};
-    const pk=String(s.employeePk||(s.firstName+''+s.lastName));
+    const pk=String(s.employeePk||s.chkPk||(s.fname+''+s.lname));
     const h0=Math.floor(a/30), h1=Math.ceil(b/30)-1;
     for(let hh=h0; hh<=h1; hh++){ (wd[hh]=wd[hh]||new Set()).add(pk); }
   });
   const hasShifts = Object.keys(workedByDate).length>0;
-  // Per-day effective cycle: cap each piece at target, credit when faster.
-  // (Same HC-time / MBC source as the day table above: HC = haircut min ÷
-  // haircut invoices, MBC = non-cut-waiting min ÷ customers.)
-  const cycleByDate={};
-  (S_dailyData.salonDaily||[]).forEach(r=>{
-    if((r.salonNum||'').trim()!==String(sn).trim()) return;
-    const hcInv=n(r.haircutOnlyInvoiceCount), hcMin=n(r.haircutOnlyServiceMinutes);
-    const cc=n(r.customerCount), ncwm=n(r.nonCutWithCustWaitingMinutes);
-    const aHC  = hcInv>0 ? hcMin/hcInv : null;
-    const aMBC = cc>0    ? ncwm/cc     : null;
-    const effHC  = (aHC!=null  && aHC>0 ) ? Math.min(HM_TARGET_HC,  aHC ) : HM_TARGET_HC;
-    const effMBC = (aMBC!=null && aMBC>0) ? Math.min(HM_TARGET_MBC, aMBC) : HM_TARGET_MBC;
-    cycleByDate[r.date] = effHC + effMBC;
-  });
-  const hmCycle = dt => cycleByDate[dt] || (HM_TARGET_HC+HM_TARGET_MBC);
   // Sustained demand: centered moving average of arrivals (queue buffers bursts).
   function smoothArr(dt, hh){
     let sum=0, cnt=0;
@@ -1809,13 +1798,12 @@ function dHeatMap(sn, dates){
       const c=day[hh];
       if(!c){ cells+='<td style="background:#fafafa;min-width:34px;height:30px;"></td>'; continue; }
       const rd=realDem[dt+'|'+hh];
-      const cyc=hmCycle(dt);
       // Real data present → need is driven by the SUSTAINED rate (smoothed),
       // not the raw single-slot count; missing slot = nobody came (0).
       const dem = hasReal ? smoothArr(dt,hh) : c.cust*(scaleByDate[dt]||1);
       const worked = (workedByDate[dt] && workedByDate[dt][hh]) ? workedByDate[dt][hh].size
-                   : (hasShifts ? 0 : (n(c.worked)||0));   // shifts loaded → trust them; else fall back to endpoint
-      const need=hmNeeded(dem,cyc), col=dGapColor(need,worked), gap=worked-need;
+                   : (hasShifts ? 0 : (n(c.worked)||0));   // punches loaded → trust them; else fall back to endpoint
+      const need=hmNeeded(dem,sn), col=dGapColor(need,worked), gap=worked-need;
       const txt = gap<0 ? String(gap) : (gap>0 ? '+'+gap : '');
       const tip = rd
         ? (DAILY_DAYNAMES[i]+' '+dHHLabel(hh)+' — '+rd.arrivals+' arrived (sustained ~'+dem.toFixed(1)+'/30m)'+(rd.walkedOut?(', '+rd.walkedOut+' left'):'')+', need '+need+', worked '+worked+(gap<0?' (short '+(-gap)+')':gap>0?' (over '+gap+')':' (matched)')+(rd.w15?('; '+rd.w15+' waited >15m'):'')+(rd.aw?('; avg wait '+rd.aw+'m'):''))
@@ -1826,7 +1814,7 @@ function dHeatMap(sn, dates){
   });
   return '<div style="margin-top:16px;">'
     + '<div style="font-weight:700;color:var(--primary);margin-bottom:2px;">Staffing heat map — where hours missed demand</div>'
-    + '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Each cell is a half-hour. Need is based on <b>sustained</b> demand (smoothed over '+(HM_SMOOTH_RADIUS*2+1)+' slots, since the queue buffers bursts) and your target cut speed (or actual, when the crew was faster). Demand = '+(hasReal?'actual customer arrivals':'forecast scaled to the day\'s actual total')+'; worked = '+(hasShifts?'stylists actually clocked in':'from staffing report')+'. <span style="color:#c0392b;font-weight:700;">Red = understaffed</span>, <span style="color:#2980b9;font-weight:700;">blue = overstaffed</span>, <span style="color:#1b5e20;font-weight:700;">green = matched</span>. Number is stylists over/short; hover for detail.</div>'
+    + '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Each cell is a half-hour. Need = <b>sustained</b> arrivals (smoothed over '+(HM_SMOOTH_RADIUS*2+1)+' slots) ÷ this salon\'s CPH goal ('+(HM_CPH_GOAL[String(sn).trim()]||2.2)+', staffed to beat by '+HM_CPH_STRETCH+'). Demand = '+(hasReal?'actual customer arrivals':'forecast scaled to the day\'s actual total')+'; worked = '+(hasShifts?'stylists actually clocked in (floor only)':'from staffing report')+'. <span style="color:#c0392b;font-weight:700;">Red = understaffed</span>, <span style="color:#2980b9;font-weight:700;">blue = overstaffed</span>, <span style="color:#1b5e20;font-weight:700;">green = matched</span>. Number is stylists over/short; hover for detail.</div>'
     + '<div style="overflow-x:auto;"><table style="border-collapse:separate;border-spacing:2px;"><thead><tr>'+header+'</tr></thead><tbody>'+rows+'</tbody></table></div>'
     + '</div>';
 }
@@ -1950,7 +1938,7 @@ function loadDayReview(dateIso){
   ]).then(([cur,pyd])=>{
     if(!cur || !cur.success){ body.innerHTML='<div class="no-data">Error loading: '+((cur&&cur.error)||'unknown')+'</div>'; return; }
     const pySalon=(pyd&&pyd.success)?(pyd.salonDaily||[]):[];
-    S_dailyData={ key:cacheKey, day:dateIso, salonDaily:[...(cur.salonDaily||[]),...pySalon], empDaily:cur.empDaily||[], shifts:cur.shifts||[], halfHour:cur.halfHour||[], demand:cur.demand||[] };
+    S_dailyData={ key:cacheKey, day:dateIso, salonDaily:[...(cur.salonDaily||[]),...pySalon], empDaily:cur.empDaily||[], shifts:cur.shifts||[], halfHour:cur.halfHour||[], demand:cur.demand||[], chkinout:cur.chkinout||[] };
     renderDayReviewTable(dateIso);
   }).catch(err=>{ body.innerHTML='<div class="no-data">Error: '+err.message+'</div>'; });
 }
