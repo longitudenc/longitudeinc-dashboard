@@ -1,77 +1,58 @@
-// app/api/gs/getDaily/route.ts
+// app/api/scrape/demand/route.ts
 //
-// On-demand endpoint for the Daily view. Returns salon-level (SD_DAILY) and
-// per-stylist (SD_EMP_DAILY) rows for a date window. Signed-in only; rows are
-// scoped to the caller's role (AMs get their salons; managers/stylists get none).
+// Manual + backfill endpoint for real per-half-hour demand, aggregated from
+// invoices. Thin wrapper over runDemandScrape() in lib/scrape-runner.ts.
 //
-// NOT part of getAllData — only hit when the Daily tab is opened, so the main
-// dashboard load stays fast as these tabs grow.
+// Invoices (/rest/invoice) are read per store, rolled up to per-half-hour
+// arrivals/served/walkouts/waits IN MEMORY, and only the rollup is written to
+// SD_DEMAND. No customer/PII data is ever persisted.
 //
 // Usage:
-//   /api/gs/getDaily?start=YYYY-MM-DD&end=YYYY-MM-DD   (both required)
+//   ?secret=...                       required (or Authorization: Bearer ...)
+//   (no dates)                        current fiscal week-to-date
+//   ?start=YYYY-MM-DD&end=YYYY-MM-DD  explicit range (backfill)
 //
-// Response:
-//   { success, start, end,
-//     salonDaily: [ {date, storeId, salonNum, customerCount, serviceSales, ...} ],
-//     empDaily:   [ {date, salonNum, storeId, payId, globalId, employeeName,
-//                    position, floorHours, custCount, hcTime, cph, productPct,
-//                    mbc, nonCutMph, productivity, payrollPct} ] }
-//
-// The UI computes salon-level KPIs from the raw SD_DAILY fields; the per-stylist
-// metrics in SD_EMP_DAILY are already computed by SD3 (cph, hcTime, productPct…).
+// Not in the nightly cron yet — manual until we've validated the rollup and
+// decided on Supabase for the full-history backfill.
 
 import { NextResponse } from 'next/server'
-import { getDailyRange, getShiftsRange, getHalfHourRange, getDemandRange } from '@/lib/sheets'
-import { requireSignedIn } from '@/lib/require-role'
-import { scopeDaily } from '@/lib/scope-filter'
+import { runDemandScrape } from '@/lib/scrape-runner'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
+
+function isAuthorized(request: Request): boolean {
+  const expected = process.env.CRON_SECRET
+  if (!expected) return false
+  const auth = request.headers.get('authorization')
+  if (auth === `Bearer ${expected}`) return true
+  const url = new URL(request.url)
+  return url.searchParams.get('secret') === expected
+}
 
 export async function GET(request: Request) {
-  const gate = await requireSignedIn()
-  if (!gate.ok) return gate.response
-  try {
-    const url = new URL(request.url)
-    const start = url.searchParams.get('start')
-    const end = url.searchParams.get('end')
+  const startedAt = Date.now()
 
-    if (!start || !end) {
-      return NextResponse.json(
-        { success: false, error: 'start and end (YYYY-MM-DD) query params are required' },
-        { status: 400 }
-      )
-    }
-    if (start > end) {
-      return NextResponse.json(
-        { success: false, error: 'start must be on or before end' },
-        { status: 400 }
-      )
-    }
-
-    const raw = await getDailyRange(start, end)
-    const rawShifts = await getShiftsRange(start, end)
-    const rawHalf = await getHalfHourRange(start, end)
-    const rawDemand = await getDemandRange(start, end)
-    const { salonDaily, empDaily, shifts, halfHour, demand } =
-      scopeDaily(raw.salonDaily, raw.empDaily, rawShifts.shifts, rawHalf.halfHour, rawDemand.demand, gate.access)
-
-    return NextResponse.json({
-      success: true,
-      start,
-      end,
-      salonDailyCount: salonDaily.length,
-      empDailyCount: empDaily.length,
-      shiftsCount: shifts.length,
-      halfHourCount: halfHour.length,
-      demandCount: demand.length,
-      salonDaily,
-      empDaily,
-      shifts,
-      halfHour,
-      demand,
-    })
-  } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 500 })
+  if (!isAuthorized(request)) {
+    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
   }
+
+  const url = new URL(request.url)
+  const start = url.searchParams.get('start')
+  const end = url.searchParams.get('end')
+
+  const result = await runDemandScrape(start || undefined, end || undefined)
+
+  return NextResponse.json({
+    ok: result.ok,
+    mode: start && end ? 'range' : 'week-to-date',
+    start: result.weekStart,
+    end: result.weekEnd,
+    processed: result.processed,
+    inserted: result.inserted,
+    updated: result.updated,
+    durationMs: Date.now() - startedAt,
+    error: result.error,
+  }, { status: result.ok ? 200 : 500 })
 }
