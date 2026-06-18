@@ -56,6 +56,7 @@ const CHKINOUT_COLUMNS = [
 const DEMAND_COLUMNS = [
   'date', 'storeId', 'salonNum', 'halfHour',
   'arrivals', 'served', 'walkedOut', 'waitedOver15',
+  'avgLine', 'avgBusy',
   'avgWaitMin', 'avgEstWaitMin', 'scrapedAt',
 ] as const
 
@@ -902,6 +903,14 @@ function hhFromTime(iso: string | null): number | null {
   if (!m) return null
   return parseInt(m[1], 10) * 2 + (parseInt(m[2], 10) >= 30 ? 1 : 0)
 }
+// Wall-clock minute-of-day from a naive local ISO ("2026-05-23T08:58:31.217").
+// We parse the clock directly (NOT Date.parse) so no timezone shift is applied.
+function minOfDay(iso: string | null): number | null {
+  if (!iso) return null
+  const m = iso.match(/T(\d{2}):(\d{2})(?::(\d{2}))?/)
+  if (!m) return null
+  return parseInt(m[1], 10) * 60 + parseInt(m[2], 10) + (m[3] ? parseInt(m[3], 10) / 60 : 0)
+}
 function waitMinutes(timeIn: string, timeServed: string): number | null {
   const a = Date.parse(timeIn), b = Date.parse(timeServed)
   if (isNaN(a) || isNaN(b)) return null
@@ -911,6 +920,9 @@ function waitMinutes(timeIn: string, timeServed: string): number | null {
 interface DemandBucket {
   arrivals: number; served: number; walkedOut: number; waitedOver15: number
   sumWait: number; nWait: number; sumEst: number; nEst: number
+  // Time-weighted accumulators (customer-minutes within each half-hour):
+  waitMin: number   // minutes customers spent waiting in-store (timeIn→timeServed)
+  busyMin: number   // minutes chairs were occupied (timeServed→timeOut)
 }
 
 /**
@@ -955,13 +967,42 @@ export async function runDemandScrape(
       }
 
       // Aggregate this store's invoices into per (date, halfHour) buckets.
+      // arrivals/served/walkedOut/waits are counted at the ARRIVAL slot.
+      // avgLine and avgBusy are TIME-WEIGHTED: each served customer's in-store
+      // wait interval [timeIn, timeServed] and chair interval [timeServed,
+      // timeOut] are spread across every half-hour they overlap, so a 30-second
+      // wait barely registers while a 25-minute wait shows as a real body across
+      // several slots. timeIn is the PHYSICAL arrival, so OCI at-home minutes are
+      // never in the line.
       const buckets = new Map<string, DemandBucket>()
-      for (const inv of invoices) {
-        const hh = hhFromTime(inv.timeIn)
-        if (hh === null || !inv.invoiceDate) continue // no arrival time = not a floor demand event
-        const key = inv.invoiceDate + '|' + hh
+      const getBucket = (date: string, hh: number): DemandBucket => {
+        const key = date + '|' + hh
         let b = buckets.get(key)
-        if (!b) { b = { arrivals: 0, served: 0, walkedOut: 0, waitedOver15: 0, sumWait: 0, nWait: 0, sumEst: 0, nEst: 0 }; buckets.set(key, b) }
+        if (!b) {
+          b = { arrivals: 0, served: 0, walkedOut: 0, waitedOver15: 0, sumWait: 0, nWait: 0, sumEst: 0, nEst: 0, waitMin: 0, busyMin: 0 }
+          buckets.set(key, b)
+        }
+        return b
+      }
+      // Spread the minutes of interval [aMin,bMin] (same day) into each slot it
+      // overlaps, accumulating into the named time-weighted field.
+      const addInterval = (date: string, aMin: number | null, bMin: number | null, field: 'waitMin' | 'busyMin') => {
+        if (aMin === null || bMin === null) return
+        const a = Math.max(0, aMin), b = Math.min(1440, bMin)
+        if (b <= a) return
+        const first = Math.floor(a / 30)
+        const last = Math.floor((b - 1e-9) / 30)
+        for (let h = first; h <= last; h++) {
+          const ov = Math.min(b, h * 30 + 30) - Math.max(a, h * 30)
+          if (ov > 0) getBucket(date, h)[field] += ov
+        }
+      }
+
+      for (const inv of invoices) {
+        if (!inv.invoiceDate) continue
+        const hh = hhFromTime(inv.timeIn)
+        if (hh === null) continue // no in-store arrival = not a floor demand event
+        const b = getBucket(inv.invoiceDate, hh)
         b.arrivals++
         if (inv.timeServed) {
           b.served++
@@ -971,6 +1012,13 @@ export async function runDemandScrape(
           b.walkedOut++ // arrived, joined the list, never served
         }
         if (inv.estWait !== null && inv.estWait >= 0) { b.sumEst += inv.estWait; b.nEst++ }
+
+        // Time-weighted line (waiting) and chair-occupancy (busy).
+        const tIn = minOfDay(inv.timeIn)
+        const tServed = minOfDay(inv.timeServed)
+        const tOut = minOfDay(inv.timeOut)
+        if (tIn !== null && tServed !== null) addInterval(inv.invoiceDate, tIn, tServed, 'waitMin')
+        if (tServed !== null && tOut !== null) addInterval(inv.invoiceDate, tServed, tOut, 'busyMin')
       }
 
       for (const [key, b] of buckets) {
@@ -978,6 +1026,8 @@ export async function runDemandScrape(
         dataRows.push({
           date, storeId: s.storeId, salonNum: s.salonNum, halfHour: Number(hhStr),
           arrivals: b.arrivals, served: b.served, walkedOut: b.walkedOut, waitedOver15: b.waitedOver15,
+          avgLine: (b.waitMin / 30).toFixed(2),
+          avgBusy: (b.busyMin / 30).toFixed(2),
           avgWaitMin: b.nWait ? (b.sumWait / b.nWait).toFixed(1) : '',
           avgEstWaitMin: b.nEst ? (b.sumEst / b.nEst).toFixed(1) : '',
           scrapedAt: new Date().toISOString(),

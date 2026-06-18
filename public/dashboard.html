@@ -1707,129 +1707,101 @@ function dShiftBlock(sn, date){
   </div>`;
 }
 
-// ── Half-hour staffing heat map (our target vs actual coverage) ──
-// Slot index → clock label (×30 min from midnight). gap = worked − need.
-// need = round(SUSTAINED demand × cycle ÷ 30), where cycle = the minutes a
-// customer occupies a stylist when busy = cut + transition. We CAP each piece at
-// target but CREDIT genuine speed (fast crew → lower need; slow crew is a
-// coaching issue, not a staffing one). Demand is smoothed (the queue buffers
-// bursts) and is "customers served, placed at arrival time" (ties to CC).
-// NB: CPH goal is the right scorecard yardstick but the WRONG per-slot divisor —
-// it's a daily average that bakes in idle time, so it overstates need.
-const HM_TARGET_HC = 14.5;     // target haircut minutes
-const HM_TARGET_MBC = 2;       // target transition minutes between customers
-const HM_SMOOTH_RADIUS = 1;    // ± slots averaged for sustained demand (1 = 90-min window)
-function hmNeeded(custPer30, cycle){ cycle = cycle || (HM_TARGET_HC+HM_TARGET_MBC); return Math.round((n(custPer30)||0)*cycle/30); }
+// ── Half-hour staffing heat map (MEASURED line + idle, not modeled need) ──
+// We no longer model "need" from demand × cut-speed. Instead we read what
+// actually happened each half-hour straight from the invoice timestamps:
+//   • line  = avg # of customers physically waiting in-store (timeIn→timeServed),
+//             time-weighted within the slot. timeIn is the PHYSICAL arrival, so
+//             online check-in minutes spent at home never count toward the line.
+//   • busy  = avg # of chairs occupied (timeServed→timeOut), time-weighted.
+//   • workedFTE = avg # of stylists clocked in on the floor (asStylist punches),
+//             time-weighted. idle = workedFTE − busy.
+// A slot is UNDERSTAFFED when a line formed (red, sized by line length),
+// OVERSTAFFED when stylists sat idle with no line (blue, sized by idle), MATCHED
+// when chairs were busy with no line, dead/closed when nobody worked or waited.
+const HM_LINE_RED  = 0.5;  // avg people waiting at/above which a slot reads understaffed
+const HM_IDLE_BLUE = 0.5;  // avg idle stylists at/above which a slot reads overstaffed
 function dHHLabel(hh){ const h=Math.floor(hh/2), mn=(hh%2)?'30':'00', ap=h<12?'a':'p', hr=h%12||12; return hr+':'+mn+ap; }
-function dGapColor(needed, worked){
-  if(needed<=0 && worked<=0) return {bg:'#fafafa', fg:'#ccc'};                 // closed / dead slot
-  const gap=worked-needed;
-  if(gap<0){ const a=Math.min(0.92, 0.30+0.20*Math.abs(gap)); return {bg:'rgba(192,57,43,'+a+')', fg:'#fff'}; }   // understaffed
-  if(gap>0){ const a=Math.min(0.80, 0.22+0.16*gap); return {bg:'rgba(41,128,185,'+a+')', fg:'#fff'}; }            // overstaffed
-  return {bg:'rgba(39,174,96,0.40)', fg:'#1b5e20'};                            // matched (had demand)
+function hmTrue(v){ const t=String(v==null?'':v).trim().toLowerCase(); return t==='true'||t==='1'||t==='yes'; }
+// Overlap (minutes) between [a,b] minute-of-day and half-hour slot hh.
+function dSlotOverlap(a, b, hh){ if(a==null||b==null||b<=a) return 0; const s=hh*30, e=s+30; const ov=Math.min(b,e)-Math.max(a,s); return ov>0?ov:0; }
+function dStateColor(line, idle){
+  // line and idle are mostly mutually exclusive; whichever is the real signal wins.
+  if(line>=HM_LINE_RED && line>=idle){ const al=Math.min(0.92, 0.30+0.18*line); return {bg:'rgba(192,57,43,'+al+')', fg:'#fff'}; }
+  if(idle>=HM_IDLE_BLUE){ const ab=Math.min(0.80, 0.22+0.16*idle); return {bg:'rgba(41,128,185,'+ab+')', fg:'#fff'}; }
+  return {bg:'rgba(39,174,96,0.38)', fg:'#1b5e20'};   // matched: chairs busy, no line, no idle
 }
 function dHeatMap(sn, dates){
-  const all=(S_dailyData&&S_dailyData.halfHour)?S_dailyData.halfHour:[];
-  const mine=all.filter(r=>(r.salonNum||'').trim()===String(sn).trim());
-  if(!mine.length) return '<div style="font-size:11px;color:var(--text-muted);margin-top:16px;">No half-hour staffing data for this week yet. Run the half-hour scrape to light up the heat map.</div>';
-  const byDate={}; let minHH=99, maxHH=0;
-  mine.forEach(r=>{ const hh=n(r.halfHour); if(isNaN(hh)) return;
-    (byDate[r.date]=byDate[r.date]||{})[hh]={needed:n(r.needed)||0, worked:n(r.worked)||0, cust:n(r.customerCount)||0};
-    if(((n(r.needed)||0)>0)||((n(r.worked)||0)>0)||((n(r.customerCount)||0)>0)){ if(hh<minHH)minHH=hh; if(hh>maxHH)maxHH=hh; }
+  sn = String(sn).trim();
+  const dem=(S_dailyData&&S_dailyData.demand)?S_dailyData.demand.filter(r=>(r.salonNum||'').trim()===sn):[];
+  const hasMeasured = dem.some(r=> String(r.avgLine==null?'':r.avgLine).trim()!=='' || String(r.avgBusy==null?'':r.avgBusy).trim()!=='');
+  if(!hasMeasured){
+    const msg = dem.length
+      ? 'Demand data for this week predates the line/idle measure. Re-run the demand scrape with the latest build to light up the heat map.'
+      : 'No demand data for this week yet. Run the demand scrape to light up the heat map.';
+    return '<div style="font-size:11px;color:var(--text-muted);margin-top:16px;">'+msg+'</div>';
+  }
+  // Measured state per date|hh from the demand rows.
+  const D={}; let minHH=99, maxHH=0;
+  const mark=hh=>{ if(hh<minHH)minHH=hh; if(hh>maxHH)maxHH=hh; };
+  dem.forEach(r=>{ const hh=n(r.halfHour); if(isNaN(hh)) return;
+    const line=n(r.avgLine), busy=n(r.avgBusy);
+    D[r.date+'|'+hh]={ line:line, busy:busy,
+      arrivals:n(r.arrivals)||0, served:n(r.served)||0, walkedOut:n(r.walkedOut)||0,
+      w15:n(r.waitedOver15)||0, aw:r.avgWaitMin };
+    if(line>0||busy>0||(n(r.arrivals)||0)>0) mark(hh);
   });
-  if(minHH>maxHH) return '<div style="font-size:11px;color:var(--text-muted);margin-top:16px;">No staffed half-hours recorded this week.</div>';
-  // The half-hour customerCount is SD3's demand FORECAST and sums to far more
-  // than the day actually served, which inflated "need" (red everywhere). Use
-  // the forecast only for its SHAPE, scaled down to each day's REAL customer
-  // count (from the daily salon row), so need reflects what actually walked in.
-  const actualCC={};
-  (S_dailyData.salonDaily||[]).forEach(r=>{ if((r.salonNum||'').trim()===String(sn).trim()) actualCC[r.date]=n(r.customerCount)||0; });
-  const scaleByDate={};
-  Object.keys(byDate).forEach(d=>{
-    let fsum=0; for(const k in byDate[d]) fsum+=byDate[d][k].cust;
-    scaleByDate[d] = (fsum>0 && actualCC[d]!=null) ? actualCC[d]/fsum : 1;
-  });
-  // Real per-half-hour demand from invoices (arrivals), keyed date|hh. When
-  // present we use it directly (true demand); otherwise fall back to the
-  // forecast curve scaled to the day's actual total.
-  const realDem={};
-  (S_dailyData.demand||[]).forEach(r=>{ if((r.salonNum||'').trim()===String(sn).trim()) realDem[r.date+'|'+n(r.halfHour)]={arrivals:n(r.arrivals)||0, served:n(r.served)||0, walkedOut:n(r.walkedOut)||0, w15:n(r.waitedOver15)||0, aw:r.avgWaitMin}; });
-  const hasReal = Object.keys(realDem).length>0;
-  // Floor coverage from ACTUAL clock punches (SD_CHKINOUT) — complete (every
-  // employee, every segment), unlike the SD_SHIFTS variance feed. For each
-  // half-hour, count distinct stylists whose punch interval overlaps the slot,
-  // counting ONLY asStylist segments (drops asRecept/asTraining/asAdmin time).
-  // Off-clock gaps between a person's segments (lunch) drop out automatically;
-  // a paid in-segment break (breakTime) isn't placeable, so it's a minor
-  // overcount in ~one slot — acceptable.
-  const hmTrue=v=>{ const t=String(v==null?'':v).trim().toLowerCase(); return t==='true'||t==='1'||t==='yes'; };
-  const workedByDate={};
+  // Floor coverage from ACTUAL clock punches (SD_CHKINOUT), time-weighted.
+  // ftMin[date][hh] = stylist-minutes on the floor in that slot (→ FTE = /30);
+  // head[date][hh] = distinct headcount (for the tooltip). Only asStylist
+  // segments count (drops asRecept/asTraining/asAdmin); absent dropped. A paid
+  // in-segment break isn't placeable, so it reads as a touch of idle — minor.
+  const ftMin={}, head={};
   (S_dailyData.chkinout||[]).forEach(s=>{
-    if((s.salonNum||'').trim()!==String(sn).trim()) return;
-    if(!hmTrue(s.asStylist)) return;                          // floor-cutting segments only
-    if(hmTrue(s.absent)) return;
+    if((s.salonNum||'').trim()!==sn) return;
+    if(!hmTrue(s.asStylist) || hmTrue(s.absent)) return;
     const a=dMinOfDay(s.checkInTime), b=dMinOfDay(s.checkOutTime);
     if(a==null||b==null||b<=a) return;
-    const wd=workedByDate[s.date]=workedByDate[s.date]||{};
     const pk=String(s.employeePk||s.chkPk||(s.fname+''+s.lname));
     const h0=Math.floor(a/30), h1=Math.ceil(b/30)-1;
-    for(let hh=h0; hh<=h1; hh++){ (wd[hh]=wd[hh]||new Set()).add(pk); }
-  });
-  const hasShifts = Object.keys(workedByDate).length>0;
-  // Per-day cut-speed cycle: cap each piece at target, credit when faster.
-  const cycleByDate={};
-  (S_dailyData.salonDaily||[]).forEach(r=>{
-    if((r.salonNum||'').trim()!==String(sn).trim()) return;
-    const hcInv=n(r.haircutOnlyInvoiceCount), hcMin=n(r.haircutOnlyServiceMinutes);
-    const cc=n(r.customerCount), ncwm=n(r.nonCutWithCustWaitingMinutes);
-    const aHC  = hcInv>0 ? hcMin/hcInv : null;
-    const aMBC = cc>0    ? ncwm/cc     : null;
-    const effHC  = (aHC!=null  && aHC>0 ) ? Math.min(HM_TARGET_HC,  aHC ) : HM_TARGET_HC;
-    const effMBC = (aMBC!=null && aMBC>0) ? Math.min(HM_TARGET_MBC, aMBC) : HM_TARGET_MBC;
-    cycleByDate[r.date] = effHC + effMBC;
-  });
-  const hmCycle = dt => cycleByDate[dt] || (HM_TARGET_HC+HM_TARGET_MBC);
-  // Sustained demand: centered moving average of served (queue buffers bursts).
-  function smoothArr(dt, hh){
-    let sum=0, cnt=0;
-    for(let k=hh-HM_SMOOTH_RADIUS; k<=hh+HM_SMOOTH_RADIUS; k++){
-      if(k<minHH || k>maxHH) continue;
-      const r=realDem[dt+'|'+k];
-      sum += r ? r.served : 0; cnt++;
+    const fd=ftMin[s.date]=ftMin[s.date]||{}, hd=head[s.date]=head[s.date]||{};
+    for(let hh=h0; hh<=h1; hh++){
+      fd[hh]=(fd[hh]||0)+dSlotOverlap(a,b,hh);
+      (hd[hh]=hd[hh]||new Set()).add(pk);
+      mark(hh);
     }
-    return cnt ? sum/cnt : 0;
-  }
+  });
+  if(minHH>maxHH) return '<div style="font-size:11px;color:var(--text-muted);margin-top:16px;">No staffed or busy half-hours recorded this week.</div>';
+
   let header='<th style="text-align:left;position:sticky;left:0;background:#fff;z-index:1;font-size:12px;padding-right:10px;">Day</th>';
   for(let hh=minHH; hh<=maxHH; hh++){ header+='<th style="font-size:11px;padding:3px 2px;font-weight:600;color:var(--text-muted);min-width:34px;">'+(hh%2===0?dHHLabel(hh):'')+'</th>'; }
   let rows='';
   dates.forEach((dt,i)=>{
-    const day=byDate[dt]||{};
     let cells='';
     for(let hh=minHH; hh<=maxHH; hh++){
-      const c=day[hh];
-      if(!c){ cells+='<td style="background:#fafafa;min-width:34px;height:30px;"></td>'; continue; }
-      const rd=realDem[dt+'|'+hh];
-      // Real data present → need is driven by the SUSTAINED rate (smoothed),
-      // not the raw single-slot count; missing slot = nobody came (0).
-      const dem = hasReal ? smoothArr(dt,hh) : c.cust*(scaleByDate[dt]||1);
-      const worked = (workedByDate[dt] && workedByDate[dt][hh]) ? workedByDate[dt][hh].size
-                   : (hasShifts ? 0 : (n(c.worked)||0));   // punches loaded → trust them; else fall back to endpoint
-      const need=hmNeeded(dem,hmCycle(dt)), col=dGapColor(need,worked), gap=worked-need;
-      const txt = gap<0 ? String(gap) : (gap>0 ? '+'+gap : '');
-      const tip = rd
-        ? (DAILY_DAYNAMES[i]+' '+dHHLabel(hh)+' — '+rd.served+' served (sustained ~'+dem.toFixed(1)+'/30m), need '+need+', worked '+worked+(gap<0?' (short '+(-gap)+')':gap>0?' (over '+gap+')':' (matched)')+(rd.w15?('; '+rd.w15+' waited >15m'):'')+(rd.aw?('; avg wait '+rd.aw+'m'):''))
-        : (DAILY_DAYNAMES[i]+' '+dHHLabel(hh)+' — '+(hasReal?'0 arrived':'demand ~'+dem.toFixed(1)+' (est)')+', need '+need+', worked '+worked+(gap<0?' (short '+(-gap)+')':gap>0?' (over '+gap+')':gap===0&&need>0?' (matched)':''));
+      const d=D[dt+'|'+hh];
+      const workedFTE=(ftMin[dt]&&ftMin[dt][hh])?ftMin[dt][hh]/30:0;
+      const headN=(head[dt]&&head[dt][hh])?head[dt][hh].size:0;
+      const line=d?d.line:0, busy=d?d.busy:0;
+      const idle=Math.max(0, workedFTE-busy);
+      // dead/closed slot: nobody on the floor, nothing being served, no line.
+      if(workedFTE<0.05 && busy<0.10 && line<0.10){ cells+='<td style="background:#fafafa;min-width:34px;height:30px;"></td>'; continue; }
+      const col=dStateColor(line, idle);
+      let txt='';
+      if(line>=HM_LINE_RED && line>=idle) txt=String(Math.round(line));   // red: people waiting
+      else if(idle>=HM_IDLE_BLUE) txt='+'+Math.round(idle);               // blue: idle stylists
+      const served=d?d.served:0;
+      const tip = DAILY_DAYNAMES[i]+' '+dHHLabel(hh)+' — ≈'+line.toFixed(1)+' waiting, '+busy.toFixed(1)+' cutting of '+workedFTE.toFixed(1)+' on floor'+(headN?(' ('+headN+' clocked in)'):'')+(idle>=0.1?(', '+idle.toFixed(1)+' idle'):'')+(served?('; '+served+' served'):'')+(d&&d.w15?('; '+d.w15+' waited >15m'):'')+(d&&d.aw?('; avg wait '+d.aw+'m'):'');
       cells+='<td title="'+tip+'" style="background:'+col.bg+';color:'+col.fg+';font-size:12px;font-weight:700;text-align:center;min-width:34px;height:30px;">'+txt+'</td>';
     }
     rows+='<tr><td style="text-align:left;font-weight:600;font-size:12px;position:sticky;left:0;background:#fff;white-space:nowrap;padding-right:10px;">'+DAILY_DAYNAMES[i]+' '+dFmtMD(dt)+'</td>'+cells+'</tr>';
   });
   return '<div style="margin-top:16px;">'
-    + '<div style="font-weight:700;color:var(--primary);margin-bottom:2px;">Staffing heat map — where hours missed demand</div>'
-    + '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Each cell is a half-hour. Need = <b>sustained</b> demand (customers served, placed at arrival time, smoothed over '+(HM_SMOOTH_RADIUS*2+1)+' slots) at the crew\'s cut speed (target, or actual when faster). worked = '+(hasShifts?'stylists actually clocked in (floor only)':'from staffing report')+'. <span style="color:#c0392b;font-weight:700;">Red = understaffed</span>, <span style="color:#2980b9;font-weight:700;">blue = overstaffed</span>, <span style="color:#1b5e20;font-weight:700;">green = matched</span>. Number is stylists over/short; hover for detail.</div>'
+    + '<div style="font-weight:700;color:var(--primary);margin-bottom:2px;">Staffing heat map — measured line vs idle</div>'
+    + '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Each cell is a half-hour, read straight from the invoice clock — no modeling. <span style="color:#c0392b;font-weight:700;">Red = a line formed</span> (number ≈ people waiting in-store; time spent at home after an online check-in is excluded). <span style="color:#2980b9;font-weight:700;">Blue = stylists idle</span> with no line (number ≈ stylists with no one to cut). <span style="color:#1b5e20;font-weight:700;">Green = chairs busy, no line</span>. Hover any cell for the detail.</div>'
     + '<div style="overflow-x:auto;"><table style="border-collapse:separate;border-spacing:2px;"><thead><tr>'+header+'</tr></thead><tbody>'+rows+'</tbody></table></div>'
     + '</div>';
 }
-
 function openDayDetail(sn, date, targetId){
   sn = String(sn).trim();
   S_dailyDetail = { salonNum: sn, date };

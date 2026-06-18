@@ -343,8 +343,9 @@ export async function fetchHalfHourOptimal(
 export interface SD3InvoiceLite {
   storeId: number
   invoiceDate: string
-  timeIn: string | null      // arrival / joined-the-list timestamp (demand)
+  timeIn: string | null      // PHYSICAL in-store arrival (NOT origTimeIn/online check-in)
   timeServed: string | null  // when service started (null = never served)
+  timeOut: string | null     // when service ended / customer left the chair
   estWait: number | null     // posted estimated wait at arrival
 }
 
@@ -379,8 +380,12 @@ export async function fetchInvoices(
   return rows.map(r => ({
     storeId,
     invoiceDate: String(r.invoiceDate ?? ''),
+    // timeIn is the PHYSICAL in-store arrival. origTimeIn (the online check-in
+    // click) is deliberately ignored so an OCI customer's at-home/in-transit
+    // minutes never count toward the in-store line.
     timeIn: r.timeIn ? String(r.timeIn) : null,
     timeServed: r.timeServed ? String(r.timeServed) : null,
+    timeOut: r.timeOut ? String(r.timeOut) : null,
     estWait: numOrNull(r.estimatedWaitMinutesAtArrival ?? r.originalEstWait),
   }))
 }
