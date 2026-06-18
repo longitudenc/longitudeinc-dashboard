@@ -1670,66 +1670,56 @@ function dMinOfDay(iso){ const m=String(iso||'').match(/T(\d{2}):(\d{2})/); retu
 function dTitle(s){ s=String(s||'').toLowerCase(); return s.charAt(0).toUpperCase()+s.slice(1); }
 function dShiftName(f,l){ return (dTitle(f)+' '+dTitle(l)).trim(); }
 function dShiftBlock(sn, date){
-  sn=String(sn).trim();
-  const isTrue=v=>{ const t=String(v==null?'':v).trim().toLowerCase(); return t==='true'||t==='1'; };
-  const chk = ((S_dailyData&&S_dailyData.chkinout)||[]).filter(s=>(s.salonNum||'').trim()===sn && s.date===date);
-  const sched = ((S_dailyData&&S_dailyData.shifts)||[]).filter(s=>(s.salonNum||'').trim()===sn && s.date===date);
-  if(!chk.length && !sched.length) return '<div style="font-size:11px;color:var(--text-muted);margin-top:12px;">No coverage data for this day.</div>';
-  const rows = chk.slice().sort((a,b)=>{ const am=dMinOfDay(a.checkInTime), bm=dMinOfDay(b.checkInTime); return (am==null?9999:am)-(bm==null?9999:bm); });
+  const all = (S_dailyData && S_dailyData.shifts) ? S_dailyData.shifts : [];
+  const rows = all.filter(s=>(s.salonNum||'').trim()===String(sn).trim() && s.date===date)
+    .sort((a,b)=>{ const am=dMinOfDay(a.schedStart||a.actualStart), bm=dMinOfDay(b.schedStart||b.actualStart); return (am==null?9999:am)-(bm==null?9999:bm); });
+  if(!rows.length) return '<div style="font-size:11px;color:var(--text-muted);margin-top:12px;">No schedule data for this day.</div>';
   let body='';
   rows.forEach(s=>{
-    const role = isTrue(s.asStylist)?'Stylist': isTrue(s.asTraining)?'Training': isTrue(s.asRecept)?'Recept': isTrue(s.asAdmin)?'Admin':'—';
-    const act = (s.checkInTime?dClock(s.checkInTime):'—')+'–'+(s.checkOutTime?dClock(s.checkOutTime):'—');
-    const brk = n(s.breakTime)>0 ? n(s.breakTime)+'m' : '—';
-    const a=dMinOfDay(s.checkInTime);
-    let match=null;
-    sched.forEach(z=>{ if(String(z.employeePk)===String(s.employeePk) && z.schedStart){ const zs=dMinOfDay(z.schedStart); if(match==null || (a!=null&&zs!=null&&Math.abs(zs-a)<Math.abs(dMinOfDay(match.schedStart)-a))) match=z; } });
-    const schedTxt = match&&match.schedStart ? dClock(match.schedStart)+'–'+dClock(match.schedEnd) : '—';
-    let badge='Unscheduled', color='#2980b9';
-    if(match&&match.schedStart&&s.checkInTime){
-      const sd=dMinOfDay(s.checkInTime)-dMinOfDay(match.schedStart);
-      const ed=match.schedEnd&&s.checkOutTime?dMinOfDay(match.schedEnd)-dMinOfDay(s.checkOutTime):0;
+    const hasSched=!!s.schedStart, hasAct=!!s.actualStart;
+    let badge, color;
+    if(hasSched && !hasAct){ badge='No show'; color='#c0392b'; }
+    else if(!hasSched && hasAct){ badge='Unscheduled'; color='#2980b9'; }
+    else {
+      const sd=dMinOfDay(s.actualStart)-dMinOfDay(s.schedStart);  // + = clocked in late
+      const ed=dMinOfDay(s.schedEnd)-dMinOfDay(s.actualEnd);      // + = left early
       if(sd>5){ badge='Late '+sd+'m'; color='#e67e22'; }
       else if(ed>5){ badge='Left early '+ed+'m'; color='#e67e22'; }
       else if(sd<-5){ badge='Early '+(-sd)+'m'; color='#27ae60'; }
       else { badge='On time'; color='#27ae60'; }
     }
-    const roleTag = role!=='Stylist' ? ' <span style="font-size:9px;color:var(--text-muted);">('+role.toLowerCase()+')</span>' : '';
-    body += `<tr>
-      <td style="text-align:left;font-weight:600;">${dShiftName(s.fname,s.lname)}${roleTag}</td>
-      <td style="text-align:center;">${schedTxt}</td>
+    const sched = hasSched ? dClock(s.schedStart)+'–'+dClock(s.schedEnd) : '—';
+    const act   = hasAct   ? dClock(s.actualStart)+'–'+dClock(s.actualEnd) : '—';
+    const nf = (String(s.isNonFloor).toLowerCase()==='true') ? ' <span style="font-size:9px;color:var(--text-muted);">(non-floor)</span>' : '';
+    const note = s.notes ? ' title="'+String(s.notes).replace(/"/g,'&quot;')+'"' : '';
+    body += `<tr${note}>
+      <td style="text-align:left;font-weight:600;">${dShiftName(s.firstName,s.lastName)}${nf}</td>
+      <td style="text-align:center;">${sched}</td>
       <td style="text-align:center;">${act}</td>
-      <td style="text-align:center;">${brk}</td>
       <td style="text-align:center;"><span style="background:${color};color:#fff;border-radius:10px;padding:1px 8px;font-size:10px;font-weight:700;white-space:nowrap;">${badge}</span></td>
     </tr>`;
   });
-  // Scheduled but never punched in = no-show.
-  sched.forEach(z=>{ if(z.schedStart && !chk.some(c=>String(c.employeePk)===String(z.employeePk))){
-    body+=`<tr><td style="text-align:left;font-weight:600;">${dShiftName(z.firstName,z.lastName)}</td><td style="text-align:center;">${dClock(z.schedStart)+'–'+dClock(z.schedEnd)}</td><td style="text-align:center;">—</td><td style="text-align:center;">—</td><td style="text-align:center;"><span style="background:#c0392b;color:#fff;border-radius:10px;padding:1px 8px;font-size:10px;font-weight:700;">No show</span></td></tr>`;
-  }});
   return `<div style="margin-top:14px;">
-    <div style="font-weight:700;color:var(--primary);margin-bottom:6px;">Shifts — actual punches vs scheduled</div>
-    <div style="overflow-x:auto;"><table class="data-table" style="min-width:520px;">
-      <thead><tr><th style="text-align:left;">Stylist</th><th style="text-align:center;">Scheduled</th><th style="text-align:center;">Actual</th><th style="text-align:center;">Break</th><th style="text-align:center;">Variance</th></tr></thead>
+    <div style="font-weight:700;color:var(--primary);margin-bottom:6px;">Shifts — scheduled vs actual</div>
+    <div style="overflow-x:auto;"><table class="data-table" style="min-width:480px;">
+      <thead><tr><th style="text-align:left;">Stylist</th><th style="text-align:center;">Scheduled</th><th style="text-align:center;">Actual</th><th style="text-align:center;">Variance</th></tr></thead>
       <tbody>${body}</tbody></table></div>
   </div>`;
 }
 
 // ── Half-hour staffing heat map (our target vs actual coverage) ──
 // Slot index → clock label (×30 min from midnight). gap = worked − need.
-// need = round(SUSTAINED arrivals/hour ÷ (salon CPH goal + stretch)). The CPH
-// goal is the salon's volume-scaled productivity target, so the model self-
-// calibrates per salon; the stretch staffs slightly leaner than goal. Demand is
-// smoothed (the queue buffers bursts), so need tracks the sustained rate.
+// need = round(SUSTAINED demand × cycle ÷ 30), where cycle = the minutes a
+// customer occupies a stylist when busy = cut + transition. We CAP each piece at
+// target but CREDIT genuine speed (fast crew → lower need; slow crew is a
+// coaching issue, not a staffing one). Demand is smoothed (the queue buffers
+// bursts) and is "customers served, placed at arrival time" (ties to CC).
+// NB: CPH goal is the right scorecard yardstick but the WRONG per-slot divisor —
+// it's a daily average that bakes in idle time, so it overstates need.
+const HM_TARGET_HC = 14.5;     // target haircut minutes
+const HM_TARGET_MBC = 2;       // target transition minutes between customers
 const HM_SMOOTH_RADIUS = 1;    // ± slots averaged for sustained demand (1 = 90-min window)
-const HM_CPH_STRETCH   = 0.15; // staff to BEAT the CPH goal by this (lean dial)
-const HM_TARGET_HC = 14.5;     // target haircut min (for coaching "work-back", not need)
-const HM_TARGET_MBC = 2;       // target transition min (for coaching "work-back", not need)
-// Per-salon 2026 CPH goals (volume-scaled). Fallback 2.2 for any salon not listed.
-const HM_CPH_GOAL = {'1304':2.2,'2554':2.0,'3015':2.6,'3025':2.8,'3027':2.5,'3043':2.5,'3045':2.0,'3053':2.4,'3058':2.8,'3062':2.7,'3071':2.9,'3545':1.6,'3685':1.8,'4138':2.0,'7728':2.6,'8725':2.0,'9478':2.8,'9489':2.0,'9689':2.7};
-function hmCphGoal(sn){ return (HM_CPH_GOAL[String(sn).trim()] || 2.2) + HM_CPH_STRETCH; }
-// arrPer30 = sustained arrivals per 30-min slot → stylists needed at the CPH goal.
-function hmNeeded(arrPer30, sn){ return Math.round((n(arrPer30)||0) * 2 / hmCphGoal(sn)); }
+function hmNeeded(custPer30, cycle){ cycle = cycle || (HM_TARGET_HC+HM_TARGET_MBC); return Math.round((n(custPer30)||0)*cycle/30); }
 function dHHLabel(hh){ const h=Math.floor(hh/2), mn=(hh%2)?'30':'00', ap=h<12?'a':'p', hr=h%12||12; return hr+':'+mn+ap; }
 function dGapColor(needed, worked){
   if(needed<=0 && worked<=0) return {bg:'#fafafa', fg:'#ccc'};                 // closed / dead slot
@@ -1786,13 +1776,26 @@ function dHeatMap(sn, dates){
     for(let hh=h0; hh<=h1; hh++){ (wd[hh]=wd[hh]||new Set()).add(pk); }
   });
   const hasShifts = Object.keys(workedByDate).length>0;
-  // Sustained demand: centered moving average of arrivals (queue buffers bursts).
+  // Per-day cut-speed cycle: cap each piece at target, credit when faster.
+  const cycleByDate={};
+  (S_dailyData.salonDaily||[]).forEach(r=>{
+    if((r.salonNum||'').trim()!==String(sn).trim()) return;
+    const hcInv=n(r.haircutOnlyInvoiceCount), hcMin=n(r.haircutOnlyServiceMinutes);
+    const cc=n(r.customerCount), ncwm=n(r.nonCutWithCustWaitingMinutes);
+    const aHC  = hcInv>0 ? hcMin/hcInv : null;
+    const aMBC = cc>0    ? ncwm/cc     : null;
+    const effHC  = (aHC!=null  && aHC>0 ) ? Math.min(HM_TARGET_HC,  aHC ) : HM_TARGET_HC;
+    const effMBC = (aMBC!=null && aMBC>0) ? Math.min(HM_TARGET_MBC, aMBC) : HM_TARGET_MBC;
+    cycleByDate[r.date] = effHC + effMBC;
+  });
+  const hmCycle = dt => cycleByDate[dt] || (HM_TARGET_HC+HM_TARGET_MBC);
+  // Sustained demand: centered moving average of served (queue buffers bursts).
   function smoothArr(dt, hh){
     let sum=0, cnt=0;
     for(let k=hh-HM_SMOOTH_RADIUS; k<=hh+HM_SMOOTH_RADIUS; k++){
       if(k<minHH || k>maxHH) continue;
       const r=realDem[dt+'|'+k];
-      sum += r ? r.arrivals : 0; cnt++;
+      sum += r ? r.served : 0; cnt++;
     }
     return cnt ? sum/cnt : 0;
   }
@@ -1811,43 +1814,19 @@ function dHeatMap(sn, dates){
       const dem = hasReal ? smoothArr(dt,hh) : c.cust*(scaleByDate[dt]||1);
       const worked = (workedByDate[dt] && workedByDate[dt][hh]) ? workedByDate[dt][hh].size
                    : (hasShifts ? 0 : (n(c.worked)||0));   // punches loaded → trust them; else fall back to endpoint
-      const need=hmNeeded(dem,sn), col=dGapColor(need,worked), gap=worked-need;
+      const need=hmNeeded(dem,hmCycle(dt)), col=dGapColor(need,worked), gap=worked-need;
       const txt = gap<0 ? String(gap) : (gap>0 ? '+'+gap : '');
       const tip = rd
-        ? (DAILY_DAYNAMES[i]+' '+dHHLabel(hh)+' — '+rd.arrivals+' arrived (sustained ~'+dem.toFixed(1)+'/30m)'+(rd.walkedOut?(', '+rd.walkedOut+' left'):'')+', need '+need+', worked '+worked+(gap<0?' (short '+(-gap)+')':gap>0?' (over '+gap+')':' (matched)')+(rd.w15?('; '+rd.w15+' waited >15m'):'')+(rd.aw?('; avg wait '+rd.aw+'m'):''))
+        ? (DAILY_DAYNAMES[i]+' '+dHHLabel(hh)+' — '+rd.served+' served (sustained ~'+dem.toFixed(1)+'/30m), need '+need+', worked '+worked+(gap<0?' (short '+(-gap)+')':gap>0?' (over '+gap+')':' (matched)')+(rd.w15?('; '+rd.w15+' waited >15m'):'')+(rd.aw?('; avg wait '+rd.aw+'m'):''))
         : (DAILY_DAYNAMES[i]+' '+dHHLabel(hh)+' — '+(hasReal?'0 arrived':'demand ~'+dem.toFixed(1)+' (est)')+', need '+need+', worked '+worked+(gap<0?' (short '+(-gap)+')':gap>0?' (over '+gap+')':gap===0&&need>0?' (matched)':''));
       cells+='<td title="'+tip+'" style="background:'+col.bg+';color:'+col.fg+';font-size:12px;font-weight:700;text-align:center;min-width:34px;height:30px;">'+txt+'</td>';
     }
     rows+='<tr><td style="text-align:left;font-weight:600;font-size:12px;position:sticky;left:0;background:#fff;white-space:nowrap;padding-right:10px;">'+DAILY_DAYNAMES[i]+' '+dFmtMD(dt)+'</td>'+cells+'</tr>';
   });
-  // Per-day reconciliation: integrity check (Served should ≈ CC) and the
-  // "what did the worked hours leave on the table" capacity readout.
-  let recon='';
-  if(hasReal){
-    const goal=(HM_CPH_GOAL[String(sn).trim()]||2.2);
-    let trows='';
-    dates.forEach((dt,i)=>{
-      let arr=0,srv=0,wlk=0;
-      (S_dailyData.demand||[]).forEach(r=>{ if((r.salonNum||'').trim()===String(sn).trim() && r.date===dt){ arr+=n(r.arrivals)||0; srv+=n(r.served)||0; wlk+=n(r.walkedOut)||0; } });
-      let fh=0;
-      (S_dailyData.chkinout||[]).forEach(s=>{ if((s.salonNum||'').trim()===String(sn).trim() && s.date===dt && String(s.asStylist).trim().toLowerCase()==='true'){ const h=n(s.hours)||0, b=(n(s.breakTime)||0)/60; fh+=Math.max(0,h-b); } });
-      if(arr===0 && srv===0 && fh===0) return;
-      const cc = actualCC[dt]!=null?actualCC[dt]:'—';
-      const cap = Math.round(fh*goal);
-      trows += '<tr><td style="text-align:left;font-weight:600;">'+DAILY_DAYNAMES[i]+' '+dFmtMD(dt)+'</td>'
-        + '<td style="text-align:center;">'+arr+'</td><td style="text-align:center;">'+srv+'</td>'
-        + '<td style="text-align:center;">'+cc+'</td><td style="text-align:center;">'+(wlk||'—')+'</td>'
-        + '<td style="text-align:center;">'+fh.toFixed(1)+'</td><td style="text-align:center;">'+cap+'</td></tr>';
-    });
-    if(trows) recon = '<div style="margin-top:12px;font-size:11px;"><div style="font-weight:700;color:var(--primary);margin-bottom:4px;">Day reconciliation</div>'
-      + '<div style="overflow-x:auto;"><table class="data-table" style="min-width:560px;"><thead><tr><th style="text-align:left;">Day</th><th>Arrived</th><th>Served</th><th>CC</th><th>Walked</th><th>Floor hrs (net break)</th><th>Capacity @ goal</th></tr></thead><tbody>'+trows+'</tbody></table></div>'
-      + '<div style="color:var(--text-muted);margin-top:3px;">Served should track CC — if Arrived runs far above CC, demand is being double-counted. Capacity @ goal = floor-hours × CPH goal (what the hours worked could serve at target productivity); compare to Arrived for demand left on the table.</div></div>';
-  }
   return '<div style="margin-top:16px;">'
     + '<div style="font-weight:700;color:var(--primary);margin-bottom:2px;">Staffing heat map — where hours missed demand</div>'
-    + '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Each cell is a half-hour. Need = <b>sustained</b> arrivals (smoothed over '+(HM_SMOOTH_RADIUS*2+1)+' slots) ÷ this salon\'s CPH goal ('+(HM_CPH_GOAL[String(sn).trim()]||2.2)+', staffed to beat by '+HM_CPH_STRETCH+'). Demand = '+(hasReal?'actual customer arrivals':'forecast scaled to the day\'s actual total')+'; worked = '+(hasShifts?'stylists actually clocked in (floor only)':'from staffing report')+'. <span style="color:#c0392b;font-weight:700;">Red = understaffed</span>, <span style="color:#2980b9;font-weight:700;">blue = overstaffed</span>, <span style="color:#1b5e20;font-weight:700;">green = matched</span>. Number is stylists over/short; hover for detail.</div>'
+    + '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Each cell is a half-hour. Need = <b>sustained</b> demand (customers served, placed at arrival time, smoothed over '+(HM_SMOOTH_RADIUS*2+1)+' slots) at the crew\'s cut speed (target, or actual when faster). worked = '+(hasShifts?'stylists actually clocked in (floor only)':'from staffing report')+'. <span style="color:#c0392b;font-weight:700;">Red = understaffed</span>, <span style="color:#2980b9;font-weight:700;">blue = overstaffed</span>, <span style="color:#1b5e20;font-weight:700;">green = matched</span>. Number is stylists over/short; hover for detail.</div>'
     + '<div style="overflow-x:auto;"><table style="border-collapse:separate;border-spacing:2px;"><thead><tr>'+header+'</tr></thead><tbody>'+rows+'</tbody></table></div>'
-    + recon
     + '</div>';
 }
 
