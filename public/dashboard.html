@@ -1750,6 +1750,23 @@ function dHeatMap(sn, dates){
   const realDem={};
   (S_dailyData.demand||[]).forEach(r=>{ if((r.salonNum||'').trim()===String(sn).trim()) realDem[r.date+'|'+n(r.halfHour)]={arrivals:n(r.arrivals)||0, served:n(r.served)||0, walkedOut:n(r.walkedOut)||0, w15:n(r.waitedOver15)||0, aw:r.avgWaitMin}; });
   const hasReal = Object.keys(realDem).length>0;
+  // "worked" from the OPTIMAL endpoint is forecast-only (≈0 actuals), so derive
+  // real floor coverage from shift clock-times: for each half-hour, count the
+  // distinct on-floor stylists whose ACTUAL clocked interval overlaps the slot.
+  // No-shows have null actuals (drop out); receptionists are isNonFloor (skip).
+  const hmTrue=v=>{ const t=String(v==null?'':v).trim().toLowerCase(); return t==='true'||t==='1'||t==='yes'; };
+  const workedByDate={};
+  (S_dailyData.shifts||[]).forEach(s=>{
+    if((s.salonNum||'').trim()!==String(sn).trim()) return;
+    if(hmTrue(s.isNonFloor)) return;                          // skip reception / non-floor
+    const a=dMinOfDay(s.actualStart), b=dMinOfDay(s.actualEnd);
+    if(a==null||b==null||b<=a) return;                        // no-show or bad row
+    const wd=workedByDate[s.date]=workedByDate[s.date]||{};
+    const pk=String(s.employeePk||(s.firstName+''+s.lastName));
+    const h0=Math.floor(a/30), h1=Math.ceil(b/30)-1;
+    for(let hh=h0; hh<=h1; hh++){ (wd[hh]=wd[hh]||new Set()).add(pk); }
+  });
+  const hasShifts = Object.keys(workedByDate).length>0;
   let header='<th style="text-align:left;position:sticky;left:0;background:#fff;z-index:1;font-size:12px;padding-right:10px;">Day</th>';
   for(let hh=minHH; hh<=maxHH; hh++){ header+='<th style="font-size:11px;padding:3px 2px;font-weight:600;color:var(--text-muted);min-width:34px;">'+(hh%2===0?dHHLabel(hh):'')+'</th>'; }
   let rows='';
@@ -1760,19 +1777,23 @@ function dHeatMap(sn, dates){
       const c=day[hh];
       if(!c){ cells+='<td style="background:#fafafa;min-width:34px;height:30px;"></td>'; continue; }
       const rd=realDem[dt+'|'+hh];
-      const dem = rd ? rd.arrivals : c.cust*(scaleByDate[dt]||1);
-      const need=hmNeeded(dem), col=dGapColor(need,c.worked), gap=c.worked-need;
+      // Real data present → a slot with no arrival record means nobody came (0),
+      // not "unknown" — so we don't fall back to the forecast and paint it red.
+      const dem = hasReal ? (rd ? rd.arrivals : 0) : c.cust*(scaleByDate[dt]||1);
+      const worked = (workedByDate[dt] && workedByDate[dt][hh]) ? workedByDate[dt][hh].size
+                   : (hasShifts ? 0 : (n(c.worked)||0));   // shifts loaded → trust them; else fall back to endpoint
+      const need=hmNeeded(dem), col=dGapColor(need,worked), gap=worked-need;
       const txt = gap<0 ? String(gap) : (gap>0 ? '+'+gap : '');
       const tip = rd
-        ? (DAILY_DAYNAMES[i]+' '+dHHLabel(hh)+' — '+rd.arrivals+' arrived'+(rd.walkedOut?(', '+rd.walkedOut+' left'):'')+', need '+need+', worked '+c.worked+(gap<0?' (short '+(-gap)+')':gap>0?' (over '+gap+')':' (matched)')+(rd.w15?('; '+rd.w15+' waited >15m'):'')+(rd.aw?('; avg wait '+rd.aw+'m'):''))
-        : (DAILY_DAYNAMES[i]+' '+dHHLabel(hh)+' — demand ~'+dem.toFixed(1)+' (est), need '+need+', worked '+c.worked+(gap<0?' (short '+(-gap)+')':gap>0?' (over '+gap+')':' (matched)')+'  [SD3 rec '+c.needed+']');
+        ? (DAILY_DAYNAMES[i]+' '+dHHLabel(hh)+' — '+rd.arrivals+' arrived'+(rd.walkedOut?(', '+rd.walkedOut+' left'):'')+', need '+need+', worked '+worked+(gap<0?' (short '+(-gap)+')':gap>0?' (over '+gap+')':' (matched)')+(rd.w15?('; '+rd.w15+' waited >15m'):'')+(rd.aw?('; avg wait '+rd.aw+'m'):''))
+        : (DAILY_DAYNAMES[i]+' '+dHHLabel(hh)+' — '+(hasReal?'0 arrived':'demand ~'+dem.toFixed(1)+' (est)')+', need '+need+', worked '+worked+(gap<0?' (short '+(-gap)+')':gap>0?' (over '+gap+')':gap===0&&need>0?' (matched)':''));
       cells+='<td title="'+tip+'" style="background:'+col.bg+';color:'+col.fg+';font-size:12px;font-weight:700;text-align:center;min-width:34px;height:30px;">'+txt+'</td>';
     }
     rows+='<tr><td style="text-align:left;font-weight:600;font-size:12px;position:sticky;left:0;background:#fff;white-space:nowrap;padding-right:10px;">'+DAILY_DAYNAMES[i]+' '+dFmtMD(dt)+'</td>'+cells+'</tr>';
   });
   return '<div style="margin-top:16px;">'
     + '<div style="font-weight:700;color:var(--primary);margin-bottom:2px;">Staffing heat map — where hours missed demand</div>'
-    + '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Each cell is a half-hour, vs. our target staffing (cycle '+(HM_TARGET_HC+HM_TARGET_MBC)+' min = '+HM_TARGET_HC+' cut + '+HM_TARGET_MBC+' transition). Demand = '+(hasReal?'actual customer arrivals':'forecast scaled to the day\'s actual total')+'. <span style="color:#c0392b;font-weight:700;">Red = understaffed</span> (got hurt), <span style="color:#2980b9;font-weight:700;">blue = overstaffed</span> (paid for idle), <span style="color:#1b5e20;font-weight:700;">green = matched</span>. Number is stylists over/short; hover for detail.</div>'
+    + '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Each cell is a half-hour, vs. our target staffing (cycle '+(HM_TARGET_HC+HM_TARGET_MBC)+' min = '+HM_TARGET_HC+' cut + '+HM_TARGET_MBC+' transition). Demand = '+(hasReal?'actual customer arrivals':'forecast scaled to the day\'s actual total')+'; worked = '+(hasShifts?'stylists actually clocked in':'from staffing report')+'. <span style="color:#c0392b;font-weight:700;">Red = understaffed</span> (got hurt), <span style="color:#2980b9;font-weight:700;">blue = overstaffed</span> (paid for idle), <span style="color:#1b5e20;font-weight:700;">green = matched</span>. Number is stylists over/short; hover for detail.</div>'
     + '<div style="overflow-x:auto;"><table style="border-collapse:separate;border-spacing:2px;"><thead><tr>'+header+'</tr></thead><tbody>'+rows+'</tbody></table></div>'
     + '</div>';
 }
