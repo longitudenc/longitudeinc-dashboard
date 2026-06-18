@@ -435,7 +435,7 @@
         <div class="summary-grid" id="salon-summary"></div>
         <div class="table-card">
           <div class="table-card-header">
-            <div class="card-title" style="margin:0;">Salon Results — Week Ending <span id="salon-week-label">—</span> <span class="gmode-toggle" style="display:inline-flex;gap:2px;background:#e9e9e9;border-radius:14px;padding:2px;vertical-align:middle;margin-left:6px;"><button class="gmode-btn" data-gmode="weekly" onclick="setGlobalMode('weekly')" style="padding:3px 11px;border-radius:12px;border:none;font-size:11px;font-weight:700;cursor:pointer;background:var(--primary);color:#fff;">This Week</button><button class="gmode-btn" data-gmode="ytd" onclick="setGlobalMode('ytd')" style="padding:3px 11px;border-radius:12px;border:none;font-size:11px;font-weight:700;cursor:pointer;background:transparent;color:var(--text-muted);">YTD</button></span></div>
+            <div class="card-title" style="margin:0;">Salon Results — Week Ending <span id="salon-week-label">—</span> <span class="gmode-toggle" style="display:inline-flex;gap:2px;background:#e9e9e9;border:1px solid var(--border);border-radius:14px;padding:2px;vertical-align:middle;margin-left:6px;"><button class="gmode-btn" data-gmode="weekly" onclick="setGlobalMode('weekly')" style="padding:3px 11px;border-radius:12px;border:none;font-size:11px;font-weight:700;cursor:pointer;background:var(--primary);color:#fff;">This Week</button><button class="gmode-btn" data-gmode="ytd" onclick="setGlobalMode('ytd')" style="padding:3px 11px;border-radius:12px;border:none;font-size:11px;font-weight:700;cursor:pointer;background:transparent;color:var(--primary);">YTD</button></span></div>
             <div class="legend-bar">
               <span class="legend-item"><span class="legend-dot" style="background:#2d7a1a;"></span><span style="color:#1a5c0a;font-weight:600;">4 Excellence</span></span>
               <span class="legend-item"><span class="legend-dot" style="background:#c8a800;"></span><span style="color:#7a5a00;font-weight:600;">3 Growth</span></span>
@@ -457,7 +457,7 @@
         <div class="table-card">
           <div class="table-card-header">
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-          <div class="card-title" style="margin:0;">Individual Measures — HC Time · MBC · Product % <span class="gmode-toggle" style="display:inline-flex;gap:2px;background:#e9e9e9;border-radius:14px;padding:2px;vertical-align:middle;margin-left:6px;"><button class="gmode-btn" data-gmode="weekly" onclick="setGlobalMode('weekly')" style="padding:3px 11px;border-radius:12px;border:none;font-size:11px;font-weight:700;cursor:pointer;background:var(--primary);color:#fff;">This Week</button><button class="gmode-btn" data-gmode="ytd" onclick="setGlobalMode('ytd')" style="padding:3px 11px;border-radius:12px;border:none;font-size:11px;font-weight:700;cursor:pointer;background:transparent;color:var(--text-muted);">YTD</button></span></div>
+          <div class="card-title" style="margin:0;">Individual Measures — HC Time · MBC · Product % <span class="gmode-toggle" style="display:inline-flex;gap:2px;background:#e9e9e9;border:1px solid var(--border);border-radius:14px;padding:2px;vertical-align:middle;margin-left:6px;"><button class="gmode-btn" data-gmode="weekly" onclick="setGlobalMode('weekly')" style="padding:3px 11px;border-radius:12px;border:none;font-size:11px;font-weight:700;cursor:pointer;background:var(--primary);color:#fff;">This Week</button><button class="gmode-btn" data-gmode="ytd" onclick="setGlobalMode('ytd')" style="padding:3px 11px;border-radius:12px;border:none;font-size:11px;font-weight:700;cursor:pointer;background:transparent;color:var(--primary);">YTD</button></span></div>
           <span id="indiv-count-note" style="font-size:11px;color:var(--text-muted);"></span>
         </div>
           </div>
@@ -502,7 +502,7 @@
 
     <!-- Company Overview (admin only) -->
     <div class="page" id="page-company">
-      <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;"><div><h2>Company Overview</h2><div class="sub" id="company-sub">All Salons · —</div></div><span class="gmode-toggle" style="display:inline-flex;gap:2px;background:#e9e9e9;border-radius:14px;padding:2px;"><button class="gmode-btn" data-gmode="weekly" onclick="setGlobalMode('weekly')" style="padding:4px 13px;border-radius:12px;border:none;font-size:11px;font-weight:700;cursor:pointer;background:var(--primary);color:#fff;">This Week</button><button class="gmode-btn" data-gmode="ytd" onclick="setGlobalMode('ytd')" style="padding:4px 13px;border-radius:12px;border:none;font-size:11px;font-weight:700;cursor:pointer;background:transparent;color:var(--text-muted);">YTD</button></span></div>
+      <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;"><div><h2>Company Overview</h2><div class="sub" id="company-sub">All Salons · —</div></div><span class="gmode-toggle" style="display:inline-flex;gap:2px;background:#e9e9e9;border:1px solid var(--border);border-radius:14px;padding:2px;"><button class="gmode-btn" data-gmode="weekly" onclick="setGlobalMode('weekly')" style="padding:4px 13px;border-radius:12px;border:none;font-size:11px;font-weight:700;cursor:pointer;background:var(--primary);color:#fff;">This Week</button><button class="gmode-btn" data-gmode="ytd" onclick="setGlobalMode('ytd')" style="padding:4px 13px;border-radius:12px;border:none;font-size:11px;font-weight:700;cursor:pointer;background:transparent;color:var(--primary);">YTD</button></span></div>
       <div class="summary-grid" id="company-summary"></div>
 
       <!-- AM Scorecards -->
@@ -767,13 +767,13 @@ let USER_AM_NAME= '';
 // Role helpers — translate the auth vocabulary (owner/admin/viewer/
 // area_manager/manager/stylist) into the dashboard's access buckets.
 // Owner behaves as admin-plus; area_manager behaves as the old "am".
-function roleClean(){ return String(USER_ROLE||'').replace(/["']/g,'').trim(); }
+function roleClean(){ return String(USER_ROLE||'').replace(/["']/g,'').trim().toLowerCase(); }
 function isAdminRole(){ const r=roleClean(); return r==='owner'||r==='admin'; }
 function isViewerRole(){ return roleClean()==='viewer'; }
 function isAMRole(){ const r=roleClean(); return r==='area_manager'||r==='am'; }
 function canSeeAllSalons(){ return isAdminRole()||isViewerRole(); }
-// Day Review (whole-company single-day) is for owner/admin and Kayla specifically.
-// Day Review (whole-company single-day) — owner/admin/viewer, plus Kayla as a
+// Day Review (whole-company single-day) — owner/admin/viewer (canSeeAllSalons),
+// plus Kayla as a
 // fallback in case her admin role hasn't been set in the users list yet.
 function canSeeDayReview(){ return canSeeAllSalons() || (isAMRole() && String(USER_AM_ID||'').replace(/["']/g,'').trim()==='kayla'); }
 
@@ -1046,7 +1046,7 @@ function setGlobalMode(mode){
   document.querySelectorAll('.gmode-btn').forEach(b=>{
     const on = b.dataset.gmode===mode;
     b.style.background = on ? 'var(--primary)' : 'transparent';
-    b.style.color = on ? '#fff' : 'var(--text-muted)';
+    b.style.color = on ? '#fff' : 'var(--primary)';
   });
   // Show/hide week selector (not needed in YTD mode)
   const wl = document.getElementById('week-label');
@@ -1774,7 +1774,7 @@ function dHeatMap(sn, dates){
   if(minHH>maxHH) return '<div style="font-size:11px;color:var(--text-muted);margin-top:16px;">No staffed or busy half-hours recorded this week.</div>';
 
   let header='<th style="text-align:left;position:sticky;left:0;background:#fff;z-index:1;font-size:12px;padding-right:10px;">Day</th>';
-  for(let hh=minHH; hh<=maxHH; hh++){ header+='<th style="font-size:11px;padding:3px 2px;font-weight:600;color:var(--text-muted);min-width:34px;">'+(hh%2===0?dHHLabel(hh):'')+'</th>'; }
+  for(let hh=minHH; hh<=maxHH; hh++){ header+='<th style="font-size:11px;padding:3px 2px;font-weight:600;color:var(--text-muted);min-width:40px;">'+(hh%2===0?dHHLabel(hh):'')+'</th>'; }
   let rows='';
   dates.forEach((dt,i)=>{
     let cells='';
@@ -1785,14 +1785,14 @@ function dHeatMap(sn, dates){
       const line=d?d.line:0, busy=d?d.busy:0;
       const idle=Math.max(0, workedFTE-busy);
       // dead/closed slot: nobody on the floor, nothing being served, no line.
-      if(workedFTE<0.05 && busy<0.10 && line<0.10){ cells+='<td style="background:#fafafa;min-width:34px;height:30px;"></td>'; continue; }
+      if(workedFTE<0.05 && busy<0.10 && line<0.10){ cells+='<td style="background:#fafafa;min-width:40px;height:36px;"></td>'; continue; }
       const col=dStateColor(line, idle);
       let txt='';
       if(line>=HM_LINE_RED && line>=idle) txt=String(Math.round(line));   // red: people waiting
       else if(idle>=HM_IDLE_BLUE) txt='+'+Math.round(idle);               // blue: idle stylists
       const served=d?d.served:0;
       const tip = DAILY_DAYNAMES[i]+' '+dHHLabel(hh)+' — ≈'+line.toFixed(1)+' waiting, '+busy.toFixed(1)+' cutting of '+workedFTE.toFixed(1)+' on floor'+(headN?(' ('+headN+' clocked in)'):'')+(idle>=0.1?(', '+idle.toFixed(1)+' idle'):'')+(served?('; '+served+' served'):'')+(d&&d.w15?('; '+d.w15+' waited >15m'):'')+(d&&d.aw?('; avg wait '+d.aw+'m'):'');
-      cells+='<td title="'+tip+'" style="background:'+col.bg+';color:'+col.fg+';font-size:12px;font-weight:700;text-align:center;min-width:34px;height:30px;">'+txt+'</td>';
+      cells+='<td title="'+tip+'" style="background:'+col.bg+';color:'+col.fg+';font-size:13px;font-weight:700;text-align:center;min-width:40px;height:36px;">'+txt+'</td>';
     }
     rows+='<tr><td style="text-align:left;font-weight:600;font-size:12px;position:sticky;left:0;background:#fff;white-space:nowrap;padding-right:10px;">'+DAILY_DAYNAMES[i]+' '+dFmtMD(dt)+'</td>'+cells+'</tr>';
   });
@@ -1802,6 +1802,63 @@ function dHeatMap(sn, dates){
     + '<div style="overflow-x:auto;"><table style="border-collapse:separate;border-spacing:2px;"><thead><tr>'+header+'</tr></thead><tbody>'+rows+'</tbody></table></div>'
     + '</div>';
 }
+// ── Day Review heat strip — one day, every in-scope salon as a row ──────────
+// Same measured logic as dHeatMap (line from invoices, idle from punches), but
+// rows are salons for the single reviewed day so the whole company's coverage
+// reads at a glance. Returns '' when the day has no measured demand loaded.
+function dDayHeatStrip(dateIso, sns){
+  if(!S_dailyData) return '';
+  const dem=(S_dailyData.demand||[]).filter(r=>String(r.date)===dateIso);
+  const hasMeasured = dem.some(r=> String(r.avgLine==null?'':r.avgLine).trim()!=='' || String(r.avgBusy==null?'':r.avgBusy).trim()!=='');
+  if(!hasMeasured) return '';
+  const D={}; let minHH=99, maxHH=0;
+  const mark=hh=>{ if(hh<minHH)minHH=hh; if(hh>maxHH)maxHH=hh; };
+  dem.forEach(r=>{ const sn=(r.salonNum||'').trim(), hh=n(r.halfHour); if(!sn||isNaN(hh)) return;
+    const line=n(r.avgLine), busy=n(r.avgBusy);
+    D[sn+'|'+hh]={line:line, busy:busy, served:n(r.served)||0, w15:n(r.waitedOver15)||0};
+    if(line>0||busy>0||(n(r.arrivals)||0)>0) mark(hh);
+  });
+  const ftMin={}, head={};
+  (S_dailyData.chkinout||[]).filter(s=>String(s.date)===dateIso).forEach(s=>{
+    if(!hmTrue(s.asStylist) || hmTrue(s.absent)) return;
+    const sn=(s.salonNum||'').trim(); if(!sn) return;
+    const a=dMinOfDay(s.checkInTime), b=dMinOfDay(s.checkOutTime);
+    if(a==null||b==null||b<=a) return;
+    const pk=String(s.employeePk||s.chkPk||(s.fname+''+s.lname));
+    const h0=Math.floor(a/30), h1=Math.ceil(b/30)-1;
+    const fd=ftMin[sn]=ftMin[sn]||{}, hd=head[sn]=head[sn]||{};
+    for(let hh=h0; hh<=h1; hh++){ fd[hh]=(fd[hh]||0)+dSlotOverlap(a,b,hh); (hd[hh]=hd[hh]||new Set()).add(pk); mark(hh); }
+  });
+  if(minHH>maxHH) return '';
+  let header='<th style="text-align:left;position:sticky;left:0;background:#fff;z-index:1;font-size:12px;padding-right:10px;">Salon</th>';
+  for(let hh=minHH; hh<=maxHH; hh++){ header+='<th style="font-size:11px;padding:3px 2px;font-weight:600;color:var(--text-muted);min-width:40px;">'+(hh%2===0?dHHLabel(hh):'')+'</th>'; }
+  let rows='';
+  (sns||[]).forEach(snRaw=>{
+    const sn=String(snRaw).trim();
+    let cells='';
+    for(let hh=minHH; hh<=maxHH; hh++){
+      const d=D[sn+'|'+hh];
+      const workedFTE=(ftMin[sn]&&ftMin[sn][hh])?ftMin[sn][hh]/30:0;
+      const headN=(head[sn]&&head[sn][hh])?head[sn][hh].size:0;
+      const line=d?d.line:0, busy=d?d.busy:0;
+      const idle=Math.max(0, workedFTE-busy);
+      if(workedFTE<0.05 && busy<0.10 && line<0.10){ cells+='<td style="background:#fafafa;min-width:40px;height:36px;"></td>'; continue; }
+      const col=dStateColor(line, idle);
+      let txt='';
+      if(line>=HM_LINE_RED && line>=idle) txt=String(Math.round(line));
+      else if(idle>=HM_IDLE_BLUE) txt='+'+Math.round(idle);
+      const tip=dHHLabel(hh)+' — ≈'+line.toFixed(1)+' waiting, '+busy.toFixed(1)+' cutting of '+workedFTE.toFixed(1)+' on floor'+(headN?(' ('+headN+' clocked in)'):'')+(idle>=0.1?(', '+idle.toFixed(1)+' idle'):'')+(d&&d.served?('; '+d.served+' served'):'')+(d&&d.w15?('; '+d.w15+' waited >15m'):'');
+      cells+='<td title="'+tip+'" style="background:'+col.bg+';color:'+col.fg+';font-size:13px;font-weight:700;text-align:center;min-width:40px;height:36px;">'+txt+'</td>';
+    }
+    rows+='<tr><td style="text-align:left;font-weight:600;font-size:12px;position:sticky;left:0;background:#fff;white-space:nowrap;padding-right:10px;">'+salonDisplay(sn)+'</td>'+cells+'</tr>';
+  });
+  return '<div style="margin-top:18px;">'
+    + '<div style="font-weight:700;color:var(--primary);margin-bottom:2px;">Staffing heat map — '+dDayName(dateIso)+' '+dFmtMD(dateIso)+'</div>'
+    + '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Each cell is a half-hour, measured from the invoice clock. <span style="color:#c0392b;font-weight:700;">Red = a line formed</span> (≈ people waiting; online check-in time at home excluded). <span style="color:#2980b9;font-weight:700;">Blue = stylists idle</span> with no line. <span style="color:#1b5e20;font-weight:700;">Green = busy, no line</span>. Hover any cell for the detail.</div>'
+    + '<div style="overflow-x:auto;"><table style="border-collapse:separate;border-spacing:2px;"><thead><tr>'+header+'</tr></thead><tbody>'+rows+'</tbody></table></div>'
+    + '</div>';
+}
+
 function openDayDetail(sn, date, targetId){
   sn = String(sn).trim();
   S_dailyDetail = { salonNum: sn, date };
@@ -1969,7 +2026,7 @@ function renderDayReviewTable(dateIso){
   </tr>`;
   const head=`<tr><th style="text-align:left;">Salon</th><th>CC</th><th>CC Δ LY</th><th>Sales</th><th>Sales Δ LY</th><th>CPH</th><th>HC Time</th><th>MBC</th><th>Product %</th><th>Waits %</th><th>Payroll %</th></tr>`;
   body.innerHTML=`<div style="font-size:11px;color:var(--text-muted);padding:0 2px 8px;">${dDayName(dateIso)} ${dFmtMDY(dateIso)} · all salons. Δ LY = vs the same day last year. Click any salon to see who worked and how they performed.</div>
-    <div class="sticky-head-scroll" style="overflow:auto;max-height:72vh;"><table class="data-table" style="min-width:840px;"><thead>${head}</thead><tbody>${rows}${totalRow}</tbody></table></div>`;
+    <div class="sticky-head-scroll" style="overflow:auto;max-height:72vh;"><table class="data-table" style="min-width:840px;"><thead>${head}</thead><tbody>${rows}${totalRow}</tbody></table></div>` + dDayHeatStrip(dateIso, sns);
 }
 
 function switchTab(tab,el){ 
@@ -3272,7 +3329,7 @@ function renderCompany(){
       : (snap?snap.salons:[]);
     const allAForAM = calcAvgs(allForAMAvg);
     document.getElementById('company-sub').textContent = isYTD
-      ? 'All Salons · YTD Average · ' + S.weekHistory.length + ' weeks'
+      ? 'All Salons · YTD Average · ' + ytdWeeks().length + ' weeks'
       : 'All Salons · Week Ending '+(S.currentWeek?fmtWeek(S.currentWeek):'—');
     const allA=calcAvgs(all);
     // For the summary cards, collapse salon-weeks → distinct salons (averaged),
@@ -3702,6 +3759,7 @@ function buildBonusMonth(){
     const ci = S_bonusSort.col, asc = S_bonusSort.asc;
     emps = [...emps].sort((a,b)=>{
       if(ci===0){ const av=a.empName||'',bv=b.empName||''; return asc?av.localeCompare(bv):bv.localeCompare(av); }
+      if(ci===11){ const r=x=>{const pt=parseFloat(x.potential)||0; return pt>0?(parseFloat(x.payout)||0)/pt:0;}; return asc?r(a)-r(b):r(b)-r(a); }
       return asc?(parseFloat(a[bonusCols[ci]])||0)-(parseFloat(b[bonusCols[ci]])||0):(parseFloat(b[bonusCols[ci]])||0)-(parseFloat(a[bonusCols[ci]])||0);
     });
   }
@@ -3712,7 +3770,7 @@ function buildBonusMonth(){
       ${bTh(0,'Employee')}
       ${bTh(1,'Avg Wkly Hrs')}${bTh(2,'Prod %')}${bTh(3,'NR %')}${bTh(4,'RR %')}${bTh(5,'MBC')}
       ${bTh(6,'HC Time')}${bTh(7,'Pts')}${bTh(8,'$/Pt')}${bTh(9,'Potential')}${bTh(10,'Payout')}
-      <th>% of Pot.</th><th>Notes</th>
+      ${bTh(11,'% of Pot.')}<th>Notes</th>
     </tr></thead><tbody>`;
 
   Object.keys(bySalon).sort((a,b)=>parseFloat(a)-parseFloat(b)||a.localeCompare(b)).forEach(sn=>{
@@ -6160,6 +6218,7 @@ function buildCompanyBonusAllStylists(){
     stys = [...stys].sort((a,b)=>{
       const k = sortKey[ci] || 'empName';
       if(ci<=2){ const av=String(a[k]||''),bv=String(b[k]||''); return asc?av.localeCompare(bv,undefined,{numeric:true}):bv.localeCompare(av,undefined,{numeric:true}); }
+      if(ci===12){ const r=x=>{const pt=parseFloat(x.potential)||0; return pt>0?payablePayout(x)/pt:0;}; return asc?r(a)-r(b):r(b)-r(a); }
       return asc?(parseFloat(a[k])||0)-(parseFloat(b[k])||0):(parseFloat(b[k])||0)-(parseFloat(a[k])||0);
     });
   } else {
@@ -6192,7 +6251,7 @@ function buildCompanyBonusAllStylists(){
       ${bTh2(3,'Avg Wkly Hrs')}${bTh2(4,'Prod %')}${bTh2(5,'NR %')}${bTh2(6,'RR %')}
       ${bTh2(7,'MBC')}${bTh2(8,'HC Time')}${bTh2(9,'Pts')}
       ${bTh2(10,'Potential')}${bTh2(11,'Payout')}
-      <th>% of Pot.</th><th>Notes</th>
+      ${bTh2(12,'% of Pot.')}<th>Notes</th>
     </tr></thead><tbody>`;
 
   // Only show salon divider rows when sorted by salon (default or col 1)
