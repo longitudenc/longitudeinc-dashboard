@@ -1670,39 +1670,47 @@ function dMinOfDay(iso){ const m=String(iso||'').match(/T(\d{2}):(\d{2})/); retu
 function dTitle(s){ s=String(s||'').toLowerCase(); return s.charAt(0).toUpperCase()+s.slice(1); }
 function dShiftName(f,l){ return (dTitle(f)+' '+dTitle(l)).trim(); }
 function dShiftBlock(sn, date){
-  const all = (S_dailyData && S_dailyData.shifts) ? S_dailyData.shifts : [];
-  const rows = all.filter(s=>(s.salonNum||'').trim()===String(sn).trim() && s.date===date)
-    .sort((a,b)=>{ const am=dMinOfDay(a.schedStart||a.actualStart), bm=dMinOfDay(b.schedStart||b.actualStart); return (am==null?9999:am)-(bm==null?9999:bm); });
-  if(!rows.length) return '<div style="font-size:11px;color:var(--text-muted);margin-top:12px;">No schedule data for this day.</div>';
+  sn=String(sn).trim();
+  const isTrue=v=>{ const t=String(v==null?'':v).trim().toLowerCase(); return t==='true'||t==='1'; };
+  const chk = ((S_dailyData&&S_dailyData.chkinout)||[]).filter(s=>(s.salonNum||'').trim()===sn && s.date===date);
+  const sched = ((S_dailyData&&S_dailyData.shifts)||[]).filter(s=>(s.salonNum||'').trim()===sn && s.date===date);
+  if(!chk.length && !sched.length) return '<div style="font-size:11px;color:var(--text-muted);margin-top:12px;">No coverage data for this day.</div>';
+  const rows = chk.slice().sort((a,b)=>{ const am=dMinOfDay(a.checkInTime), bm=dMinOfDay(b.checkInTime); return (am==null?9999:am)-(bm==null?9999:bm); });
   let body='';
   rows.forEach(s=>{
-    const hasSched=!!s.schedStart, hasAct=!!s.actualStart;
-    let badge, color;
-    if(hasSched && !hasAct){ badge='No show'; color='#c0392b'; }
-    else if(!hasSched && hasAct){ badge='Unscheduled'; color='#2980b9'; }
-    else {
-      const sd=dMinOfDay(s.actualStart)-dMinOfDay(s.schedStart);  // + = clocked in late
-      const ed=dMinOfDay(s.schedEnd)-dMinOfDay(s.actualEnd);      // + = left early
+    const role = isTrue(s.asStylist)?'Stylist': isTrue(s.asTraining)?'Training': isTrue(s.asRecept)?'Recept': isTrue(s.asAdmin)?'Admin':'—';
+    const act = (s.checkInTime?dClock(s.checkInTime):'—')+'–'+(s.checkOutTime?dClock(s.checkOutTime):'—');
+    const brk = n(s.breakTime)>0 ? n(s.breakTime)+'m' : '—';
+    const a=dMinOfDay(s.checkInTime);
+    let match=null;
+    sched.forEach(z=>{ if(String(z.employeePk)===String(s.employeePk) && z.schedStart){ const zs=dMinOfDay(z.schedStart); if(match==null || (a!=null&&zs!=null&&Math.abs(zs-a)<Math.abs(dMinOfDay(match.schedStart)-a))) match=z; } });
+    const schedTxt = match&&match.schedStart ? dClock(match.schedStart)+'–'+dClock(match.schedEnd) : '—';
+    let badge='Unscheduled', color='#2980b9';
+    if(match&&match.schedStart&&s.checkInTime){
+      const sd=dMinOfDay(s.checkInTime)-dMinOfDay(match.schedStart);
+      const ed=match.schedEnd&&s.checkOutTime?dMinOfDay(match.schedEnd)-dMinOfDay(s.checkOutTime):0;
       if(sd>5){ badge='Late '+sd+'m'; color='#e67e22'; }
       else if(ed>5){ badge='Left early '+ed+'m'; color='#e67e22'; }
       else if(sd<-5){ badge='Early '+(-sd)+'m'; color='#27ae60'; }
       else { badge='On time'; color='#27ae60'; }
     }
-    const sched = hasSched ? dClock(s.schedStart)+'–'+dClock(s.schedEnd) : '—';
-    const act   = hasAct   ? dClock(s.actualStart)+'–'+dClock(s.actualEnd) : '—';
-    const nf = (String(s.isNonFloor).toLowerCase()==='true') ? ' <span style="font-size:9px;color:var(--text-muted);">(non-floor)</span>' : '';
-    const note = s.notes ? ' title="'+String(s.notes).replace(/"/g,'&quot;')+'"' : '';
-    body += `<tr${note}>
-      <td style="text-align:left;font-weight:600;">${dShiftName(s.firstName,s.lastName)}${nf}</td>
-      <td style="text-align:center;">${sched}</td>
+    const roleTag = role!=='Stylist' ? ' <span style="font-size:9px;color:var(--text-muted);">('+role.toLowerCase()+')</span>' : '';
+    body += `<tr>
+      <td style="text-align:left;font-weight:600;">${dShiftName(s.fname,s.lname)}${roleTag}</td>
+      <td style="text-align:center;">${schedTxt}</td>
       <td style="text-align:center;">${act}</td>
+      <td style="text-align:center;">${brk}</td>
       <td style="text-align:center;"><span style="background:${color};color:#fff;border-radius:10px;padding:1px 8px;font-size:10px;font-weight:700;white-space:nowrap;">${badge}</span></td>
     </tr>`;
   });
+  // Scheduled but never punched in = no-show.
+  sched.forEach(z=>{ if(z.schedStart && !chk.some(c=>String(c.employeePk)===String(z.employeePk))){
+    body+=`<tr><td style="text-align:left;font-weight:600;">${dShiftName(z.firstName,z.lastName)}</td><td style="text-align:center;">${dClock(z.schedStart)+'–'+dClock(z.schedEnd)}</td><td style="text-align:center;">—</td><td style="text-align:center;">—</td><td style="text-align:center;"><span style="background:#c0392b;color:#fff;border-radius:10px;padding:1px 8px;font-size:10px;font-weight:700;">No show</span></td></tr>`;
+  }});
   return `<div style="margin-top:14px;">
-    <div style="font-weight:700;color:var(--primary);margin-bottom:6px;">Shifts — scheduled vs actual</div>
-    <div style="overflow-x:auto;"><table class="data-table" style="min-width:480px;">
-      <thead><tr><th style="text-align:left;">Stylist</th><th style="text-align:center;">Scheduled</th><th style="text-align:center;">Actual</th><th style="text-align:center;">Variance</th></tr></thead>
+    <div style="font-weight:700;color:var(--primary);margin-bottom:6px;">Shifts — actual punches vs scheduled</div>
+    <div style="overflow-x:auto;"><table class="data-table" style="min-width:520px;">
+      <thead><tr><th style="text-align:left;">Stylist</th><th style="text-align:center;">Scheduled</th><th style="text-align:center;">Actual</th><th style="text-align:center;">Break</th><th style="text-align:center;">Variance</th></tr></thead>
       <tbody>${body}</tbody></table></div>
   </div>`;
 }
@@ -1812,10 +1820,34 @@ function dHeatMap(sn, dates){
     }
     rows+='<tr><td style="text-align:left;font-weight:600;font-size:12px;position:sticky;left:0;background:#fff;white-space:nowrap;padding-right:10px;">'+DAILY_DAYNAMES[i]+' '+dFmtMD(dt)+'</td>'+cells+'</tr>';
   });
+  // Per-day reconciliation: integrity check (Served should ≈ CC) and the
+  // "what did the worked hours leave on the table" capacity readout.
+  let recon='';
+  if(hasReal){
+    const goal=(HM_CPH_GOAL[String(sn).trim()]||2.2);
+    let trows='';
+    dates.forEach((dt,i)=>{
+      let arr=0,srv=0,wlk=0;
+      (S_dailyData.demand||[]).forEach(r=>{ if((r.salonNum||'').trim()===String(sn).trim() && r.date===dt){ arr+=n(r.arrivals)||0; srv+=n(r.served)||0; wlk+=n(r.walkedOut)||0; } });
+      let fh=0;
+      (S_dailyData.chkinout||[]).forEach(s=>{ if((s.salonNum||'').trim()===String(sn).trim() && s.date===dt && String(s.asStylist).trim().toLowerCase()==='true'){ const h=n(s.hours)||0, b=(n(s.breakTime)||0)/60; fh+=Math.max(0,h-b); } });
+      if(arr===0 && srv===0 && fh===0) return;
+      const cc = actualCC[dt]!=null?actualCC[dt]:'—';
+      const cap = Math.round(fh*goal);
+      trows += '<tr><td style="text-align:left;font-weight:600;">'+DAILY_DAYNAMES[i]+' '+dFmtMD(dt)+'</td>'
+        + '<td style="text-align:center;">'+arr+'</td><td style="text-align:center;">'+srv+'</td>'
+        + '<td style="text-align:center;">'+cc+'</td><td style="text-align:center;">'+(wlk||'—')+'</td>'
+        + '<td style="text-align:center;">'+fh.toFixed(1)+'</td><td style="text-align:center;">'+cap+'</td></tr>';
+    });
+    if(trows) recon = '<div style="margin-top:12px;font-size:11px;"><div style="font-weight:700;color:var(--primary);margin-bottom:4px;">Day reconciliation</div>'
+      + '<div style="overflow-x:auto;"><table class="data-table" style="min-width:560px;"><thead><tr><th style="text-align:left;">Day</th><th>Arrived</th><th>Served</th><th>CC</th><th>Walked</th><th>Floor hrs (net break)</th><th>Capacity @ goal</th></tr></thead><tbody>'+trows+'</tbody></table></div>'
+      + '<div style="color:var(--text-muted);margin-top:3px;">Served should track CC — if Arrived runs far above CC, demand is being double-counted. Capacity @ goal = floor-hours × CPH goal (what the hours worked could serve at target productivity); compare to Arrived for demand left on the table.</div></div>';
+  }
   return '<div style="margin-top:16px;">'
     + '<div style="font-weight:700;color:var(--primary);margin-bottom:2px;">Staffing heat map — where hours missed demand</div>'
     + '<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Each cell is a half-hour. Need = <b>sustained</b> arrivals (smoothed over '+(HM_SMOOTH_RADIUS*2+1)+' slots) ÷ this salon\'s CPH goal ('+(HM_CPH_GOAL[String(sn).trim()]||2.2)+', staffed to beat by '+HM_CPH_STRETCH+'). Demand = '+(hasReal?'actual customer arrivals':'forecast scaled to the day\'s actual total')+'; worked = '+(hasShifts?'stylists actually clocked in (floor only)':'from staffing report')+'. <span style="color:#c0392b;font-weight:700;">Red = understaffed</span>, <span style="color:#2980b9;font-weight:700;">blue = overstaffed</span>, <span style="color:#1b5e20;font-weight:700;">green = matched</span>. Number is stylists over/short; hover for detail.</div>'
     + '<div style="overflow-x:auto;"><table style="border-collapse:separate;border-spacing:2px;"><thead><tr>'+header+'</tr></thead><tbody>'+rows+'</tbody></table></div>'
+    + recon
     + '</div>';
 }
 
