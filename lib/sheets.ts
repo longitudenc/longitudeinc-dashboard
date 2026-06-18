@@ -219,6 +219,14 @@ export async function getDemandRange(start: string, end: string) {
   return { demand }
 }
 
+/** Read SD_CHKINOUT rows (actual clock punches) in a date window. */
+export async function getChkInOutRange(start: string, end: string) {
+  const raw = await readSheet('SD_CHKINOUT')
+  const inRange = (d: string) => d >= start && d <= end
+  const chkinout = rowsToObjects(raw).filter(r => inRange(String(r.date || '')))
+  return { chkinout }
+}
+
 export async function getAllDashboardData() {
   const [
     salonRows,

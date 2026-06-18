@@ -386,6 +386,91 @@ export async function fetchInvoices(
 }
 
 /**
+ * Actual employee clock punches (EmpChkInOut). This is the COMPLETE per-segment
+ * record for every employee — unlike SD_SHIFTS (a schedule/variance feed that
+ * was missing people). Each segment carries role flags (asStylist/asRecept/
+ * asTraining/asAdmin) so we can count only floor-cutting time, plus breakTime so
+ * we can net non-cutting minutes. checkInTime/checkOutTime are the punch window.
+ */
+export interface SD3ChkInOut {
+  chkPk: number | null
+  storeId: number
+  date: string
+  employeePk: number | null
+  employeeId: number | null
+  fname: string
+  lname: string
+  checkInTime: string | null
+  checkOutTime: string | null
+  hours: number | null
+  breakTime: number | null            // minutes on break inside this segment
+  asStylist: boolean
+  asRecept: boolean
+  asTraining: boolean
+  asAdmin: boolean
+  absent: boolean
+  custsWaitingAtTimeOut: number | null
+  estWaitAtTimeOut: number | null
+}
+
+function addOneDayIso(iso: string): string {
+  const d = new Date(iso + 'T00:00:00Z')
+  d.setUTCDate(d.getUTCDate() + 1)
+  return d.toISOString().slice(0, 10)
+}
+
+/**
+ * Pull ALL employees' clock punches for one store over a date range. Endpoint is
+ * per-store path-segment with a checkInTime window (end is exclusive, so we add a
+ * day). NO employee= filter → every employee; the x= param is not a row cap.
+ */
+export async function fetchEmpChkInOut(
+  session: SD3Session,
+  storeId: number,
+  startDate: string,
+  endDate: string
+): Promise<SD3ChkInOut[]> {
+  const endExclusive = addOneDayIso(endDate)
+  const url =
+    `${SD3_BASE}/rest/storeconfig/${storeId}/empchkinout` +
+    `?checkInTime>=${startDate}&checkInTime<${endExclusive}`
+
+  const res = await fetch(url, { headers: jsonHeaders(session.token) })
+  if (!res.ok) {
+    throw new Error(
+      `empchkinout failed for storeId=${storeId}: ${res.status} ${res.statusText}`
+    )
+  }
+
+  const rows = asRowArray(await res.json())
+  return rows.map(r => {
+    const emp = ((r as any).employee?.objectId?.idSnapshot) || {}
+    const chk = ((r as any).objectId?.idSnapshot) || {}
+    return {
+      chkPk: numOrNull(chk.employeecheckinoutpk),
+      storeId: extractStoreId(r) ?? storeId,
+      date: String(r.date ?? ''),
+      employeePk: numOrNull(emp.employeepk),
+      employeeId: numOrNull(r.employeeId),
+      fname: String(r.fname ?? r.firstName ?? ''),
+      lname: String(r.lname ?? r.lastName ?? ''),
+      checkInTime: r.checkInTime ? String(r.checkInTime) : null,
+      checkOutTime: (r.checkOutTime ?? r.checkOutTimeNonNull)
+        ? String(r.checkOutTime ?? r.checkOutTimeNonNull) : null,
+      hours: numOrNull(r.hours),
+      breakTime: numOrNull(r.breakTime),
+      asStylist: !!r.asStylist,
+      asRecept: !!r.asRecept,
+      asTraining: !!r.asTraining,
+      asAdmin: !!r.asAdmin,
+      absent: !!r.absent,
+      custsWaitingAtTimeOut: numOrNull(r.custsWaitingAtTimeOut),
+      estWaitAtTimeOut: numOrNull(r.estWaitAtTimeOut),
+    }
+  })
+}
+
+/**
  * Pull employee performance CSV (Detail mode — one row per emp/salon/week).
  * Returns raw CSV text; CSV parsing happens in the scraper route.
  */

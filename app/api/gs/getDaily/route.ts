@@ -21,7 +21,7 @@
 // metrics in SD_EMP_DAILY are already computed by SD3 (cph, hcTime, productPct…).
 
 import { NextResponse } from 'next/server'
-import { getDailyRange, getShiftsRange, getHalfHourRange, getDemandRange } from '@/lib/sheets'
+import { getDailyRange, getShiftsRange, getHalfHourRange, getDemandRange, getChkInOutRange } from '@/lib/sheets'
 import { requireSignedIn } from '@/lib/require-role'
 import { scopeDaily } from '@/lib/scope-filter'
 
@@ -53,8 +53,9 @@ export async function GET(request: Request) {
     const rawShifts = await getShiftsRange(start, end)
     const rawHalf = await getHalfHourRange(start, end)
     const rawDemand = await getDemandRange(start, end)
-    const { salonDaily, empDaily, shifts, halfHour, demand } =
-      scopeDaily(raw.salonDaily, raw.empDaily, rawShifts.shifts, rawHalf.halfHour, rawDemand.demand, gate.access)
+    const rawChk = await getChkInOutRange(start, end)
+    const { salonDaily, empDaily, shifts, halfHour, demand, chkinout } =
+      scopeDaily(raw.salonDaily, raw.empDaily, rawShifts.shifts, rawHalf.halfHour, rawDemand.demand, rawChk.chkinout, gate.access)
 
     return NextResponse.json({
       success: true,
@@ -65,11 +66,13 @@ export async function GET(request: Request) {
       shiftsCount: shifts.length,
       halfHourCount: halfHour.length,
       demandCount: demand.length,
+      chkinoutCount: chkinout.length,
       salonDaily,
       empDaily,
       shifts,
       halfHour,
       demand,
+      chkinout,
     })
   } catch (e: any) {
     return NextResponse.json({ success: false, error: e.message }, { status: 500 })

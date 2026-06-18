@@ -17,11 +17,13 @@ import {
   fetchShifts,
   fetchHalfHourOptimal,
   fetchInvoices,
+  fetchEmpChkInOut,
   batchMap,
   type SD3DailyStoreSummary,
   type SD3ShiftVariance,
   type SD3HalfHourOptimal,
   type SD3InvoiceLite,
+  type SD3ChkInOut,
 } from '@/lib/sd3'
 import { upsertSheet, readSheet, rowsToObjects } from '@/lib/sheets'
 import { parseCsv, rowsToObjectsAt, num, returnRate } from '@/lib/csv'
@@ -36,6 +38,17 @@ const SD_MONTHLY_TAB = 'SD_MONTHLY'
 const SD_SHIFTS_TAB = 'SD_SHIFTS'
 const SD_HALFHOUR_TAB = 'SD_HALFHOUR'
 const SD_DEMAND_TAB = 'SD_DEMAND'
+const SD_CHKINOUT_TAB = 'SD_CHKINOUT'
+
+// Actual clock punches (one row per employee per segment). Complete coverage
+// source: role flags let us count only floor-cutting time, breakTime nets the
+// rest. checkInTime/checkOutTime define the on-floor window per segment.
+const CHKINOUT_COLUMNS = [
+  'date', 'storeId', 'salonNum', 'chkPk', 'employeePk', 'employeeId',
+  'fname', 'lname', 'checkInTime', 'checkOutTime', 'hours', 'breakTime',
+  'asStylist', 'asRecept', 'asTraining', 'asAdmin', 'absent',
+  'custsWaiting', 'estWait', 'scrapedAt',
+] as const
 
 // Real per-half-hour demand, aggregated from invoices (PII dropped at the SD3
 // boundary). arrivals = customers who joined the list in that slot (true,
@@ -993,6 +1006,90 @@ export async function runDemandScrape(
     result.ok = false
     result.error = err instanceof Error ? err.message : String(err)
     console.error('[scrape/demand] fatal:', result.error)
+  }
+  result.durationMs = Date.now() - startedAt
+  return result
+}
+
+// ── Employee clock punches (actual floor coverage, break-aware) ─────
+
+/**
+ * Scrape actual clock punches into SD_CHKINOUT — one row per employee per
+ * segment, for ALL employees (no employee= filter). Raw segments are stored
+ * as-is; the dashboard derives per-half-hour floor coverage (asStylist segments
+ * overlapping each slot) and break-netted daily capacity from them.
+ *  - no args     → current fiscal week-to-date.
+ *  - start & end → explicit range (backfill).
+ * Upsert key (date, storeId, chkPk).
+ */
+export async function runChkInOutScrape(
+  startOverride?: string,
+  endOverride?: string
+): Promise<EntityScrapeResult> {
+  const startedAt = Date.now()
+  const end = endOverride || yesterdayET()
+  const start = startOverride || fiscalWeekStart(end)
+  const result: EntityScrapeResult = {
+    ok: true, durationMs: 0, weekStart: start, weekEnd: end,
+    rowsUpserted: 0, updated: 0, inserted: 0, skipped: 0, processed: 0, error: null,
+  }
+  try {
+    const session = await authenticate()
+    const salons = await fetchSalons(session)
+    console.log(`[scrape/chkinout] ${start}→${end} — ${salons.length} salons`)
+
+    const dataRows: Record<string, any>[] = []
+    let firstErr = ''
+    let storesFailed = 0
+
+    for (const s of salons) {
+      let segs: SD3ChkInOut[]
+      try {
+        segs = await fetchEmpChkInOut(session, s.storeId, start, end)
+      } catch (e) {
+        storesFailed++
+        const msg = e instanceof Error ? e.message : String(e)
+        if (!firstErr) firstErr = msg
+        console.error(`[scrape/chkinout] store ${s.salonNum} (${s.storeId}) failed:`, msg)
+        continue
+      }
+      for (const seg of segs) {
+        if (!seg.date || seg.chkPk == null) continue
+        dataRows.push({
+          date: seg.date, storeId: s.storeId, salonNum: s.salonNum,
+          chkPk: seg.chkPk, employeePk: seg.employeePk ?? '', employeeId: seg.employeeId ?? '',
+          fname: seg.fname, lname: seg.lname,
+          checkInTime: seg.checkInTime ?? '', checkOutTime: seg.checkOutTime ?? '',
+          hours: seg.hours ?? '', breakTime: seg.breakTime ?? '',
+          asStylist: seg.asStylist, asRecept: seg.asRecept, asTraining: seg.asTraining,
+          asAdmin: seg.asAdmin, absent: seg.absent,
+          custsWaiting: seg.custsWaitingAtTimeOut ?? '', estWait: seg.estWaitAtTimeOut ?? '',
+          scrapedAt: new Date().toISOString(),
+        })
+      }
+    }
+
+    result.processed = dataRows.length
+    if (dataRows.length === 0) {
+      result.error = firstErr
+        ? `0 rows — ${storesFailed}/${salons.length} stores errored, first: ${firstErr}`
+        : '0 rows — no punches in range (check endpoint/params)'
+    }
+    if (dataRows.length > 0) {
+      const up = await upsertSheet(
+        SD_CHKINOUT_TAB,
+        [...CHKINOUT_COLUMNS],
+        ['date', 'storeId', 'chkPk'],
+        dataRows
+      )
+      result.rowsUpserted = dataRows.length
+      result.updated = up.updated
+      result.inserted = up.inserted
+    }
+  } catch (err) {
+    result.ok = false
+    result.error = err instanceof Error ? err.message : String(err)
+    console.error('[scrape/chkinout] fatal:', result.error)
   }
   result.durationMs = Date.now() - startedAt
   return result

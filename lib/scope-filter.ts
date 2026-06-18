@@ -89,9 +89,10 @@ export function scopeDaily(
   shifts: any[],
   halfHour: any[],
   demand: any[],
+  chkinout: any[],
   access: Access
-): { salonDaily: any[]; empDaily: any[]; shifts: any[]; halfHour: any[]; demand: any[] } {
-  if (seesEverything(access)) return { salonDaily, empDaily, shifts, halfHour, demand }
+): { salonDaily: any[]; empDaily: any[]; shifts: any[]; halfHour: any[]; demand: any[]; chkinout: any[] } {
+  if (seesEverything(access)) return { salonDaily, empDaily, shifts, halfHour, demand, chkinout }
   if (access.role === 'area_manager') {
     const salons = amSalonSet(access)
     const inScope = (sn: any) => salons.has(String(sn || '').trim())
@@ -101,7 +102,8 @@ export function scopeDaily(
       shifts: (shifts || []).filter(r => inScope(r.salonNum)),
       halfHour: (halfHour || []).filter(r => inScope(r.salonNum)),
       demand: (demand || []).filter(r => inScope(r.salonNum)),
+      chkinout: (chkinout || []).filter(r => inScope(r.salonNum)),
     }
   }
-  return { salonDaily: [], empDaily: [], shifts: [], halfHour: [], demand: [] } // manager / stylist
+  return { salonDaily: [], empDaily: [], shifts: [], halfHour: [], demand: [], chkinout: [] } // manager / stylist
 }
