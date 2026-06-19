@@ -404,7 +404,17 @@ export async function upsertSheet(
   const insertRows: any[][] = []
   let updatedCount = 0
 
+  // De-dupe the incoming batch by key (last occurrence wins). Without this, two
+  // rows sharing a key that aren't yet in the sheet would BOTH be inserted,
+  // creating duplicates — this was doubling SD_EMP_DAILY rows whenever a daily
+  // CSV listed a person more than once for the same day.
+  const dedupedByKey = new Map<string, Record<string, any>>()
   for (const obj of rowsAsObjects) {
+    const key = keyColumns.map(k => String(obj[k] ?? '')).join('||')
+    dedupedByKey.set(key, obj)
+  }
+
+  for (const obj of dedupedByKey.values()) {
     const newRow = existingHeaders.map(h => obj[h] ?? '')
     const key = keyColumns.map(k => String(obj[k] ?? '')).join('||')
     const existingRowNum = existingByKey.get(key)

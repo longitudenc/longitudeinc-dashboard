@@ -1651,7 +1651,7 @@ function openSalonDaily(sn, hostId){
     if(!cur || !cur.success){ host.innerHTML='<div class="table-card"><div class="no-data">Error loading daily data: '+((cur&&cur.error)||'unknown')+'</div></div>'; return; }
     const pySalon = (py && py.success) ? (py.salonDaily||[]) : [];   // prior-year salon rows (empty until backfilled)
     S_dailyData = { key:cacheKey, start:curStart, end:curEnd,
-      salonDaily:[...(cur.salonDaily||[]), ...pySalon], empDaily:cur.empDaily||[], shifts:cur.shifts||[], halfHour:cur.halfHour||[], demand:cur.demand||[], chkinout:cur.chkinout||[] };
+      salonDaily:[...(cur.salonDaily||[]), ...pySalon], empDaily:dedupEmp(cur.empDaily||[]), shifts:cur.shifts||[], halfHour:cur.halfHour||[], demand:cur.demand||[], chkinout:cur.chkinout||[] };
     render();
   }).catch(err=>{ host.innerHTML='<div class="table-card"><div class="no-data">Error: '+err.message+'</div></div>'; });
 }
@@ -1887,6 +1887,21 @@ function dDayHeatStrip(dateIso, sns){
     + '</div>';
 }
 
+// Defensive de-dupe of per-stylist daily rows by (date, salon, person). The
+// scrape writes one row per person/day; a duplicate row would otherwise double
+// every stylist AND the salon total. Keeps display correct regardless of source.
+function dedupEmp(arr){
+  if(!Array.isArray(arr)) return [];
+  const seen=new Set(), out=[];
+  for(const e of arr){
+    const id=String(e.payId||e.employeeId||e.globalId||e.employeeName||'').trim();
+    if(!id){ out.push(e); continue; }
+    const k=String(e.date||'')+'|'+String(e.salonNum||e.storeId||'').trim()+'|'+id;
+    if(seen.has(k)) continue;
+    seen.add(k); out.push(e);
+  }
+  return out;
+}
 function openDayDetail(sn, date, targetId){
   sn = String(sn).trim();
   S_dailyDetail = { salonNum: sn, date };
@@ -2006,7 +2021,7 @@ function loadDayReview(dateIso){
   ]).then(([cur,pyd])=>{
     if(!cur || !cur.success){ body.innerHTML='<div class="no-data">Error loading: '+((cur&&cur.error)||'unknown')+'</div>'; return; }
     const pySalon=(pyd&&pyd.success)?(pyd.salonDaily||[]):[];
-    S_dailyData={ key:cacheKey, day:dateIso, salonDaily:[...(cur.salonDaily||[]),...pySalon], empDaily:cur.empDaily||[], shifts:cur.shifts||[], halfHour:cur.halfHour||[], demand:cur.demand||[], chkinout:cur.chkinout||[] };
+    S_dailyData={ key:cacheKey, day:dateIso, salonDaily:[...(cur.salonDaily||[]),...pySalon], empDaily:dedupEmp(cur.empDaily||[]), shifts:cur.shifts||[], halfHour:cur.halfHour||[], demand:cur.demand||[], chkinout:cur.chkinout||[] };
     renderDayReviewTable(dateIso);
   }).catch(err=>{ body.innerHTML='<div class="no-data">Error: '+err.message+'</div>'; });
 }
