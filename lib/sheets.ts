@@ -170,10 +170,11 @@ export async function getTrackerData() {
  * SD_DAILY is keyed by storeId only, so we join SalonRoster to attach salonNum
  * to each salon-day row, making the response self-contained for the UI.
  */
-export async function getDailyRange(start: string, end: string) {
+export async function getDailyRange(start: string, end: string, opts?: { skipEmp?: boolean }) {
+  const skipEmp = !!opts?.skipEmp
   const [salonRaw, empRaw, rosterRaw] = await Promise.all([
     readSheet('SD_DAILY'),
-    readSheet('SD_EMP_DAILY'),
+    skipEmp ? Promise.resolve([] as any[]) : readSheet('SD_EMP_DAILY'),
     readSheet('SalonRoster'),
   ])
   const inRange = (d: string) => d >= start && d <= end
@@ -187,7 +188,7 @@ export async function getDailyRange(start: string, end: string) {
   const salonDaily = rowsToObjects(salonRaw)
     .filter(r => inRange(String(r.date || '')))
     .map(r => ({ ...r, salonNum: salonNumByStore[String(r.storeId || '').trim()] || '' }))
-  const empDaily = rowsToObjects(empRaw).filter(r => inRange(String(r.date || '')))
+  const empDaily = skipEmp ? [] : rowsToObjects(empRaw).filter(r => inRange(String(r.date || '')))
 
   return { salonDaily, empDaily }
 }

@@ -272,7 +272,11 @@ export async function fetchShifts(
   const url =
     `${SD3_BASE}/rest/schedule/variance` +
     `?storeIds=${storeId}&start=${startDate}&end=${endDate}` +
-    `&initial=true&employees=0&includeDetailedData=true`
+    // Current schedule (NOT initial=true — the initial posted schedule drops
+    // anyone added or who picked up a shift later, which is why we were only
+    // landing ~5 of 8 people). svsev/svslv/svlev/svllv = 5-min variance
+    // thresholds, matching the report. employees=0 → all employees.
+    `&employees=0&includeDetailedData=true&svsev=5&svslv=5&svlev=5&svllv=5`
 
   const res = await fetch(url, { headers: jsonHeaders(session.token) })
   if (!res.ok) {

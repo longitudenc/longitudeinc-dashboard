@@ -1646,7 +1646,7 @@ function openSalonDaily(sn, hostId){
   host.innerHTML='<div class="table-card"><div class="no-data">Loading daily…</div></div>';
   Promise.all([
     fetch(`/api/gs/getDaily?start=${curStart}&end=${curEnd}`).then(r=>r.json()),
-    fetch(`/api/gs/getDaily?start=${pyStart}&end=${pyEnd}`).then(r=>r.json())
+    fetch(`/api/gs/getDaily?start=${pyStart}&end=${pyEnd}&light=1`).then(r=>r.json())
   ]).then(([cur, py])=>{
     if(!cur || !cur.success){ host.innerHTML='<div class="table-card"><div class="no-data">Error loading daily data: '+((cur&&cur.error)||'unknown')+'</div></div>'; return; }
     const pySalon = (py && py.success) ? (py.salonDaily||[]) : [];   // prior-year salon rows (empty until backfilled)
@@ -1670,39 +1670,67 @@ function dMinOfDay(iso){ const m=String(iso||'').match(/T(\d{2}):(\d{2})/); retu
 function dTitle(s){ s=String(s||'').toLowerCase(); return s.charAt(0).toUpperCase()+s.slice(1); }
 function dShiftName(f,l){ return (dTitle(f)+' '+dTitle(l)).trim(); }
 function dShiftBlock(sn, date){
-  const all = (S_dailyData && S_dailyData.shifts) ? S_dailyData.shifts : [];
-  const rows = all.filter(s=>(s.salonNum||'').trim()===String(sn).trim() && s.date===date)
-    .sort((a,b)=>{ const am=dMinOfDay(a.schedStart||a.actualStart), bm=dMinOfDay(b.schedStart||b.actualStart); return (am==null?9999:am)-(bm==null?9999:bm); });
-  if(!rows.length) return '<div style="font-size:11px;color:var(--text-muted);margin-top:12px;">No schedule data for this day.</div>';
-  let body='';
+  sn=String(sn).trim();
+  const rows=(S_dailyData && S_dailyData.shifts)
+    ? S_dailyData.shifts.filter(s=>(s.salonNum||'').trim()===sn && String(s.date)===date)
+    : [];
+  if(!rows.length) return '<div style="font-size:11px;color:var(--text-muted);margin-top:12px;">No schedule/variance data for this day yet.</div>';
+  // SD_SHIFTS comes from SD3's schedule/variance report (Current Schedule), so it
+  // carries EVERYONE — scheduled + no-shows + unscheduled — each row pairing the
+  // scheduled times with that person's actual worked times and SD3's variance
+  // (mask + minute diffs + lobby counts). No-show = scheduled, never clocked in.
+  // Not scheduled = worked with no schedule. Variance bits: 1=start early,
+  // 2=start late, 4=left early, 8=left late (verified against the report).
+  const keyMin=s=>{ const m=dMinOfDay(s.schedStart||s.actualStart); return m==null?9999:m; };
+  rows.sort((a,b)=>keyMin(a)-keyMin(b));
+  let body='', noShows=0;
   rows.forEach(s=>{
-    const hasSched=!!s.schedStart, hasAct=!!s.actualStart;
-    let badge, color;
-    if(hasSched && !hasAct){ badge='No show'; color='#c0392b'; }
-    else if(!hasSched && hasAct){ badge='Unscheduled'; color='#2980b9'; }
-    else {
-      const sd=dMinOfDay(s.actualStart)-dMinOfDay(s.schedStart);  // + = clocked in late
-      const ed=dMinOfDay(s.schedEnd)-dMinOfDay(s.actualEnd);      // + = left early
-      if(sd>5){ badge='Late '+sd+'m'; color='#e67e22'; }
-      else if(ed>5){ badge='Left early '+ed+'m'; color='#e67e22'; }
-      else if(sd<-5){ badge='Early '+(-sd)+'m'; color='#27ae60'; }
-      else { badge='On time'; color='#27ae60'; }
+    const hasSched=!!String(s.schedStart||'').trim();
+    const hasAct=!!String(s.actualStart||'').trim();
+    const nonFloor=String(s.isNonFloor).toLowerCase()==='true';
+    const roleTag=nonFloor?' <span style="font-size:9px;color:var(--text-muted);">(non-floor)</span>':'';
+    const sched=hasSched?dClock(s.schedStart)+'–'+dClock(s.schedEnd):'—';
+    const worked=hasAct?dClock(s.actualStart)+'–'+dClock(s.actualEnd):'—';
+    const mask=parseInt(s.varianceMask,10)||0;
+    let badges=[];
+    if(hasSched && !hasAct){ badges.push(['No show','#c0392b']); noShows++; }
+    else if(!hasSched && hasAct){ badges.push(['Not scheduled','#1e8449']); }
+    else if(hasSched && hasAct){
+      const ci=Math.abs(parseInt(s.checkInDiff,10)||0);
+      const co=Math.abs(parseInt(s.checkOutDiff,10)||0);
+      if(mask&1) badges.push(['Start '+ci+'m early','#2980b9']);
+      if(mask&2) badges.push(['Start '+ci+'m late','#e67e22']);
+      if(mask&4) badges.push(['Left '+co+'m early','#e67e22']);
+      if(mask&8) badges.push(['Left '+co+'m late','#2980b9']);
+      if(!badges.length) badges.push(['On time','#27ae60']);
     }
-    const sched = hasSched ? dClock(s.schedStart)+'–'+dClock(s.schedEnd) : '—';
-    const act   = hasAct   ? dClock(s.actualStart)+'–'+dClock(s.actualEnd) : '—';
-    const nf = (String(s.isNonFloor).toLowerCase()==='true') ? ' <span style="font-size:9px;color:var(--text-muted);">(non-floor)</span>' : '';
-    const note = s.notes ? ' title="'+String(s.notes).replace(/"/g,'&quot;')+'"' : '';
-    body += `<tr${note}>
-      <td style="text-align:left;font-weight:600;">${dShiftName(s.firstName,s.lastName)}${nf}</td>
+    // Lobby at the moment they clocked in / out (the cost of an early start or
+    // an early/late leave): in-lobby waiters + OCI customers not yet arrived.
+    const ciW=parseInt(s.checkInWaiting,10)||0, ciO=parseInt(s.checkInOciWaiting,10)||0;
+    const coW=parseInt(s.checkOutWaiting,10)||0, coO=parseInt(s.checkOutOciWaiting,10)||0;
+    const estW=parseInt(s.estWaitAtTimeout,10)||0;
+    const lobby=[];
+    if(((mask&1)||(mask&2)) && (ciW+ciO)>0)
+      lobby.push('<span style="color:var(--text-muted);">at clock-in: '+ciW+' in lobby'+(ciO?(' + '+ciO+' OCI'):'')+'</span>');
+    if(((mask&4)||(mask&8)) && (coW+coO)>0){
+      const leftEarly=!!(mask&4);
+      lobby.push('<span style="color:'+(leftEarly?'#c0392b':'var(--text-muted)')+';font-weight:'+(leftEarly?'700':'400')+';">at clock-out: '+coW+' in lobby'+(coO?(' + '+coO+' OCI'):'')+(estW?(', ~'+estW+'m wait'):'')+'</span>');
+    }
+    const lobbyHtml=lobby.length?('<div style="font-size:9px;margin-top:2px;line-height:1.35;">'+lobby.join('<br>')+'</div>'):'';
+    const note=s.notes?' title="'+String(s.notes).replace(/"/g,'&quot;')+'"':'';
+    const badgeHtml=badges.map(b=>'<span style="background:'+b[1]+';color:#fff;border-radius:10px;padding:1px 8px;font-size:10px;font-weight:700;white-space:nowrap;margin:0 2px 2px 0;display:inline-block;">'+b[0]+'</span>').join('');
+    const rowBg=(hasSched && !hasAct)?' style="background:#fdeaea;"':(!hasSched && hasAct?' style="background:#eafaf0;"':'');
+    body += `<tr${note}${rowBg}>
+      <td style="text-align:left;font-weight:600;">${dShiftName(s.firstName,s.lastName)}${roleTag}</td>
       <td style="text-align:center;">${sched}</td>
-      <td style="text-align:center;">${act}</td>
-      <td style="text-align:center;"><span style="background:${color};color:#fff;border-radius:10px;padding:1px 8px;font-size:10px;font-weight:700;white-space:nowrap;">${badge}</span></td>
+      <td style="text-align:center;">${worked}</td>
+      <td style="text-align:center;">${badgeHtml}${lobbyHtml}</td>
     </tr>`;
   });
   return `<div style="margin-top:14px;">
-    <div style="font-weight:700;color:var(--primary);margin-bottom:6px;">Shifts — scheduled vs actual</div>
-    <div style="overflow-x:auto;"><table class="data-table" style="min-width:480px;">
-      <thead><tr><th style="text-align:left;">Stylist</th><th style="text-align:center;">Scheduled</th><th style="text-align:center;">Actual</th><th style="text-align:center;">Variance</th></tr></thead>
+    <div style="font-weight:700;color:var(--primary);margin-bottom:6px;">Shifts — scheduled vs actual${noShows?(' · <span style="color:#c0392b;">'+noShows+' no-show'+(noShows>1?'s':'')+'</span>'):''}</div>
+    <div style="overflow-x:auto;"><table class="data-table" style="min-width:520px;">
+      <thead><tr><th style="text-align:left;">Stylist</th><th style="text-align:center;">Scheduled</th><th style="text-align:center;">Worked</th><th style="text-align:center;">Variance</th></tr></thead>
       <tbody>${body}</tbody></table></div>
   </div>`;
 }
@@ -1810,7 +1838,7 @@ function dDayHeatStrip(dateIso, sns){
   if(!S_dailyData) return '';
   const dem=(S_dailyData.demand||[]).filter(r=>String(r.date)===dateIso);
   const hasMeasured = dem.some(r=> String(r.avgLine==null?'':r.avgLine).trim()!=='' || String(r.avgBusy==null?'':r.avgBusy).trim()!=='');
-  if(!hasMeasured) return '';
+  if(!hasMeasured) return '<div style="margin-top:18px;font-size:11px;color:var(--text-muted);">Staffing heat map — no half-hour demand pulled for '+dFmtMD(dateIso)+' yet. It will appear here once the demand backfill reaches this day.</div>';
   const D={}; let minHH=99, maxHH=0;
   const mark=hh=>{ if(hh<minHH)minHH=hh; if(hh>maxHH)maxHH=hh; };
   dem.forEach(r=>{ const sn=(r.salonNum||'').trim(), hh=n(r.halfHour); if(!sn||isNaN(hh)) return;
@@ -1974,7 +2002,7 @@ function loadDayReview(dateIso){
   body.innerHTML='<div class="no-data">Loading…</div>';
   Promise.all([
     fetch(`/api/gs/getDaily?start=${dateIso}&end=${dateIso}`).then(r=>r.json()),
-    fetch(`/api/gs/getDaily?start=${py}&end=${py}`).then(r=>r.json())
+    fetch(`/api/gs/getDaily?start=${py}&end=${py}&light=1`).then(r=>r.json())
   ]).then(([cur,pyd])=>{
     if(!cur || !cur.success){ body.innerHTML='<div class="no-data">Error loading: '+((cur&&cur.error)||'unknown')+'</div>'; return; }
     const pySalon=(pyd&&pyd.success)?(pyd.salonDaily||[]):[];

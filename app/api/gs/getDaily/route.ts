@@ -21,7 +21,7 @@
 // metrics in SD_EMP_DAILY are already computed by SD3 (cph, hcTime, productPct…).
 
 import { NextResponse } from 'next/server'
-import { getDailyRange, getShiftsRange, getHalfHourRange, getDemandRange, getChkInOutRange } from '@/lib/sheets'
+import { getDailyRange, getShiftsRange, getDemandRange, getChkInOutRange } from '@/lib/sheets'
 import { requireSignedIn } from '@/lib/require-role'
 import { scopeDaily } from '@/lib/scope-filter'
 
@@ -49,13 +49,17 @@ export async function GET(request: Request) {
       )
     }
 
-    const raw = await getDailyRange(start, end)
-    const rawShifts = await getShiftsRange(start, end)
-    const rawHalf = await getHalfHourRange(start, end)
-    const rawDemand = await getDemandRange(start, end)
-    const rawChk = await getChkInOutRange(start, end)
+    // light=1 → prior-year Δ-LY lookups that only need salon-level rows. Skip the
+    // heavy SD_EMP_DAILY / SD_DEMAND / SD_CHKINOUT reads. SD_SHIFTS + SD_HALFHOUR
+    // are no longer consumed by the UI, so they are never read either way.
+    const light = url.searchParams.get('light') === '1'
+
+    const raw = await getDailyRange(start, end, { skipEmp: light })
+    const rawShifts = light ? { shifts: [] as any[] } : await getShiftsRange(start, end)
+    const rawDemand = light ? { demand: [] as any[] } : await getDemandRange(start, end)
+    const rawChk = light ? { chkinout: [] as any[] } : await getChkInOutRange(start, end)
     const { salonDaily, empDaily, shifts, halfHour, demand, chkinout } =
-      scopeDaily(raw.salonDaily, raw.empDaily, rawShifts.shifts, rawHalf.halfHour, rawDemand.demand, rawChk.chkinout, gate.access)
+      scopeDaily(raw.salonDaily, raw.empDaily, rawShifts.shifts, [], rawDemand.demand, rawChk.chkinout, gate.access)
 
     return NextResponse.json({
       success: true,
