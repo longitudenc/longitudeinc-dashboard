@@ -398,6 +398,7 @@
         <button class="tab"        id="tb-individual" onclick="switchTab('individual',this)">My Team's Performance</button>
         <button class="tab"        id="tb-trends"     onclick="switchTab('trends',this)">Trends</button>
         <button class="tab"        id="tb-bonus"      onclick="switchTab('bonus',this)">Bonus 💰</button>
+        <button class="tab"        id="tb-reviews"    onclick="switchTab('reviews',this)">Reviews 📋</button>
       </div>
 
       <!-- SCORECARD -->
@@ -493,6 +494,7 @@
         </div>
       </div>
       <!-- BONUS TAB -->
+      <div id="tab-reviews" style="display:none;"><div id="am-reviews-body"></div></div>
       <div id="tab-bonus" style="display:none;">
         <div id="bonus-container">
           <div class="no-data"><div class="no-data-icon">💰</div>No bonus data loaded yet.<br><span style="font-size:12px;color:var(--text-muted);">Drop a monthly employee CSV with "bonus" in the filename into your upload folder.</span></div>
@@ -593,6 +595,7 @@
 
       <!-- Day Review — whole company for a single day (owner/admin/Kayla) -->
       <div class="table-card" id="section-day-review" style="display:none;"></div>
+      <div class="table-card" id="section-reviews" style="display:none;"></div>
     </div><!-- /page-company -->
 
     <!-- Stylist Profile Drawer -->
@@ -1387,6 +1390,7 @@ function setupSidebar(){
       <button class="am-btn company-subnav-btn" data-ctab="ams" onclick="showCompanyTab('ams')" style="font-size:13px;padding:7px 10px;">Area Managers</button>
       <button class="am-btn company-subnav-btn" data-ctab="bonus" onclick="showCompanyTab('bonus')" style="font-size:13px;padding:7px 10px;">Bonus 💰</button>
       <button class="am-btn company-subnav-btn" data-ctab="standouts" onclick="showCompanyTab('standouts')" style="font-size:13px;padding:7px 10px;">Standouts 🏆</button>
+      <button class="am-btn company-subnav-btn" data-ctab="reviews" onclick="showCompanyTab('reviews')" style="font-size:13px;padding:7px 10px;">Reviews 📋</button>
       ${canSeeDayReview()?`<button class="am-btn company-subnav-btn" data-ctab="dayreview" onclick="showCompanyTab('dayreview')" style="font-size:13px;padding:7px 10px;">Day Review 📅</button>`:''}
     </div>`;
     if(isAdminRole()){
@@ -1410,6 +1414,7 @@ function setupSidebar(){
       html += `<div id="company-subnav" style="display:none;padding-left:10px;border-left:2px solid var(--border);margin:2px 0 2px 14px;">
         <button class="am-btn company-subnav-btn active" data-ctab="allsalons" onclick="showCompanyTab('allsalons')" style="font-size:13px;padding:7px 10px;">All Salons</button>
         <button class="am-btn company-subnav-btn" data-ctab="standouts" onclick="showCompanyTab('standouts')" style="font-size:13px;padding:7px 10px;">Standouts 🏆</button>
+      <button class="am-btn company-subnav-btn" data-ctab="reviews" onclick="showCompanyTab('reviews')" style="font-size:13px;padding:7px 10px;">Reviews 📋</button>
         ${canSeeDayReview()?`<button class="am-btn company-subnav-btn" data-ctab="dayreview" onclick="showCompanyTab('dayreview')" style="font-size:13px;padding:7px 10px;">Day Review 📅</button>`:''}
       </div>`;
     }
@@ -1458,6 +1463,7 @@ const COMPANY_TAB_SECTIONS = {
   bonus:     ['section-bonus'],
   standouts: ['section-standouts'],
   dayreview: ['section-day-review'],
+  reviews:   ['section-reviews'],
 };
 function applyCompanyTabVisibility(){
   const full = canSeeAllSalons();
@@ -1465,7 +1471,7 @@ function applyCompanyTabVisibility(){
   const gated = new Set(['section-scorecard','section-am-perf','section-bonus']);
   const roleOk = id => id==='section-day-review' ? canSeeDayReview() : (gated.has(id) ? full : true);
   const active = new Set(COMPANY_TAB_SECTIONS[S_companyTab] || COMPANY_TAB_SECTIONS.allsalons);
-  ['company-summary','section-scorecard','section-am-perf','section-all-salons','co-salon-drill','section-bonus','section-standouts','section-day-review'].forEach(id=>{
+  ['company-summary','section-scorecard','section-am-perf','section-all-salons','co-salon-drill','section-bonus','section-standouts','section-day-review','section-reviews'].forEach(id=>{
     const el = document.getElementById(id); if(!el) return;
     el.style.display = (active.has(id) && roleOk(id)) ? '' : 'none';
   });
@@ -1478,10 +1484,11 @@ function applyCompanyTabVisibility(){
 function showCompanyTab(name){
   if(name==='dayreview' && !canSeeDayReview()) name='allsalons';
   // Limited roles only get All Salons + Standouts (+ Day Review for Kayla).
-  else if(!canSeeAllSalons() && !['allsalons','standouts','dayreview'].includes(name)) name='allsalons';
+  else if(!canSeeAllSalons() && !['allsalons','standouts','dayreview','reviews'].includes(name)) name='allsalons';
   S_companyTab = name;
   applyCompanyTabVisibility();
   if(name==='dayreview') renderDayReview();
+  if(name==='reviews') renderReviewsTab('section-reviews','company');
 }
 
 function switchToCompany(){ 
@@ -2075,12 +2082,13 @@ function renderDayReviewTable(dateIso){
 function switchTab(tab,el){ 
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active')); 
   el.classList.add('active');
-  ['score','salon','individual','trends','bonus'].forEach(t=>{ const el2=document.getElementById('tab-'+t); if(el2) el2.style.display=t===tab?'block':'none'; });
+  ['score','salon','individual','trends','bonus','reviews'].forEach(t=>{ const el2=document.getElementById('tab-'+t); if(el2) el2.style.display=t===tab?'block':'none'; });
   if(tab==='individual') renderIndividual();
   if(tab==='salon') renderSalonTab();
   if(tab==='score') renderScorecard();
   if(tab==='trends') renderTrends();
   if(tab==='bonus') renderBonus();
+  if(tab==='reviews') renderReviewsTab('am-reviews-body','am');
 }
 
 // — Week dropdown ────────────────────────────────────────────
@@ -2117,6 +2125,7 @@ function selectWeek(wk){
     if(tabId === 'tb-salon') renderSalonTab();
     else if(tabId === 'tb-individual') renderIndividual();
     else if(tabId === 'tb-tracker') renderTracker();
+    else if(tabId === 'tb-reviews') renderReviewsTab('am-reviews-body','am');
     else renderScorecard();
     // Update header
     document.getElementById('am-sub').textContent = 'Area Manager · Week Ending ' + (wk?fmtWeek(wk):'—');
@@ -2125,6 +2134,111 @@ function selectWeek(wk){
 }
 
 // ── AM page ───────────────────────────────────────────────────
+// ── Reviews (stylist annual reviews + salon/manager reviews) ─────────────────
+// Lives as a subtab in BOTH windows (AM view and Company Overview). A toggle
+// picks stylist vs salon; a salon selector scopes by role. Stylist mode reuses
+// the existing annual review (opens the profile drawer on its Review tab). Salon
+// mode is the manager raise review — engine lands in the next layer.
+let S_reviewMode = 'salon';        // 'salon' | 'stylist'
+let S_reviewSalonSel = '';         // selected salonNum
+let S_reviewWindow = 'am';         // 'am' | 'company' (for salon scoping)
+let S_reviewHostId = 'am-reviews-body';
+
+// Distinct people who worked a given salon, from loaded weekly employee data.
+function stylistsForSalon(sn){
+  sn = String(sn).trim();
+  const by = {};
+  (S.weekHistory||[]).forEach(snap=>{
+    (snap.emps||[]).forEach(e=>{
+      if(String(e.salonNum||'').trim()!==sn) return;
+      const gid = String(e.globalId||'').trim(); if(!gid) return;
+      if(!by[gid]) by[gid] = { globalId:gid, name:e.empName||gid, position:(e.position||'').trim() };
+    });
+  });
+  return Object.values(by).sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
+}
+
+// Salons selectable in the Reviews tab for the current window + role.
+function reviewSalonList(){
+  const snap = (typeof getSnap==='function') ? getSnap() : null;
+  let sns = [];
+  if(S_reviewWindow==='am'){
+    const am = AMS[S.currentAM];
+    if(S.currentAM==='kayla'){
+      sns = snap ? snap.salons.map(s=>String(s.salonNum||'').trim()).filter(x=>!NAMED.has(x)) : [];
+    } else {
+      sns = am ? (am.salons||[]).slice() : [];
+    }
+  } else {
+    sns = snap ? snap.salons.map(s=>String(s.salonNum||'').trim()) : [];
+  }
+  sns = [...new Set(sns.filter(Boolean))].filter(sn=>canDrillSalon(sn)).sort((a,b)=>parseInt(a,10)-parseInt(b,10));
+  return sns;
+}
+
+function setReviewMode(m){ S_reviewMode=m; renderReviewsTab(S_reviewHostId, S_reviewWindow); }
+function setReviewSalon(v){ S_reviewSalonSel=v; renderReviewsTab(S_reviewHostId, S_reviewWindow); }
+function openStylistReview(gid, name){
+  if(typeof canViewPerson==='function' && !canViewPerson(gid)) return;
+  openProfile(gid, name);
+  setTimeout(()=>{ try{ switchProfileTab('review'); }catch(e){} }, 60);
+}
+
+function renderReviewsTab(hostId, windowKind){
+  S_reviewHostId = hostId || S_reviewHostId;
+  S_reviewWindow = windowKind || S_reviewWindow;
+  const host = document.getElementById(S_reviewHostId); if(!host) return;
+  const salons = reviewSalonList();
+  if(!S_reviewSalonSel || !salons.includes(S_reviewSalonSel)) S_reviewSalonSel = salons[0]||'';
+
+  // Managers (once they get access) only ever see their own salon review.
+  const mgrOnly = (typeof roleClean==='function' && roleClean()==='manager');
+  if(mgrOnly) S_reviewMode='salon';
+
+  const salonOpts = salons.map(sn=>`<option value="${sn}" ${sn===S_reviewSalonSel?'selected':''}>${salonDisplay(sn)}</option>`).join('') || '<option value="">No salons</option>';
+  const tBtn = (mode,label)=>`<button onclick="setReviewMode('${mode}')" style="padding:4px 14px;border-radius:12px;border:none;font-size:12px;font-weight:700;cursor:pointer;background:${S_reviewMode===mode?'var(--primary)':'transparent'};color:${S_reviewMode===mode?'#fff':'var(--primary)'};">${label}</button>`;
+  const toggle = mgrOnly ? '' : `<span style="display:inline-flex;gap:2px;background:#e9e9e9;border:1px solid var(--border);border-radius:14px;padding:2px;">${tBtn('salon','Salon / Manager')}${tBtn('stylist','Stylist')}</span>`;
+
+  let bodyHtml='';
+  if(!S_reviewSalonSel){
+    bodyHtml = '<div style="padding:24px;color:var(--text-muted);">No salons available for reviews in this view.</div>';
+  } else if(S_reviewMode==='stylist'){
+    const sts = stylistsForSalon(S_reviewSalonSel);
+    bodyHtml = sts.length ? `
+      <div style="font-size:12px;color:var(--text-muted);margin:10px 0 8px;">Stylists at ${salonDisplay(S_reviewSalonSel)} — click to open the annual review.</div>
+      <div style="display:flex;flex-direction:column;gap:6px;max-width:540px;">
+        ${sts.map(s=>`<button onclick="openStylistReview('${s.globalId}', '${String(s.name||'').replace(/'/g,"\\'")}')" style="display:flex;justify-content:space-between;align-items:center;text-align:left;padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:#fff;cursor:pointer;font-size:13px;">
+          <span style="font-weight:600;">${fmtName(s.name||'')}</span>
+          <span style="font-size:11px;color:var(--text-muted);">${s.position==='M'?'Manager':'Stylist'} · Review ›</span>
+        </button>`).join('')}
+      </div>` : '<div style="padding:24px;color:var(--text-muted);">No stylists on record for this salon yet.</div>';
+  } else {
+    const mgr = (S_managerTable[S_reviewSalonSel]) || {name:'', globalId:''};
+    bodyHtml = `
+      <div style="font-size:12px;color:var(--text-muted);margin:10px 0 8px;">Salon / manager review — ${salonDisplay(S_reviewSalonSel)}.</div>
+      <div style="max-width:640px;border:1px solid var(--border);border-radius:10px;padding:16px;background:#fff;">
+        <div style="display:flex;justify-content:space-between;margin-bottom:12px;">
+          <div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);">Manager</div><div style="font-weight:700;font-size:15px;">${mgr.name?fmtName(mgr.name):'—'}</div></div>
+          <div style="text-align:right;"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);">Review year</div><div style="font-weight:700;font-size:15px;">${_reviewYear}</div></div>
+        </div>
+        <div style="font-size:12px;color:var(--text-muted);line-height:1.55;">
+          Scores <b>11 salon metrics</b> + <b>5 manager metrics</b> (productivity removed) on the 12-month average → total points → raise. A manager must hold this salon Jan–Dec to receive the salon review; otherwise they get a stylist review. 4+ disciplinary points eliminates the raise.
+          <div style="margin-top:12px;color:var(--primary);font-weight:700;">⚙️ Scoring engine — building next.</div>
+        </div>
+      </div>`;
+  }
+
+  host.innerHTML = `
+    <div class="table-card-header" style="margin-bottom:10px;"><div class="card-title" style="margin:0;">Reviews 📋</div></div>
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:6px;">
+      ${toggle}
+      <label style="font-size:12px;color:var(--text-muted);">Salon
+        <select onchange="setReviewSalon(this.value)" style="font-size:13px;padding:5px 8px;border-radius:6px;border:1px solid var(--border);margin-left:6px;">${salonOpts}</select>
+      </label>
+    </div>
+    ${bodyHtml}`;
+}
+
 function renderAM(){
   const am=AMS[S.currentAM];
   if(!am) return;
@@ -2139,6 +2253,7 @@ function renderAM(){
   else if(tabId==='tb-individual') renderIndividual();
   else if(tabId==='tb-trends') renderTrends();
   else if(tabId==='tb-bonus') renderBonus();
+  else if(tabId==='tb-reviews') renderReviewsTab('am-reviews-body','am');
   else renderScorecard();
 }
 
