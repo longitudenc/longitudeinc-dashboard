@@ -392,7 +392,7 @@
           <button class="btn btn-secondary btn-sm" onclick="window.print()">⎙ Print</button>
         </div>
       </div>
-      <div class="tabs">
+      <div class="tabs" id="am-tabbar" style="display:none;">
         <button class="tab active" id="tb-score"      onclick="switchTab('score',this)">Scorecard <span class="ytd-badge">YTD</span></button>
         <button class="tab"        id="tb-salon"      onclick="switchTab('salon',this)">Salon Performance</button>
         <button class="tab"        id="tb-individual" onclick="switchTab('individual',this)">My Team's Performance</button>
@@ -1365,6 +1365,18 @@ function hideLoading(){
 }
 
 // ── Sidebar ───────────────────────────────────────────────────
+function amSubnavHtml(){
+  const t=(atab,lbl)=>`<button class="am-btn am-subnav-btn${atab==='salon'?' active':''}" data-atab="${atab}" onclick="amSubTab('${atab}')" style="font-size:13px;padding:7px 10px;">${lbl}</button>`;
+  return `<div id="am-subnav" style="display:none;padding-left:10px;border-left:2px solid var(--border);margin:2px 0 6px 14px;">`
+    + t('score','Scorecard') + t('salon','Salon Performance') + t('individual',"My Team's Performance")
+    + t('trends','Trends') + t('bonus','Bonus 💰') + t('reviews','Reviews 📋') + `</div>`;
+}
+function amSubTab(atab){
+  if(!document.getElementById('page-am').classList.contains('active')){
+    const id=S.currentAM||AM_ORDER.find(x=>AMS[x]); if(id) switchAM(id);
+  }
+  switchTab(atab);
+}
 function setupSidebar(){
   const sb = document.getElementById('sidebar');
   if(!sb) return;
@@ -1380,6 +1392,7 @@ function setupSidebar(){
         <div class="am-avatar" style="background:${am.color}22;color:${am.color};">${am.init}</div>${am.name}
       </button>`;
     });
+    html += amSubnavHtml();
     html += '<div style="border-top:1px solid var(--border);margin:.5rem 0;"></div>';
     html += '<div class="sidebar-label">Views</div>';
     html += `<button class="am-btn" onclick="switchToCompany()" id="btn-company">
@@ -1406,6 +1419,7 @@ function setupSidebar(){
       html += `<button class="am-btn active" onclick="switchAM('${amId}')" id="btn-${amId}">
         <div class="am-avatar" style="background:${am.color}22;color:${am.color};">${am.init}</div>${am.name}
       </button>`;
+      html += amSubnavHtml();
       html += '<div style="border-top:1px solid var(--border);margin:.5rem 0;"></div>';
       html += '<div class="sidebar-label">Company</div>';
       html += `<button class="am-btn" onclick="switchToCompany()" id="btn-company">
@@ -1427,6 +1441,7 @@ function clearActive(){
   document.querySelectorAll('.am-btn').forEach(b=>b.classList.remove('active')); 
   document.querySelectorAll('.page').forEach(pg=>pg.classList.remove('active')); 
   const csn=document.getElementById('company-subnav'); if(csn) csn.style.display='none';
+  const asn=document.getElementById('am-subnav'); if(asn) asn.style.display='none';
 }
 function showPage(id){ clearActive(); document.getElementById('page-'+id)?.classList.add('active'); }
 
@@ -1444,9 +1459,12 @@ function switchAM(id){
   const btn=document.getElementById('btn-'+id); if(btn) btn.classList.add('active');
   document.getElementById('page-am').classList.add('active');
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  // Relocate the AM sub-nav under the active AM and reveal it.
+  const sub=document.getElementById('am-subnav'); if(sub && btn){ btn.insertAdjacentElement('afterend', sub); sub.style.display=''; }
   // Default to Salon Performance (not Scorecard).
   document.getElementById('tb-salon').classList.add('active');
-  ['score','individual','trends','bonus'].forEach(t=>{ const el=document.getElementById('tab-'+t); if(el) el.style.display='none'; });
+  document.querySelectorAll('.am-subnav-btn').forEach(b=>b.classList.toggle('active', b.dataset.atab==='salon'));
+  ['score','individual','trends','bonus','reviews'].forEach(t=>{ const el=document.getElementById('tab-'+t); if(el) el.style.display='none'; });
   document.getElementById('tab-salon').style.display='block';
   renderAM();
 }
@@ -2081,7 +2099,8 @@ function renderDayReviewTable(dateIso){
 
 function switchTab(tab,el){ 
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active')); 
-  el.classList.add('active');
+  const _tb=el||document.getElementById('tb-'+tab); if(_tb) _tb.classList.add('active');
+  document.querySelectorAll('.am-subnav-btn').forEach(b=>b.classList.toggle('active', b.dataset.atab===tab));
   ['score','salon','individual','trends','bonus','reviews'].forEach(t=>{ const el2=document.getElementById('tab-'+t); if(el2) el2.style.display=t===tab?'block':'none'; });
   if(tab==='individual') renderIndividual();
   if(tab==='salon') renderSalonTab();
@@ -2184,6 +2203,185 @@ function openStylistReview(gid, name){
   setTimeout(()=>{ try{ switchProfileTab('review'); }catch(e){} }, 60);
 }
 
+// ── Salon / Manager review ENGINE (exact LI_Salon_Review_2025 workbook logic) ──
+// Scoring reverse-engineered from the workbook's per-cell formulas (col G), NOT
+// the Settings color bands. Validated against 3071/2025: salon 30 + manager 15
+// (productivity dropped per Trey) = 45 → $0.25. All %-metrics take PERCENT units
+// (e.g. 79.5), matching how the dashboard stores nr/rr/product/waits/payroll/ccg.
+function srNR(v){ return v>=25.945?4:v>=23.945?3:v>=20.945?2:1; }
+function srRR(v){ return v>=75.9?4:v>=72.9?3:v>=69.9?2:1; }
+function srHC(v){ if(v<10.95)return 1; if(v<11.95)return 2; if(v<14.05)return 4; if(v<17.05)return 3; if(v<18.05)return 2; return 1; }
+function srMBC(v){ return v<2.05?4:v<3.05?3:v<4.05?2:1; }
+function srProductivity(v,goal){ return (goal&&v>=goal)?2:1; }   // 2 or 1 (Prod$ vs goal)
+function srProductPct(v){ return v>=5.95?4:v>=3.95?3:v>=2.45?2:1; }
+function srSSWait(v){ return v<15.05?4:v<19.05?3:v<23.05?2:1; }
+function srWait(v){ return v<15.05?4:v<23.05?3:1; }             // workbook quirk: no "2" band
+function srPayroll(v,exPay,grPay){ return v<=exPay?4:v<=grPay?3:1; }
+function srCC(v){ return v>=499.95?4:v>=399.95?3:v>=299.95?2:1; }
+function srCCG(v){ return v>=4.95?4:v>=2.95?3:v>=0.95?2:1; }
+const SR_RAISE=[[63,.70],[59,.60],[56,.55],[53,.50],[51,.45],[49,.40],[46.5,.35],[44,.25],[41.5,.20]];
+function srRaise(pts){ for(const t of SR_RAISE){ if(pts>=t[0]) return t[1]; } return 0; }
+function srColor(s){ return s===4?'#1f8a4c':s===3?'#7cb342':s===2?'#e8a33d':s===1?'#d64545':'#bbb'; }
+
+function computeSalonReview(salonNum, year){
+  salonNum=String(salonNum).trim();
+  const inYear = iso=>{ const m=String(iso||'').match(/^(\d{4})/); return m && +m[1]===year; };
+  const monthOf = iso=>{ const m=String(iso||'').match(/^\d{4}-(\d{2})/); return m?+m[1]:0; };
+  const pf=(arr,v)=>{ if(v!==null&&v!==undefined&&!isNaN(v)) arr.push(v); };
+
+  const salMon={};   // m -> {nr:[],rr:[],hc:[],mbc:[],product:[],ssw:[],wt:[],pay:[],cc:[],ccg:[]}
+  const prodMon={};  // m -> {ss,fh}  (salon Prod$ = Σ prod×hrs / Σ hrs)
+  const mgrMon={};   // m -> {nr:[],rr:[],hc:[],mbc:[],product:[]}
+  const mgrPosMonths=new Set();
+  const mgr = S_managerTable[salonNum] || {name:'',globalId:''};
+  const mgrGid = String(mgr.globalId||'').trim();
+
+  (S.weekHistory||[]).forEach(snap=>{
+    if(!inYear(snap.weekEnding)) return;
+    const m=monthOf(snap.weekEnding); if(!m) return;
+    const s=(snap.salons||[]).find(x=>String(x.salonNum||'').trim()===salonNum);
+    if(s){
+      const M=salMon[m]||(salMon[m]={nr:[],rr:[],hc:[],mbc:[],product:[],ssw:[],wt:[],pay:[],cc:[],ccg:[]});
+      pf(M.nr,p(s.nr)); pf(M.rr,p(s.rr)); pf(M.hc,n(s.hcTime)); pf(M.mbc,n(s.mbc));
+      pf(M.product,p(s.product)); pf(M.ssw,p(s.ssWaits)); pf(M.wt,p(s.waits));
+      pf(M.pay,p(s.payroll)); pf(M.cc,n(s.ccThis)); pf(M.ccg,p(s.ccGrowth));
+    }
+    (snap.emps||[]).forEach(e=>{
+      if(String(e.salonNum||'').trim()!==salonNum) return;
+      const fh=n(e.floorHours), pv=n(e.productivity);
+      if(fh>0 && !isNaN(pv)){ const P=prodMon[m]||(prodMon[m]={ss:0,fh:0}); P.ss+=pv*fh; P.fh+=fh; }
+      if(mgrGid && String(e.globalId||'').trim()===mgrGid){
+        const G=mgrMon[m]||(mgrMon[m]={nr:[],rr:[],hc:[],mbc:[],product:[]});
+        pf(G.nr,p(e.nr)); pf(G.rr,p(e.rr)); pf(G.hc,n(e.hcTime)); pf(G.mbc,n(e.mbc)); pf(G.product,p(e.product));
+        if(String(e.position||'').trim().toUpperCase()==='M') mgrPosMonths.add(m);
+      }
+    });
+  });
+
+  const mean=arr=>arr.length?arr.reduce((a,b)=>a+b,0)/arr.length:null;
+  const monthMeans=(bucket,key)=>{ const v=[]; Object.keys(bucket).forEach(m=>{ const mm=mean(bucket[m][key]); if(mm!==null) v.push(mm); }); return v.length?mean(v):null; };
+  const ccAvg=(()=>{ const sums=[]; Object.keys(salMon).forEach(m=>{ const a=salMon[m].cc; if(a.length) sums.push(a.reduce((x,y)=>x+y,0)); }); return sums.length?mean(sums):null; })();
+  const prodAvg=(()=>{ const v=[]; Object.keys(prodMon).forEach(m=>{ const P=prodMon[m]; if(P.fh>0) v.push(P.ss/P.fh); }); return v.length?mean(v):null; })();
+
+  const a={ nr:monthMeans(salMon,'nr'), rr:monthMeans(salMon,'rr'), hc:monthMeans(salMon,'hc'),
+    mbc:monthMeans(salMon,'mbc'), product:monthMeans(salMon,'product'), ssw:monthMeans(salMon,'ssw'),
+    wt:monthMeans(salMon,'wt'), pay:monthMeans(salMon,'pay'), cc:ccAvg, ccg:monthMeans(salMon,'ccg'), prod:prodAvg };
+  const ma={ nr:monthMeans(mgrMon,'nr'), rr:monthMeans(mgrMon,'rr'), hc:monthMeans(mgrMon,'hc'),
+    mbc:monthMeans(mgrMon,'mbc'), product:monthMeans(mgrMon,'product') };
+
+  const pt=payrollTargets(a.cc||0);
+  const goal=salonProdGoal(salonNum);
+  const sc=(fn,v,...x)=> (v===null||v===undefined||isNaN(v))?null:fn(v,...x);
+  const pct=v=>v.toFixed(1)+'%', mn=v=>v.toFixed(1)+' min', f2=v=>v.toFixed(2), ct=v=>Math.round(v).toString(), dol=v=>'$'+v.toFixed(2);
+
+  const salonRows=[
+    {lbl:'New Customer Return %',    band:'≥26 / 24 / 21',           fmt:pct, v:a.nr,      s:sc(srNR,a.nr)},
+    {lbl:'Repeat Customer Return %', band:'≥76 / 73 / 70',           fmt:pct, v:a.rr,      s:sc(srRR,a.rr)},
+    {lbl:'Haircut Time',             band:'12–14 ideal',             fmt:mn,  v:a.hc,      s:sc(srHC,a.hc)},
+    {lbl:'Minutes Between Customer', band:'<2 / 3 / 4',              fmt:f2,  v:a.mbc,     s:sc(srMBC,a.mbc)},
+    {lbl:'Productivity ($/hr)',      band:(goal?'goal $'+goal:'—'), fmt:dol, v:a.prod,    s:sc(srProductivity,a.prod,goal)},
+    {lbl:'Product %',                band:'≥6 / 4 / 2.5',           fmt:pct, v:a.product, s:sc(srProductPct,a.product)},
+    {lbl:'S/S Wait > 15 Min %',      band:'≤15 / 19 / 23',          fmt:pct, v:a.ssw,     s:sc(srSSWait,a.ssw)},
+    {lbl:'Wait > 15 Min %',          band:'≤15 / <23',              fmt:pct, v:a.wt,      s:sc(srWait,a.wt)},
+    {lbl:'Payroll %',                band:'≤'+pt.exc+' / '+pt.grw,  fmt:pct, v:a.pay,     s:sc(srPayroll,a.pay,pt.exc,pt.grw)},
+    {lbl:'Customer Count',           band:'≥500 / 400 / 300',       fmt:ct,  v:a.cc,      s:sc(srCC,a.cc)},
+    {lbl:'Customer Count Growth %',  band:'≥5 / 3 / 1',             fmt:pct, v:a.ccg,     s:sc(srCCG,a.ccg)},
+  ];
+  const mgrRows=[
+    {lbl:'New Customer Return %',    band:'≥26 / 24 / 21', fmt:pct, v:ma.nr,      s:sc(srNR,ma.nr)},
+    {lbl:'Repeat Customer Return %', band:'≥76 / 73 / 70', fmt:pct, v:ma.rr,      s:sc(srRR,ma.rr)},
+    {lbl:'Haircut Time',             band:'12–14 ideal',   fmt:mn,  v:ma.hc,      s:sc(srHC,ma.hc)},
+    {lbl:'Minutes Between Customer', band:'<2 / 3 / 4',    fmt:f2,  v:ma.mbc,     s:sc(srMBC,ma.mbc)},
+    {lbl:'Product %',                band:'≥6 / 4 / 2.5',  fmt:pct, v:ma.product, s:sc(srProductPct,ma.product)},
+  ];
+  const sumS=rows=>rows.reduce((acc,r)=>acc+(r.s||0),0);
+  const salonPts=sumS(salonRows), mgrPts=sumS(mgrRows), totalPts=salonPts+mgrPts;
+
+  const dataMonths=Object.keys(salMon).map(Number).sort((x,y)=>x-y);
+  const heldAllYear = !!mgrGid && dataMonths.length>0 && dataMonths.every(m=>mgrPosMonths.has(m));
+  const curPeriod = periodKeyFromWeekEnd(S.currentWeek)||periodKeyFromWeekEnd(new Date().toISOString());
+  const discPts = (typeof activeDiscPoints==='function' && mgrGid) ? activeDiscPoints(mgrGid,curPeriod) : 0;
+  const discElim = discPts>=4;
+  const eligible = heldAllYear && !discElim;
+  const raise = eligible ? srRaise(totalPts) : 0;
+
+  return { salonNum, year, managerName:mgr.name, managerGid:mgrGid, salonRows, mgrRows,
+    salonPts, mgrPts, totalPts, raise, heldAllYear, discPts, discElim, eligible,
+    hasData:dataMonths.length>0, dataMonths, exPay:pt.exc, grPay:pt.grw, prodGoal:goal };
+}
+
+function srYearSelector(){
+  const cur=new Date().getFullYear(); const ys=[]; for(let y=Math.max(cur,2025);y>=2025;y--) ys.push(y);
+  return `<select onchange="_reviewYear=parseInt(this.value);renderReviewsTab(S_reviewHostId,S_reviewWindow);" style="font-size:13px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);">`
+    + ys.map(y=>`<option value="${y}" ${y===_reviewYear?'selected':''}>${y}</option>`).join('') + `</select>`;
+}
+
+function renderSalonReviewBody(salonNum){
+  const d=computeSalonReview(salonNum, _reviewYear);
+  const row=r=>`<tr>
+    <td style="padding:6px 10px;">${r.lbl}</td>
+    <td style="padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums;">${(r.v===null||r.v===undefined||isNaN(r.v))?'<span style="color:#bbb;">—</span>':r.fmt(r.v)}</td>
+    <td style="padding:6px 10px;text-align:right;font-size:11px;color:var(--text-muted);">${r.band}</td>
+    <td style="padding:6px 10px;text-align:center;"><span style="display:inline-block;min-width:22px;padding:2px 0;border-radius:5px;background:${srColor(r.s)};color:#fff;font-weight:700;font-size:12px;">${r.s==null?'—':r.s}</span></td></tr>`;
+  const tbl=(rows,head)=>`<table style="width:100%;border-collapse:collapse;font-size:13px;">
+    <thead><tr style="border-bottom:2px solid var(--border);"><th style="text-align:left;padding:6px 10px;font-size:11px;color:var(--text-muted);">${head}</th><th style="text-align:right;padding:6px 10px;font-size:11px;color:var(--text-muted);">12-Mo Avg</th><th style="text-align:right;padding:6px 10px;font-size:11px;color:var(--text-muted);">Band (4/3/2)</th><th style="text-align:center;padding:6px 10px;font-size:11px;color:var(--text-muted);">Score</th></tr></thead>
+    <tbody>${rows.map(row).join('')}</tbody></table>`;
+
+  if(!d.hasData) return `<div style="padding:24px;color:var(--text-muted);">No ${_reviewYear} weekly data on record for ${salonDisplay(salonNum)}.</div>`;
+
+  let banner='';
+  if(!d.managerGid){
+    banner=`<div style="margin:10px 0;padding:10px 14px;border-radius:8px;background:#fff5e6;border:1px solid #f0c674;font-size:12px;">No manager of record for this salon — manager metrics can't be scored.</div>`;
+  } else if(!d.heldAllYear){
+    banner=`<div style="margin:10px 0;padding:10px 14px;border-radius:8px;background:#fff5e6;border:1px solid #f0c674;font-size:12.5px;">
+      <b>${fmtName(d.managerName)}</b> did not hold this salon for all of ${_reviewYear}, so this manager gets a <b>stylist review</b>, not the salon review.
+      ${d.managerGid?`<button onclick="openStylistReview('${d.managerGid}','${String(d.managerName||'').replace(/'/g,"\\'")}')" style="margin-left:6px;padding:3px 10px;border:1px solid var(--primary);border-radius:6px;background:#fff;color:var(--primary);font-weight:700;font-size:11px;cursor:pointer;">Open stylist review ›</button>`:''}
+    </div>`;
+  } else if(d.discElim){
+    banner=`<div style="margin:10px 0;padding:10px 14px;border-radius:8px;background:#fde8e8;border:1px solid #e7a3a3;font-size:12.5px;"><b>${d.discPts} disciplinary points</b> (4+) — raise eliminated for ${_reviewYear}.</div>`;
+  }
+
+  const raiseBox = d.eligible
+    ? `<div style="text-align:center;"><div style="font-size:10px;text-transform:uppercase;color:var(--text-muted);">Raise</div><div style="font-weight:800;font-size:22px;color:#1f8a4c;">$${d.raise.toFixed(2)}</div></div>`
+    : `<div style="text-align:center;"><div style="font-size:10px;text-transform:uppercase;color:var(--text-muted);">Raise</div><div style="font-weight:800;font-size:18px;color:#999;">—</div></div>`;
+
+  return `
+    <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin:6px 0 12px;">
+      <div><div style="font-size:10px;text-transform:uppercase;color:var(--text-muted);">Manager</div><div style="font-weight:700;font-size:15px;">${d.managerName?fmtName(d.managerName):'—'}</div></div>
+      <div><div style="font-size:10px;text-transform:uppercase;color:var(--text-muted);">Year</div>${srYearSelector()}</div>
+    </div>
+    ${banner}
+    <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start;">
+      <div style="flex:1;min-width:420px;border:1px solid var(--border);border-radius:10px;overflow:hidden;">
+        <div style="background:#f6f7f9;padding:8px 12px;font-weight:700;font-size:13px;">Salon Key Results <span style="float:right;color:var(--text-muted);">${d.salonPts} / 41 pts</span></div>
+        ${tbl(d.salonRows,'Metric')}
+      </div>
+      <div style="flex:1;min-width:360px;border:1px solid var(--border);border-radius:10px;overflow:hidden;">
+        <div style="background:#f6f7f9;padding:8px 12px;font-weight:700;font-size:13px;">Manager Key Results <span style="float:right;color:var(--text-muted);">${d.mgrPts} / 20 pts</span></div>
+        ${tbl(d.mgrRows,'Metric')}
+      </div>
+    </div>
+    <div style="margin-top:14px;display:flex;gap:24px;align-items:center;flex-wrap:wrap;padding:12px 16px;border:1px solid var(--border);border-radius:10px;background:#fff;max-width:620px;">
+      <div style="text-align:center;"><div style="font-size:10px;text-transform:uppercase;color:var(--text-muted);">Total Points</div><div style="font-weight:800;font-size:22px;">${d.totalPts}</div></div>
+      ${raiseBox}
+      <div style="font-size:11px;color:var(--text-muted);line-height:1.5;">
+        Salon ${d.salonPts} + Manager ${d.mgrPts} (productivity dropped).<br>
+        ${d.discPts>0?`${d.discPts} disciplinary pt(s). `:''}Eligibility: manager in seat all ${_reviewYear} ${d.heldAllYear?'✓':'✗'}.
+      </div>
+    </div>`;
+}
+
+// Self-test: run scorers on 3071/2025 workbook 12-mo averages → salon 30, mgr 15.
+function _srSelfTest(){
+  const salon=[srNR(22.87),srRR(79.53),srHC(15.6417),srMBC(2.875),srProductivity(55.3467,56.5),srProductPct(3.36),srSSWait(18.18),srWait(22.6),srPayroll(34.27,35,36),srCC(753.92),srCCG(-3.04)];
+  const mgr=[srNR(24.76),srRR(81.23),srHC(15.8571),srMBC(2.8857),srProductPct(3.56)];
+  const sp=salon.reduce((x,y)=>x+y,0), mp=mgr.reduce((x,y)=>x+y,0);
+  if(sp===30 && mp===15 && srRaise(sp+mp)===0.25) console.log('[salon-review self-test OK] 3071/2025 → salon 30, mgr 15, total 45, raise $0.25');
+  else console.warn('[salon-review self-test FAIL]',{salon,sp,mgr,mp,raise:srRaise(sp+mp)});
+}
+try{ _srSelfTest(); }catch(e){}
+
+
 function renderReviewsTab(hostId, windowKind){
   S_reviewHostId = hostId || S_reviewHostId;
   S_reviewWindow = windowKind || S_reviewWindow;
@@ -2213,19 +2411,7 @@ function renderReviewsTab(hostId, windowKind){
         </button>`).join('')}
       </div>` : '<div style="padding:24px;color:var(--text-muted);">No stylists on record for this salon yet.</div>';
   } else {
-    const mgr = (S_managerTable[S_reviewSalonSel]) || {name:'', globalId:''};
-    bodyHtml = `
-      <div style="font-size:12px;color:var(--text-muted);margin:10px 0 8px;">Salon / manager review — ${salonDisplay(S_reviewSalonSel)}.</div>
-      <div style="max-width:640px;border:1px solid var(--border);border-radius:10px;padding:16px;background:#fff;">
-        <div style="display:flex;justify-content:space-between;margin-bottom:12px;">
-          <div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);">Manager</div><div style="font-weight:700;font-size:15px;">${mgr.name?fmtName(mgr.name):'—'}</div></div>
-          <div style="text-align:right;"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);">Review year</div><div style="font-weight:700;font-size:15px;">${_reviewYear}</div></div>
-        </div>
-        <div style="font-size:12px;color:var(--text-muted);line-height:1.55;">
-          Scores <b>11 salon metrics</b> + <b>5 manager metrics</b> (productivity removed) on the 12-month average → total points → raise. A manager must hold this salon Jan–Dec to receive the salon review; otherwise they get a stylist review. 4+ disciplinary points eliminates the raise.
-          <div style="margin-top:12px;color:var(--primary);font-weight:700;">⚙️ Scoring engine — building next.</div>
-        </div>
-      </div>`;
+    bodyHtml = renderSalonReviewBody(S_reviewSalonSel);
   }
 
   host.innerHTML = `
