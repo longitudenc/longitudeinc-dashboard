@@ -2262,6 +2262,8 @@ function computeSalonReview(salonNum, year){
   const monthMeans=(bucket,key)=>{ const v=[]; Object.keys(bucket).forEach(m=>{ const mm=mean(bucket[m][key]); if(mm!==null) v.push(mm); }); return v.length?mean(v):null; };
   const ccAvg=(()=>{ const sums=[]; Object.keys(salMon).forEach(m=>{ const a=salMon[m].cc; if(a.length) sums.push(a.reduce((x,y)=>x+y,0)); }); return sums.length?mean(sums):null; })();
   const prodAvg=(()=>{ const v=[]; Object.keys(prodMon).forEach(m=>{ const P=prodMon[m]; if(P.fh>0) v.push(P.ss/P.fh); }); return v.length?mean(v):null; })();
+  const M12=(bucket,key,agg)=>{ const out=[]; for(let m=1;m<=12;m++){ const b=bucket[m]; if(!b||!b[key]||!b[key].length){ out.push(null); continue; } const arr=b[key]; out.push(agg==='sum'?arr.reduce((x,y)=>x+y,0):mean(arr)); } return out; };
+  const prod12=(()=>{ const out=[]; for(let m=1;m<=12;m++){ const P=prodMon[m]; out.push(P&&P.fh>0?P.ss/P.fh:null); } return out; })();
 
   const a={ nr:monthMeans(salMon,'nr'), rr:monthMeans(salMon,'rr'), hc:monthMeans(salMon,'hc'),
     mbc:monthMeans(salMon,'mbc'), product:monthMeans(salMon,'product'), ssw:monthMeans(salMon,'ssw'),
@@ -2274,25 +2276,26 @@ function computeSalonReview(salonNum, year){
   const sc=(fn,v,...x)=> (v===null||v===undefined||isNaN(v))?null:fn(v,...x);
   const pct=v=>v.toFixed(1)+'%', mn=v=>v.toFixed(1)+' min', f2=v=>v.toFixed(2), ct=v=>Math.round(v).toString(), dol=v=>'$'+v.toFixed(2);
 
+  const mk=(lbl,band,fmt,v,monthly,scoreFn)=>({lbl,band,fmt,v,monthly,scoreFn,s:(v===null||v===undefined||isNaN(v))?null:scoreFn(v)});
   const salonRows=[
-    {lbl:'New Customer Return %',    band:'≥26 / 24 / 21',           fmt:pct, v:a.nr,      s:sc(srNR,a.nr)},
-    {lbl:'Repeat Customer Return %', band:'≥76 / 73 / 70',           fmt:pct, v:a.rr,      s:sc(srRR,a.rr)},
-    {lbl:'Haircut Time',             band:'12–14 ideal',             fmt:mn,  v:a.hc,      s:sc(srHC,a.hc)},
-    {lbl:'Minutes Between Customer', band:'<2 / 3 / 4',              fmt:f2,  v:a.mbc,     s:sc(srMBC,a.mbc)},
-    {lbl:'Productivity ($/hr)',      band:(goal?'goal $'+goal:'—'), fmt:dol, v:a.prod,    s:sc(srProductivity,a.prod,goal)},
-    {lbl:'Product %',                band:'≥6 / 4 / 2.5',           fmt:pct, v:a.product, s:sc(srProductPct,a.product)},
-    {lbl:'S/S Wait > 15 Min %',      band:'≤15 / 19 / 23',          fmt:pct, v:a.ssw,     s:sc(srSSWait,a.ssw)},
-    {lbl:'Wait > 15 Min %',          band:'≤15 / <23',              fmt:pct, v:a.wt,      s:sc(srWait,a.wt)},
-    {lbl:'Payroll %',                band:'≤'+pt.exc+' / '+pt.grw,  fmt:pct, v:a.pay,     s:sc(srPayroll,a.pay,pt.exc,pt.grw)},
-    {lbl:'Customer Count',           band:'≥500 / 400 / 300',       fmt:ct,  v:a.cc,      s:sc(srCC,a.cc)},
-    {lbl:'Customer Count Growth %',  band:'≥5 / 3 / 1',             fmt:pct, v:a.ccg,     s:sc(srCCG,a.ccg)},
+    mk('New Customer Return %','≥26 / 24 / 21',pct,a.nr,M12(salMon,'nr'),srNR),
+    mk('Repeat Customer Return %','≥76 / 73 / 70',pct,a.rr,M12(salMon,'rr'),srRR),
+    mk('Haircut Time','12–14 ideal',mn,a.hc,M12(salMon,'hc'),srHC),
+    mk('Minutes Between Customer','<2 / 3 / 4',f2,a.mbc,M12(salMon,'mbc'),srMBC),
+    mk('Productivity ($/hr)',(goal?'goal $'+goal:'—'),dol,a.prod,prod12,(v)=>srProductivity(v,goal)),
+    mk('Product %','≥6 / 4 / 2.5',pct,a.product,M12(salMon,'product'),srProductPct),
+    mk('S/S Wait > 15 Min %','≤15 / 19 / 23',pct,a.ssw,M12(salMon,'ssw'),srSSWait),
+    mk('Wait > 15 Min %','≤15 / <23',pct,a.wt,M12(salMon,'wt'),srWait),
+    mk('Payroll %','≤'+pt.exc+' / '+pt.grw,pct,a.pay,M12(salMon,'pay'),(v)=>srPayroll(v,pt.exc,pt.grw)),
+    mk('Customer Count','≥500 / 400 / 300',ct,a.cc,M12(salMon,'cc','sum'),srCC),
+    mk('Customer Count Growth %','≥5 / 3 / 1',pct,a.ccg,M12(salMon,'ccg'),srCCG),
   ];
   const mgrRows=[
-    {lbl:'New Customer Return %',    band:'≥26 / 24 / 21', fmt:pct, v:ma.nr,      s:sc(srNR,ma.nr)},
-    {lbl:'Repeat Customer Return %', band:'≥76 / 73 / 70', fmt:pct, v:ma.rr,      s:sc(srRR,ma.rr)},
-    {lbl:'Haircut Time',             band:'12–14 ideal',   fmt:mn,  v:ma.hc,      s:sc(srHC,ma.hc)},
-    {lbl:'Minutes Between Customer', band:'<2 / 3 / 4',    fmt:f2,  v:ma.mbc,     s:sc(srMBC,ma.mbc)},
-    {lbl:'Product %',                band:'≥6 / 4 / 2.5',  fmt:pct, v:ma.product, s:sc(srProductPct,ma.product)},
+    mk('New Customer Return %','≥26 / 24 / 21',pct,ma.nr,M12(mgrMon,'nr'),srNR),
+    mk('Repeat Customer Return %','≥76 / 73 / 70',pct,ma.rr,M12(mgrMon,'rr'),srRR),
+    mk('Haircut Time','12–14 ideal',mn,ma.hc,M12(mgrMon,'hc'),srHC),
+    mk('Minutes Between Customer','<2 / 3 / 4',f2,ma.mbc,M12(mgrMon,'mbc'),srMBC),
+    mk('Product %','≥6 / 4 / 2.5',pct,ma.product,M12(mgrMon,'product'),srProductPct),
   ];
   const sumS=rows=>rows.reduce((acc,r)=>acc+(r.s||0),0);
   const salonPts=sumS(salonRows), mgrPts=sumS(mgrRows), totalPts=salonPts+mgrPts;
@@ -2316,16 +2319,49 @@ function srYearSelector(){
     + ys.map(y=>`<option value="${y}" ${y===_reviewYear?'selected':''}>${y}</option>`).join('') + `</select>`;
 }
 
+function srToggleMonth(id){ const el=document.getElementById(id); if(!el) return; el.style.display=(el.style.display==='none'||!el.style.display)?'table-row':'none'; }
+function srRaiseScaleHtml(pts){
+  const asc=[...SR_RAISE].sort((x,y)=>x[0]-y[0]);
+  const active=srRaise(pts);
+  const chip=(label,d,on)=>`<div style="text-align:center;padding:5px 9px;border-radius:7px;border:1px solid ${on?'#1f8a4c':'var(--border)'};background:${on?'#e7f5ec':'#fff'};min-width:56px;">`
+    +`<div style="font-size:10px;color:var(--text-muted);">${label}</div>`
+    +`<div style="font-weight:700;font-size:13px;color:${on?'#1f8a4c':'inherit'};">$${d.toFixed(2)}</div></div>`;
+  let html=chip('< 41.5',0,pts<41.5);
+  asc.forEach(t=>{ html+=chip('≥ '+t[0], t[1], active===t[1] && pts>=t[0]); });
+  return `<div style="margin-top:16px;"><div style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin-bottom:6px;">Raise scale — total points → raise (highlight = where ${pts} pts lands)</div>`
+    +`<div style="display:flex;gap:6px;flex-wrap:wrap;">${html}</div></div>`;
+}
+
 function renderSalonReviewBody(salonNum){
   const d=computeSalonReview(salonNum, _reviewYear);
-  const row=r=>`<tr>
-    <td style="padding:6px 10px;">${r.lbl}</td>
-    <td style="padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums;">${(r.v===null||r.v===undefined||isNaN(r.v))?'<span style="color:#bbb;">—</span>':r.fmt(r.v)}</td>
-    <td style="padding:6px 10px;text-align:right;font-size:11px;color:var(--text-muted);">${r.band}</td>
-    <td style="padding:6px 10px;text-align:center;"><span style="display:inline-block;min-width:22px;padding:2px 0;border-radius:5px;background:${srColor(r.s)};color:#fff;font-weight:700;font-size:12px;">${r.s==null?'—':r.s}</span></td></tr>`;
-  const tbl=(rows,head)=>`<table style="width:100%;border-collapse:collapse;font-size:13px;">
+  const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const monthStrip=r=>{
+    let cells='';
+    for(let i=0;i<12;i++){
+      const val=r.monthly?r.monthly[i]:null;
+      const has=(val!==null&&val!==undefined&&!isNaN(val));
+      const ss=has?r.scoreFn(val):null;
+      cells+='<div style="text-align:center;border:1px solid var(--border);border-radius:6px;padding:4px 2px;background:#fff;">'
+        +'<div style="font-size:9.5px;color:var(--text-muted);">'+MON[i]+'</div>'
+        +'<div style="font-size:11.5px;font-weight:600;color:'+(has?'inherit':'#ccc')+';">'+(has?r.fmt(val):'—')+'</div>'
+        +(has?('<div><span style="display:inline-block;min-width:16px;border-radius:4px;background:'+srColor(ss)+';color:#fff;font-size:10px;font-weight:700;">'+ss+'</span></div>'):'')
+        +'</div>';
+    }
+    return '<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:5px;">'+cells+'</div>';
+  };
+  const row=(r,sec,i)=>{
+    const id='sr-d-'+salonNum+'-'+sec+'-'+i;
+    const hasV=!(r.v===null||r.v===undefined||isNaN(r.v));
+    return `<tr onclick="srToggleMonth('${id}')" style="cursor:pointer;border-bottom:1px solid #f1f1f1;">
+      <td style="padding:6px 10px;"><span style="color:var(--text-muted);font-size:10px;">▸</span> ${r.lbl}</td>
+      <td style="padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums;">${hasV?r.fmt(r.v):'<span style="color:#bbb;">—</span>'}</td>
+      <td style="padding:6px 10px;text-align:right;font-size:11px;color:var(--text-muted);">${r.band}</td>
+      <td style="padding:6px 10px;text-align:center;"><span style="display:inline-block;min-width:22px;padding:2px 0;border-radius:5px;background:${srColor(r.s)};color:#fff;font-weight:700;font-size:12px;">${r.s==null?'—':r.s}</span></td></tr>`
+      +`<tr id="${id}" style="display:none;"><td colspan="4" style="padding:4px 12px 12px;background:#fafbfc;">${monthStrip(r)}</td></tr>`;
+  };
+  const tbl=(rows,head,sec)=>`<table style="width:100%;border-collapse:collapse;font-size:13px;">
     <thead><tr style="border-bottom:2px solid var(--border);"><th style="text-align:left;padding:6px 10px;font-size:11px;color:var(--text-muted);">${head}</th><th style="text-align:right;padding:6px 10px;font-size:11px;color:var(--text-muted);">12-Mo Avg</th><th style="text-align:right;padding:6px 10px;font-size:11px;color:var(--text-muted);">Band (4/3/2)</th><th style="text-align:center;padding:6px 10px;font-size:11px;color:var(--text-muted);">Score</th></tr></thead>
-    <tbody>${rows.map(row).join('')}</tbody></table>`;
+    <tbody>${rows.map((r,i)=>row(r,sec,i)).join('')}</tbody></table>`;
 
   if(!d.hasData) return `<div style="padding:24px;color:var(--text-muted);">No ${_reviewYear} weekly data on record for ${salonDisplay(salonNum)}.</div>`;
 
@@ -2351,14 +2387,15 @@ function renderSalonReviewBody(salonNum){
       <div><div style="font-size:10px;text-transform:uppercase;color:var(--text-muted);">Year</div>${srYearSelector()}</div>
     </div>
     ${banner}
+    <div style="font-size:11.5px;color:var(--text-muted);margin:0 0 8px;">Tap any metric to see the month-by-month values that feed its 12-month average.</div>
     <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start;">
       <div style="flex:1;min-width:420px;border:1px solid var(--border);border-radius:10px;overflow:hidden;">
         <div style="background:#f6f7f9;padding:8px 12px;font-weight:700;font-size:13px;">Salon Key Results <span style="float:right;color:var(--text-muted);">${d.salonPts} / 41 pts</span></div>
-        ${tbl(d.salonRows,'Metric')}
+        ${tbl(d.salonRows,'Metric','sal')}
       </div>
       <div style="flex:1;min-width:360px;border:1px solid var(--border);border-radius:10px;overflow:hidden;">
         <div style="background:#f6f7f9;padding:8px 12px;font-weight:700;font-size:13px;">Manager Key Results <span style="float:right;color:var(--text-muted);">${d.mgrPts} / 20 pts</span></div>
-        ${tbl(d.mgrRows,'Metric')}
+        ${tbl(d.mgrRows,'Metric','mgr')}
       </div>
     </div>
     <div style="margin-top:14px;display:flex;gap:24px;align-items:center;flex-wrap:wrap;padding:12px 16px;border:1px solid var(--border);border-radius:10px;background:#fff;max-width:620px;">
@@ -2368,7 +2405,8 @@ function renderSalonReviewBody(salonNum){
         Salon ${d.salonPts} + Manager ${d.mgrPts} (productivity dropped).<br>
         ${d.discPts>0?`${d.discPts} disciplinary pt(s). `:''}Eligibility: manager in seat all ${_reviewYear} ${d.heldAllYear?'✓':'✗'}.
       </div>
-    </div>`;
+    </div>
+    ${srRaiseScaleHtml(d.totalPts)}`;
 }
 
 // Self-test: run scorers on 3071/2025 workbook 12-mo averages → salon 30, mgr 15.
