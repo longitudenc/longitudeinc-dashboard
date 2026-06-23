@@ -1131,10 +1131,14 @@ function calcAvgs(rows){
   let wcc=0,wProd=0,wNr=0,wRr=0,wSsw=0,wWts=0,wNoc=0,wMbc=0,wHc=0;
   rows.forEach(r=>{
     const ct=n(r.ccThis), cl=n(r.ccLast), st=n(r.salesThis), sl=n(r.salesLast), cph=n(r.cph);
-    if(ct>0){ sCcT+=ct; nCcT++; }
+    // TY denominators count EVERY salon-week on record — including a salon's
+    // closed / zero-customer weeks — matching the report (divide by weeks open,
+    // not weeks with customers). LY side still excludes no-prior-year-match weeks.
+    sCcT+=ct; nCcT++;
+    sSalesT+=st; nSalesT++;
     if(cl>0){ sCcL+=cl; nCcL++; }
-    if(st>0){ sSalesT+=st; nSalesT++; paySales+=p(r.payroll)*st; salesForPay+=st; }
     if(sl>0){ sSalesL+=sl; nSalesL++; }
+    if(st>0){ paySales+=p(r.payroll)*st; salesForPay+=st; }
     if(ct>0 && cph>0){ ccForCph+=ct; hours+=ct/cph; }
     if(ct>0){ wcc+=ct;
       wProd+=p(r.product)*ct; wNr+=p(r.nr)*ct; wRr+=p(r.rr)*ct;
@@ -2547,17 +2551,17 @@ function collapseSalonsAvg(rows){
     if(!bySalon[k]) bySalon[k] = { salonNum:k, _cc:[], _pay:[], _prod:[], cT:0,nT:0, cL:0,nL:0, sT:0,snT:0, sL:0,snL:0 };
     const b=bySalon[k];
     const cc=n(r.ccThis), cl=n(r.ccLast), st=n(r.salesThis), sl=n(r.salesLast);
-    if(cc>0) b._cc.push(cc);
+    b._cc.push(cc);                       // include 0-customer weeks in the avg
     const pay=p(r.payroll); if(pay>0) b._pay.push(pay);
     const prod=p(r.product); if(prod>0) b._prod.push(prod);
-    if(cc>0){ b.cT+=cc; b.nT++; } if(cl>0){ b.cL+=cl; b.nL++; }
-    if(st>0){ b.sT+=st; b.snT++; } if(sl>0){ b.sL+=sl; b.snL++; }
+    b.cT+=cc; b.nT++; b.sT+=st; b.snT++;  // TY over every week on record
+    if(cl>0){ b.cL+=cl; b.nL++; } if(sl>0){ b.sL+=sl; b.snL++; }
   });
   const mean = a => a.length ? a.reduce((x,y)=>x+y,0)/a.length : 0;
   return Object.values(bySalon).map(s=>{
     const avgCcT=s.nT?s.cT/s.nT:0, avgCcL=s.nL?s.cL/s.nL:0;
     const avgST=s.snT?s.sT/s.snT:0, avgSL=s.snL?s.sL/s.snL:0;
-    return { salonNum:s.salonNum, ccThis:mean(s._cc), payroll:mean(s._pay), product:mean(s._prod),
+    return { salonNum:s.salonNum, ccThis:(s.nT?s.cT/s.nT:0), payroll:mean(s._pay), product:mean(s._prod),
       ccGrowth: avgCcL? (avgCcT-avgCcL)/avgCcL*100 : 0,
       salesGrowth: avgSL? (avgST-avgSL)/avgSL*100 : 0 };
   });
