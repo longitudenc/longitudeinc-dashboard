@@ -1118,13 +1118,45 @@ function amOf(sn){
 
 // ── Averages ──────────────────────────────────────────────────
 function calcAvgs(rows){
-  if(!rows.length)return null;
-  const f=k=>avg(rows.map(r=>n(r[k])));
-  const fp=k=>avg(rows.map(r=>p(r[k])));
-  // Avg LY diff: average across rows that have a known LY avg
-  const lyDiffs = rows.map(r=>{ const l=LY_AVG[r.salonNum]; return (l && !isNaN(n(r.ccThis))) ? n(r.ccThis)-l : null; }).filter(x=>x!==null);
-  const lyDiff = lyDiffs.length ? avg(lyDiffs) : null;
-  return{cc:f('ccThis'),ccG:fp('ccGrowth'),sgr:fp('salesGrowth'),prod:fp('product'),nr:fp('nr'),rr:fp('rr'),hc:f('hcTime'),mbc:f('mbc'),ssW:fp('ssWaits'),wts:fp('waits'),noc:fp('nonOciWaits'),pay:fp('payroll'),cph:f('cph'),lyDiff:lyDiff};
+  // POOLED roll-up that matches the SD3 "Manager Bonus" report exactly:
+  // sum the underlying parts across all salon-weeks, then divide — NOT a mean
+  // of per-salon percentages. Sales/CC growth = ratio of the two pooled period
+  // averages, each over its own available salon-weeks (a week with no prior-year
+  // match is excluded from the LY side, never zero-filled). Rate columns are
+  // pooled by their natural base: payroll% by sales$, CPH by labor-hours,
+  // everything else by customer count.
+  if(!rows || !rows.length) return null;
+  let sCcT=0,nCcT=0, sCcL=0,nCcL=0, sSalesT=0,nSalesT=0, sSalesL=0,nSalesL=0;
+  let salesForPay=0, paySales=0, ccForCph=0, hours=0;
+  let wcc=0,wProd=0,wNr=0,wRr=0,wSsw=0,wWts=0,wNoc=0,wMbc=0,wHc=0;
+  rows.forEach(r=>{
+    const ct=n(r.ccThis), cl=n(r.ccLast), st=n(r.salesThis), sl=n(r.salesLast), cph=n(r.cph);
+    if(ct>0){ sCcT+=ct; nCcT++; }
+    if(cl>0){ sCcL+=cl; nCcL++; }
+    if(st>0){ sSalesT+=st; nSalesT++; paySales+=p(r.payroll)*st; salesForPay+=st; }
+    if(sl>0){ sSalesL+=sl; nSalesL++; }
+    if(ct>0 && cph>0){ ccForCph+=ct; hours+=ct/cph; }
+    if(ct>0){ wcc+=ct;
+      wProd+=p(r.product)*ct; wNr+=p(r.nr)*ct; wRr+=p(r.rr)*ct;
+      wSsw+=p(r.ssWaits)*ct; wWts+=p(r.waits)*ct; wNoc+=p(r.nonOciWaits)*ct;
+      wMbc+=n(r.mbc)*ct; wHc+=n(r.hcTime)*ct; }
+  });
+  const avgCcT=nCcT?sCcT/nCcT:0, avgCcL=nCcL?sCcL/nCcL:0;
+  const avgSalesT=nSalesT?sSalesT/nSalesT:0, avgSalesL=nSalesL?sSalesL/nSalesL:0;
+  const W=v=>wcc?v/wcc:0;
+  const lyDiffs=rows.map(r=>{ const l=LY_AVG[r.salonNum]; return (l && !isNaN(n(r.ccThis)))?n(r.ccThis)-l:null; }).filter(x=>x!==null);
+  return {
+    cc: avgCcT,
+    ccG: avgCcL? (avgCcT-avgCcL)/avgCcL*100 : 0,
+    sgr: avgSalesL? (avgSalesT-avgSalesL)/avgSalesL*100 : 0,
+    prod:W(wProd), nr:W(wNr), rr:W(wRr), hc:W(wHc), mbc:W(wMbc),
+    ssW:W(wSsw), wts:W(wWts), noc:W(wNoc),
+    pay: salesForPay? paySales/salesForPay : 0,
+    cph: hours? ccForCph/hours : 0,
+    lyDiff: lyDiffs.length? avg(lyDiffs) : null,
+    totSalesT:sSalesT, totSalesL:sSalesL, totCcT:sCcT, totCcL:sCcL,
+    avgSalesT, avgSalesL, nWeeksT:nCcT, nWeeksL:nCcL
+  };
 }
 function calcEmpAvgs(emps){
   const e=emps.filter(x=>x.hcTime&&!isNaN(n(x.hcTime)));
@@ -2512,47 +2544,35 @@ function collapseSalonsAvg(rows){
   const bySalon = {};
   (rows||[]).forEach(r=>{
     const k = String(r.salonNum||'').trim() || '?';
-    if(!bySalon[k]) bySalon[k] = { salonNum:k, _cc:[], _pay:[], _prod:[], _ccg:[], _sgr:[] };
-    const cc = n(r.ccThis); if(cc>0) bySalon[k]._cc.push(cc);
-    const pay = p(r.payroll); if(pay>0) bySalon[k]._pay.push(pay);
-    const prod = p(r.product); if(prod>0) bySalon[k]._prod.push(prod);
-    const ccg = p(r.ccGrowth); if(Number.isFinite(ccg)) bySalon[k]._ccg.push(ccg); // keep negatives
-    const sgr = p(r.salesGrowth); if(Number.isFinite(sgr)) bySalon[k]._sgr.push(sgr); // keep negatives
+    if(!bySalon[k]) bySalon[k] = { salonNum:k, _cc:[], _pay:[], _prod:[], cT:0,nT:0, cL:0,nL:0, sT:0,snT:0, sL:0,snL:0 };
+    const b=bySalon[k];
+    const cc=n(r.ccThis), cl=n(r.ccLast), st=n(r.salesThis), sl=n(r.salesLast);
+    if(cc>0) b._cc.push(cc);
+    const pay=p(r.payroll); if(pay>0) b._pay.push(pay);
+    const prod=p(r.product); if(prod>0) b._prod.push(prod);
+    if(cc>0){ b.cT+=cc; b.nT++; } if(cl>0){ b.cL+=cl; b.nL++; }
+    if(st>0){ b.sT+=st; b.snT++; } if(sl>0){ b.sL+=sl; b.snL++; }
   });
   const mean = a => a.length ? a.reduce((x,y)=>x+y,0)/a.length : 0;
-  return Object.values(bySalon).map(s=>({
-    salonNum: s.salonNum,
-    ccThis: mean(s._cc),
-    payroll: mean(s._pay),
-    product: mean(s._prod),
-    ccGrowth: mean(s._ccg),
-    salesGrowth: mean(s._sgr),
-  }));
+  return Object.values(bySalon).map(s=>{
+    const avgCcT=s.nT?s.cT/s.nT:0, avgCcL=s.nL?s.cL/s.nL:0;
+    const avgST=s.snT?s.sT/s.snT:0, avgSL=s.snL?s.sL/s.snL:0;
+    return { salonNum:s.salonNum, ccThis:mean(s._cc), payroll:mean(s._pay), product:mean(s._prod),
+      ccGrowth: avgCcL? (avgCcT-avgCcL)/avgCcL*100 : 0,
+      salesGrowth: avgSL? (avgST-avgSL)/avgSL*100 : 0 };
+  });
 }
 
 function calcYTDAvgs(amId){
-  // Average each salon's metrics across all weeks — doesn't depend on selected week
+  // YTD roll-up: pool over EVERY salon-week in range (report method), not a
+  // mean of per-salon averages. One calcAvgs() over all the rows does it.
   if(!S.weekHistory.length) return null;
   const yWeeks = ytdWeeks();
-  const salonNums = amId==='kayla'
-    ? [...new Set(yWeeks.flatMap(w=>(w.salons||[]).map(r=>String(r.salonNum||'').trim())).filter(s=>!NAMED.has(s)))]
-    : (AMS[amId]?.salons||[]);
-
-  const salonAvgs = salonNums.map(snum=>{
-    const weeklyRows = yWeeks.map(w=>{
-      return (amId==='kayla'
-        ? (w.salons||[]).filter(r=>!NAMED.has(String(r.salonNum||'').trim()))
-        : (w.salons||[]).filter(r=>String(r.salonNum||'').trim()===snum)
-      );
-    }).flat();
-    return calcAvgs(weeklyRows);
-  }).filter(Boolean);
-
-  if(!salonAvgs.length) return null;
-  const keys = ['cc','ccG','sgr','prod','nr','rr','hc','mbc','ssW','wts','noc','pay','cph'];
-  const result = {};
-  keys.forEach(k=>{ result[k] = avg(salonAvgs.map(a=>a[k]||0)); });
-  return result;
+  const inSet = amId==='kayla'
+    ? (sn=>!NAMED.has(sn))
+    : (sn=>(AMS[amId]?.salons||[]).includes(sn));
+  const rows = yWeeks.flatMap(w=>(w.salons||[]).filter(r=>inSet(String(r.salonNum||'').trim())));
+  return calcAvgs(rows);
 }
 
 function calcYTDEmpAvgs(amId){
