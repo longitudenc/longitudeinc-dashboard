@@ -3730,13 +3730,17 @@ function renderCompany(){
     // in renderCompanyBonus via the role check).
     const isYTD = S_globalMode === 'ytd';
     const snap=getSnap();
+    // Company view = current organization only (matches the SD3 report scope):
+    // exclude salons sold/closed as of today (e.g. 8725) from every roll-up.
+    const _coActive = new Set(activeSalons(new Date().toISOString().slice(0,10)));
+    const _coFilt = arr => (arr||[]).filter(r=>_coActive.has(String(r.salonNum||'').trim()));
     const all = isYTD
-      ? ytdWeeks().flatMap(w=>w.salons||[])
-      : (snap?snap.salons:[]);
+      ? ytdWeeks().flatMap(w=>_coFilt(w.salons))
+      : _coFilt(snap?snap.salons:[]);
     // For AM table avg row — use same mode as toggle
     const allForAMAvg = S_coAMMode==='ytd'
-      ? ytdWeeks().flatMap(w=>w.salons||[])
-      : (snap?snap.salons:[]);
+      ? ytdWeeks().flatMap(w=>_coFilt(w.salons))
+      : _coFilt(snap?snap.salons:[]);
     const allAForAM = calcAvgs(allForAMAvg);
     document.getElementById('company-sub').textContent = isYTD
       ? 'All Salons · YTD Average · ' + ytdWeeks().length + ' weeks'
@@ -3830,7 +3834,7 @@ function renderCompany(){
 
     document.getElementById('co-all-thead').innerHTML=buildHead(allCols,'co-all','sortCoAll');
     // Company YTD averages across all weeks
-    const allWeeksRows = ytdWeeks().flatMap(w=>w.salons||[]);
+    const allWeeksRows = ytdWeeks().flatMap(w=>_coFilt(w.salons));
     const coYtdA = calcAvgs(allWeeksRows);
     function coYtdRow(a){
       if(!a) return '';
@@ -3858,7 +3862,7 @@ function renderCompany(){
       </tr>`;
     }
     if(isYTD){
-      const allSalonNums = [...new Set(ytdWeeks().flatMap(w=>(w.salons||[]).map(r=>String(r.salonNum||'').trim())))];
+      const allSalonNums = [...new Set(ytdWeeks().flatMap(w=>_coFilt(w.salons).map(r=>String(r.salonNum||'').trim())))];
       let ytdSalonRows = allSalonNums.map(snum=>{
         const allRows = ytdWeeks().flatMap(w=>(w.salons||[]).filter(r=>String(r.salonNum||'').trim()===snum));
         const avg = calcAvgs(allRows);
