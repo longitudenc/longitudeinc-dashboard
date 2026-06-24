@@ -2414,8 +2414,8 @@ function renderSalonReviewBody(salonNum){
   }
 
   const raiseBox = d.eligible
-    ? `<div style="text-align:center;"><div style="font-size:10px;text-transform:uppercase;color:var(--text-muted);">Raise</div><div style="font-weight:800;font-size:22px;color:#1f8a4c;">$${d.raise.toFixed(2)}</div></div>`
-    : `<div style="text-align:center;"><div style="font-size:10px;text-transform:uppercase;color:var(--text-muted);">Raise</div><div style="font-weight:800;font-size:18px;color:#999;">—</div></div>`;
+    ? `<div style="text-align:center;"><div style="font-size:12px;text-transform:uppercase;color:var(--text-muted);">Raise</div><div style="font-weight:800;font-size:32px;color:#1f8a4c;line-height:1.1;">$${d.raise.toFixed(2)}</div></div>`
+    : `<div style="text-align:center;"><div style="font-size:12px;text-transform:uppercase;color:var(--text-muted);">Raise</div><div style="font-weight:800;font-size:26px;color:#999;line-height:1.1;">—</div></div>`;
 
   return `
     <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin:6px 0 12px;">
@@ -2429,20 +2429,22 @@ function renderSalonReviewBody(salonNum){
         <div style="background:#f6f7f9;padding:8px 12px;font-weight:700;font-size:13px;">Salon Key Results <span style="float:right;color:var(--text-muted);">${d.salonPts} / 41 pts</span></div>
         ${tbl(d.salonRows,'Metric','sal')}
       </div>
-      <div style="flex:1;min-width:360px;border:1px solid var(--border);border-radius:10px;overflow:hidden;">
-        <div style="background:#f6f7f9;padding:8px 12px;font-weight:700;font-size:13px;">Manager Key Results <span style="float:right;color:var(--text-muted);">${d.mgrPts} / 20 pts</span></div>
-        ${tbl(d.mgrRows,'Metric','mgr')}
+      <div style="flex:1;min-width:360px;display:flex;flex-direction:column;gap:16px;">
+        <div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;">
+          <div style="background:#f6f7f9;padding:8px 12px;font-weight:700;font-size:13px;">Manager Key Results <span style="float:right;color:var(--text-muted);">${d.mgrPts} / 20 pts</span></div>
+          ${tbl(d.mgrRows,'Metric','mgr')}
+        </div>
+        <div style="display:flex;gap:28px;align-items:center;flex-wrap:wrap;padding:16px 20px;border:1px solid var(--border);border-radius:10px;background:#fff;">
+          <div style="text-align:center;"><div style="font-size:12px;text-transform:uppercase;color:var(--text-muted);">Total Points</div><div style="font-weight:800;font-size:34px;line-height:1.1;">${d.totalPts}</div></div>
+          ${raiseBox}
+          <div style="font-size:12px;color:var(--text-muted);line-height:1.5;">
+            Salon ${d.salonPts} + Manager ${d.mgrPts}.<br>
+            ${d.discPts>0?`${d.discPts} disciplinary pt(s). `:''}Eligibility: manager in seat all ${_reviewYear} ${d.heldAllYear?'✓':'✗'}.
+          </div>
+        </div>
+        ${srRaiseScaleHtml(d.totalPts)}
       </div>
-    </div>
-    <div style="margin-top:14px;display:flex;gap:24px;align-items:center;flex-wrap:wrap;padding:12px 16px;border:1px solid var(--border);border-radius:10px;background:#fff;max-width:620px;">
-      <div style="text-align:center;"><div style="font-size:10px;text-transform:uppercase;color:var(--text-muted);">Total Points</div><div style="font-weight:800;font-size:22px;">${d.totalPts}</div></div>
-      ${raiseBox}
-      <div style="font-size:11px;color:var(--text-muted);line-height:1.5;">
-        Salon ${d.salonPts} + Manager ${d.mgrPts} (productivity dropped).<br>
-        ${d.discPts>0?`${d.discPts} disciplinary pt(s). `:''}Eligibility: manager in seat all ${_reviewYear} ${d.heldAllYear?'✓':'✗'}.
-      </div>
-    </div>
-    ${srRaiseScaleHtml(d.totalPts)}`;
+    </div>`;
 }
 
 // Self-test: run scorers on 3071/2025 workbook 12-mo averages → salon 30, mgr 15.
