@@ -1130,7 +1130,7 @@ function calcAvgs(rows){
   let salesForPay=0, paySales=0, ccForCph=0, hours=0;
   let wcc=0,wProd=0,wNr=0,wRr=0,wSsw=0,wWts=0,wNoc=0,wMbc=0,wHc=0;
   // exact pooled bases (populated once the weekly scraper backfills the count columns)
-  let ssWtC=0,ssCtC=0,nocWt=0,nocCt=0;
+  let nrRet=0,nrVis=0,rrRet=0,rrVis=0,ssWtC=0,ssCtC=0,nocWt=0,nocCt=0;
   rows.forEach(r=>{
     const ct=n(r.ccThis), cl=n(r.ccLast), st=n(r.salesThis), sl=n(r.salesLast), cph=n(r.cph);
     // TY denominators count EVERY salon-week on record — including a salon's
@@ -1146,26 +1146,13 @@ function calcAvgs(rows){
       wProd+=p(r.product)*ct; wNr+=p(r.nr)*ct; wRr+=p(r.rr)*ct;
       wSsw+=p(r.ssWaits)*ct; wWts+=p(r.waits)*ct; wNoc+=p(r.nonOciWaits)*ct;
       wMbc+=n(r.mbc)*ct; wHc+=n(r.hcTime)*ct; }
-    // S/S-Wait + nonOci bases — period totals, pooled exactly in the return below.
+    // raw NR/RR/S-S/nonOci bases — period totals, summed unconditionally
+    // (a salon's closed weeks contribute 0). Pooled exactly in the return below.
+    nrRet+=n(r.nrReturnCount); nrVis+=n(r.nrVisitCount);
+    rrRet+=n(r.rrReturnCount); rrVis+=n(r.rrVisitCount);
     ssWtC+=n(r.ssWaitCount);   ssCtC+=n(r.ssCustCount);
     nocWt+=n(r.nonOciWaitCount); nocCt+=n(r.nonOciCustCount);
   });
-  // NR / RR follow the report's method: a MEAN of weekly means. For each week,
-  // average the salons' NR/RR percentages (skipping a salon with no cohort that
-  // week — zero visits shows blank, not 0%); then average those weekly means.
-  // A single-salon input degenerates to that salon's own mean of weekly values.
-  const _wk={};
-  rows.forEach(r=>{
-    const k=r.weekEnding||'', m=_wk[k]||(_wk[k]={nr:[],rr:[]});
-    const nv=n(r.nrVisitCount), rv=n(r.rrVisitCount);
-    if(nv>0) m.nr.push(n(r.nrReturnCount)/nv*100);
-    if(rv>0) m.rr.push(n(r.rrReturnCount)/rv*100);
-  });
-  const _mean=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:null;
-  const _wkNr=[], _wkRr=[];
-  Object.keys(_wk).forEach(k=>{ const a=_mean(_wk[k].nr), b=_mean(_wk[k].rr);
-    if(a!=null)_wkNr.push(a); if(b!=null)_wkRr.push(b); });
-  const meanNr=_mean(_wkNr), meanRr=_mean(_wkRr);
   const avgCcT=nCcT?sCcT/nCcT:0, avgCcL=nCcL?sCcL/nCcL:0;
   const avgSalesT=nSalesT?sSalesT/nSalesT:0, avgSalesL=nSalesL?sSalesL/nSalesL:0;
   const W=v=>wcc?v/wcc:0;
@@ -1175,12 +1162,11 @@ function calcAvgs(rows){
     ccG: avgCcL? (avgCcT-avgCcL)/avgCcL*100 : 0,
     sgr: avgSalesL? (avgSalesT-avgSalesL)/avgSalesL*100 : 0,
     prod:W(wProd), hc:W(wHc), mbc:W(wMbc),
-    // NR/RR = mean of weekly means (matches the report; see grouping above).
-    // Falls back to the cc-weighted approximation only when no cohort counts exist.
-    nr:  meanNr!=null ? meanNr : W(wNr),
-    rr:  meanRr!=null ? meanRr : W(wRr),
-    // S/S Wait pooled exactly (waits / weekend customers); Wait% pooled via
-    // cc-weighting is already exact since its denominator IS cc.
+    // Exact pooled ratios (Sum numerator / Sum denominator) once the count columns
+    // are backfilled; until then nrVis/etc are 0 and we fall back to the cc-weighted
+    // approximation. Wait%'s denominator IS cc, so cc-weighting it is already exact.
+    nr:  nrVis>0 ? nrRet/nrVis*100 : W(wNr),
+    rr:  rrVis>0 ? rrRet/rrVis*100 : W(wRr),
     ssW: ssCtC>0 ? ssWtC/ssCtC*100 : W(wSsw),
     wts: W(wWts),
     noc: nocCt>0 ? nocWt/nocCt*100 : W(wNoc),
