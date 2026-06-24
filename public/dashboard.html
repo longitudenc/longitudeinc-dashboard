@@ -2241,8 +2241,10 @@ function openStylistReview(gid, name){
 
 // ── Salon / Manager review ENGINE (exact LI_Salon_Review_2025 workbook logic) ──
 // Scoring reverse-engineered from the workbook's per-cell formulas (col G), NOT
-// the Settings color bands. Validated against 3071/2025: salon 30 + manager 15
-// (productivity dropped per Trey) = 45 → $0.25. All %-metrics take PERCENT units
+// the Settings color bands. Regular Wait% uses the full 4-band scale (same as
+// S/S Wait%) per the 2026 tier sheet — the 2025 workbook's copy-paste bug (no "2"
+// band) is intentionally NOT replicated. Validated against 3071: salon 29 + manager
+// 15 = 44 → $0.25. All %-metrics take PERCENT units
 // (e.g. 79.5), matching how the dashboard stores nr/rr/product/waits/payroll/ccg.
 function srNR(v){ return v>=25.945?4:v>=23.945?3:v>=20.945?2:1; }
 function srRR(v){ return v>=75.9?4:v>=72.9?3:v>=69.9?2:1; }
@@ -2251,7 +2253,7 @@ function srMBC(v){ return v<2.05?4:v<3.05?3:v<4.05?2:1; }
 function srProductivity(v,goal){ return (goal&&v>=goal)?2:1; }   // 2 or 1 (Prod$ vs goal)
 function srProductPct(v){ return v>=5.95?4:v>=3.95?3:v>=2.45?2:1; }
 function srSSWait(v){ return v<15.05?4:v<19.05?3:v<23.05?2:1; }
-function srWait(v){ return v<15.05?4:v<23.05?3:1; }             // workbook quirk: no "2" band
+function srWait(v){ return v<15.05?4:v<19.05?3:v<23.05?2:1; }   // full 4-band (matches S/S Wait), per 2026 tiers
 function srPayroll(v,exPay,grPay){ return v<=exPay?4:v<=grPay?3:1; }
 function srCC(v){ return v>=499.95?4:v>=399.95?3:v>=299.95?2:1; }
 function srCCG(v){ return v>=4.95?4:v>=2.95?3:v>=0.95?2:1; }
@@ -2321,7 +2323,7 @@ function computeSalonReview(salonNum, year){
     mk('Productivity ($/hr)',(goal?'goal $'+goal:'—'),dol,a.prod,prod12,(v)=>srProductivity(v,goal)),
     mk('Product %','≥6 / 4 / 2.5',pct,a.product,M12(salMon,'product'),srProductPct),
     mk('S/S Wait > 15 Min %','≤15 / 19 / 23',pct,a.ssw,M12(salMon,'ssw'),srSSWait),
-    mk('Wait > 15 Min %','≤15 / <23',pct,a.wt,M12(salMon,'wt'),srWait),
+    mk('Wait > 15 Min %','≤15 / 19 / 23',pct,a.wt,M12(salMon,'wt'),srWait),
     mk('Payroll %','≤'+pt.exc+' / '+pt.grw,pct,a.pay,M12(salMon,'pay'),(v)=>srPayroll(v,pt.exc,pt.grw)),
     mk('Customer Count','≥500 / 400 / 300',ct,a.cc,M12(salMon,'cc','sum'),srCC),
     mk('Customer Count Growth %','≥5 / 3 / 1',pct,a.ccg,M12(salMon,'ccg'),srCCG),
@@ -2452,7 +2454,7 @@ function _srSelfTest(){
   const salon=[srNR(22.87),srRR(79.53),srHC(15.6417),srMBC(2.875),srProductivity(55.3467,56.5),srProductPct(3.36),srSSWait(18.18),srWait(22.6),srPayroll(34.27,35,36),srCC(753.92),srCCG(-3.04)];
   const mgr=[srNR(24.76),srRR(81.23),srHC(15.8571),srMBC(2.8857),srProductPct(3.56)];
   const sp=salon.reduce((x,y)=>x+y,0), mp=mgr.reduce((x,y)=>x+y,0);
-  if(sp===30 && mp===15 && srRaise(sp+mp)===0.25) console.log('[salon-review self-test OK] 3071/2025 → salon 30, mgr 15, total 45, raise $0.25');
+  if(sp===29 && mp===15 && srRaise(sp+mp)===0.25) console.log('[salon-review self-test OK] 3071 → salon 29, mgr 15, total 44, raise $0.25');
   else console.warn('[salon-review self-test FAIL]',{salon,sp,mgr,mp,raise:srRaise(sp+mp)});
 }
 try{ _srSelfTest(); }catch(e){}
