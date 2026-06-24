@@ -100,6 +100,9 @@ const PERIOD_COLUMNS = [
   'serviceDiscounts', 'productDiscounts', 'redoAmount',
   'grossHaircutSales', 'haircutCount', 'waitOver15Count',
   'ssCustCount', 'ssWaitCount',
+  // raw rate bases for exact NR/RR/S-S-Wait/nonOci pooling — added 2026-06
+  'nrReturnCount', 'nrVisitCount', 'rrReturnCount', 'rrVisitCount',
+  'nonOciWaitCount', 'nonOciCustCount',
   'scrapedAt',
 ] as const
 
@@ -157,6 +160,12 @@ function periodRow(
     waitOver15Count: agg.waitOver15Count,
     ssCustCount: agg.ssCustCount,
     ssWaitCount: agg.ssWaitCount,
+    nrReturnCount: agg.nrReturnCount,
+    nrVisitCount: agg.nrVisitCount,
+    rrReturnCount: agg.rrReturnCount,
+    rrVisitCount: agg.rrVisitCount,
+    nonOciWaitCount: agg.nonOciWaitCount,
+    nonOciCustCount: agg.nonOciCustCount,
     scrapedAt: new Date().toISOString(),
   }
 }

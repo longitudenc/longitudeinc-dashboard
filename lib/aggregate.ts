@@ -57,6 +57,13 @@ export interface AggregatedPeriod {
   waitOver15Count: number      // customers who waited > 15 min
   ssCustCount: number          // Sat+Sun customer count
   ssWaitCount: number          // Sat+Sun customers who waited > 15 min
+  // Raw rate bases for exact pooled roll-ups (period totals) — added 2026-06
+  nrReturnCount: number        // new-customer cohort: returned (NR numerator)
+  nrVisitCount: number         // new-customer cohort: total (NR denominator)
+  rrReturnCount: number        // repeat-customer cohort: returned (RR numerator)
+  rrVisitCount: number         // repeat-customer cohort: total (RR denominator)
+  nonOciWaitCount: number      // non-OCI customers who waited > 15 min
+  nonOciCustCount: number      // non-OCI customer count (nonOciWaits denominator)
 
   // Computed percentages and averages
   cph: number             // customers per hour
@@ -148,6 +155,12 @@ export function aggregatePeriod(
     waitOver15Count: waitOver15MinsCount,
     ssCustCount,
     ssWaitCount,
+    nrReturnCount: newCustomerReturnCount,
+    nrVisitCount: newCustomerVisitCount,
+    rrReturnCount: repeatCustomerReturnCount,
+    rrVisitCount: repeatCustomerVisitCount,
+    nonOciWaitCount: nonOciWaitOver15MinsCount,
+    nonOciCustCount: nonOciCustomerCount,
 
     cph: safeDiv(cc, floorHours),
     payrollPct: pct(payrollAmount, totalSales),

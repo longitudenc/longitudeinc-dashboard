@@ -58,6 +58,16 @@ export type DashboardSalonRow = {
   hcTime: number
   cph: number
   mbc: number
+  // Raw rate bases for exact pooled roll-ups (period totals) — added 2026-06
+  nrReturnCount: number
+  nrVisitCount: number
+  rrReturnCount: number
+  rrVisitCount: number
+  waitOver15Count: number
+  ssCustCount: number
+  ssWaitCount: number
+  nonOciWaitCount: number
+  nonOciCustCount: number
 }
 
 export type DashboardWeek = {
@@ -171,6 +181,15 @@ export async function getDashboardWeeks(): Promise<DashboardWeek[]> {
       hcTime: num(r.hcTime),
       cph: num(r.cph),
       mbc: num(r.mbc),
+      nrReturnCount: num(r.nrReturnCount),
+      nrVisitCount: num(r.nrVisitCount),
+      rrReturnCount: num(r.rrReturnCount),
+      rrVisitCount: num(r.rrVisitCount),
+      waitOver15Count: num(r.waitOver15Count),
+      ssCustCount: num(r.ssCustCount),
+      ssWaitCount: num(r.ssWaitCount),
+      nonOciWaitCount: num(r.nonOciWaitCount),
+      nonOciCustCount: num(r.nonOciCustCount),
     }
 
     if (!byWeek.has(r.weekEnd)) byWeek.set(r.weekEnd, [])
