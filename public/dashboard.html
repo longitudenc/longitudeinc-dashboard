@@ -2259,10 +2259,21 @@ function stylistsForSalon(sn){
     if(ref && (cnt[ref]!=null || !Object.keys(cnt).length)) return ref;
     return Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a])[0] || ref || '';
   };
+  // Only people who ACTUALLY worked in the selected review year appear — i.e. they
+  // have at least one consolidated BonusData row that year. This is the reliable
+  // backstop: long-gone employees still sitting in homeDataMap (but never flagged
+  // inactive in SD3's profile) are dropped because they have no current-year data.
+  const _yr = _reviewYear || (new Date().getFullYear());
+  const workedThisYear = new Set();
+  (S_bonusPeriods||[]).forEach(per=>{
+    if(periodYear(per.periodKey)!==_yr) return;
+    (per.employees||[]).forEach(e=>{ const g=String(e.globalId||'').trim(); if(g) workedThisYear.add(g); });
+  });
   const out=[];
   Object.entries(S.homeDataMap||{}).forEach(([gid,row])=>{
     gid=String(gid).trim(); if(!gid) return;
     if(homeOf(gid)!==sn) return;          // home salon only (floaters under home store)
+    if(!workedThisYear.has(gid)) return;  // must have worked (have BonusData) this year
     if(isInactive(gid)) return;           // active employees only
     if(amGids.has(gid)) return;           // no AMs
     if(gid===fullYearMgrGid) return;      // full-year manager -> salon review, not here
@@ -7367,6 +7378,7 @@ function profileBonusHtml(bonusRows, globalId){
         const pay=parseFloat(r.payout)||0, pot=parseFloat(r.potential)||0;
         const blk=discBlockedPeriod(r);
         const prod=parseFloat(r.product)||0, nr=parseFloat(r.nr)||0, rr=parseFloat(r.rr)||0, mbc=parseFloat(r.mbc)||0;
+        const hc=parseFloat(r.hcTime)||0, hcSc=hc>0?scoreHC(hc):0, hcCls=hc<=0?'':(hcSc>=4?'bv-green':hcSc>=2?'bv-yellow':'bv-red');
         const pp=pot>0?Math.round(pay/pot*100)+'%':'—';
         const payCls=pay>0?(pay/pot>=0.5?'bv-green':'bv-yellow'):'bv-red';
         const prodCls=prod<BONUS_CFG.PROD_1?'bv-orange':prod<BONUS_CFG.PROD_2?'bv-yellow':'bv-green';
@@ -7381,7 +7393,7 @@ function profileBonusHtml(bonusRows, globalId){
           <td class="${nrCls}" style="padding:8px 12px;text-align:center;">${fmtPct(r.nr)}</td>
           <td class="${rrCls}" style="padding:8px 12px;text-align:center;">${fmtPct(r.rr)}</td>
           <td class="${mbcCls}" style="padding:8px 12px;text-align:center;">${fmtN1(r.mbc)}</td>
-          <td style="padding:8px 12px;text-align:center;">${(parseFloat(r.hcTime)||0)?fmtN1(r.hcTime):'—'}</td>
+          <td class="${hcCls}" style="padding:8px 12px;text-align:center;">${hc>0?fmtN1(r.hcTime):'—'}</td>
           <td style="padding:8px 12px;text-align:center;font-weight:700;">${r.points||'—'}</td>
           <td style="padding:8px 12px;text-align:center;">${pot>0?fmtMoney(pot):'$0'}</td>
           <td class="${blk?'bv-red':payCls}" style="padding:8px 12px;text-align:center;font-weight:700;">${blk?'<s style="color:#999;">'+fmtMoney(pay)+'</s>':fmtMoney(pay)}</td>
