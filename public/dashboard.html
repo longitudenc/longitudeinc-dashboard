@@ -1360,6 +1360,10 @@ function onDataLoaded(data){
     S.profileMap = data.profileMap || {};
     // Load bonus periods (sorted chronologically — re-run periods can arrive out of order)
     S_bonusPeriods = (data.bonusPeriods || []).slice().sort((a,b)=>periodSortKey(a.periodKey)-periodSortKey(b.periodKey));
+    // Consolidated weekly per-employee rows (merged across float) → index by globalId.
+    S.empWeeklyCons = data.empWeeklyConsRows || [];
+    S.empWeeklyConsByGid = {};
+    S.empWeeklyCons.forEach(r=>{ const g=String(r.globalId||'').trim(); if(!g) return; (S.empWeeklyConsByGid[g] || (S.empWeeklyConsByGid[g]=[])).push(r); });
     if(S_bonusPeriods.length > 0 && !S_bonusPeriod){
       S_bonusPeriod = S_bonusPeriods[S_bonusPeriods.length-1].periodKey;
     }
@@ -7073,7 +7077,9 @@ let profileCharts = []; // track Chart instances for cleanup
 let S_profileTrendWindow = 20; // profile Trends window: 20 | 52 | 'ytd' | 'all' (default recent 20)
 let S_profileTrendPriorYear = false; // overlay the same window from the prior year (−364d)
 let S_profileBonusRange = 'ytd'; // profile Bonus History range: ytd | prior | r12 | all
-let S_profileWeeklyWindow = 20; // profile Weekly Data window: 20 | 52 | 'ytd' | 'all'
+let S_profileWeeklyGrain = 'weekly';   // profile Weekly view grain: 'weekly' | 'monthly'
+let S_profileWeeklyRange = 'ytd';      // 'ytd' | 'prior' | 'all'
+let S_profileWeekExpanded = new Set(); // weekEnds expanded to show the per-salon drill
 
 // Convert "Last, First" (SD3 format) → "First Last" for display. Handles
 // suffixes after a second comma (e.g. "Smith, John, Jr" → "John Smith Jr"),
@@ -7420,73 +7426,171 @@ function renderProfileBonus(){
   if(el) el.innerHTML = profileBonusHtml(window._profileBonusRows, window._profileGlobalId);
 }
 
-function profileWeeklyBar(){
-  return [{w:20,l:'20 wk'},{w:52,l:'52 wk'},{w:'ytd',l:'YTD'},{w:'all',l:'All'}].map(o=>{
-    const arg = typeof o.w==='string'?"'"+o.w+"'":o.w;
-    const active = S_profileWeeklyWindow===o.w;
-    return `<button onclick="S_profileWeeklyWindow=${arg};renderProfileWeekly()" style="padding:3px 12px;border-radius:14px;border:1px solid ${active?'var(--primary)':'var(--border)'};font-size:12px;font-weight:600;cursor:pointer;background:${active?'var(--primary)':'white'};color:${active?'white':'var(--text)'};">${o.l}</button>`;
-  }).join('');
+// ── Profile Weekly view: consolidated (merged-across-float) line per WEEK with a
+//    click-through to the per-salon breakdown, OR one line per MONTH from BonusData.
+//    Grain (Weekly|Monthly) × Range (YTD|Prior Year|All). ──
+function profileWeeklyControls(){
+  const grp=(label,opts,cur,setter)=>`<span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-right:2px;">${label}:</span>`+
+    opts.map(([k,l])=>`<button onclick="${setter}('${k}')" style="padding:3px 12px;border-radius:14px;border:1px solid ${cur===k?'var(--primary)':'var(--border)'};font-size:12px;font-weight:600;cursor:pointer;background:${cur===k?'var(--primary)':'white'};color:${cur===k?'white':'var(--text)'};">${l}</button>`).join('');
+  return `<div style="display:flex;gap:14px;align-items:center;margin:0 0 12px 0;flex-wrap:wrap;">
+    <div style="display:flex;gap:6px;align-items:center;">${grp('View',[['weekly','Weekly'],['monthly','Monthly']],S_profileWeeklyGrain,'setProfileWeeklyGrain')}</div>
+    <div style="display:flex;gap:6px;align-items:center;">${grp('Range',[['ytd','YTD'],['prior','Prior Year'],['all','All']],S_profileWeeklyRange,'setProfileWeeklyRange')}</div>
+  </div>`;
 }
-function profileWeeklyHtml(empRows){
-  empRows = empRows || window._profileEmpRows || [];
-  if(!empRows.length) return '<div style="color:var(--text-muted);">No weekly data on record.</div>';
-  const bar = `<div style="display:flex;gap:6px;align-items:center;margin:0 0 12px 0;flex-wrap:wrap;"><span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);">Range:</span>${profileWeeklyBar()}</div>`;
-  const W = S_profileWeeklyWindow;
-  let rows;
-  if(W==='all') rows = empRows.slice();
-  else if(W==='ytd'){ const anchor = fiscalYearStartIso(empRows[empRows.length-1].weekEnding); rows = empRows.filter(r=>r.weekEnding>=anchor); }
-  else rows = empRows.slice(Math.max(0, empRows.length - W));
-  rows = rows.slice().reverse(); // newest first
-  if(!rows.length) return bar + '<div style="color:var(--text-muted);padding:8px 2px;">No weeks in this range.</div>';
-  const fmtWE = iso=>{ const m=String(iso||'').match(/^(\d{4})-(\d{2})-(\d{2})/); return m?(+m[2])+'/'+(+m[3])+'/'+m[1].slice(2):iso; };
-  const avgW = fn=>{ const v=rows.map(fn).filter(x=>!isNaN(x)&&x!==0); return v.length?v.reduce((a,b)=>a+b,0)/v.length:null; };
-  const aHC=avgW(r=>n(r.hcTime)), aMBC=avgW(r=>n(r.mbc)), aProd=avgW(r=>p(r.product)), aNR=avgW(r=>p(r.nr)), aRR=avgW(r=>p(r.rr)), aFloor=avgW(r=>n(r.floorHours)), aCust=avgW(r=>n(r.custCount)), aCPH=avgW(r=>n(r.cph));
-  const fa=(v,d=1,s='')=>v===null?'—':v.toFixed(d)+s;
-  return bar + `<table style="width:100%;border-collapse:collapse;font-size:12px;">
-    <thead style="position:sticky;top:0;z-index:1;"><tr style="background:var(--primary-dark);color:white;">
-      <th style="padding:7px 10px;text-align:left;">Week Ending</th>
-      <th style="padding:7px 10px;text-align:left;">Period</th>
-      <th style="padding:7px 10px;text-align:center;">HC Time</th>
-      <th style="padding:7px 10px;text-align:center;">MBC</th>
-      <th style="padding:7px 10px;text-align:center;">Product %</th>
-      <th style="padding:7px 10px;text-align:center;">NR %</th>
-      <th style="padding:7px 10px;text-align:center;">RR %</th>
-      <th style="padding:7px 10px;text-align:center;">Floor Hrs</th>
-      <th style="padding:7px 10px;text-align:center;">Cust Count</th>
-      <th style="padding:7px 10px;text-align:center;">CPH</th>
-    </tr></thead>
+function setProfileWeeklyGrain(g){ S_profileWeeklyGrain=g; renderProfileWeekly(); }
+function setProfileWeeklyRange(r){ S_profileWeeklyRange=r; renderProfileWeekly(); }
+function toggleProfileWeek(we){ if(S_profileWeekExpanded.has(we)) S_profileWeekExpanded.delete(we); else S_profileWeekExpanded.add(we); renderProfileWeekly(); }
+
+// Filter rows to the selected fiscal-year range using each row's ISO week-end date.
+function _profWeeklyRangeFilter(rows, dateOf){
+  if(!rows.length || S_profileWeeklyRange==='all') return rows.slice();
+  const latest = rows.reduce((m,r)=>{ const d=dateOf(r); return d>m?d:m; }, '');
+  if(!latest) return rows.slice();
+  const thisFY = fiscalYearStartIso(latest);
+  if(S_profileWeeklyRange==='ytd') return rows.filter(r=>dateOf(r)>=thisFY);
+  const priorEnd = addDaysIso(thisFY,-1), priorStart = fiscalYearStartIso(priorEnd);
+  return rows.filter(r=>{ const d=dateOf(r); return d>=priorStart && d<=priorEnd; });
+}
+
+const _wkHead = `<thead style="position:sticky;top:0;z-index:1;"><tr style="background:var(--primary-dark);color:white;">
+  <th style="padding:7px 10px;text-align:left;">Week Ending</th>
+  <th style="padding:7px 10px;text-align:left;">Period</th>
+  <th style="padding:7px 10px;text-align:center;">HC Time</th>
+  <th style="padding:7px 10px;text-align:center;">MBC</th>
+  <th style="padding:7px 10px;text-align:center;">Product %</th>
+  <th style="padding:7px 10px;text-align:center;">NR %</th>
+  <th style="padding:7px 10px;text-align:center;">RR %</th>
+  <th style="padding:7px 10px;text-align:center;">Floor Hrs</th>
+  <th style="padding:7px 10px;text-align:center;">Cust Count</th>
+  <th style="padding:7px 10px;text-align:center;">CPH</th>
+</tr></thead>`;
+const _wkFmtWE = iso=>{ const m=String(iso||'').match(/^(\d{4})-(\d{2})-(\d{2})/); return m?(+m[2])+'/'+(+m[3])+'/'+m[1].slice(2):iso; };
+const _wkFa = (v,d=1,s='')=> (v===null||v===undefined||isNaN(v))?'—':v.toFixed(d)+s;
+
+function profileWeeklyHtml(){
+  const bar = profileWeeklyControls();
+  return bar + (S_profileWeeklyGrain==='monthly' ? profileWeeklyMonthlyTable() : profileWeeklyConsTable());
+}
+
+// WEEKLY: one consolidated row per week (exact, merged across float) + per-salon drill.
+function profileWeeklyConsTable(){
+  const cons = (window._profileWeeklyCons||[]);
+  if(!cons.length) return '<div style="color:var(--text-muted);padding:8px 2px;">No consolidated weekly data on record yet.</div>';
+  let rows = _profWeeklyRangeFilter(cons, r=>r.weekEnd).slice().sort((a,b)=> a.weekEnd<b.weekEnd?1:-1); // newest first
+  if(!rows.length) return '<div style="color:var(--text-muted);padding:8px 2px;">No weeks in this range.</div>';
+  const emp = window._profileEmpRows||[];
+  const avgW = fn=>{ const v=rows.map(fn).filter(x=>x!==null&&!isNaN(x)); return v.length?v.reduce((a,b)=>a+b,0)/v.length:null; };
+  const aHC=avgW(r=>parseFloat(r.hcTime)), aMBC=avgW(r=>parseFloat(r.mbc)), aProd=avgW(r=>parseFloat(r.product)*100),
+        aNR=avgW(r=>parseFloat(r.nr)*100), aRR=avgW(r=>parseFloat(r.rr)*100), aFloor=avgW(r=>parseFloat(r.floorHours)),
+        aCust=avgW(r=>parseFloat(r.custCount)), aCPH=avgW(r=>parseFloat(r.cph));
+  const body = rows.map((r,i)=>{
+    const we=r.weekEnd;
+    const hc=parseFloat(r.hcTime)||0, mbc=parseFloat(r.mbc)||0, prod=parseFloat(r.product)*100, nr=parseFloat(r.nr)*100, rr=parseFloat(r.rr)*100, floor=parseFloat(r.floorHours)||0, cust=parseFloat(r.custCount)||0, cph=parseFloat(r.cph)||0;
+    const det = emp.filter(e=>String(e.weekEnding)===String(we)).slice().sort((a,b)=>String(a.salonNum).localeCompare(String(b.salonNum)));
+    const multi = det.length>1, expanded = S_profileWeekExpanded.has(we);
+    const caret = multi ? `<span style="color:var(--primary);font-weight:700;margin-right:5px;">${expanded?'▾':'▸'}</span>` : '';
+    let html = `<tr ${multi?`onclick="toggleProfileWeek('${we}')" style="cursor:pointer;background:${i%2?'#f8f7f4':'white'};"`:`style="background:${i%2?'#f8f7f4':'white'};"`}>
+      <td style="padding:7px 10px;white-space:nowrap;font-weight:500;">${caret}${_wkFmtWE(we)}${multi?` <span style="color:var(--text-muted);font-size:10px;">${det.length} salons</span>`:''}</td>
+      <td style="padding:7px 10px;white-space:nowrap;color:var(--text-muted);">${formatBonusPeriod(periodKeyFromWeekEnd(we))}</td>
+      <td class="${hc?tierHC(hc):''}" style="padding:7px 10px;text-align:center;">${hc?hc.toFixed(1):'—'}</td>
+      <td class="${mbc?tierMBC(mbc):''}" style="padding:7px 10px;text-align:center;">${mbc?mbc.toFixed(1):'—'}</td>
+      <td class="${isNaN(prod)?'':tierProd(prod)}" style="padding:7px 10px;text-align:center;">${isNaN(prod)?'—':prod.toFixed(1)+'%'}</td>
+      <td class="${isNaN(nr)?'':tierNR(nr)}" style="padding:7px 10px;text-align:center;">${isNaN(nr)?'—':nr.toFixed(1)+'%'}</td>
+      <td class="${isNaN(rr)?'':tierRR(rr)}" style="padding:7px 10px;text-align:center;">${isNaN(rr)?'—':rr.toFixed(1)+'%'}</td>
+      <td style="padding:7px 10px;text-align:center;">${floor?floor.toFixed(1):'—'}</td>
+      <td style="padding:7px 10px;text-align:center;">${cust||'—'}</td>
+      <td style="padding:7px 10px;text-align:center;">${cph?cph.toFixed(2):'—'}</td>
+    </tr>`;
+    if(multi && expanded){
+      html += det.map(e=>{
+        const ehc=n(e.hcTime), embc=n(e.mbc), eprod=p(e.product), enr=p(e.nr), err=p(e.rr), efloor=n(e.floorHours), ecph=n(e.cph);
+        return `<tr style="background:#eef4ef;font-size:11px;color:#3a463c;">
+          <td style="padding:4px 10px 4px 30px;white-space:nowrap;">↳ Salon ${e.salonNum}</td>
+          <td></td>
+          <td style="padding:4px 10px;text-align:center;">${efloor?ehc.toFixed(1):'—'}</td>
+          <td style="padding:4px 10px;text-align:center;">${embc?embc.toFixed(1):'—'}</td>
+          <td style="padding:4px 10px;text-align:center;">${isNaN(eprod)?'—':eprod.toFixed(1)+'%'}</td>
+          <td style="padding:4px 10px;text-align:center;">${(isNaN(enr)||enr===0)?'—':enr.toFixed(1)+'%'}</td>
+          <td style="padding:4px 10px;text-align:center;">${(isNaN(err)||err===0)?'—':err.toFixed(1)+'%'}</td>
+          <td style="padding:4px 10px;text-align:center;">${efloor?efloor.toFixed(1):'—'}</td>
+          <td style="padding:4px 10px;text-align:center;">${e.custCount||'—'}</td>
+          <td style="padding:4px 10px;text-align:center;">${ecph?ecph.toFixed(2):'—'}</td>
+        </tr>`;
+      }).join('');
+    }
+    return html;
+  }).join('');
+  return `<div style="font-size:11px;color:var(--text-muted);margin:0 0 8px 2px;">One consolidated line per week (merged across every salon worked). ▸ a multi-salon week to see where they worked.</div>
+  <table style="width:100%;border-collapse:collapse;font-size:12px;">${_wkHead}
     <tbody>
       <tr style="background:#e9f1ea;font-weight:700;border-bottom:2px solid var(--primary);">
         <td style="padding:7px 10px;white-space:nowrap;">Average</td>
         <td style="padding:7px 10px;white-space:nowrap;color:var(--text-muted);font-weight:600;">${rows.length} wks</td>
-        <td style="padding:7px 10px;text-align:center;">${fa(aHC)}</td>
-        <td style="padding:7px 10px;text-align:center;">${fa(aMBC)}</td>
-        <td style="padding:7px 10px;text-align:center;">${fa(aProd,1,'%')}</td>
-        <td style="padding:7px 10px;text-align:center;">${fa(aNR,1,'%')}</td>
-        <td style="padding:7px 10px;text-align:center;">${fa(aRR,1,'%')}</td>
-        <td style="padding:7px 10px;text-align:center;">${fa(aFloor)}</td>
+        <td style="padding:7px 10px;text-align:center;">${_wkFa(aHC)}</td>
+        <td style="padding:7px 10px;text-align:center;">${_wkFa(aMBC)}</td>
+        <td style="padding:7px 10px;text-align:center;">${_wkFa(aProd,1,'%')}</td>
+        <td style="padding:7px 10px;text-align:center;">${_wkFa(aNR,1,'%')}</td>
+        <td style="padding:7px 10px;text-align:center;">${_wkFa(aRR,1,'%')}</td>
+        <td style="padding:7px 10px;text-align:center;">${_wkFa(aFloor)}</td>
         <td style="padding:7px 10px;text-align:center;">${aCust===null?'—':Math.round(aCust)}</td>
-        <td style="padding:7px 10px;text-align:center;">${fa(aCPH,2)}</td>
+        <td style="padding:7px 10px;text-align:center;">${_wkFa(aCPH,2)}</td>
       </tr>
-      ${rows.map((r,i)=>`
-      <tr style="background:${i%2?'#f8f7f4':'white'};">
-        <td style="padding:7px 10px;white-space:nowrap;font-weight:500;">${fmtWE(r.weekEnding)}</td>
-        <td style="padding:7px 10px;white-space:nowrap;color:var(--text-muted);">${formatBonusPeriod(periodKeyFromWeekEnd(r.weekEnding))}</td>
-        <td class="${tierHC(n(r.hcTime))}" style="padding:7px 10px;text-align:center;">${n(r.hcTime).toFixed(1)}</td>
-        <td class="${tierMBC(n(r.mbc))}" style="padding:7px 10px;text-align:center;">${n(r.mbc).toFixed(1)}</td>
-        <td class="${tierProd(p(r.product))}" style="padding:7px 10px;text-align:center;">${p(r.product).toFixed(1)}%</td>
-        <td class="${tierNR(p(r.nr))}" style="padding:7px 10px;text-align:center;">${p(r.nr).toFixed(1)}%</td>
-        <td class="${tierRR(p(r.rr))}" style="padding:7px 10px;text-align:center;">${p(r.rr).toFixed(1)}%</td>
-        <td style="padding:7px 10px;text-align:center;">${n(r.floorHours).toFixed(1)}</td>
-        <td style="padding:7px 10px;text-align:center;">${r.custCount||'—'}</td>
-        <td style="padding:7px 10px;text-align:center;">${n(r.cph).toFixed(2)}</td>
-      </tr>`).join('')}
+      ${body}
     </tbody>
   </table>`;
 }
+
+// MONTHLY: one line per month from consolidated BonusData (exact).
+function profileWeeklyMonthlyTable(){
+  const all = (window._profileBonusRows||[]);
+  if(!all.length) return '<div style="color:var(--text-muted);padding:8px 2px;">No monthly data on record.</div>';
+  let rows = bonusRangeFilter(all, r=>r.period, S_profileWeeklyRange).slice()
+    .sort((a,b)=> periodSortKey(a.period)<periodSortKey(b.period)?1:-1);
+  if(!rows.length) return '<div style="color:var(--text-muted);padding:8px 2px;">No months in this range.</div>';
+  const mv=(r,k)=>{ const x=parseFloat(r[k]); return isNaN(x)?null:x; };
+  const avgM=fn=>{ const v=rows.map(fn).filter(x=>x!==null&&!isNaN(x)); return v.length?v.reduce((a,b)=>a+b,0)/v.length:null; };
+  const mCph=r=>{ const c=mv(r,'custCount'), h=mv(r,'avgWkHrs'), w=mv(r,'weeksN'); return (c&&h&&w)?c/(h*w):null; };
+  const aHC=avgM(r=>mv(r,'hcTime')), aMBC=avgM(r=>mv(r,'mbc')), aProd=avgM(r=>{const v=mv(r,'product');return v===null?null:v*100;}),
+        aNR=avgM(r=>{const v=mv(r,'nr');return v===null?null:v*100;}), aRR=avgM(r=>{const v=mv(r,'rr');return v===null?null:v*100;}),
+        aFloor=avgM(r=>mv(r,'avgWkHrs')), aCust=avgM(r=>mv(r,'custCount')), aCPH=avgM(mCph);
+  const body = rows.map((r,i)=>{
+    const hc=mv(r,'hcTime'), mbc=mv(r,'mbc'), prod=(mv(r,'product')===null?null:mv(r,'product')*100), nr=(mv(r,'nr')===null?null:mv(r,'nr')*100), rr=(mv(r,'rr')===null?null:mv(r,'rr')*100), floor=mv(r,'avgWkHrs'), cust=mv(r,'custCount'), cph=mCph(r);
+    return `<tr style="background:${i%2?'#f8f7f4':'white'};">
+      <td style="padding:7px 10px;white-space:nowrap;font-weight:600;">${formatBonusPeriod(r.period)}</td>
+      <td style="padding:7px 10px;white-space:nowrap;color:var(--text-muted);">${mv(r,'weeksN')||'—'} wks</td>
+      <td class="${hc?tierHC(hc):''}" style="padding:7px 10px;text-align:center;">${hc===null?'—':hc.toFixed(1)}</td>
+      <td class="${mbc?tierMBC(mbc):''}" style="padding:7px 10px;text-align:center;">${mbc===null?'—':mbc.toFixed(1)}</td>
+      <td class="${prod===null?'':tierProd(prod)}" style="padding:7px 10px;text-align:center;">${prod===null?'—':prod.toFixed(1)+'%'}</td>
+      <td class="${nr===null?'':tierNR(nr)}" style="padding:7px 10px;text-align:center;">${nr===null?'—':nr.toFixed(1)+'%'}</td>
+      <td class="${rr===null?'':tierRR(rr)}" style="padding:7px 10px;text-align:center;">${rr===null?'—':rr.toFixed(1)+'%'}</td>
+      <td style="padding:7px 10px;text-align:center;">${floor===null?'—':floor.toFixed(1)}</td>
+      <td style="padding:7px 10px;text-align:center;">${cust===null?'—':Math.round(cust)}</td>
+      <td style="padding:7px 10px;text-align:center;">${cph===null?'—':cph.toFixed(2)}</td>
+    </tr>`;
+  }).join('');
+  return `<div style="font-size:11px;color:var(--text-muted);margin:0 0 8px 2px;">One consolidated line per month (exact, merged across salons).</div>
+  <table style="width:100%;border-collapse:collapse;font-size:12px;">${_wkHead.replace('>Week Ending<','>Month<').replace('>Period<','>Weeks<').replace('>Floor Hrs<','>Floor Hrs/Wk<')}
+    <tbody>
+      <tr style="background:#e9f1ea;font-weight:700;border-bottom:2px solid var(--primary);">
+        <td style="padding:7px 10px;white-space:nowrap;">Average</td>
+        <td style="padding:7px 10px;white-space:nowrap;color:var(--text-muted);font-weight:600;">${rows.length} mo</td>
+        <td style="padding:7px 10px;text-align:center;">${_wkFa(aHC)}</td>
+        <td style="padding:7px 10px;text-align:center;">${_wkFa(aMBC)}</td>
+        <td style="padding:7px 10px;text-align:center;">${_wkFa(aProd,1,'%')}</td>
+        <td style="padding:7px 10px;text-align:center;">${_wkFa(aNR,1,'%')}</td>
+        <td style="padding:7px 10px;text-align:center;">${_wkFa(aRR,1,'%')}</td>
+        <td style="padding:7px 10px;text-align:center;">${_wkFa(aFloor)}</td>
+        <td style="padding:7px 10px;text-align:center;">${aCust===null?'—':Math.round(aCust)}</td>
+        <td style="padding:7px 10px;text-align:center;">${_wkFa(aCPH,2)}</td>
+      </tr>
+      ${body}
+    </tbody>
+  </table>`;
+}
+
 function renderProfileWeekly(){
   const el = document.getElementById('ptab-weekly-content');
-  if(el) el.innerHTML = profileWeeklyHtml(window._profileEmpRows);
+  if(el) el.innerHTML = profileWeeklyHtml();
 }
 
 function buildProfile(globalId, name){
@@ -7677,7 +7781,7 @@ function buildProfile(globalId, name){
 
         <!-- Weekly tab -->
         <div id="ptab-weekly-content"  style="display:none;flex:1;overflow-y:auto;padding:20px;">
-          ${profileWeeklyHtml(empRows)}
+          ${profileWeeklyHtml()}
         </div>
 
       </div>
@@ -7690,6 +7794,8 @@ function buildProfile(globalId, name){
   window._profileBonusRows = bonusRows;
   window._profileGlobalId = globalId;
   window._profileEmpRows = empRows;
+  window._profileWeeklyCons = (S.empWeeklyConsByGid && S.empWeeklyConsByGid[globalId]) ? S.empWeeklyConsByGid[globalId] : [];
+  S_profileWeekExpanded = new Set(); // reset drill state when opening a profile
 
   // Chart draws when the Trends tab is first shown (the canvas must be visible
   // to size correctly). If disc points aren't loaded yet, load them and refresh
