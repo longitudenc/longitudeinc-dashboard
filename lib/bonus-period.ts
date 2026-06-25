@@ -189,7 +189,7 @@ function vOrNull(v: number | null | undefined): number | null {
  * employees get a principled merge: hours summed; HC/MBC/NR/RR weighted by
  * customer count; product weighted by service volume (productivity × hours).
  */
-function bonusRowsFromMonthlyCsv(
+export function bonusRowsFromMonthlyCsv(
   csvText: string,
   periodKey: string,
   periodLabel: string,

@@ -24,7 +24,9 @@ import {
   type SD3HalfHourOptimal,
   type SD3InvoiceLite,
   type SD3ChkInOut,
+  type SD3Session,
 } from '@/lib/sd3'
+import { bonusRowsFromMonthlyCsv } from '@/lib/bonus-period'
 import { upsertSheet, readSheet, rowsToObjects } from '@/lib/sheets'
 import { parseCsv, rowsToObjectsAt, num, returnRate } from '@/lib/csv'
 import { aggregatePeriod, type AggregatedPeriod } from '@/lib/aggregate'
@@ -383,6 +385,124 @@ export async function runMonthlyScrape(
 
 const SALON_ROSTER_TAB = 'SalonRoster'
 const SD_EMP_WEEKLY_TAB = 'SD_EMP_WEEKLY'
+
+// ── Weekly CONSOLIDATED employee rows (one row per employee per week, MERGED across
+//    any salons they worked). Reuses the exact bonus-period consolidation (SD3
+//    Totals/Averages override for floaters) over a single Sat→Fri week, via the
+//    lighter isDetail=false pull + 5 retries. Per-salon detail for the click-through
+//    drill stays in SD_EMP_WEEKLY — this tab is only the merged line. ──
+const SD_EMP_WEEKLY_CONS_TAB = 'SD_EMP_WEEKLY_CONS'
+const EMP_WEEKLY_CONS_COLUMNS = [
+  'weekEnd', 'globalId', 'payId', 'empName', 'position', 'salonNum',
+  'nr', 'rr', 'product', 'productivity', 'floorHours', 'custCount', 'cph', 'mbc', 'hcTime', 'scrapedAt',
+]
+
+async function fetchConsolidatedWeek(
+  session: SD3Session, storeIds: number[], ws: string, we: string,
+  storeToSalon: Record<string, string>,
+): Promise<Record<string, any>[]> {
+  const MAX = 5
+  for (let attempt = 1; attempt <= MAX; attempt++) {
+    try {
+      const csv = await fetchEmployeePerformanceCsv(session, storeIds, ws, we, false)
+      const parsed = bonusRowsFromMonthlyCsv(csv, we, we, 1, storeToSalon)
+      if (!parsed.length) throw new Error('parsed 0 rows')
+      return parsed
+    } catch (e: any) {
+      if (attempt < MAX) { await new Promise(r => setTimeout(r, 3000 * attempt)); continue }
+      throw new Error(`weekly consolidated CSV failed after ${MAX} attempts: ${e?.message}`)
+    }
+  }
+  return []
+}
+
+function consRowsToSheet(parsed: Record<string, any>[], we: string): Record<string, any>[] {
+  const now = new Date().toISOString()
+  return parsed.map(r => {
+    const floor = Number(r.avgWkHrs) || 0   // weeksN=1 → this week's floor hours
+    const cust = Number(r.custCount) || 0
+    return {
+      weekEnd: we,
+      globalId: r.globalId, payId: r.payId, empName: r.empName, position: r.position,
+      salonNum: r.salonNum,
+      nr: r.nr, rr: r.rr, product: r.product, productivity: r.productivity,
+      floorHours: floor, custCount: cust,
+      cph: floor > 0 ? Math.round((cust / floor) * 1000) / 1000 : '',
+      mbc: r.mbc, hcTime: r.hcTime, scrapedAt: now,
+    }
+  })
+}
+
+export async function runEmployeeWeeklyConsolidatedScrape(
+  weekStart?: string, weekEnd?: string,
+): Promise<EntityScrapeResult> {
+  const startedAt = Date.now()
+  let ws = weekStart, we = weekEnd
+  if (!ws || !we) { const w = lastCompletedFiscalWeek(todayET()); ws = w.start; we = w.end }
+  const result: EntityScrapeResult = {
+    ok: true, durationMs: 0, weekStart: ws, weekEnd: we,
+    rowsUpserted: 0, updated: 0, inserted: 0, skipped: 0, processed: 0, error: null,
+  }
+  try {
+    const session = await authenticate()
+    const salons = await fetchSalons(session)
+    const storeToSalon: Record<string, string> = {}
+    for (const s of salons) storeToSalon[String(s.storeId)] = s.salonNum
+    const storeIds = salons.map(s => s.storeId)
+
+    const parsed = await fetchConsolidatedWeek(session, storeIds, ws!, we!, storeToSalon)
+    const dataRows = consRowsToSheet(parsed, we!)
+    result.processed = dataRows.length
+    if (dataRows.length) {
+      const up = await upsertSheet(SD_EMP_WEEKLY_CONS_TAB, [...EMP_WEEKLY_CONS_COLUMNS], ['weekEnd', 'globalId'], dataRows)
+      result.rowsUpserted = dataRows.length
+      result.updated = up.updated
+      result.inserted = up.inserted
+    }
+  } catch (err: any) {
+    result.ok = false; result.error = err?.message || String(err)
+  }
+  result.durationMs = Date.now() - startedAt
+  return result
+}
+
+export async function runEmployeeWeeklyConsolidatedRange(
+  start: string, end: string,
+): Promise<EntityScrapeResult & { weeks?: number }> {
+  const startedAt = Date.now()
+  const result: EntityScrapeResult & { weeks?: number } = {
+    ok: true, durationMs: 0, weekStart: start, weekEnd: end,
+    rowsUpserted: 0, updated: 0, inserted: 0, skipped: 0, processed: 0, error: null, weeks: 0,
+  }
+  try {
+    const session = await authenticate()
+    const salons = await fetchSalons(session)
+    const storeToSalon: Record<string, string> = {}
+    for (const s of salons) storeToSalon[String(s.storeId)] = s.salonNum
+    const storeIds = salons.map(s => s.storeId)
+
+    // start/end are Friday week-endings; step a week at a time.
+    let we = start
+    for (let i = 0; i < 200 && we <= end; i++) {
+      const ws = addDays(we, -6)
+      const parsed = await fetchConsolidatedWeek(session, storeIds, ws, we, storeToSalon)
+      const dataRows = consRowsToSheet(parsed, we)
+      if (dataRows.length) {
+        const up = await upsertSheet(SD_EMP_WEEKLY_CONS_TAB, [...EMP_WEEKLY_CONS_COLUMNS], ['weekEnd', 'globalId'], dataRows)
+        result.rowsUpserted! += dataRows.length
+        result.updated! += up.updated
+        result.inserted! += up.inserted
+        result.processed! += dataRows.length
+      }
+      result.weeks!++
+      we = addDays(we, 7)
+    }
+  } catch (err: any) {
+    result.ok = false; result.error = err?.message || String(err)
+  }
+  result.durationMs = Date.now() - startedAt
+  return result
+}
 const SD_PAYROLL_TAB = 'SD_PAYROLL'
 
 export type EntityScrapeResult = {

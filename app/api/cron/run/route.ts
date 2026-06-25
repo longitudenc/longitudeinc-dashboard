@@ -15,6 +15,7 @@ import {
   runMonthlyScrape,
   runRosterScrape,
   runEmployeeScrape,
+  runEmployeeWeeklyConsolidatedScrape,
   runEmployeeDailyScrape,
   runPayrollScrape,
   runProfileScrape,
@@ -74,6 +75,7 @@ export async function GET(request: Request) {
     results.push({ name: 'weekly',   result: await runWeeklyScrape() })
     results.push({ name: 'roster',   result: await runRosterScrape() })
     results.push({ name: 'employee', result: await runEmployeeScrape() })
+    results.push({ name: 'employee-weekly-cons', result: await runEmployeeWeeklyConsolidatedScrape() })
     results.push({ name: 'payroll',  result: await runPayrollScrape() })
   }
 

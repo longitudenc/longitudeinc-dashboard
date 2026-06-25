@@ -86,6 +86,13 @@ export async function getEmployeeWeeks() {
 export async function getBonusPeriods() {
   return rowsToObjects(await readSheet('BonusData'))
 }
+// Weekly CONSOLIDATED per-employee rows (merged across float). Resilient: returns
+// [] if the tab doesn't exist yet (before the first weekly-consolidated scrape),
+// so getAllData never hard-fails on a fresh deploy.
+export async function getEmployeeWeeklyConsolidated() {
+  try { return rowsToObjects(await readSheet('SD_EMP_WEEKLY_CONS')) }
+  catch { return [] }
+}
 export async function getSalonSummaries() {
   return rowsToObjects(await readSheet('SalonSummaryData'))
 }
@@ -241,6 +248,7 @@ export async function getAllDashboardData() {
     homeRows,
     trackerRows,
     payrollWeeklyRows,
+    empWeeklyConsRows,
   ] = await Promise.all([
     getSalonWeeks(),
     getEmployeeWeeks(),
@@ -253,6 +261,7 @@ export async function getAllDashboardData() {
     getHomeData(),
     getTrackerData(),
     getPayrollWeekly(),
+    getEmployeeWeeklyConsolidated(),
   ])
 
   return {
@@ -267,6 +276,7 @@ export async function getAllDashboardData() {
     homeRows,
     trackerRows,
     payrollWeeklyRows,
+    empWeeklyConsRows,
   }
 }
 

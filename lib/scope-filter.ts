@@ -58,6 +58,8 @@ export function scopeAllData(data: any, access: Access): any {
     // 2) Per-employee buckets -> the AM's salons only.
     out.bonusPeriods = scopePeriods(data.bonusPeriods, inScope)
     out.payrollConsolidatedPeriods = scopePeriods(data.payrollConsolidatedPeriods, inScope)
+    if (Array.isArray(data.empWeeklyConsRows))
+      out.empWeeklyConsRows = data.empWeeklyConsRows.filter((r: any) => inScope(r.salonNum))
     // 3) Disciplinary tracker (keyed by globalId) -> only the AM's employees.
     if (data.trackerData) {
       out.trackerData = {}

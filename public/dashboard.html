@@ -7363,11 +7363,11 @@ function profileBonusHtml(bonusRows, globalId){
     <thead><tr style="background:var(--primary-dark);color:white;">
       <th style="padding:8px 12px;text-align:left;">Period</th>
       <th style="padding:8px 12px;text-align:center;">Floor Hrs/Wk</th>
+      <th style="padding:8px 12px;text-align:center;">HC Time</th>
+      <th style="padding:8px 12px;text-align:center;">MBC</th>
       <th style="padding:8px 12px;text-align:center;">Prod%</th>
       <th style="padding:8px 12px;text-align:center;">NR%</th>
       <th style="padding:8px 12px;text-align:center;">RR%</th>
-      <th style="padding:8px 12px;text-align:center;">MBC</th>
-      <th style="padding:8px 12px;text-align:center;">HC Time</th>
       <th style="padding:8px 12px;text-align:center;">Pts</th>
       <th style="padding:8px 12px;text-align:center;">Potential</th>
       <th style="padding:8px 12px;text-align:center;">Payout</th>
@@ -7389,11 +7389,11 @@ function profileBonusHtml(bonusRows, globalId){
         return `<tr style="background:${bg};">
           <td style="padding:8px 12px;font-weight:600;">${formatBonusPeriod(r.period)}${blk?' <span style="color:#9C0006;font-size:10px;font-weight:600;">⚠ ineligible</span>':''}</td>
           <td style="padding:8px 12px;text-align:center;">${fmtN1(r.avgWkHrs)}</td>
+          <td class="${hcCls}" style="padding:8px 12px;text-align:center;">${hc>0?fmtN1(r.hcTime):'—'}</td>
+          <td class="${mbcCls}" style="padding:8px 12px;text-align:center;">${fmtN1(r.mbc)}</td>
           <td class="${prodCls}" style="padding:8px 12px;text-align:center;">${fmtPct(r.product)}</td>
           <td class="${nrCls}" style="padding:8px 12px;text-align:center;">${fmtPct(r.nr)}</td>
           <td class="${rrCls}" style="padding:8px 12px;text-align:center;">${fmtPct(r.rr)}</td>
-          <td class="${mbcCls}" style="padding:8px 12px;text-align:center;">${fmtN1(r.mbc)}</td>
-          <td class="${hcCls}" style="padding:8px 12px;text-align:center;">${hc>0?fmtN1(r.hcTime):'—'}</td>
           <td style="padding:8px 12px;text-align:center;font-weight:700;">${r.points||'—'}</td>
           <td style="padding:8px 12px;text-align:center;">${pot>0?fmtMoney(pot):'$0'}</td>
           <td class="${blk?'bv-red':payCls}" style="padding:8px 12px;text-align:center;font-weight:700;">${blk?'<s style="color:#999;">'+fmtMoney(pay)+'</s>':fmtMoney(pay)}</td>

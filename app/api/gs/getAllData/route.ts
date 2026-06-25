@@ -285,5 +285,6 @@ function formatAllData(raw: any, scrapedWeeks: any[], rosterRows: any[]) {
     homeRetroUpdated: 0,
     lyAvg: null,
     salonRoster: rosterRows,
+    empWeeklyConsRows: raw.empWeeklyConsRows || [],
   }
 }
