@@ -2349,12 +2349,34 @@ function computeSalonReview(salonNum, year){
       const fh=n(e.floorHours), pv=n(e.productivity);
       if(fh>0 && !isNaN(pv)){ const P=prodMon[m]||(prodMon[m]={ss:0,fh:0}); P.ss+=pv*fh; P.fh+=fh; }
       if(mgrGid && String(e.globalId||'').trim()===mgrGid){
-        const G=mgrMon[m]||(mgrMon[m]={nr:[],rr:[],hc:[],mbc:[],product:[]});
-        pf(G.nr,p(e.nr)); pf(G.rr,p(e.rr)); pf(G.hc,n(e.hcTime)); pf(G.mbc,n(e.mbc)); pf(G.product,p(e.product));
+        // ELIGIBILITY ONLY: was this person the MANAGER at THIS salon this month?
+        // Their metric VALUES come from consolidated BonusData (built after the loop),
+        // so a manager who floats is judged on their MERGED numbers, not fragments.
         if(String(e.position||'').trim().toUpperCase()==='M') mgrPosMonths.add(m);
       }
     });
   });
+
+  // Manager's OWN metric values come from consolidated BonusData (one row per month,
+  // merged across every salon they worked), NOT the per-salon weekly fragments — so a
+  // floating manager is reviewed on their true combined numbers. Eligibility above is
+  // unchanged (still position 'M' at THIS salon). *** / not-worked months are excluded.
+  if(mgrGid){
+    const pushReal=(arr,val)=>{ const x=parseFloat(val); if(!isNaN(x)) arr.push(x); };
+    (S_bonusPeriods||[]).forEach(per=>{
+      if(periodYear(per.periodKey)!==year) return;
+      const mAbbr=String(per.periodKey||'').trim().split(/\s+/)[0];
+      const mNum=REVIEW_MONTHS.indexOf(mAbbr)+1; if(mNum<1) return;
+      const row=(per.employees||[]).find(e=>String(e.globalId||'').trim()===mgrGid);
+      if(!row) return;
+      const G=mgrMon[mNum]||(mgrMon[mNum]={nr:[],rr:[],hc:[],mbc:[],product:[]});
+      pushReal(G.nr, parseFloat(row.nr)*100);       // BonusData stores nr/rr/product as fractions
+      pushReal(G.rr, parseFloat(row.rr)*100);
+      pushReal(G.hc, row.hcTime);
+      pushReal(G.mbc, row.mbc);
+      pushReal(G.product, parseFloat(row.product)*100);
+    });
+  }
 
   const mean=arr=>arr.length?arr.reduce((a,b)=>a+b,0)/arr.length:null;
   const monthMeans=(bucket,key)=>{ const v=[]; Object.keys(bucket).forEach(m=>{ const mm=mean(bucket[m][key]); if(mm!==null) v.push(mm); }); return v.length?mean(v):null; };
@@ -2395,6 +2417,9 @@ function computeSalonReview(salonNum, year){
     mk('Minutes Between Customer','<2 / 3 / 4',f2,ma.mbc,M12(mgrMon,'mbc'),srMBC),
     mk('Product %','≥6 / 4 / 2.5',pct,ma.product,M12(mgrMon,'product'),srProductPct),
   ];
+  // Manager NR/RR with no measurable cohort all year (score null) → 2 of 4: same
+  // benefit-of-the-doubt newcomer rule used for stylist reviews.
+  mgrRows.forEach(r=>{ if(r.s===null && (r.lbl==='New Customer Return %'||r.lbl==='Repeat Customer Return %')) r.s=2; });
   const sumS=rows=>rows.reduce((acc,r)=>acc+(r.s||0),0);
   const salonPts=sumS(salonRows), mgrPts=sumS(mgrRows), totalPts=salonPts+mgrPts;
 
