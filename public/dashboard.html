@@ -7467,18 +7467,20 @@ const _wkHead = `<thead style="position:sticky;top:0;z-index:1;"><tr style="back
 const _wkFmtWE = iso=>{ const m=String(iso||'').match(/^(\d{4})-(\d{2})-(\d{2})/); return m?(+m[2])+'/'+(+m[3])+'/'+m[1].slice(2):iso; };
 const _wkFa = (v,d=1,s='')=> (v===null||v===undefined||isNaN(v))?'—':v.toFixed(d)+s;
 
-function profileWeeklyHtml(){
+function profileWeeklyHtml(cons, emp){
+  cons = cons || window._profileWeeklyCons || [];
+  emp  = emp  || window._profileEmpRows || [];
   const bar = profileWeeklyControls();
-  return bar + (S_profileWeeklyGrain==='monthly' ? profileWeeklyMonthlyTable() : profileWeeklyConsTable());
+  return bar + (S_profileWeeklyGrain==='monthly' ? profileWeeklyMonthlyTable() : profileWeeklyConsTable(cons, emp));
 }
 
 // WEEKLY: one consolidated row per week (exact, merged across float) + per-salon drill.
-function profileWeeklyConsTable(){
-  const cons = (window._profileWeeklyCons||[]);
+function profileWeeklyConsTable(cons, emp){
+  cons = cons || window._profileWeeklyCons || [];
+  emp  = emp  || window._profileEmpRows || [];
   if(!cons.length) return '<div style="color:var(--text-muted);padding:8px 2px;">No consolidated weekly data on record yet.</div>';
   let rows = _profWeeklyRangeFilter(cons, r=>r.weekEnd).slice().sort((a,b)=> a.weekEnd<b.weekEnd?1:-1); // newest first
   if(!rows.length) return '<div style="color:var(--text-muted);padding:8px 2px;">No weeks in this range.</div>';
-  const emp = window._profileEmpRows||[];
   const avgW = fn=>{ const v=rows.map(fn).filter(x=>x!==null&&!isNaN(x)); return v.length?v.reduce((a,b)=>a+b,0)/v.length:null; };
   const aHC=avgW(r=>parseFloat(r.hcTime)), aMBC=avgW(r=>parseFloat(r.mbc)), aProd=avgW(r=>parseFloat(r.product)*100),
         aNR=avgW(r=>parseFloat(r.nr)*100), aRR=avgW(r=>parseFloat(r.rr)*100), aFloor=avgW(r=>parseFloat(r.floorHours)),
@@ -7619,6 +7621,9 @@ function buildProfile(globalId, name){
   const empRows = S.weekHistory.flatMap(w=>
     (w.emps||[]).filter(e=>e.globalId && e.globalId.trim()===globalId)
   ).sort((a,b)=>new Date(a.weekEnding)-new Date(b.weekEnding));
+  // Consolidated weekly rows for THIS person (computed before the template so the
+  // first render gets the right data — window vars below are set after the template).
+  const weeklyCons = (S.empWeeklyConsByGid && S.empWeeklyConsByGid[globalId]) ? S.empWeeklyConsByGid[globalId] : [];
 
   const bonusRows = S_bonusPeriods.map(p=>{
     const emp = p.employees.find(e=>e.globalId && e.globalId.trim()===globalId);
@@ -7781,7 +7786,7 @@ function buildProfile(globalId, name){
 
         <!-- Weekly tab -->
         <div id="ptab-weekly-content"  style="display:none;flex:1;overflow-y:auto;padding:20px;">
-          ${profileWeeklyHtml()}
+          ${profileWeeklyHtml(weeklyCons, empRows)}
         </div>
 
       </div>
