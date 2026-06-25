@@ -2231,15 +2231,46 @@ let S_reviewHostId = 'am-reviews-body';
 // Distinct people who worked a given salon, from loaded weekly employee data.
 function stylistsForSalon(sn){
   sn = String(sn).trim();
-  const by = {};
-  (S.weekHistory||[]).forEach(snap=>{
-    (snap.emps||[]).forEach(e=>{
-      if(String(e.salonNum||'').trim()!==sn) return;
-      const gid = String(e.globalId||'').trim(); if(!gid) return;
-      if(!by[gid]) by[gid] = { globalId:gid, name:e.empName||gid, position:(e.position||'').trim() };
-    });
+  // AMs never appear in the stylist review list.
+  const amGids = new Set(Object.values(AMS).map(a=>String(a.globalId||'').trim()).filter(Boolean));
+  // A manager who held THIS store every data-month is getting a SALON review, so
+  // exclude them here. A manager who did NOT hold it all year falls through and
+  // gets a stylist review like anyone else.
+  let fullYearMgrGid = '';
+  try {
+    const sr = computeSalonReview(sn, _reviewYear || (new Date().getFullYear()));
+    if(sr && sr.heldAllYear && sr.managerGid) fullYearMgrGid = String(sr.managerGid).trim();
+  } catch(e){}
+  // From week history: latest position, a name fallback, and per-salon week counts
+  // (used only to resolve a home salon when the roster's home field is blank).
+  const posByGid={}, nameByGid={}, cntByGid={};
+  (S.weekHistory||[]).forEach(snap=>(snap.emps||[]).forEach(e=>{
+    const gid=String(e.globalId||'').trim(); if(!gid) return;
+    if(e.position) posByGid[gid]=String(e.position).trim();
+    if(e.empName)  nameByGid[gid]=e.empName;
+    const k=String(e.salonNum||'').trim();
+    if(k){ const c=cntByGid[gid]||(cntByGid[gid]={}); c[k]=(c[k]||0)+1; }
+  }));
+  // A person belongs to exactly ONE salon for reviews: their roster home salon
+  // (floaters included). Fall back to most-worked salon only if home is blank.
+  const homeOf = gid => {
+    const ref = (S.homeDataMap && S.homeDataMap[gid]) ? String(S.homeDataMap[gid].homeSalon||'').trim() : '';
+    const cnt = cntByGid[gid]||{};
+    if(ref && (cnt[ref]!=null || !Object.keys(cnt).length)) return ref;
+    return Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a])[0] || ref || '';
+  };
+  const out=[];
+  Object.entries(S.homeDataMap||{}).forEach(([gid,row])=>{
+    gid=String(gid).trim(); if(!gid) return;
+    if(homeOf(gid)!==sn) return;          // home salon only (floaters under home store)
+    if(isInactive(gid)) return;           // active employees only
+    if(amGids.has(gid)) return;           // no AMs
+    if(gid===fullYearMgrGid) return;      // full-year manager -> salon review, not here
+    const name = String((row&&row.payrollName)||'').trim() || nameByGid[gid] || '';
+    if(!name) return;
+    out.push({ globalId:gid, name, position: posByGid[gid]||'' });
   });
-  return Object.values(by).sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
+  return out.sort((a,b)=>fmtName(a.name).localeCompare(fmtName(b.name)));
 }
 
 // Salons selectable in the Reviews tab for the current window + role.
@@ -7300,6 +7331,7 @@ function profileBonusHtml(bonusRows, globalId){
       <th style="padding:8px 12px;text-align:center;">NR%</th>
       <th style="padding:8px 12px;text-align:center;">RR%</th>
       <th style="padding:8px 12px;text-align:center;">MBC</th>
+      <th style="padding:8px 12px;text-align:center;">HC Time</th>
       <th style="padding:8px 12px;text-align:center;">Pts</th>
       <th style="padding:8px 12px;text-align:center;">Potential</th>
       <th style="padding:8px 12px;text-align:center;">Payout</th>
@@ -7324,6 +7356,7 @@ function profileBonusHtml(bonusRows, globalId){
           <td class="${nrCls}" style="padding:8px 12px;text-align:center;">${fmtPct(r.nr)}</td>
           <td class="${rrCls}" style="padding:8px 12px;text-align:center;">${fmtPct(r.rr)}</td>
           <td class="${mbcCls}" style="padding:8px 12px;text-align:center;">${fmtN1(r.mbc)}</td>
+          <td style="padding:8px 12px;text-align:center;">${(parseFloat(r.hcTime)||0)?fmtN1(r.hcTime):'—'}</td>
           <td style="padding:8px 12px;text-align:center;font-weight:700;">${r.points||'—'}</td>
           <td style="padding:8px 12px;text-align:center;">${pot>0?fmtMoney(pot):'$0'}</td>
           <td class="${blk?'bv-red':payCls}" style="padding:8px 12px;text-align:center;font-weight:700;">${blk?'<s style="color:#999;">'+fmtMoney(pay)+'</s>':fmtMoney(pay)}</td>
@@ -7336,7 +7369,7 @@ function profileBonusHtml(bonusRows, globalId){
         const totPP = totPot>0?Math.round(totPay/totPot*100)+'%':'—';
         return `<tr style="background:var(--primary);color:white;font-weight:700;">
           <td style="padding:8px 12px;">${totLabel}</td>
-          <td colspan="6"></td>
+          <td colspan="7"></td>
           <td style="padding:8px 12px;text-align:center;">${fmtMoney(totPot)}</td>
           <td style="padding:8px 12px;text-align:center;">${fmtMoney(totPay)}</td>
           <td style="padding:8px 12px;text-align:center;">${totPP}</td>
@@ -7996,22 +8029,21 @@ function fmtReviewDate(raw){
 // (window._profileEmpRows), grouped by calendar month of the selected year.
 // Replaces the old getReviewData sheet read, which was empty.
 function computeReviewData(globalId, year){
-  const rows = (window._profileEmpRows||[]).filter(r=>{
-    const m = String(r.weekEnding||'').match(/^(\d{4})-(\d{2})/);
-    return m && parseInt(m[1],10)===year;
-  });
+  // Consolidated monthly per-employee numbers from BonusData (one row per period),
+  // so floaters review on MERGED figures and NR/RR are exact.
+  const rows = (window._profileBonusRows||[]).filter(r=>periodYear(r.period)===year);
   const keys = ['nr','rr','hc','mbc','prod'];
   const valOf = (r,k)=>{
     let v;
-    if(k==='nr')      v=p(r.nr);
-    else if(k==='rr') v=p(r.rr);
-    else if(k==='hc') v=n(r.hcTime);
-    else if(k==='mbc')v=n(r.mbc);
-    else              v=p(r.product);
-    return (isNaN(v)||v===0)?null:v; // treat 0 as missing-data
+    if(k==='nr')      v=parseFloat(r.nr)*100;   // BonusData stores nr/rr/product as fractions
+    else if(k==='rr') v=parseFloat(r.rr)*100;
+    else if(k==='hc') v=parseFloat(r.hcTime);
+    else if(k==='mbc')v=parseFloat(r.mbc);
+    else              v=parseFloat(r.product)*100;
+    return isNaN(v)?null:v;  // *** / not-worked month is blank → null (excluded); a real 0 is kept
   };
   const avg = arr=>{ const v=arr.filter(x=>x!==null&&!isNaN(x)); return v.length?v.reduce((a,b)=>a+b,0)/v.length:null; };
-  const monthOf = r=>{ const m=String(r.weekEnding||'').match(/^\d{4}-(\d{2})/); return m?REVIEW_MONTHS[parseInt(m[1],10)-1]:''; };
+  const monthOf = r=>{ const a=String(r.period||'').trim().split(/\s+/); return a[0]||''; }; // "May 26" -> "May"
 
   // Monthly grid
   const grid = {};
@@ -8030,7 +8062,12 @@ function computeReviewData(globalId, year){
   // Scores (from annual averages) → points → raise
   const scoreFns={nr:scoreNR,rr:scoreRR,hc:scoreHC,mbc:scoreMBC,prod:scoreProd};
   const scores={}; let totalPts=0;
-  keys.forEach(k=>{ const a=annualAvg[k]; const s=(a===null)?0:scoreFns[k](a); scores[k]=s; totalPts+=s; });
+  // No measurable cohort all year (annual avg null because every month was *** /
+  // not-worked) -> 2 of 4 for NR & RR (benefit of the doubt, too new to judge);
+  // other metrics with no data score 0.
+  keys.forEach(k=>{ const a=annualAvg[k];
+    const s=(a===null)?((k==='nr'||k==='rr')?2:0):scoreFns[k](a);
+    scores[k]=s; totalPts+=s; });
   const raiseEarned = (totalPts>=REVIEW_MIN_PTS) ? (REVIEW_RAISE[totalPts]||0) : 0;
   const monthsWorked = REVIEW_MONTHS.filter(mo=>grid[mo]).length;
 

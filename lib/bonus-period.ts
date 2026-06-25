@@ -472,14 +472,30 @@ export async function runBonusPeriodScrape(
     //      Bonus report). Weekly-table averages remain as a fallback if the
     //      SD3 fetch fails, so backfills never hard-stop. ──
     let bonusRows: Record<string, any>[] = []
-    try {
-      const csvText = await fetchEmployeePerformanceCsv(session, storeIds, monthStart, monthEnd)
-      bonusRows = bonusRowsFromMonthlyCsv(csvText, periodKey, periodLabel, weeksN, storeToSalon)
-      if (!bonusRows.length) throw new Error('monthly employee CSV parsed to 0 rows')
-    } catch (e: any) {
-      result.errors.push(`monthly emp CSV failed (${e?.message}); fell back to weekly averages`)
-      const empInPeriod = empAll.filter(r => weekSet.has(String(r.weekEnd)))
-      bonusRows = bonusRowsFromWeekly(empInPeriod, periodKey, periodLabel, weeksN, storeToSalon)
+    let csvOk = false
+    const MAX_ATTEMPTS = 5
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        // Try the lighter consolidated pull (isDetail=false). It still carries each
+        // employee's merged Totals/Averages values, so NR/RR stay exact.
+        const csvText = await fetchEmployeePerformanceCsv(session, storeIds, monthStart, monthEnd, false)
+        const parsed = bonusRowsFromMonthlyCsv(csvText, periodKey, periodLabel, weeksN, storeToSalon)
+        if (!parsed.length) throw new Error('monthly employee CSV parsed to 0 rows')
+        bonusRows = parsed
+        csvOk = true
+        if (attempt > 1) result.errors.push(`monthly emp CSV recovered on attempt ${attempt} for ${periodKey}`)
+        break
+      } catch (e: any) {
+        if (attempt < MAX_ATTEMPTS) {
+          await new Promise(r => setTimeout(r, 3000 * attempt)) // 3s, 6s, 9s, 12s backoff
+          continue
+        }
+        // All retries exhausted. Fall back to weekly averages to keep the period
+        // populated, but FLAG it loudly so it can be rerun — never silently.
+        result.errors.push(`monthly emp CSV FAILED after ${MAX_ATTEMPTS} attempts (${e?.message}) — used weekly averages, NR/RR approximate, RERUN ${periodKey}`)
+        const empInPeriod = empAll.filter(r => weekSet.has(String(r.weekEnd)))
+        bonusRows = bonusRowsFromWeekly(empInPeriod, periodKey, periodLabel, weeksN, storeToSalon)
+      }
     }
     if (bonusRows.length) {
       await upsertSheet(BONUS_TAB, [...BONUS_COLUMNS], ['periodKey', 'globalId'], bonusRows)

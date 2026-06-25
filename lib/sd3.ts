@@ -487,14 +487,18 @@ export async function fetchEmployeePerformanceCsv(
   session: SD3Session,
   storeIds: number[],
   startDate: string,
-  endDate: string
+  endDate: string,
+  detail: boolean = true
 ): Promise<string> {
   const stores = storeIds.join(',')
+  // isDetail=false returns SD3's lighter consolidated payload (no per-salon-per-week
+  // detail rows), which is far smaller and much less prone to the gateway 504 on
+  // wide month-range pulls. It still carries each employee's merged values.
   const url =
     `${SD3_BASE}/rest/dailyemployeesummary/consolidated.csv` +
     `?stores=${stores}` +
     `&start=${startDate}&end=${endDate}` +
-    `&selectEmployees=true&isDetail=true` +
+    `&selectEmployees=true&isDetail=${detail ? 'true' : 'false'}` +
     `&token=${encodeURIComponent(session.token)}` +
     `&app=salondata`
 
