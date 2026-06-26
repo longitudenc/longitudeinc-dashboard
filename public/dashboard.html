@@ -3099,25 +3099,30 @@ function openSalonDrill(salonNum){
 }
 
 // ── Store View sections: Trends / Bonuses / Individual (reuse built logic) ───
-let S_sdBonusPeriod='', S_sdBonusType='manager';
+let S_sdBonusPeriod='', S_sdBonusType='manager', S_sdTrendMetrics=['cc'];
 
 // TRENDS — embed the real Chart.js trend, scoped to this salon, into the overlay.
 function renderSdTrendsShell(){
   if(!S_trendMetric) S_trendMetric='cc';
   const mks=['cc','lyDiff','ccG','sgr','prod','nr','rr','hc','mbc','ssW','wts','pay','cph'];
-  const mbtns=mks.map(function(k){ var lbl=(TREND_METRICS[k]&&TREND_METRICS[k].label)||k; var on=(k===S_trendMetric); return '<button onclick="sdDrawTrends(\''+k+'\')" style="padding:4px 10px;border-radius:8px;font-size:11.5px;font-weight:600;cursor:pointer;border:1px solid var(--border);'+(on?'background:var(--primary-dark);color:#fff;':'background:#fff;color:var(--text);')+'">'+lbl+'</button>'; }).join('');
+  const sel=S_sdTrendMetrics||[];
+  const mbtns=mks.map(function(k){ var lbl=(TREND_METRICS[k]&&TREND_METRICS[k].label)||k; var on=sel.indexOf(k)>=0; return '<button onclick="sdToggleMetric(\''+k+'\')" style="padding:4px 10px;border-radius:8px;font-size:11.5px;font-weight:600;cursor:pointer;border:1px solid var(--border);'+(on?'background:var(--primary-dark);color:#fff;':'background:#fff;color:var(--text);')+'">'+lbl+'</button>'; }).join('');
+  const hint='<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Pick a metric &mdash; or select a second for a dual-axis comparison (e.g. HC Time vs Payroll). Use the legend to add salons or Company Avg.</div>';
   return '<div style="background:#fff;border-radius:8px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.12);">'
+    +hint
     +'<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px;">'+mbtns+'</div>'
     +'<div id="sd-trend-host" style="min-height:380px;"></div></div>';
 }
 function sdSetTrendWin(w){ S_trendWindow=(w==='ytd'||w==='all')?w:parseInt(w,10); sdDrawTrends(); }
 function sdDrawTrends(metric){
-  if(metric) S_trendMetric=metric;
-  // Persist legend show/hide across metric + window switches (otherwise the
-  // focus salon snaps back visible on every rebuild).
+  if(metric) S_sdTrendMetrics=[metric];
+  if(!S_sdTrendMetrics || !S_sdTrendMetrics.length) S_sdTrendMetrics=[S_trendMetric||'cc'];
+  S_trendMetric=S_sdTrendMetrics[0];
+  // Persist legend show/hide across metric + window switches (single-metric mode).
   if(S_trendChart){ try{ const snap={}; S_trendChart.data.datasets.forEach((ds,i)=>{ const base=(ds.label||'').endsWith(' (PY)')?ds.label.slice(0,-5):(ds.label||''); snap[base]=S_trendChart.isDatasetVisible(i); }); S_trendVisSnapshot=snap; }catch(e){} }
   const b=document.getElementById('sd-body'); if(!b) return;
   b.innerHTML=renderSdTrendsShell();
+  if(S_sdTrendMetrics.length>=2){ try{ sdDrawMultiMetric(); }catch(e){} return; }
   // selectTrendMetric guards on AMS[S.currentAM]; point it at this salon's AM
   // for the call, then restore so the underlying page state is untouched.
   const _savedAM=S.currentAM, _savedDrill=S_drillSalon, amId=amOf(S_sdSalon);
@@ -3126,6 +3131,37 @@ function sdDrawTrends(metric){
   S.currentAM=_savedAM; S_drillSalon=_savedDrill;
 }
 function sdToggleTrendPY(){ S_trendPriorYear=!S_trendPriorYear; sdDrawTrends(); }
+function sdToggleMetric(k){
+  let arr=(S_sdTrendMetrics||[]).slice();
+  const i=arr.indexOf(k);
+  if(i>=0){ if(arr.length>1) arr.splice(i,1); }      // keep at least one
+  else { arr.push(k); if(arr.length>2) arr.shift(); } // cap at 2, drop oldest
+  S_sdTrendMetrics=arr; S_trendMetric=arr[0];
+  sdDrawTrends();
+}
+// Dual-axis chart for the selected salon when two metrics are picked.
+function sdDrawMultiMetric(){
+  const host=document.getElementById('sd-trend-host'); if(!host) return;
+  const keys=S_sdTrendMetrics.slice(0,2);
+  const today=_sdTodayIso();
+  const allWeeks=[...S.weekHistory].filter(w=>String(w.weekEnding)<today).sort((a,b)=>new Date(a.weekEnding)-new Date(b.weekEnding));
+  let weeks=allWeeks;
+  if(S_trendWindow==='all'){}
+  else if(S_trendWindow==='ytd'){ const anc=allWeeks.length?fiscalYearStartIso(allWeeks[allWeeks.length-1].weekEnding):''; weeks=allWeeks.filter(w=>w.weekEnding>=anc); }
+  else { weeks=allWeeks.slice(-S_trendWindow); }
+  const labels=weeks.map(function(w){ var pr=String(w.weekEnding).split('-'); return parseInt(pr[1],10)+'/'+parseInt(pr[2],10); });
+  const rowFieldMap={cc:'ccThis',ccG:'ccGrowth',sgr:'salesGrowth',prod:'product',nr:'nr',rr:'rr',hc:'hcTime',mbc:'mbc',ssW:'ssWaits',wts:'waits',noc:'nonOciWaits',pay:'payroll',cph:'cph'};
+  const sn=S_sdSalon;
+  const seriesFor=function(k){ return weeks.map(function(w){ var row=(w.salons||[]).find(function(r){ return String(r.salonNum||'').trim()===String(sn).trim(); }); if(!row) return null; var f=rowFieldMap[k]; if(!f) return null; var v=parseFloat(row[f]); return isNaN(v)?null:parseFloat(v.toFixed(2)); }); };
+  const colors=['#2a6a9a','#9a5a2a'];
+  const lbl=function(k){ return (TREND_METRICS[k]&&TREND_METRICS[k].label)||k; };
+  const datasets=keys.map(function(k,idx){ return { label:lbl(k), data:seriesFor(k), borderColor:colors[idx], backgroundColor:'transparent', borderWidth:2.5, pointRadius:3, pointHoverRadius:6, tension:0.3, fill:false, yAxisID:idx===0?'yA':'yB' }; });
+  const winHtml=[{w:20,l:'20 wk'},{w:52,l:'52 wk'},{w:'ytd',l:'YTD'},{w:'all',l:'All'}].map(function(o){ var arg=typeof o.w==='string'?("'"+o.w+"'"):o.w; var active=S_trendWindow===o.w; return '<button onclick="sdSetTrendWin('+arg+')" style="padding:4px 12px;border-radius:16px;border:1px solid var(--border);font-size:11px;font-weight:600;cursor:pointer;background:'+(active?'var(--primary)':'white')+';color:'+(active?'white':'var(--text)')+';">'+o.l+'</button>'; }).join('');
+  host.innerHTML='<div class="drill-header"><div><div class="trend-chart-title">'+keys.map(lbl).join('  vs  ')+'</div><div class="trend-chart-sub">'+salonDisplay(sn)+' · '+weeks.length+' weeks · dual axis</div></div><div style="margin-left:auto;display:flex;gap:4px;align-items:center;">'+winHtml+'</div></div><div class="chart-canvas-wrap"><canvas id="trend-canvas"></canvas></div>';
+  if(S_trendChart){ try{S_trendChart.destroy();}catch(e){} S_trendChart=null; }
+  const ctx=document.getElementById('trend-canvas'); if(!ctx) return;
+  S_trendChart=new Chart(ctx,{ type:'line', data:{labels:labels,datasets:datasets}, options:{ responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false}, plugins:{legend:{display:true,position:'bottom'}}, scales:{ yA:{type:'linear',position:'left',title:{display:true,text:lbl(keys[0])}}, yB:{type:'linear',position:'right',grid:{drawOnChartArea:false},title:{display:true,text:lbl(keys[1])}} } } });
+}
 
 // BONUSES — real manager bonus card + stylist payouts for this salon, by period.
 function _sdBonusPeriodsList(){
@@ -3705,7 +3741,7 @@ function selectTrendMetric(key, btn, overrideSalon, hostId, storeView){
   const am = AMS[S.currentAM], metric = TREND_METRICS[key];
   if(!metric || !am) return;
 
-  const allWeeksSorted = [...S.weekHistory].sort((a,b)=>new Date(a.weekEnding)-new Date(b.weekEnding));
+  const allWeeksSorted = [...S.weekHistory].filter(w=>String(w.weekEnding) < _sdTodayIso()).sort((a,b)=>new Date(a.weekEnding)-new Date(b.weekEnding));
   let weeks;
   if (S_trendWindow === 'all') {
     weeks = allWeeksSorted;
@@ -3752,7 +3788,7 @@ function selectTrendMetric(key, btn, overrideSalon, hostId, storeView){
   }
   // Ensure the focus salon is always present even if scoping missed it.
   if(drillSalon && !allAMSalons.includes(drillSalon)) allAMSalons = [drillSalon, ...allAMSalons];
-  const amSalons = (storeView && drillSalon) ? [drillSalon] : allAMSalons;
+  const amSalons = allAMSalons;
 
   const palette = ['#4e79a7','#f28e2b','#e15759','#76b7b2','#59a14f','#edc948','#b07aa1','#ff9da7','#9c755f','#bab0ac'];
   const pointStyles = ['circle','rect','triangle','star','rectRot','crossRot','cross','dash','rectRounded','circle'];
@@ -4042,7 +4078,7 @@ function selectTrendMetric(key, btn, overrideSalon, hostId, storeView){
     }
     // Also update the chart heading focus text if present
     const focusEl = document.getElementById('trend-focus-label');
-    if(focusEl) focusEl.textContent = drillSalon ? ('  (focus: '+focusLabel+')') : '';
+    if(focusEl) focusEl.textContent = (storeView || !drillSalon) ? '' : ('  (focus: '+focusLabel+')');
   }
   window._updateTrendStats = updateTrendStats;
 
