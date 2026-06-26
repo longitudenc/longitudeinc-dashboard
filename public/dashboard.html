@@ -601,8 +601,8 @@
     </div><!-- /page-company -->
 
     <!-- Stylist Profile Drawer -->
-    <div id="profile-overlay" onclick="closeProfile()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:900;"></div>
-    <div id="profile-drawer" style="display:none;position:fixed;top:0;right:0;height:100vh;width:100vw;background:#ffffff;box-shadow:-4px 0 24px rgba(0,0,0,.18);z-index:901;overflow:hidden;flex-direction:column;">
+    <div id="profile-overlay" onclick="closeProfile()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:10000;"></div>
+    <div id="profile-drawer" style="display:none;position:fixed;top:0;right:0;height:100vh;width:100vw;background:#ffffff;box-shadow:-4px 0 24px rgba(0,0,0,.18);z-index:10001;overflow:hidden;flex-direction:column;">
       <div id="profile-content" style="padding:0;"></div>
     </div>
 
@@ -3045,8 +3045,9 @@ function sdRender(){
   // body
   const body=document.getElementById('sd-body'); if(!body) return;
   if(S_sdSection==='reviews'){
-    try{ body.innerHTML='<div style="background:#fff;border-radius:8px;padding:14px;box-shadow:0 1px 4px rgba(0,0,0,.12);">'+renderSalonReviewBody(S_sdSalon)+'</div>'; }
-    catch(e){ body.innerHTML='<div style="padding:24px;color:var(--text-muted);">Review unavailable for this salon.</div>'; }
+    body.innerHTML='<div id="sd-review-host" style="background:#fff;border-radius:8px;padding:14px;box-shadow:0 1px 4px rgba(0,0,0,.12);"></div>';
+    try{ if(typeof reviewSalonList==='function' && reviewSalonList().includes(S_sdSalon)) S_reviewSalonSel=S_sdSalon; renderReviewsTab('sd-review-host'); }
+    catch(e){ document.getElementById('sd-review-host').innerHTML='<div style="padding:24px;color:var(--text-muted);">Review unavailable for this salon.</div>'; }
     return;
   }
   if(S_sdSection==='individual'){ body.innerHTML=renderSdIndividual(S_sdSalon); return; }
@@ -3094,7 +3095,7 @@ function openSalonDrill(salonNum){
 }
 
 // ── Store View sections: Trends / Bonuses / Individual (reuse built logic) ───
-let S_sdBonusPeriod='';
+let S_sdBonusPeriod='', S_sdBonusType='manager';
 
 // TRENDS — embed the real Chart.js trend, scoped to this salon, into the overlay.
 function renderSdTrendsShell(){
@@ -3103,9 +3104,11 @@ function renderSdTrendsShell(){
   const mbtns=mks.map(function(k){ var lbl=(TREND_METRICS[k]&&TREND_METRICS[k].label)||k; var on=(k===S_trendMetric); return '<button onclick="sdDrawTrends(\''+k+'\')" style="padding:4px 10px;border-radius:8px;font-size:11.5px;font-weight:600;cursor:pointer;border:1px solid var(--border);'+(on?'background:var(--primary-dark);color:#fff;':'background:#fff;color:var(--text);')+'">'+lbl+'</button>'; }).join('');
   const wins=[[20,'20 wks'],[52,'52 wks'],['ytd','YTD'],['all','All']];
   const wbtns=wins.map(function(x){ var on=(String(S_trendWindow)===String(x[0])); return '<button onclick="sdSetTrendWin(\''+x[0]+'\')" style="padding:4px 10px;border-radius:8px;font-size:11.5px;font-weight:600;cursor:pointer;border:1px solid var(--border);'+(on?'background:var(--primary-dark);color:#fff;':'background:#fff;color:var(--text);')+'">'+x[1]+'</button>'; }).join('');
+  const pyOn=!!S_trendPriorYear;
+  const pyBtn='<button onclick="sdToggleTrendPY()" style="padding:4px 10px;border-radius:8px;font-size:11.5px;font-weight:600;cursor:pointer;border:1px solid var(--border);'+(pyOn?'background:#6b3fa0;color:#fff;':'background:#fff;color:var(--text);')+'">Prior Year</button>';
   return '<div style="background:#fff;border-radius:8px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.12);">'
     +'<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px;">'+mbtns+'</div>'
-    +'<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:12px;">'+wbtns+'</div>'
+    +'<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:12px;align-items:center;">'+wbtns+'<span style="width:1px;height:18px;background:var(--border);margin:0 4px;"></span>'+pyBtn+'</div>'
     +'<div id="sd-trend-host" style="min-height:380px;"></div></div>';
 }
 function sdSetTrendWin(w){ S_trendWindow=(w==='ytd'||w==='all')?w:parseInt(w,10); sdDrawTrends(); }
@@ -3115,10 +3118,12 @@ function sdDrawTrends(metric){
   b.innerHTML=renderSdTrendsShell();
   // selectTrendMetric guards on AMS[S.currentAM]; point it at this salon's AM
   // for the call, then restore so the underlying page state is untouched.
-  const _saved=S.currentAM, amId=amOf(S_sdSalon); if(amId) S.currentAM=amId;
+  const _savedAM=S.currentAM, _savedDrill=S_drillSalon, amId=amOf(S_sdSalon);
+  if(amId) S.currentAM=amId; S_drillSalon=null;
   try{ selectTrendMetric(S_trendMetric||'cc', null, S_sdSalon, 'sd-trend-host'); }catch(e){}
-  S.currentAM=_saved;
+  S.currentAM=_savedAM; S_drillSalon=_savedDrill;
 }
+function sdToggleTrendPY(){ S_trendPriorYear=!S_trendPriorYear; sdDrawTrends(); }
 
 // BONUSES — real manager bonus card + stylist payouts for this salon, by period.
 function _sdBonusPeriodsList(){
@@ -3150,19 +3155,21 @@ function _sdStylistBonus(snum, normLabel){
     return '<tr style="border-bottom:1px solid #eee;"><td style="padding:6px 10px;font-weight:600;">'+nameCell+'</td><td style="padding:6px 8px;text-align:right;">'+fmtMoney(pot)+'</td><td style="padding:6px 8px;text-align:right;font-weight:700;">'+fmtMoney(pay)+'</td><td style="padding:6px 8px;text-align:right;">'+pct.toFixed(0)+'%</td></tr>'; }).join('');
   return '<div style="background:#fff;border-radius:8px;overflow:auto;box-shadow:0 1px 4px rgba(0,0,0,.12);"><table style="width:100%;border-collapse:collapse;font-size:12.5px;"><thead><tr style="background:#2E4D8A;color:#fff;"><th style="padding:7px 10px;text-align:left;">Stylist</th><th style="padding:7px 8px;text-align:right;">Potential</th><th style="padding:7px 8px;text-align:right;">Payout</th><th style="padding:7px 8px;text-align:right;">%</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
 }
+function setSdBonusType(t){ S_sdBonusType=t; sdRender(); }
 function renderSdBonuses(snum){
   const periods=_sdBonusPeriodsList();
   if(!periods.length) return _sdPlaceholder('Bonuses','No completed bonus periods loaded yet.');
   if(!S_sdBonusPeriod || !periods.some(p=>p.periodKey===S_sdBonusPeriod)) S_sdBonusPeriod=periods[0].periodKey;
   const ssPeriod=periods.find(p=>p.periodKey===S_sdBonusPeriod);
-  const sel='<div style="margin-bottom:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><span style="font-size:11px;font-weight:700;letter-spacing:.05em;color:var(--text-muted);">PERIOD</span><select onchange="setSdBonusPeriod(this.value)" style="font-size:13px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);cursor:pointer;">'+periods.map(p=>'<option value="'+p.periodKey+'" '+(p.periodKey===S_sdBonusPeriod?'selected':'')+'>'+p.periodKey+'</option>').join('')+'</select></div>';
   const normLabel=normPeriodLabel(ssPeriod.periodLabel);
-  let mgr=''; try{ mgr=_sdMgrCard(snum, ssPeriod); }catch(e){ mgr=''; }
-  const sty=_sdStylistBonus(snum, normLabel);
-  return sel
-    +'<div style="font-size:13px;font-weight:800;margin:2px 0 10px;">Manager Bonus</div>'
-    +(mgr||'<div style="color:var(--text-muted);padding:10px;">No manager bonus on record for this salon and period.</div>')
-    +'<div style="font-size:13px;font-weight:800;margin:20px 0 10px;">Stylist Bonuses</div>'+sty;
+  const tBtn=(t,l)=>'<button onclick="setSdBonusType(\''+t+'\')" style="padding:5px 16px;border-radius:12px;border:none;font-size:12.5px;font-weight:700;cursor:pointer;background:'+(S_sdBonusType===t?'var(--primary-dark)':'transparent')+';color:'+(S_sdBonusType===t?'#fff':'var(--text)')+';">'+l+'</button>';
+  const bar='<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:14px;">'
+    +'<span style="display:inline-flex;gap:2px;background:#e9e9e9;border:1px solid var(--border);border-radius:14px;padding:2px;">'+tBtn('manager','Manager 💼')+tBtn('stylist','Stylist 💰')+'</span>'
+    +'<span style="display:inline-flex;align-items:center;gap:8px;"><span style="font-size:11px;font-weight:700;letter-spacing:.05em;color:var(--text-muted);">PERIOD</span><select onchange="setSdBonusPeriod(this.value)" style="font-size:13px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);cursor:pointer;">'+periods.map(p=>'<option value="'+p.periodKey+'" '+(p.periodKey===S_sdBonusPeriod?'selected':'')+'>'+p.periodKey+'</option>').join('')+'</select></span></div>';
+  let bodyHtml;
+  if(S_sdBonusType==='manager'){ let mgr=''; try{ mgr=_sdMgrCard(snum, ssPeriod); }catch(e){ mgr=''; } bodyHtml=(mgr||'<div style="color:var(--text-muted);padding:10px;">No manager bonus on record for this salon and period.</div>'); }
+  else { bodyHtml=_sdStylistBonus(snum, normLabel); }
+  return bar+bodyHtml;
 }
 
 // INDIVIDUAL — fiscal-year stylist roster at this salon; click opens full profile.
@@ -3850,6 +3857,11 @@ function selectTrendMetric(key, btn, overrideSalon, hostId){
         hidden: ds.hidden // mirror the focus salon's visibility
       });
     });
+    // Company average — prior year (dashed gray)
+    const coPyData = weeks.map(w=>{ const pw=priorWeekOf(w.weekEnding); return pw?getVal(calcAvgs(pw.salons||[])):null; });
+    if(!coPyData.every(v=>v===null)){
+      datasets.push({ label:'Company Avg (PY)', data:coPyData, borderColor:'#999', backgroundColor:'transparent', borderWidth:1.5, borderDash:[2,3], pointRadius:0, pointHoverRadius:5, tension:0.3, fill:false, type:'line', order:5 });
+    }
   }
 
   // AM average — bold (hidden in drill mode)
