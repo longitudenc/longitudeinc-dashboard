@@ -327,7 +327,7 @@
 
 <!-- Loading overlay -->
 <div class="loading-overlay" id="loading">
-  <img src="longitude-badge.png?v=1" alt="Longitude Inc" style="width:220px;height:220px;margin-bottom:22px;opacity:.9;" />
+  <img src="longitude-badge.png?v=1" alt="Longitude Inc" style="width:300px;height:300px;margin-bottom:24px;opacity:.9;" />
   <div class="spinner"></div>
   <div>Loading AM Dashboard...</div>
 </div>
@@ -365,8 +365,10 @@
     <img src="longitude-header.png?v=1" alt="Longitude Inc — A Great Clips Franchisee" style="height:46px;width:auto;display:block;" />
   </div>
   <div class="header-right">
-    <div style="position:relative;">
+    <div style="position:relative;display:inline-flex;align-items:center;gap:6px;">
+      <button onclick="stepWeek(-1)" title="Previous (older) week" style="background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.25);border-radius:6px;width:26px;height:26px;cursor:pointer;font-size:11px;line-height:1;">&#9664;</button>
       <div class="week-badge" id="week-label" onclick="toggleWeekDropdown(event)">Week Ending — ▾</div>
+      <button onclick="stepWeek(1)" title="Next (newer) week" style="background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.25);border-radius:6px;width:26px;height:26px;cursor:pointer;font-size:11px;line-height:1;">&#9654;</button>
       <div class="week-dropdown" id="week-dropdown">
         <div class="week-dropdown-label">Select Week</div>
         <div id="week-dropdown-items"><div class="week-dropdown-item" style="color:var(--text-muted);font-style:italic;">Loading...</div></div>
@@ -2198,6 +2200,15 @@ function updateWeekDropdown(){
   document.getElementById('week-label').textContent='Week Ending '+(S.currentWeek?fmtWeek(S.currentWeek):'—')+' ▼';
 }
 
+// ◀ ▶ step through weeks from the header. dir=+1 newer, dir=-1 older (no wrap).
+function stepWeek(dir){
+  const weeks=[...S.weekHistory].sort((a,b)=>new Date(b.weekEnding)-new Date(a.weekEnding)).map(w=>w.weekEnding);
+  if(!weeks.length) return;
+  let i=weeks.indexOf(S.currentWeek); if(i<0) i=0;
+  const ni=i-dir;                       // newest-first: newer = lower index
+  if(ni<0 || ni>=weeks.length) return;  // clamp at the ends
+  selectWeek(weeks[ni]);
+}
 function selectWeek(wk){
   S.currentWeek = wk;
   // Recompute prior-FY averages relative to the newly selected week (so a 2025
@@ -2915,6 +2926,108 @@ function fmtWeek(iso){
   if(!m) return iso;
   return `${parseInt(m[2],10)}/${parseInt(m[3],10)}/${m[1]}`;
 }
+// ── Salon Performance Deep Dive (Daily / Weekly / Monthly) ───────────────────
+// Full-screen drill for ONE salon. Weekly + Monthly are tables built from the
+// in-memory weekHistory (the same per-salon metric objects the Trends charts use),
+// so they need no fetch. Daily reuses the existing openSalonDaily 7-day strip.
+// The range control lets you flip / see many periods at once.
+let S_sdSalon='', S_sdGrain='weekly', S_sdRange='13';
+const SD_COLS = [
+  {k:'cc',   lbl:'CC',        f:v=>Math.round(v),    t:(v)=>tierCC(Math.round(v))},
+  {k:'ccG',  lbl:'CC Gr%',    f:v=>v.toFixed(1)+'%', t:(v)=>tierCCG(v)},
+  {k:'pay',  lbl:'Payroll%',  f:v=>v.toFixed(1)+'%', t:(v,cc)=>tierPayroll(v,Math.round(cc))},
+  {k:'cph',  lbl:'CPH',       f:v=>v.toFixed(2),     t:(v,cc)=>tierCPH(v,Math.round(cc))},
+  {k:'prod', lbl:'Prod%',     f:v=>v.toFixed(1)+'%'},
+  {k:'nr',   lbl:'NR%',       f:v=>v.toFixed(1)+'%'},
+  {k:'rr',   lbl:'RR%',       f:v=>v.toFixed(1)+'%'},
+  {k:'hc',   lbl:'HC',        f:v=>v.toFixed(1)},
+  {k:'mbc',  lbl:'MBC',       f:v=>v.toFixed(1)},
+  {k:'ssW',  lbl:'S/S Wait%', f:v=>v.toFixed(1)+'%'},
+  {k:'wts',  lbl:'WT%',       f:v=>v.toFixed(1)+'%'},
+];
+function _sdRow(snum, w){ return (w.salons||[]).find(r=>String(r.salonNum||'').trim()===String(snum).trim()) || null; }
+function _sdWeekly(snum){
+  const all=[...S.weekHistory].sort((a,b)=>new Date(a.weekEnding)-new Date(b.weekEnding));
+  let weeks=all;
+  if(S_sdRange==='ytd'){ const anchor=all.length?fiscalYearStartIso(all[all.length-1].weekEnding):''; weeks=all.filter(w=>w.weekEnding>=anchor); }
+  else if(S_sdRange!=='all'){ weeks=all.slice(-parseInt(S_sdRange)); }
+  return weeks.map(w=>({label:fmtWeek(w.weekEnding), m:_sdRow(snum,w)})).reverse(); // newest first
+}
+function _sdMonthly(snum){
+  const groups={};
+  (S.weekHistory||[]).forEach(w=>{ const m=_sdRow(snum,w); if(!m) return; const key=periodKeyFromWeekEnd(w.weekEnding); if(!key) return; (groups[key]||(groups[key]={key,rows:[]})).rows.push(m); });
+  let keys=Object.keys(groups).sort((a,b)=>periodSortKey(a)-periodSortKey(b));
+  let rows=keys.map(key=>{
+    const ms=groups[key].rows, avg={};
+    SD_COLS.forEach(c=>{ const vals=ms.map(x=>x?x[c.k]:null).filter(v=>v!==null&&v!==undefined&&!isNaN(v)).map(Number); avg[c.k]=vals.length?(vals.reduce((a,b)=>a+b,0)/vals.length):null; });
+    return {label:key, key, m:avg, n:ms.length};
+  });
+  if(S_sdRange==='ytd'){ const curFY=periodYear(periodKeyFromWeekEnd(S.currentWeek)||''); rows=rows.filter(r=>periodYear(r.key)===curFY); }
+  else if(S_sdRange!=='all'){ rows=rows.slice(-parseInt(S_sdRange)); }
+  return rows.reverse(); // newest first
+}
+function _sdTable(rows){
+  if(!rows.length) return '<div style="padding:24px;color:var(--text-muted);">No data on record for this range.</div>';
+  const head = `<th style="position:sticky;left:0;background:#2E4D8A;color:#fff;text-align:left;padding:7px 10px;z-index:1;">Period</th>`+
+    SD_COLS.map(c=>`<th style="background:#2E4D8A;color:#fff;padding:7px 8px;text-align:center;white-space:nowrap;">${c.lbl}</th>`).join('');
+  const body = rows.map(rw=>{
+    const m=rw.m, cc=m?m.cc:null;
+    const cells = SD_COLS.map(c=>{
+      const v=m?m[c.k]:null, has=(v!==null&&v!==undefined&&!isNaN(v));
+      const cls=(has&&c.t)?c.t(Number(v), cc):'';
+      return `<td class="${cls}" style="padding:6px 8px;text-align:center;white-space:nowrap;">${has?c.f(Number(v)):'—'}</td>`;
+    }).join('');
+    const wkN = rw.n?` <span style="color:var(--text-muted);font-weight:400;font-size:10px;">(${rw.n}w)</span>`:'';
+    return `<tr style="border-bottom:1px solid #eee;"><td style="position:sticky;left:0;background:#fff;font-weight:600;padding:6px 10px;white-space:nowrap;">${rw.label}${wkN}</td>${cells}</tr>`;
+  }).join('');
+  return `<div style="background:#fff;border-radius:8px;overflow:auto;box-shadow:0 1px 4px rgba(0,0,0,.12);"><table style="width:100%;border-collapse:collapse;font-size:12.5px;"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+function setSdGrain(g){ S_sdGrain=g; sdRender(); }
+function setSdRange(v){ S_sdRange=v; sdRender(); }
+function sdRender(){
+  const gWrap=document.getElementById('sd-grain');
+  if(gWrap){ const on='background:#fff;color:var(--primary-dark);',off='background:transparent;color:#fff;',base='padding:4px 14px;border:none;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;';
+    gWrap.innerHTML=[['daily','Daily'],['weekly','Weekly'],['monthly','Monthly']].map(([k,l])=>`<button onclick="setSdGrain('${k}')" style="${base}${S_sdGrain===k?on:off}">${l}</button>`).join('');
+  }
+  const rWrap=document.getElementById('sd-range-wrap'), rSel=document.getElementById('sd-range');
+  if(S_sdGrain==='daily'){ if(rWrap) rWrap.style.display='none'; }
+  else if(rSel){ if(rWrap) rWrap.style.display='inline-flex';
+    const opts = S_sdGrain==='weekly' ? [['8','Last 8 weeks'],['13','Last 13 weeks'],['26','Last 26 weeks'],['ytd','YTD'],['all','All']]
+                                      : [['3','Last 3 months'],['6','Last 6 months'],['12','Last 12 months'],['ytd','YTD'],['all','All']];
+    if(!opts.some(o=>o[0]===S_sdRange)) S_sdRange = (S_sdGrain==='weekly'?'13':'6');
+    rSel.innerHTML=opts.map(([v,l])=>`<option value="${v}" ${S_sdRange===v?'selected':''}>${l}</option>`).join('');
+  }
+  const body=document.getElementById('sd-body'); if(!body) return;
+  if(S_sdGrain==='daily'){
+    body.innerHTML='<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">Most recent 7 days — click any day for the per-stylist breakdown.</div><div id="sd-daily-host"></div>';
+    try{ openSalonDaily(S_sdSalon,'sd-daily-host'); }catch(e){ body.innerHTML='<div style="padding:24px;color:var(--text-muted);">Daily data unavailable.</div>'; }
+    return;
+  }
+  const rows = (S_sdGrain==='weekly') ? _sdWeekly(S_sdSalon) : _sdMonthly(S_sdSalon);
+  const note = (S_sdGrain==='monthly') ? '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Monthly = average of the weekly figures in that month (week count shown per row).</div>' : '';
+  body.innerHTML = note + _sdTable(rows);
+}
+function openSalonDrill(salonNum){
+  if(typeof canDrillSalon==='function' && !canDrillSalon(salonNum)) return;  // role/assignment gate
+  S_sdSalon=String(salonNum).trim(); S_sdGrain='weekly'; S_sdRange='13';
+  const old=document.getElementById('salon-drill-overlay'); if(old) old.remove();
+  const ov=document.createElement('div'); ov.id='salon-drill-overlay';
+  ov.style.cssText='position:fixed;inset:0;z-index:9999;background:#fff;display:flex;flex-direction:column;';
+  ov.innerHTML=`
+    <style>#salon-drill-overlay td.c1,#salon-drill-overlay td.c2,#salon-drill-overlay td.c3,#salon-drill-overlay td.c4{font-weight:600;}</style>
+    <div style="background:var(--primary-dark);color:#fff;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+      <strong style="font-size:15px;">${salonDisplay(S_sdSalon)} — Performance Deep Dive</strong>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <span id="sd-grain" style="display:inline-flex;gap:2px;background:rgba(255,255,255,.15);border-radius:12px;padding:2px;"></span>
+        <span id="sd-range-wrap" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;">Show <select id="sd-range" onchange="setSdRange(this.value)" style="font-size:12px;padding:3px 6px;border-radius:6px;border:none;cursor:pointer;"></select></span>
+        <button onclick="document.getElementById('salon-drill-overlay').remove()" style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,.4);border-radius:6px;padding:4px 12px;cursor:pointer;font-size:13px;">Close</button>
+      </div>
+    </div>
+    <div id="sd-body" style="overflow:auto;flex:1;background:#f4f5f7;padding:16px;"></div>`;
+  document.body.appendChild(ov);
+  sdRender();
+}
+
 function buildSalonRow(r,cols,showAM=false){
   const amId=amOf(r.salonNum), am=AMS[amId]||{color:'#999',name:'Unknown'};
   const fromTab = showAM ? 'salon' : 'salon';
@@ -2923,7 +3036,10 @@ function buildSalonRow(r,cols,showAM=false){
   const dailyBtn = canDrillSalon(r.salonNum)
     ? ` <span class="salon-daily-link" onclick="event.stopPropagation();openSalonDaily('${r.salonNum}','${dailyHost}')" title="Daily breakdown for ${salonDisplay(r.salonNum)}" style="cursor:pointer;font-size:13px;opacity:.65;margin-left:3px;">📅</span>`
     : '';
-  const nameCell = `<td class="${cols[0].cl(r)}">${salonLink(r.salonNum, cols[0].fv(r), fromTab)}${dailyBtn}</td>`;
+  const deepBtn = canDrillSalon(r.salonNum)
+    ? ` <span class="salon-daily-link" onclick="event.stopPropagation();openSalonDrill('${r.salonNum}')" title="Daily / Weekly / Monthly deep dive for ${salonDisplay(r.salonNum)}" style="cursor:pointer;font-size:13px;opacity:.65;margin-left:2px;">📊</span>`
+    : '';
+  const nameCell = `<td class="${cols[0].cl(r)}">${salonLink(r.salonNum, cols[0].fv(r), fromTab)}${dailyBtn}${deepBtn}</td>`;
   const amCell=showAM?`<td>${amChip(am)}</td>`:'';
   if(showAM) return `<tr>${nameCell}${amCell}${cols.slice(1).map(c=>`<td class="${c.cl(r)}">${c.fv(r)}</td>`).join('')}</tr>`;
   return `<tr>${nameCell}${cols.slice(1).map(c=>`<td class="${c.cl(r)}">${c.fv(r)}</td>`).join('')}</tr>`;
