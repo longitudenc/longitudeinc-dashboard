@@ -1206,7 +1206,7 @@ function scoreTierLabel(total){ if(total>=24)return{label:'Performance Excellenc
 
 // ── Init ──────────────────────────────────────────────────────
 // Real per-user identity, set from /api/auth/me after sign-in.
-let SESSION = { email: '', role: 'none', globalId: '', salons: [] };
+let SESSION = { email: '', role: 'none', globalId: '', salons: [], name: '' };
 
 function init(){
   // Ask the server who's signed in. No valid session → show login.
@@ -1219,7 +1219,8 @@ function init(){
       email: me.email || '',
       role: me.access.role || 'none',
       globalId: me.access.globalId || '',
-      salons: me.access.salons || []
+      salons: me.access.salons || [],
+      name: me.access.name || ''
     };
     startDashboard();
   }).catch(()=>{ showLogin(); });
@@ -2262,9 +2263,9 @@ function displayNameForGid(gid){
 // hover tooltip. Falls back to the email when no name can be resolved.
 function updateUserChip(){
   const chip=document.getElementById('user-chip'); if(!chip) return;
-  const nm=displayNameForGid(SESSION.globalId);
+  const nm = SESSION.name || displayNameForGid(SESSION.globalId);
   chip.textContent = nm || SESSION.email || 'Unknown';
-  chip.title = SESSION.email || '';
+  chip.title = (SESSION.email || '') + ' · click to sign out';
 }
 function stylistsForSalon(sn){
   sn = String(sn).trim();
@@ -2636,11 +2637,11 @@ function renderReviewsTab(hostId, windowKind){
           </button>`).join('')}
           </div>`;
       }).filter(Boolean).join('');
-      bodyHtml = '<div style="font-size:12px;color:var(--text-muted);margin:10px 0 0;">All employees across salons — click to open the annual review.</div>' + (groups || '<div style="padding:24px;color:var(--text-muted);">No stylists on record.</div>');
+      bodyHtml = reviewViewAllButton() + '<div style="font-size:12px;color:var(--text-muted);margin:10px 0 0;">All employees across salons — click to open the annual review.</div>' + (groups || '<div style="padding:24px;color:var(--text-muted);">No stylists on record.</div>');
     }
   } else if(S_reviewMode==='stylist'){
     const sts = stylistsForSalon(S_reviewSalonSel);
-    bodyHtml = sts.length ? `
+    bodyHtml = sts.length ? reviewViewAllButton() + `
       <div style="font-size:12px;color:var(--text-muted);margin:10px 0 8px;">Stylists at ${salonDisplay(S_reviewSalonSel)} — click to open the annual review.</div>
       <div style="display:flex;flex-direction:column;gap:6px;max-width:540px;">
         ${sts.map(s=>`<button onclick="openStylistReview('${s.globalId}', '${reviewName(s.preferred,s.name).replace(/'/g,"\\'")}')" style="display:flex;justify-content:space-between;align-items:center;text-align:left;padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:#fff;cursor:pointer;font-size:13px;">
@@ -8380,7 +8381,7 @@ function renderReview(data){
 
   <div id="review-printable">
   <div style="background:#FFF3CD;border:1px solid #E0C97F;color:#7D6608;padding:8px 12px;border-radius:4px;margin-bottom:10px;font-size:11px;line-height:1.45;">
-    <strong>PREVIEW — not final.</strong> This reflects year-to-date performance only. Any raise shown is <strong>earned only at the conclusion of the fiscal year</strong>, and once finalized it takes effect the following <strong>February</strong>. Figures will continue to change as the remaining weeks are completed.
+    <strong>PREVIEW — not final.</strong> This reflects year-to-date performance only. Any raise shown is <strong>earned only at the conclusion of the fiscal year</strong>, and once finalized it takes effect the following <strong>February</strong>. Figures will continue to change as the remaining months are completed.
   </div>
   <!-- Header -->
   <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;border:1px solid #ccc;padding:10px;margin-bottom:8px;background:white;">
@@ -8577,52 +8578,44 @@ function initBulkPrintSelectors(){
   });
 }
 
+// Shared gatherer: collect the reviewable people for a salon (or 'ALL') and compute
+// each one's review via computeReviewData — the SAME consolidated-BonusData logic
+// (***/empty->2 rule) as the on-screen Annual Review, so print, bulk and the in-app
+// reader all match exactly.
+function gatherBulkReviews(salonSel, year){
+  const allSalons = [...new Set(Object.values(S.homeDataMap||{}).map(r=>String((r&&r.homeSalon)||'').trim()).filter(Boolean))].sort();
+  const salons = (!salonSel || salonSel==='ALL') ? allSalons : [String(salonSel)];
+  const seen=new Set(), people=[];
+  salons.forEach(sn=>{ (stylistsForSalon(sn)||[]).forEach(pp=>{ const g=String(pp.globalId||'').trim(); if(g && !seen.has(g)){ seen.add(g); people.push({globalId:g, name:pp.name||'', preferred:pp.preferred||''}); } }); });
+  const reviews=[];
+  people.forEach(pp=>{
+    const rv = computeReviewData(pp.globalId, year);
+    if(!rv || !rv.hasData) return;                 // only people with data that year
+    const home = (S.homeDataMap && S.homeDataMap[pp.globalId]) || {};
+    reviews.push({ ...rv, globalId: pp.globalId, name: reviewName(pp.preferred, pp.name || rv.payrollName || ''), year, baseWage: parseFloat(home.baseWage)||0 });
+  });
+  reviews.sort((a,b)=> String(a.homeSalon).localeCompare(String(b.homeSalon)) || String(a.name).localeCompare(String(b.name)));
+  const curPeriod = periodKeyFromWeekEnd(S.currentWeek);
+  const discPts={};
+  reviews.forEach(r=>{ const pts = activeDiscPoints(r.globalId, curPeriod)||0; if(pts) discPts[(r.name||'').toLowerCase()] = pts; });
+  return { success:true, year, reviews, discPts };
+}
+
 function bulkPrintReviews(){
-  // Generate the bulk reviews CLIENT-SIDE from computeReviewData — the exact same
-  // consolidated-BonusData logic (with the ***/empty->2 newcomer rule) used by the
-  // on-screen Annual Review — so printed reviews always match the screen. No server
-  // round-trip and no second scoring implementation to drift.
   const salonSel = document.getElementById('bulk-salon-select')?.value || 'ALL';
   const year     = parseInt(document.getElementById('bulk-year-select')?.value) || (new Date().getFullYear());
   const btn      = document.getElementById('bulk-print-btn');
   const status   = document.getElementById('bulk-print-status');
   if(btn){ btn.disabled = true; btn.textContent = '⏳ Generating...'; }
   if(status) status.textContent = 'Building reviews from consolidated data…';
-
-  // Let the status paint before the synchronous build loop.
   setTimeout(()=>{
     const _reset=()=>{ if(btn){ btn.disabled=false; btn.textContent='🖨 Generate Reviews'; } };
     try {
-      // Same population as the on-screen Reviews tab: active, home-salon, worked this
-      // year, AMs excluded, full-year managers routed to the salon review.
-      const allSalons = [...new Set(Object.values(S.homeDataMap||{}).map(r=>String((r&&r.homeSalon)||'').trim()).filter(Boolean))].sort();
-      const salons = (!salonSel || salonSel==='ALL') ? allSalons : [String(salonSel)];
-      const seen=new Set(), people=[];
-      salons.forEach(sn=>{ (stylistsForSalon(sn)||[]).forEach(pp=>{ const g=String(pp.globalId||'').trim(); if(g && !seen.has(g)){ seen.add(g); people.push({globalId:g, name:pp.name||'', preferred:pp.preferred||''}); } }); });
-
-      const reviews=[];
-      people.forEach(pp=>{
-        const rv = computeReviewData(pp.globalId, year);
-        if(!rv || !rv.hasData) return;                 // only people with data that year
-        const home = (S.homeDataMap && S.homeDataMap[pp.globalId]) || {};
-        reviews.push({ ...rv,
-          globalId: pp.globalId,
-          name: reviewName(pp.preferred, pp.name || rv.payrollName || ''),
-          year,
-          baseWage: parseFloat(home.baseWage)||0,
-        });
-      });
-      reviews.sort((a,b)=> String(a.homeSalon).localeCompare(String(b.homeSalon)) || String(a.name).localeCompare(String(b.name)));
-
-      // Disc points keyed by the exact (lowercased) name buildReviewHTML looks up.
-      const curPeriod = periodKeyFromWeekEnd(S.currentWeek);
-      const discPts={};
-      reviews.forEach(r=>{ const pts = activeDiscPoints(r.globalId, curPeriod)||0; if(pts) discPts[(r.name||'').toLowerCase()] = pts; });
-
+      const data = gatherBulkReviews(salonSel, year);
       _reset();
-      if(!reviews.length){ if(status) status.textContent='No reviewable stylists found for that selection.'; return; }
-      if(status) status.textContent=`Opening ${reviews.length} review${reviews.length!==1?'s':''}…`;
-      openBulkPrintWindow({ success:true, year, reviews, discPts });
+      if(!data.reviews.length){ if(status) status.textContent='No reviewable stylists found for that selection.'; return; }
+      if(status) status.textContent=`Opening ${data.reviews.length} review${data.reviews.length!==1?'s':''}…`;
+      openBulkPrintWindow(data);
     } catch(err){
       _reset();
       if(status) status.textContent='Error: '+String((err&&err.message)||err);
@@ -8630,7 +8623,7 @@ function bulkPrintReviews(){
   }, 30);
 }
 
-function openBulkPrintWindow(data){
+function buildAllReviewCardsHTML(data){
   const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const RAISE_TABLE = {11:.20,12:.25,13:.30,14:.35,15:.40,16:.45,17:.50,18:.55,19:.60,20:.70};
   const metrics = [
@@ -8667,7 +8660,7 @@ function openBulkPrintWindow(data){
     return `
     <div class="review-page">
       <div style="background:#FFF3CD;border:1px solid #E0C97F;color:#7D6608;padding:8px 12px;border-radius:4px;margin-bottom:10px;font-size:11px;line-height:1.45;">
-    <strong>PREVIEW — not final.</strong> This reflects year-to-date performance only. Any raise shown is <strong>earned only at the conclusion of the fiscal year</strong>, and once finalized it takes effect the following <strong>February</strong>. Figures will continue to change as the remaining weeks are completed.
+    <strong>PREVIEW — not final.</strong> This reflects year-to-date performance only. Any raise shown is <strong>earned only at the conclusion of the fiscal year</strong>, and once finalized it takes effect the following <strong>February</strong>. Figures will continue to change as the remaining months are completed.
   </div>
       <div class="rev-header">
         <table style="width:100%;border-collapse:collapse;border:1px solid #999;margin-bottom:8px;">
@@ -8786,9 +8779,13 @@ function openBulkPrintWindow(data){
     </div>`;
   };
 
+  return data.reviews.map(r => buildReviewHTML(r)).join('');
+}
+
+function openBulkPrintWindow(data){
+  const allHTML = buildAllReviewCardsHTML(data);
   const w = window.open('about:blank', '_blank', 'width=1100,height=800');
   if(!w){ alert('Please allow pop-ups for this site, then generate the reviews again.'); return; }
-  const allHTML = data.reviews.map(r => buildReviewHTML(r)).join('');
 
   w.document.write(`<!DOCTYPE html><html><head>
     <title>Annual Reviews — ${data.year}</title>
@@ -8815,6 +8812,75 @@ function openBulkPrintWindow(data){
     ${allHTML}
   </body></html>`);
   w.document.close();
+}
+
+// ── In-app "View All Reviews" reader ─────────────────────────────────────────
+// Same cards as the print/bulk output (buildAllReviewCardsHTML), shown in an overlay
+// with Scroll (all stacked) or Click-through (one at a time) — so you can review
+// everyone without opening/closing each profile.
+let _allRevIdx = 0, _allRevMode = 'scroll';
+function openAllReviews(salonSel){
+  const sel = (salonSel===undefined || salonSel===null) ? S_reviewSalonSel : salonSel;
+  const year = (typeof _reviewYear!=='undefined' && _reviewYear) ? _reviewYear : (new Date().getFullYear());
+  let data;
+  try { data = gatherBulkReviews(sel, year); }
+  catch(e){ alert('Could not build reviews: '+(e&&e.message||e)); return; }
+  if(!data || !data.reviews.length){ alert('No reviews available for this selection yet.'); return; }
+  _allRevIdx = 0; _allRevMode = 'scroll';
+  const cardsHTML = buildAllReviewCardsHTML(data);
+  const old = document.getElementById('all-reviews-overlay'); if(old) old.remove();
+  const ov = document.createElement('div');
+  ov.id = 'all-reviews-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:18px;';
+  ov.innerHTML = `
+    <style>
+      #all-reviews-overlay .review-page{background:#fff;padding:16px;margin:0 auto 14px;max-width:920px;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,.18);}
+      #all-reviews-overlay table{border-collapse:collapse;} #all-reviews-overlay th,#all-reviews-overlay td{border:1px solid #ddd;}
+    </style>
+    <div style="background:#fff;width:min(1000px,96vw);height:92vh;border-radius:10px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 10px 40px rgba(0,0,0,.35);">
+      <div style="background:var(--primary-dark);color:#fff;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+        <strong style="font-size:14px;">All Reviews — ${data.year} <span style="opacity:.7;font-weight:400;">· ${data.reviews.length}</span></strong>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="display:inline-flex;gap:2px;background:rgba(255,255,255,.15);border-radius:12px;padding:2px;">
+            <button id="arv-scroll" onclick="setAllReviewsMode('scroll')" style="padding:4px 12px;border:none;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;">Scroll</button>
+            <button id="arv-click" onclick="setAllReviewsMode('click')" style="padding:4px 12px;border:none;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;background:transparent;color:#fff;">Click-through</button>
+          </span>
+          <span id="arv-nav" style="display:none;align-items:center;gap:6px;">
+            <button onclick="stepAllReviews(-1)" style="background:#fff;color:var(--primary-dark);border:none;border-radius:6px;width:28px;height:28px;cursor:pointer;">&#9664;</button>
+            <span id="arv-counter" style="font-size:12px;min-width:64px;text-align:center;"></span>
+            <button onclick="stepAllReviews(1)" style="background:#fff;color:var(--primary-dark);border:none;border-radius:6px;width:28px;height:28px;cursor:pointer;">&#9654;</button>
+          </span>
+          <button onclick="window.print()" style="background:#fff;color:var(--primary-dark);border:none;border-radius:6px;padding:4px 12px;cursor:pointer;font-size:13px;font-weight:700;">Print</button>
+          <button onclick="document.getElementById('all-reviews-overlay').remove()" style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,.4);border-radius:6px;padding:4px 12px;cursor:pointer;font-size:13px;">Close</button>
+        </div>
+      </div>
+      <div id="arv-body" style="overflow:auto;flex:1;background:#eceff1;padding:14px;">${cardsHTML}</div>
+    </div>`;
+  document.body.appendChild(ov);
+  setAllReviewsMode('scroll');
+}
+function _arvCards(){ const b=document.getElementById('arv-body'); return b?Array.from(b.querySelectorAll('.review-page')):[]; }
+function setAllReviewsMode(m){
+  _allRevMode=m;
+  const sB=document.getElementById('arv-scroll'), cB=document.getElementById('arv-click'), nav=document.getElementById('arv-nav');
+  const on='background:#fff;color:var(--primary-dark);', off='background:transparent;color:#fff;';
+  const base='padding:4px 12px;border:none;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;';
+  if(sB) sB.style.cssText=base+(m==='scroll'?on:off);
+  if(cB) cB.style.cssText=base+(m==='click'?on:off);
+  const cards=_arvCards();
+  if(m==='click'){ if(nav) nav.style.display='inline-flex'; if(_allRevIdx>cards.length-1) _allRevIdx=0; _renderArv(); }
+  else { if(nav) nav.style.display='none'; cards.forEach(c=>c.style.display=''); }
+}
+function stepAllReviews(d){ const n=_arvCards().length; if(!n) return; _allRevIdx=(_allRevIdx+d+n)%n; _renderArv(); }
+function _renderArv(){
+  const cards=_arvCards(); const n=cards.length; if(!n) return;
+  cards.forEach((c,i)=>c.style.display=(i===_allRevIdx?'':'none'));
+  const ctr=document.getElementById('arv-counter'); if(ctr) ctr.textContent=(_allRevIdx+1)+' of '+n;
+  const body=document.getElementById('arv-body'); if(body) body.scrollTop=0;
+}
+// The button shown above the stylist lists.
+function reviewViewAllButton(){
+  return `<div style="margin:10px 0 8px;"><button onclick="openAllReviews(S_reviewSalonSel)" style="background:var(--primary);color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:700;cursor:pointer;">\uD83D\uDCC4 View All Reviews</button></div>`;
 }
 
 

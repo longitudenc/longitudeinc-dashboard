@@ -41,6 +41,7 @@ export interface Access {
   role: Role
   globalId?: string      // the person's employee id (when they're an employee)
   salons?: string[]      // salons in scope (area_manager / manager)
+  name?: string          // display name for the signed-in person (owner/admin from Users tab)
   // owner/admin/viewer have no salon scope — they see everything their role allows
 }
 
@@ -109,6 +110,8 @@ export async function resolveAccess(email: string): Promise<Access | null> {
     const role = norm(pick(u, 'role', 'access', 'tier')) as Role
     if (role) {
       const access: Access = { role }
+      const nm = String(pick(u, 'name', 'full name', 'fullname', 'display name', 'displayname') || '').trim()
+      if (nm) access.name = nm
       const gid = String(pick(u, 'globalId', 'global id', 'globalemployeekey') || '').trim()
       if (gid) access.globalId = gid
       const salons = String(pick(u, 'salons', 'salon', 'salonnums') || '').trim()
