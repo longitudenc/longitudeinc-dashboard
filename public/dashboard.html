@@ -1663,13 +1663,13 @@ function dChange(cur, prior){ return (prior&&prior>0&&cur!==null&&!isNaN(cur)) ?
 function dChangeCell(ch){ return ch===null ? '<span style="color:#bbb;">—</span>' : `<span class="${tc(ch)}">${sgn(ch)}%</span>`; }
 
 // LEVEL 1 — a salon's per-day table for the current week. hostId = drill container.
-function openSalonDaily(sn, hostId){
+function openSalonDaily(sn, hostId, weekOverride){
   hostId = hostId || 'salon-drill';
   sn = String(sn).trim();
   if(!canDrillSalon(sn)) return;            // role/assignment gate (defense in depth)
   const host = document.getElementById(hostId);
   if(!host) return;
-  const weekEnd = S.currentWeek;
+  const weekEnd = weekOverride || S.currentWeek;
   if(!weekEnd){ host.innerHTML='<div class="table-card"><div class="no-data">No week selected</div></div>'; return; }
   const dates = dailyWeekDates(weekEnd);            // current week Sat → Fri
   const curStart = dates[0], curEnd = weekEnd;
@@ -2926,104 +2926,144 @@ function fmtWeek(iso){
   if(!m) return iso;
   return `${parseInt(m[2],10)}/${parseInt(m[3],10)}/${m[1]}`;
 }
-// ── Salon Performance Deep Dive (Daily / Weekly / Monthly) ───────────────────
-// Full-screen drill for ONE salon. Weekly + Monthly are tables built from the
-// in-memory weekHistory (the same per-salon metric objects the Trends charts use),
-// so they need no fetch. Daily reuses the existing openSalonDaily 7-day strip.
-// The range control lets you flip / see many periods at once.
-let S_sdSalon='', S_sdGrain='weekly', S_sdRange='13';
-const SD_COLS = [
-  {k:'cc',   lbl:'CC',        f:v=>Math.round(v),    t:(v)=>tierCC(Math.round(v))},
-  {k:'ccG',  lbl:'CC Gr%',    f:v=>v.toFixed(1)+'%', t:(v)=>tierCCG(v)},
-  {k:'pay',  lbl:'Payroll%',  f:v=>v.toFixed(1)+'%', t:(v,cc)=>tierPayroll(v,Math.round(cc))},
-  {k:'cph',  lbl:'CPH',       f:v=>v.toFixed(2),     t:(v,cc)=>tierCPH(v,Math.round(cc))},
-  {k:'prod', lbl:'Prod%',     f:v=>v.toFixed(1)+'%'},
-  {k:'nr',   lbl:'NR%',       f:v=>v.toFixed(1)+'%'},
-  {k:'rr',   lbl:'RR%',       f:v=>v.toFixed(1)+'%'},
-  {k:'hc',   lbl:'HC',        f:v=>v.toFixed(1)},
-  {k:'mbc',  lbl:'MBC',       f:v=>v.toFixed(1)},
-  {k:'ssW',  lbl:'S/S Wait%', f:v=>v.toFixed(1)+'%'},
-  {k:'wts',  lbl:'WT%',       f:v=>v.toFixed(1)+'%'},
+// ── Salon Store View (manager-style deep dive) ──────────────────────────────
+// Click a salon -> everything about that store: Weekly / Monthly / Daily tables
+// (Average row included) + the Salon review. A salon switcher (select + arrows)
+// changes stores without leaving. Weekly reads the per-week salon rows; Monthly
+// reads the TRUE monthly salon summary (S_salonSummaryPeriods) that drives manager
+// bonuses; Daily reuses the existing 7-day strip with week navigation.
+let S_sdSalon='', S_sdTab='weekly', S_sdRange='13', S_sdDailyWeek='';
+
+// Weekly columns read the canonical per-week salon row fields.
+const SD_WEEK_COLS=[
+  {k:'cc',  lbl:'CC',        g:r=>n(r.ccThis),    f:v=>String(Math.round(v)),  t:v=>tierCC(Math.round(v))},
+  {k:'ccG', lbl:'CC Gr%',    g:r=>p(r.ccGrowth),  f:v=>v.toFixed(1)+'%',       t:v=>tierCCG(v)},
+  {k:'pay', lbl:'Payroll%',  g:r=>p(r.payroll),   f:v=>v.toFixed(1)+'%',       t:(v,cc)=>tierPayroll(v,cc)},
+  {k:'cph', lbl:'CPH',       g:r=>n(r.cph),       f:v=>v.toFixed(2),           t:(v,cc)=>tierCPH(v,cc)},
+  {k:'prod',lbl:'Prod%',     g:r=>p(r.product),   f:v=>v.toFixed(1)+'%',       t:v=>tierProd(v)},
+  {k:'nr',  lbl:'NR%',       g:r=>p(r.nr),        f:v=>v.toFixed(1)+'%',       t:v=>tierNR(v)},
+  {k:'rr',  lbl:'RR%',       g:r=>p(r.rr),        f:v=>v.toFixed(1)+'%',       t:v=>tierRR(v)},
+  {k:'hc',  lbl:'HC Time',   g:r=>n(r.hcTime),    f:v=>v.toFixed(1),           t:v=>tierHC(v)},
+  {k:'mbc', lbl:'MBC',       g:r=>n(r.mbc),       f:v=>v.toFixed(1),           t:v=>tierMBC(v)},
+  {k:'ssW', lbl:'S/S Wait%', g:r=>p(r.ssWaits),   f:v=>v.toFixed(1)+'%',       t:v=>tierWaits(v)},
+  {k:'wts', lbl:'WT%',       g:r=>p(r.waits),     f:v=>v.toFixed(1)+'%',       t:v=>tierWaits(v)},
+];
+// Monthly columns read the salon summary row (true monthly). Missing fields -> dash.
+const _pf=x=>{ const v=parseFloat(x); return isNaN(v)?NaN:v; };
+const SD_MONTH_COLS=[
+  {k:'cc',  lbl:'CC',        g:r=>_pf(r.avgWeeklyCC),  f:v=>String(Math.round(v)), t:v=>tierCC(Math.round(v))},
+  {k:'ccG', lbl:'CC Gr%',    g:r=>_pf(r.ccGrowth),     f:v=>v.toFixed(1)+'%',      t:v=>tierCCG(v)},
+  {k:'pay', lbl:'Payroll%',  g:r=>_pf(r.adjPayrollPct),f:v=>v.toFixed(1)+'%',      t:(v,cc)=>tierPayroll(v,cc)},
+  {k:'cph', lbl:'CPH',       g:r=>_pf(r.cph),          f:v=>v.toFixed(2),          t:(v,cc)=>tierCPH(v,cc)},
+  {k:'prod',lbl:'Prod%',     g:r=>_pf(r.productPct),   f:v=>v.toFixed(1)+'%',      t:v=>tierProd(v)},
+  {k:'nr',  lbl:'NR%',       g:r=>_pf(r.nr),           f:v=>v.toFixed(1)+'%',      t:v=>tierNR(v)},
+  {k:'rr',  lbl:'RR%',       g:r=>_pf(r.rr),           f:v=>v.toFixed(1)+'%',      t:v=>tierRR(v)},
+  {k:'hc',  lbl:'HC Time',   g:r=>_pf(r.hcTime),       f:v=>v.toFixed(1),          t:v=>tierHC(v)},
+  {k:'mbc', lbl:'MBC',       g:r=>_pf(r.mbc),          f:v=>v.toFixed(1),          t:v=>tierMBC(v)},
+  {k:'ssW', lbl:'S/S Wait%', g:r=>_pf(r.ssWaits),      f:v=>v.toFixed(1)+'%',      t:v=>tierWaits(v)},
+  {k:'wts', lbl:'WT%',       g:r=>_pf(r.waits),        f:v=>v.toFixed(1)+'%',      t:v=>tierWaits(v)},
 ];
 function _sdRow(snum, w){ return (w.salons||[]).find(r=>String(r.salonNum||'').trim()===String(snum).trim()) || null; }
-function _sdWeekly(snum){
+function _sdDrillSalons(){
+  return [...new Set((S.weekHistory||[]).flatMap(w=>(w.salons||[]).map(s=>String(s.salonNum||'').trim())))]
+    .filter(sn=>sn && canDrillSalon(sn)).sort((a,b)=>parseInt(a,10)-parseInt(b,10));
+}
+function _sdWeekRows(snum){
   const all=[...S.weekHistory].sort((a,b)=>new Date(a.weekEnding)-new Date(b.weekEnding));
   let weeks=all;
   if(S_sdRange==='ytd'){ const anchor=all.length?fiscalYearStartIso(all[all.length-1].weekEnding):''; weeks=all.filter(w=>w.weekEnding>=anchor); }
   else if(S_sdRange!=='all'){ weeks=all.slice(-parseInt(S_sdRange)); }
-  return weeks.map(w=>({label:fmtWeek(w.weekEnding), m:_sdRow(snum,w)})).reverse(); // newest first
+  return weeks.map(w=>({label:fmtWeek(w.weekEnding), r:_sdRow(snum,w)})).filter(x=>x.r).reverse();
 }
-function _sdMonthly(snum){
-  const groups={};
-  (S.weekHistory||[]).forEach(w=>{ const m=_sdRow(snum,w); if(!m) return; const key=periodKeyFromWeekEnd(w.weekEnding); if(!key) return; (groups[key]||(groups[key]={key,rows:[]})).rows.push(m); });
-  let keys=Object.keys(groups).sort((a,b)=>periodSortKey(a)-periodSortKey(b));
-  let rows=keys.map(key=>{
-    const ms=groups[key].rows, avg={};
-    SD_COLS.forEach(c=>{ const vals=ms.map(x=>x?x[c.k]:null).filter(v=>v!==null&&v!==undefined&&!isNaN(v)).map(Number); avg[c.k]=vals.length?(vals.reduce((a,b)=>a+b,0)/vals.length):null; });
-    return {label:key, key, m:avg, n:ms.length};
-  });
-  if(S_sdRange==='ytd'){ const curFY=periodYear(periodKeyFromWeekEnd(S.currentWeek)||''); rows=rows.filter(r=>periodYear(r.key)===curFY); }
-  else if(S_sdRange!=='all'){ rows=rows.slice(-parseInt(S_sdRange)); }
-  return rows.reverse(); // newest first
+function _sdMonthRows(snum){
+  let periods=[...(S_salonSummaryPeriods||[])].sort((a,b)=>periodSortKey(a.periodKey)-periodSortKey(b.periodKey));
+  if(S_sdRange==='ytd'){ const curFY=periodYear(periodKeyFromWeekEnd(S.currentWeek)||''); periods=periods.filter(pp=>periodYear(pp.periodKey)===curFY); }
+  else if(S_sdRange!=='all'){ periods=periods.slice(-parseInt(S_sdRange)); }
+  return periods.map(pp=>{ const r=(pp.salons||[]).find(x=>String(x.salonNum||'').trim()===String(snum).trim()); return r?{label:pp.periodKey, r, n:pp.weeksN}:null; }).filter(Boolean).reverse();
 }
-function _sdTable(rows){
+function _sdTbl(rows, cols){
   if(!rows.length) return '<div style="padding:24px;color:var(--text-muted);">No data on record for this range.</div>';
-  const head = `<th style="position:sticky;left:0;background:#2E4D8A;color:#fff;text-align:left;padding:7px 10px;z-index:1;">Period</th>`+
-    SD_COLS.map(c=>`<th style="background:#2E4D8A;color:#fff;padding:7px 8px;text-align:center;white-space:nowrap;">${c.lbl}</th>`).join('');
-  const body = rows.map(rw=>{
-    const m=rw.m, cc=m?m.cc:null;
-    const cells = SD_COLS.map(c=>{
-      const v=m?m[c.k]:null, has=(v!==null&&v!==undefined&&!isNaN(v));
-      const cls=(has&&c.t)?c.t(Number(v), cc):'';
-      return `<td class="${cls}" style="padding:6px 8px;text-align:center;white-space:nowrap;">${has?c.f(Number(v)):'—'}</td>`;
-    }).join('');
-    const wkN = rw.n?` <span style="color:var(--text-muted);font-weight:400;font-size:10px;">(${rw.n}w)</span>`:'';
-    return `<tr style="border-bottom:1px solid #eee;"><td style="position:sticky;left:0;background:#fff;font-weight:600;padding:6px 10px;white-space:nowrap;">${rw.label}${wkN}</td>${cells}</tr>`;
+  const ccCol=cols.find(c=>c.k==='cc');
+  const ctx=r=>{ const v=ccCol?ccCol.g(r):NaN; return isNaN(v)?0:Math.round(v); };
+  const head='<th style="position:sticky;left:0;background:#2E4D8A;color:#fff;text-align:left;padding:7px 10px;z-index:1;">Period</th>'+cols.map(c=>'<th style="background:#2E4D8A;color:#fff;padding:7px 8px;text-align:center;white-space:nowrap;">'+c.lbl+'</th>').join('');
+  const bodyRows=rows.map(rw=>{
+    const cc=ctx(rw.r);
+    const cells=cols.map(c=>{ const v=c.g(rw.r); const has=(v!==null&&v!==undefined&&!isNaN(v)); const cls=(has&&c.t)?c.t(v,cc):''; return '<td class="'+cls+'" style="padding:6px 8px;text-align:center;white-space:nowrap;">'+(has?c.f(v):'—')+'</td>'; }).join('');
+    const wkN=rw.n?' <span style="color:var(--text-muted);font-weight:400;font-size:10px;">('+rw.n+'w)</span>':'';
+    return '<tr style="border-bottom:1px solid #eee;"><td style="position:sticky;left:0;background:#fff;font-weight:600;padding:6px 10px;white-space:nowrap;">'+rw.label+wkN+'</td>'+cells+'</tr>';
   }).join('');
-  return `<div style="background:#fff;border-radius:8px;overflow:auto;box-shadow:0 1px 4px rgba(0,0,0,.12);"><table style="width:100%;border-collapse:collapse;font-size:12.5px;"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+  const totCells=cols.map(c=>{ const vals=rows.map(rw=>c.g(rw.r)).filter(v=>v!==null&&v!==undefined&&!isNaN(v)); const a=vals.length?vals.reduce((x,y)=>x+y,0)/vals.length:NaN; return '<td style="padding:7px 8px;text-align:center;font-weight:700;white-space:nowrap;">'+(isNaN(a)?'—':c.f(a))+'</td>'; }).join('');
+  const totRow='<tr style="border-top:2px solid #2E4D8A;background:#eef1f8;"><td style="position:sticky;left:0;background:#eef1f8;font-weight:800;padding:7px 10px;">Average</td>'+totCells+'</tr>';
+  return '<div style="background:#fff;border-radius:8px;overflow:auto;box-shadow:0 1px 4px rgba(0,0,0,.12);"><table style="width:100%;border-collapse:collapse;font-size:12.5px;"><thead><tr>'+head+'</tr></thead><tbody>'+bodyRows+totRow+'</tbody></table></div>';
 }
-function setSdGrain(g){ S_sdGrain=g; sdRender(); }
+function setSdTab(t){ S_sdTab=t; sdRender(); }
 function setSdRange(v){ S_sdRange=v; sdRender(); }
+function setSdSalon(sn){ if(!canDrillSalon(sn)) return; S_sdSalon=String(sn).trim(); sdRender(); }
+function flipSdSalon(dir){ const list=_sdDrillSalons(); if(!list.length) return; let i=list.indexOf(S_sdSalon); if(i<0) i=0; S_sdSalon=list[(i+dir+list.length)%list.length]; sdRender(); }
+function stepSdDailyWeek(dir){
+  const weeks=[...S.weekHistory].sort((a,b)=>new Date(b.weekEnding)-new Date(a.weekEnding)).map(w=>w.weekEnding);
+  if(!weeks.length) return; let i=weeks.indexOf(S_sdDailyWeek); if(i<0) i=0;
+  const ni=i-dir; if(ni<0||ni>=weeks.length) return; S_sdDailyWeek=weeks[ni]; sdRender();
+}
 function sdRender(){
-  const gWrap=document.getElementById('sd-grain');
-  if(gWrap){ const on='background:#fff;color:var(--primary-dark);',off='background:transparent;color:#fff;',base='padding:4px 14px;border:none;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;';
-    gWrap.innerHTML=[['daily','Daily'],['weekly','Weekly'],['monthly','Monthly']].map(([k,l])=>`<button onclick="setSdGrain('${k}')" style="${base}${S_sdGrain===k?on:off}">${l}</button>`).join('');
+  // salon switcher
+  const swWrap=document.getElementById('sd-salon');
+  if(swWrap){ const list=_sdDrillSalons();
+    swWrap.innerHTML='<button onclick="flipSdSalon(-1)" title="Previous salon" style="background:rgba(255,255,255,.15);color:#fff;border:none;border-radius:6px;width:26px;height:26px;cursor:pointer;">&#9664;</button>'
+      +'<select onchange="setSdSalon(this.value)" style="font-size:13px;padding:4px 8px;border-radius:6px;border:none;cursor:pointer;max-width:200px;">'+list.map(sn=>'<option value="'+sn+'" '+(sn===S_sdSalon?'selected':'')+'>'+salonDisplay(sn)+'</option>').join('')+'</select>'
+      +'<button onclick="flipSdSalon(1)" title="Next salon" style="background:rgba(255,255,255,.15);color:#fff;border:none;border-radius:6px;width:26px;height:26px;cursor:pointer;">&#9654;</button>';
   }
+  // tabs
+  const tWrap=document.getElementById('sd-tabs');
+  if(tWrap){ const on='background:#fff;color:var(--primary-dark);',off='background:transparent;color:#fff;',base='padding:4px 14px;border:none;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;';
+    tWrap.innerHTML=[['weekly','Weekly'],['monthly','Monthly'],['daily','Daily'],['reviews','Reviews']].map(([k,l])=>'<button onclick="setSdTab(\''+k+'\')" style="'+base+(S_sdTab===k?on:off)+'">'+l+'</button>').join('');
+  }
+  // range control (weekly/monthly only)
   const rWrap=document.getElementById('sd-range-wrap'), rSel=document.getElementById('sd-range');
-  if(S_sdGrain==='daily'){ if(rWrap) rWrap.style.display='none'; }
-  else if(rSel){ if(rWrap) rWrap.style.display='inline-flex';
-    const opts = S_sdGrain==='weekly' ? [['8','Last 8 weeks'],['13','Last 13 weeks'],['26','Last 26 weeks'],['ytd','YTD'],['all','All']]
-                                      : [['3','Last 3 months'],['6','Last 6 months'],['12','Last 12 months'],['ytd','YTD'],['all','All']];
-    if(!opts.some(o=>o[0]===S_sdRange)) S_sdRange = (S_sdGrain==='weekly'?'13':'6');
-    rSel.innerHTML=opts.map(([v,l])=>`<option value="${v}" ${S_sdRange===v?'selected':''}>${l}</option>`).join('');
-  }
+  if(S_sdTab==='weekly'||S_sdTab==='monthly'){
+    if(rWrap) rWrap.style.display='inline-flex';
+    const opts=S_sdTab==='weekly'?[['8','Last 8 weeks'],['13','Last 13 weeks'],['26','Last 26 weeks'],['ytd','YTD'],['all','All']]
+                                 :[['3','Last 3 months'],['6','Last 6 months'],['12','Last 12 months'],['ytd','YTD'],['all','All']];
+    if(!opts.some(o=>o[0]===S_sdRange)) S_sdRange=(S_sdTab==='weekly'?'13':'6');
+    if(rSel) rSel.innerHTML=opts.map(o=>'<option value="'+o[0]+'" '+(S_sdRange===o[0]?'selected':'')+'>'+o[1]+'</option>').join('');
+  } else if(rWrap){ rWrap.style.display='none'; }
+  // body
   const body=document.getElementById('sd-body'); if(!body) return;
-  if(S_sdGrain==='daily'){
-    body.innerHTML='<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">Most recent 7 days — click any day for the per-stylist breakdown.</div><div id="sd-daily-host"></div>';
-    try{ openSalonDaily(S_sdSalon,'sd-daily-host'); }catch(e){ body.innerHTML='<div style="padding:24px;color:var(--text-muted);">Daily data unavailable.</div>'; }
-    return;
+  if(S_sdTab==='weekly'){ body.innerHTML=_sdTbl(_sdWeekRows(S_sdSalon), SD_WEEK_COLS); }
+  else if(S_sdTab==='monthly'){
+    const note=(S_salonSummaryPeriods&&S_salonSummaryPeriods.length)?'<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Monthly salon summary — the same figures that drive manager bonuses (week count per row).</div>':'<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">No monthly salon summary loaded yet.</div>';
+    body.innerHTML=note+_sdTbl(_sdMonthRows(S_sdSalon), SD_MONTH_COLS);
   }
-  const rows = (S_sdGrain==='weekly') ? _sdWeekly(S_sdSalon) : _sdMonthly(S_sdSalon);
-  const note = (S_sdGrain==='monthly') ? '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Monthly = average of the weekly figures in that month (week count shown per row).</div>' : '';
-  body.innerHTML = note + _sdTable(rows);
+  else if(S_sdTab==='daily'){
+    body.innerHTML='<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">'
+      +'<button onclick="stepSdDailyWeek(-1)" title="Previous week" style="border:1px solid var(--border);background:#fff;border-radius:6px;width:28px;height:28px;cursor:pointer;">&#9664;</button>'
+      +'<span style="font-size:13px;font-weight:700;">Week ending '+(S_sdDailyWeek?fmtWeek(S_sdDailyWeek):'—')+'</span>'
+      +'<button onclick="stepSdDailyWeek(1)" title="Next week" style="border:1px solid var(--border);background:#fff;border-radius:6px;width:28px;height:28px;cursor:pointer;">&#9654;</button>'
+      +'</div><div id="sd-daily-host"></div>';
+    try{ openSalonDaily(S_sdSalon,'sd-daily-host',S_sdDailyWeek); }catch(e){}
+  }
+  else if(S_sdTab==='reviews'){
+    try{ body.innerHTML='<div style="background:#fff;border-radius:8px;padding:14px;box-shadow:0 1px 4px rgba(0,0,0,.12);">'+renderSalonReviewBody(S_sdSalon)+'</div>'; }
+    catch(e){ body.innerHTML='<div style="padding:24px;color:var(--text-muted);">Review unavailable for this salon.</div>'; }
+  }
 }
 function openSalonDrill(salonNum){
   if(typeof canDrillSalon==='function' && !canDrillSalon(salonNum)) return;  // role/assignment gate
-  S_sdSalon=String(salonNum).trim(); S_sdGrain='weekly'; S_sdRange='13';
+  S_sdSalon=String(salonNum).trim(); S_sdTab='weekly'; S_sdRange='13'; S_sdDailyWeek=S.currentWeek;
   const old=document.getElementById('salon-drill-overlay'); if(old) old.remove();
   const ov=document.createElement('div'); ov.id='salon-drill-overlay';
   ov.style.cssText='position:fixed;inset:0;z-index:9999;background:#fff;display:flex;flex-direction:column;';
-  ov.innerHTML=`
-    <style>#salon-drill-overlay td.c1,#salon-drill-overlay td.c2,#salon-drill-overlay td.c3,#salon-drill-overlay td.c4{font-weight:600;}</style>
-    <div style="background:var(--primary-dark);color:#fff;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-      <strong style="font-size:15px;">${salonDisplay(S_sdSalon)} — Performance Deep Dive</strong>
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-        <span id="sd-grain" style="display:inline-flex;gap:2px;background:rgba(255,255,255,.15);border-radius:12px;padding:2px;"></span>
-        <span id="sd-range-wrap" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;">Show <select id="sd-range" onchange="setSdRange(this.value)" style="font-size:12px;padding:3px 6px;border-radius:6px;border:none;cursor:pointer;"></select></span>
-        <button onclick="document.getElementById('salon-drill-overlay').remove()" style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,.4);border-radius:6px;padding:4px 12px;cursor:pointer;font-size:13px;">Close</button>
-      </div>
-    </div>
-    <div id="sd-body" style="overflow:auto;flex:1;background:#f4f5f7;padding:16px;"></div>`;
+  ov.innerHTML=''
+    +'<style>#salon-drill-overlay td.c1,#salon-drill-overlay td.c2,#salon-drill-overlay td.c3,#salon-drill-overlay td.c4{font-weight:600;}</style>'
+    +'<div style="background:var(--primary-dark);color:#fff;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">'
+    +  '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><strong style="font-size:15px;">Store View</strong><span id="sd-salon" style="display:inline-flex;align-items:center;gap:4px;"></span></div>'
+    +  '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'
+    +    '<span id="sd-tabs" style="display:inline-flex;gap:2px;background:rgba(255,255,255,.15);border-radius:12px;padding:2px;"></span>'
+    +    '<span id="sd-range-wrap" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;">Show <select id="sd-range" onchange="setSdRange(this.value)" style="font-size:12px;padding:3px 6px;border-radius:6px;border:none;cursor:pointer;"></select></span>'
+    +    '<button onclick="document.getElementById(\'salon-drill-overlay\').remove()" style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,.4);border-radius:6px;padding:4px 12px;cursor:pointer;font-size:13px;">Close</button>'
+    +  '</div>'
+    +'</div>'
+    +'<div id="sd-body" style="overflow:auto;flex:1;background:#f4f5f7;padding:16px;"></div>';
   document.body.appendChild(ov);
   sdRender();
 }
