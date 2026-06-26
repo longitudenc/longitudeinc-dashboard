@@ -2348,6 +2348,10 @@ function reviewSalonList(){
     sns = snap ? snap.salons.map(s=>String(s.salonNum||'').trim()) : [];
   }
   sns = [...new Set(sns.filter(Boolean))].filter(sn=>canDrillSalon(sn)).sort((a,b)=>parseInt(a,10)-parseInt(b,10));
+  if(!sns.length){
+    sns = [...new Set((S.weekHistory||[]).flatMap(w=>(w.salons||[]).map(s=>String(s.salonNum||'').trim())))]
+      .filter(Boolean).filter(sn=>canDrillSalon(sn)).sort((a,b)=>parseInt(a,10)-parseInt(b,10));
+  }
   return sns;
 }
 
@@ -3102,25 +3106,23 @@ function renderSdTrendsShell(){
   if(!S_trendMetric) S_trendMetric='cc';
   const mks=['cc','lyDiff','ccG','sgr','prod','nr','rr','hc','mbc','ssW','wts','pay','cph'];
   const mbtns=mks.map(function(k){ var lbl=(TREND_METRICS[k]&&TREND_METRICS[k].label)||k; var on=(k===S_trendMetric); return '<button onclick="sdDrawTrends(\''+k+'\')" style="padding:4px 10px;border-radius:8px;font-size:11.5px;font-weight:600;cursor:pointer;border:1px solid var(--border);'+(on?'background:var(--primary-dark);color:#fff;':'background:#fff;color:var(--text);')+'">'+lbl+'</button>'; }).join('');
-  const wins=[[20,'20 wks'],[52,'52 wks'],['ytd','YTD'],['all','All']];
-  const wbtns=wins.map(function(x){ var on=(String(S_trendWindow)===String(x[0])); return '<button onclick="sdSetTrendWin(\''+x[0]+'\')" style="padding:4px 10px;border-radius:8px;font-size:11.5px;font-weight:600;cursor:pointer;border:1px solid var(--border);'+(on?'background:var(--primary-dark);color:#fff;':'background:#fff;color:var(--text);')+'">'+x[1]+'</button>'; }).join('');
-  const pyOn=!!S_trendPriorYear;
-  const pyBtn='<button onclick="sdToggleTrendPY()" style="padding:4px 10px;border-radius:8px;font-size:11.5px;font-weight:600;cursor:pointer;border:1px solid var(--border);'+(pyOn?'background:#6b3fa0;color:#fff;':'background:#fff;color:var(--text);')+'">Prior Year</button>';
   return '<div style="background:#fff;border-radius:8px;padding:12px;box-shadow:0 1px 4px rgba(0,0,0,.12);">'
-    +'<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px;">'+mbtns+'</div>'
-    +'<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:12px;align-items:center;">'+wbtns+'<span style="width:1px;height:18px;background:var(--border);margin:0 4px;"></span>'+pyBtn+'</div>'
+    +'<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px;">'+mbtns+'</div>'
     +'<div id="sd-trend-host" style="min-height:380px;"></div></div>';
 }
 function sdSetTrendWin(w){ S_trendWindow=(w==='ytd'||w==='all')?w:parseInt(w,10); sdDrawTrends(); }
 function sdDrawTrends(metric){
   if(metric) S_trendMetric=metric;
+  // Persist legend show/hide across metric + window switches (otherwise the
+  // focus salon snaps back visible on every rebuild).
+  if(S_trendChart){ try{ const snap={}; S_trendChart.data.datasets.forEach((ds,i)=>{ const base=(ds.label||'').endsWith(' (PY)')?ds.label.slice(0,-5):(ds.label||''); snap[base]=S_trendChart.isDatasetVisible(i); }); S_trendVisSnapshot=snap; }catch(e){} }
   const b=document.getElementById('sd-body'); if(!b) return;
   b.innerHTML=renderSdTrendsShell();
   // selectTrendMetric guards on AMS[S.currentAM]; point it at this salon's AM
   // for the call, then restore so the underlying page state is untouched.
   const _savedAM=S.currentAM, _savedDrill=S_drillSalon, amId=amOf(S_sdSalon);
   if(amId) S.currentAM=amId; S_drillSalon=null;
-  try{ selectTrendMetric(S_trendMetric||'cc', null, S_sdSalon, 'sd-trend-host'); }catch(e){}
+  try{ selectTrendMetric(S_trendMetric||'cc', null, S_sdSalon, 'sd-trend-host', true); }catch(e){}
   S.currentAM=_savedAM; S_drillSalon=_savedDrill;
 }
 function sdToggleTrendPY(){ S_trendPriorYear=!S_trendPriorYear; sdDrawTrends(); }
@@ -3689,7 +3691,7 @@ function renderTrendsDrill(salonNum){
   selectTrendMetric(S_trendMetric, document.querySelector('.trend-metric-btn.active'), salonNum);
 }
 
-function selectTrendMetric(key, btn, overrideSalon, hostId){
+function selectTrendMetric(key, btn, overrideSalon, hostId, storeView){
   S_trendMetric = key;
   document.querySelectorAll('.trend-metric-btn').forEach(b=>b.classList.remove('active'));
   // If no btn passed, find and activate the matching one
@@ -3750,7 +3752,7 @@ function selectTrendMetric(key, btn, overrideSalon, hostId){
   }
   // Ensure the focus salon is always present even if scoping missed it.
   if(drillSalon && !allAMSalons.includes(drillSalon)) allAMSalons = [drillSalon, ...allAMSalons];
-  const amSalons = allAMSalons;
+  const amSalons = (storeView && drillSalon) ? [drillSalon] : allAMSalons;
 
   const palette = ['#4e79a7','#f28e2b','#e15759','#76b7b2','#59a14f','#edc948','#b07aa1','#ff9da7','#9c755f','#bab0ac'];
   const pointStyles = ['circle','rect','triangle','star','rectRot','crossRot','cross','dash','rectRounded','circle'];
@@ -3915,15 +3917,21 @@ function selectTrendMetric(key, btn, overrideSalon, hostId){
   });
 
   const salonName = drillSalon ? (SALON_NAMES[drillSalon]||drillSalon) : null;
-  const chartTitle = drillSalon
-    ? `${metric.label} — ${am.name}<span id="trend-focus-label"></span>`
-    : `${metric.label} — ${am.name}`;
-  const chartSub = drillSalon
-    ? `Click the legend to add or remove salons · ${weeks.length} weeks`
-    : `Each salon · AM average (bold) · Company average (dashed) · ${weeks.length} weeks`;
-  const backBtn = drillSalon
-    ? `<button class="back-btn" onclick="drillBack()">← Back</button>`
-    : '';
+  const chartTitle = storeView
+    ? `${metric.label}<span id="trend-focus-label"></span>`
+    : (drillSalon
+        ? `${metric.label} — ${am.name}<span id="trend-focus-label"></span>`
+        : `${metric.label} — ${am.name}`);
+  const chartSub = storeView
+    ? `Selected salon vs Company average · ${weeks.length} weeks`
+    : (drillSalon
+        ? `Click the legend to add or remove salons · ${weeks.length} weeks`
+        : `Each salon · AM average (bold) · Company average (dashed) · ${weeks.length} weeks`);
+  const backBtn = (storeView || !drillSalon)
+    ? ''
+    : `<button class="back-btn" onclick="drillBack()">← Back</button>`;
+  const pyFn = storeView ? 'sdToggleTrendPY()' : 'toggleTrendPriorYear()';
+  const winFn = storeView ? 'sdSetTrendWin' : 'setTrendWindow';
 
   const unit = metric.unit || '';
   const dec = (key==='cph') ? 2 : (unit==='%' ? 1 : (key==='cc' ? 0 : 1));
@@ -3960,14 +3968,14 @@ function selectTrendMetric(key, btn, overrideSalon, hostId){
         <div class="trend-chart-sub">${chartSub}</div>
       </div>
       <div style="margin-left:auto;display:flex;gap:4px;align-items:center;">
-        <button onclick="toggleTrendPriorYear()" title="Overlay the same window from the previous year"
+        <button onclick="${pyFn}" title="Overlay the same window from the previous year"
           style="padding:4px 12px;border-radius:16px;border:1px solid ${S_trendPriorYear?'var(--primary)':'var(--border)'};font-size:11px;font-weight:600;cursor:pointer;background:${S_trendPriorYear?'var(--primary)':'white'};color:${S_trendPriorYear?'white':'var(--text)'};margin-right:8px;">
           ${S_trendPriorYear?'✓ ':''}Prior Year
         </button>
         ${[{w:20,l:'20 wk'},{w:52,l:'52 wk'},{w:'ytd',l:'YTD'},{w:'all',l:'All'}].map(o=>{
           const arg = typeof o.w === 'string' ? "'"+o.w+"'" : o.w;
           const active = S_trendWindow===o.w;
-          return `<button onclick="setTrendWindow(${arg})" style="padding:4px 12px;border-radius:16px;border:1px solid var(--border);font-size:11px;font-weight:600;cursor:pointer;background:${active?'var(--primary)':'white'};color:${active?'white':'var(--text)'};">${o.l}</button>`;
+          return `<button onclick="${winFn}(${arg})" style="padding:4px 12px;border-radius:16px;border:1px solid var(--border);font-size:11px;font-weight:600;cursor:pointer;background:${active?'var(--primary)':'white'};color:${active?'white':'var(--text)'};">${o.l}</button>`;
         }).join('')}
       </div>
     </div>
