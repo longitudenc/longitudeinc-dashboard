@@ -1383,7 +1383,12 @@ function onDataLoaded(data){
 
     if(S.weekHistory.length > 0){
       const sorted = [...S.weekHistory].sort((a,b)=>new Date(b.weekEnding)-new Date(a.weekEnding));
-      S.currentWeek = sorted[0].weekEnding;
+      // Default to the last COMPLETED week: skip the in-progress current week
+      // (its Friday end is today or later), which only carries partial data.
+      const _now=new Date();
+      const _todayLocal=`${_now.getFullYear()}-${String(_now.getMonth()+1).padStart(2,'0')}-${String(_now.getDate()).padStart(2,'0')}`;
+      const _lastDone = sorted.find(w=>String(w.weekEnding) < _todayLocal);
+      S.currentWeek = (_lastDone ? _lastDone.weekEnding : sorted[0].weekEnding);
     }
 
     // Compute prior-fiscal-year average CC per salon for the CC +/- LY metric.
@@ -8177,9 +8182,16 @@ function fmtReviewDate(raw){
 // (window._profileEmpRows), grouped by calendar month of the selected year.
 // Replaces the old getReviewData sheet read, which was empty.
 function computeReviewData(globalId, year){
-  // Consolidated monthly per-employee numbers from BonusData (one row per period),
-  // so floaters review on MERGED figures and NR/RR are exact.
-  const rows = (window._profileBonusRows||[]).filter(r=>periodYear(r.period)===year);
+  // Consolidated monthly per-employee numbers from BonusData, sourced directly from
+  // S_bonusPeriods by globalId — self-contained so this works for ANY employee (e.g.
+  // bulk review printing) WITHOUT their profile being open. Floaters review on MERGED
+  // figures and NR/RR are exact.
+  const rows = [];
+  (S_bonusPeriods||[]).forEach(per=>{
+    if(periodYear(per.periodKey)!==year) return;
+    const emp = (per.employees||[]).find(e=>String(e.globalId||'').trim()===String(globalId).trim());
+    if(emp) rows.push({period:per.periodKey, ...emp});
+  });
   const keys = ['nr','rr','hc','mbc','prod'];
   const valOf = (r,k)=>{
     let v;
@@ -8226,7 +8238,7 @@ function computeReviewData(globalId, year){
   const prof = (S.profileMap||{})[globalId]||{};
   const effectiveDate = fmtReviewDate(prof.rehireDate || prof.dateOfHire || '');
 
-  return { success:true, hasData:rows.length>0, grid, annualAvg, qAvgs, scores, totalPts, raiseEarned, monthsWorked, homeSalon, payrollName:_reviewName||'', effectiveDate };
+  return { success:true, hasData:rows.length>0, grid, annualAvg, qAvgs, scores, totalPts, raiseEarned, monthsWorked, homeSalon, payrollName:(home&&home.payrollName)||_reviewName||'', effectiveDate };
 }
 
 function loadReview(){
@@ -8464,7 +8476,10 @@ function renderReview(data){
 function printReview(globalId){
   const el = document.getElementById('review-printable');
   if(!el) return;
-  const w = window.open('','_blank','width=1100,height=800');
+  // 'about:blank' (not '') so the popup never re-loads the app URL — that reload
+  // would hit the role gate and flash the "coming soon" screen instead of the review.
+  const w = window.open('about:blank','_blank','width=1100,height=800');
+  if(!w){ alert('Please allow pop-ups for this site, then click Print Review again.'); return; }
   w.document.write(`<!DOCTYPE html><html><head><title>Annual Review — ${_reviewName} ${_reviewYear}</title>
     <style>
       body{font-family:Arial,sans-serif;margin:20px;font-size:11px;}
@@ -8503,27 +8518,56 @@ function initBulkPrintSelectors(){
 }
 
 function bulkPrintReviews(){
-  const salonNum = document.getElementById('bulk-salon-select')?.value || 'ALL';
-  const year     = parseInt(document.getElementById('bulk-year-select')?.value) || new Date().getFullYear();
+  // Generate the bulk reviews CLIENT-SIDE from computeReviewData — the exact same
+  // consolidated-BonusData logic (with the ***/empty->2 newcomer rule) used by the
+  // on-screen Annual Review — so printed reviews always match the screen. No server
+  // round-trip and no second scoring implementation to drift.
+  const salonSel = document.getElementById('bulk-salon-select')?.value || 'ALL';
+  const year     = parseInt(document.getElementById('bulk-year-select')?.value) || (new Date().getFullYear());
   const btn      = document.getElementById('bulk-print-btn');
   const status   = document.getElementById('bulk-print-status');
+  if(btn){ btn.disabled = true; btn.textContent = '⏳ Generating...'; }
+  if(status) status.textContent = 'Building reviews from consolidated data…';
 
-  btn.disabled = true;
-  btn.textContent = '⏳ Loading...';
-  status.textContent = 'Fetching review data for all stylists — this may take 30-60 seconds...';
+  // Let the status paint before the synchronous build loop.
+  setTimeout(()=>{
+    const _reset=()=>{ if(btn){ btn.disabled=false; btn.textContent='🖨 Generate Reviews'; } };
+    try {
+      // Same population as the on-screen Reviews tab: active, home-salon, worked this
+      // year, AMs excluded, full-year managers routed to the salon review.
+      const allSalons = [...new Set(Object.values(S.homeDataMap||{}).map(r=>String((r&&r.homeSalon)||'').trim()).filter(Boolean))].sort();
+      const salons = (!salonSel || salonSel==='ALL') ? allSalons : [String(salonSel)];
+      const seen=new Set(), people=[];
+      salons.forEach(sn=>{ (stylistsForSalon(sn)||[]).forEach(pp=>{ const g=String(pp.globalId||'').trim(); if(g && !seen.has(g)){ seen.add(g); people.push({globalId:g, name:pp.name||''}); } }); });
 
-  fetch('/api/gs/generateBulkReviews',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})}).then(r=>r.json()).then(data=>{
-      btn.disabled = false;
-      btn.textContent = '🖨 Generate Reviews';
-      if(!data.success){ status.textContent = 'Error: ' + data.error; return; }
-      status.textContent = `Generating ${data.reviews.length} reviews — opening print window...`;
-      setTimeout(()=>openBulkPrintWindow(data), 100);
-    })
-    .catch(err=>{
-      btn.disabled = false;
-      btn.textContent = '🖨 Generate Reviews';
-      status.textContent = 'Error: ' + String(err);
-    });
+      const reviews=[];
+      people.forEach(pp=>{
+        const rv = computeReviewData(pp.globalId, year);
+        if(!rv || !rv.hasData) return;                 // only people with data that year
+        const home = (S.homeDataMap && S.homeDataMap[pp.globalId]) || {};
+        reviews.push({ ...rv,
+          globalId: pp.globalId,
+          name: fmtName(pp.name || rv.payrollName || ''),
+          year,
+          baseWage: parseFloat(home.baseWage)||0,
+        });
+      });
+      reviews.sort((a,b)=> String(a.homeSalon).localeCompare(String(b.homeSalon)) || String(a.name).localeCompare(String(b.name)));
+
+      // Disc points keyed by the exact (lowercased) name buildReviewHTML looks up.
+      const curPeriod = periodKeyFromWeekEnd(S.currentWeek);
+      const discPts={};
+      reviews.forEach(r=>{ const pts = activeDiscPoints(r.globalId, curPeriod)||0; if(pts) discPts[(r.name||'').toLowerCase()] = pts; });
+
+      _reset();
+      if(!reviews.length){ if(status) status.textContent='No reviewable stylists found for that selection.'; return; }
+      if(status) status.textContent=`Opening ${reviews.length} review${reviews.length!==1?'s':''}…`;
+      openBulkPrintWindow({ success:true, year, reviews, discPts });
+    } catch(err){
+      _reset();
+      if(status) status.textContent='Error: '+String((err&&err.message)||err);
+    }
+  }, 30);
 }
 
 function openBulkPrintWindow(data){
@@ -8679,7 +8723,8 @@ function openBulkPrintWindow(data){
     </div>`;
   };
 
-  const w = window.open('', '_blank', 'width=1100,height=800');
+  const w = window.open('about:blank', '_blank', 'width=1100,height=800');
+  if(!w){ alert('Please allow pop-ups for this site, then generate the reviews again.'); return; }
   const allHTML = data.reviews.map(r => buildReviewHTML(r)).join('');
 
   w.document.write(`<!DOCTYPE html><html><head>
