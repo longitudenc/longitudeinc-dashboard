@@ -3220,12 +3220,33 @@ function _sdYtdPeriods(){
 function _sdMgrBonusYTD(snum){
   const periods=_sdYtdPeriods();
   if(!periods.length) return '<div style="color:var(--text-muted);padding:10px;">No completed periods this fiscal year.</div>';
-  let totPay=0, totPot=0;
-  const rows=periods.map(function(pp){ var R=_sdMgrResult(snum, pp); var pay=R?R.result.finalPayout:0, pot=R?R.result.totalPotential:0; totPay+=pay; totPot+=pot; var pct=pot>0?(pay/pot*100):0;
-    return '<tr style="border-bottom:1px solid #eee;cursor:pointer;" onclick="setSdBonusPeriod(\''+pp.periodKey+'\');setSdBonusView(\'month\')" title="Open this month bonus card"><td style="padding:6px 10px;font-weight:600;">'+pp.periodKey+'<span style="color:var(--text-muted);font-weight:400;font-size:10px;"> ('+pp.weeksN+'w)</span></td><td style="padding:6px 8px;text-align:right;">'+fmtMoney(pot)+'</td><td style="padding:6px 8px;text-align:right;font-weight:700;">'+fmtMoney(pay)+'</td><td style="padding:6px 8px;text-align:right;">'+pct.toFixed(0)+'%</td></tr>'; }).join('');
+  const byMgr={}, periodTot={};
+  periods.forEach(function(pp){
+    var R=_sdMgrResult(snum, pp); if(!R) return;
+    var pay=R.result?R.result.finalPayout:0, pot=R.result?R.result.totalPotential:0;
+    var br=R.bonusMgrRow, mi=R.mgrInfo;
+    var gid=String((br&&br.globalId)||(mi&&mi.globalId)||'').trim();
+    var rawName=(br&&br.empName)||(mi&&mi.name)||'Manager';
+    var key=gid||('name:'+rawName);
+    var o=byMgr[key]||(byMgr[key]={gid:gid,name:fmtName(rawName),byPk:{},pay:0,pot:0});
+    o.byPk[pp.periodKey]=(o.byPk[pp.periodKey]||0)+pay; o.pay+=pay; o.pot+=pot;
+    periodTot[pp.periodKey]=(periodTot[pp.periodKey]||0)+pay;
+  });
+  const mgrs=Object.values(byMgr);
+  if(!mgrs.length) return '<div style="color:var(--text-muted);padding:10px;">No manager bonus on record this fiscal year.</div>';
+  mgrs.sort((a,b)=>b.pay-a.pay);
+  var totPay=0, totPot=0;
+  const monthHead=periods.map(function(pp){ return '<th style="padding:7px 8px;text-align:right;white-space:nowrap;cursor:pointer;" onclick="setSdBonusPeriod(\''+pp.periodKey+'\');setSdBonusView(\'month\')" title="Open this month bonus card">'+pp.periodKey+'</th>'; }).join('');
+  const rows=mgrs.map(function(o){ totPay+=o.pay; totPot+=o.pot; var pct=o.pot>0?(o.pay/o.pot*100):0; var nmSafe=(o.name||'').replace(/'/g,''); var nameCell=o.gid?('<span class="salon-link" onclick="openStylistBonus(\''+o.gid+'\',\''+nmSafe+'\')" style="cursor:pointer;">'+o.name+'</span>'):o.name;
+    var monthCells=periods.map(function(pp){ var v=o.byPk[pp.periodKey]; return '<td style="padding:6px 8px;text-align:right;'+(v?'':'color:#ccc;')+'">'+(v?fmtMoney(v):'—')+'</td>'; }).join('');
+    return '<tr style="border-bottom:1px solid #eee;"><td style="position:sticky;left:0;background:#fff;padding:6px 10px;font-weight:600;white-space:nowrap;">'+nameCell+'</td>'+monthCells+'<td style="padding:6px 8px;text-align:right;font-weight:700;border-left:1px solid #e3e3e3;">'+fmtMoney(o.pay)+'</td><td style="padding:6px 8px;text-align:right;">'+fmtMoney(o.pot)+'</td><td style="padding:6px 8px;text-align:right;">'+pct.toFixed(0)+'%</td></tr>'; }).join('');
   var totPct=totPot>0?(totPay/totPot*100):0;
-  const totRow='<tr style="border-top:2px solid #2E4D8A;background:#eef1f8;"><td style="padding:7px 10px;font-weight:800;">YTD Total</td><td style="padding:7px 8px;text-align:right;font-weight:700;">'+fmtMoney(totPot)+'</td><td style="padding:7px 8px;text-align:right;font-weight:800;">'+fmtMoney(totPay)+'</td><td style="padding:7px 8px;text-align:right;font-weight:700;">'+totPct.toFixed(0)+'%</td></tr>';
-  return '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Click a month to open its full bonus card.</div><div style="background:#fff;border-radius:8px;overflow:auto;box-shadow:0 1px 4px rgba(0,0,0,.12);"><table style="width:100%;border-collapse:collapse;font-size:12.5px;"><thead><tr style="background:#2E4D8A;color:#fff;"><th style="padding:7px 10px;text-align:left;">Period</th><th style="padding:7px 8px;text-align:right;">Potential</th><th style="padding:7px 8px;text-align:right;">Payout</th><th style="padding:7px 8px;text-align:right;">%</th></tr></thead><tbody>'+rows+totRow+'</tbody></table></div>';
+  var totRow='';
+  if(mgrs.length>1){
+    var monthTotCells=periods.map(function(pp){ return '<td style="padding:7px 8px;text-align:right;font-weight:700;">'+fmtMoney(periodTot[pp.periodKey]||0)+'</td>'; }).join('');
+    totRow='<tr style="border-top:2px solid #2E4D8A;background:#eef1f8;"><td style="position:sticky;left:0;background:#eef1f8;padding:7px 10px;font-weight:800;">All Managers</td>'+monthTotCells+'<td style="padding:7px 8px;text-align:right;font-weight:800;border-left:1px solid #d8dce8;">'+fmtMoney(totPay)+'</td><td style="padding:7px 8px;text-align:right;font-weight:700;">'+fmtMoney(totPot)+'</td><td style="padding:7px 8px;text-align:right;font-weight:700;">'+totPct.toFixed(0)+'%</td></tr>';
+  }
+  return '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Month-by-month manager payout, then YTD totals. Click a month header to open the full bonus card for that month.</div><div style="background:#fff;border-radius:8px;overflow:auto;box-shadow:0 1px 4px rgba(0,0,0,.12);"><table style="width:100%;border-collapse:collapse;font-size:12.5px;"><thead><tr style="background:#2E4D8A;color:#fff;"><th style="position:sticky;left:0;background:#2E4D8A;padding:7px 10px;text-align:left;">Manager</th>'+monthHead+'<th style="padding:7px 8px;text-align:right;border-left:1px solid rgba(255,255,255,.25);">YTD Payout</th><th style="padding:7px 8px;text-align:right;">YTD Potential</th><th style="padding:7px 8px;text-align:right;">Earned %</th></tr></thead><tbody>'+rows+totRow+'</tbody></table></div>';
 }
 function _sdStylistBonusYTD(snum){
   const periods=_sdYtdPeriods();
