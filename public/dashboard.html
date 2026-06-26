@@ -916,6 +916,14 @@ let INACTIVE_MAP = {};
 // Is this employee currently inactive (termed/left)? Used to exclude from the
 // ADP export and to mark in bonus views. History is preserved either way.
 function isInactive(globalId){ const r = INACTIVE_MAP[String(globalId||'').trim()]; return !!(r && r.inactive); }
+// Did this person fall off SD3's CURRENT employee report? The daily profile scrape
+// refreshes every employed person's row (fresh scrapedAt); a stale row means they
+// dropped off the report = they're gone. Conservative: true ONLY for a stale EXISTING
+// row, so an active person (fresh row, or no row at all) is never wrongly excluded.
+// Used ONLY to filter the reviews roster — it deliberately does NOT touch isInactive
+// or any bonus math, so historical payouts are never rewritten. Leave-safe: someone on
+// vacation still comes back from SD3 daily and stays fresh.
+function rosterDropped(globalId){ const r = INACTIVE_MAP[String(globalId||'').trim()]; return !!(r && r.droppedOff); }
 function inactiveSince(globalId){ const r = INACTIVE_MAP[String(globalId||'').trim()]; return r ? (r.inactiveDate||'') : ''; }
 // Is this person blocked from being PAID (inactive, or disc-ineligible)? If so
 // their earned payout shows struck-through and is excluded from salon/company
@@ -2238,6 +2246,14 @@ let S_reviewWindow = 'am';         // 'am' | 'company' (for salon scoping)
 let S_reviewHostId = 'am-reviews-body';
 
 // Distinct people who worked a given salon, from loaded weekly employee data.
+// Reviews show the PREFERRED name (SD3 "Employee Name", e.g. "Moss, Camil") with the
+// LEGAL/payroll name in parentheses, e.g. "Camil Moss (Derrick Felton)". When they are
+// the same person with no separate preferred name, just one is shown.
+function reviewName(preferred, legal){
+  const pp = fmtName(String(preferred||'')), ll = fmtName(String(legal||''));
+  if(pp && ll && pp.toLowerCase()!==ll.toLowerCase()) return pp+' ('+ll+')';
+  return pp || ll || '';
+}
 function stylistsForSalon(sn){
   sn = String(sn).trim();
   // AMs never appear in the stylist review list.
@@ -2283,12 +2299,13 @@ function stylistsForSalon(sn){
     gid=String(gid).trim(); if(!gid) return;
     if(homeOf(gid)!==sn) return;          // home salon only (floaters under home store)
     if(!workedThisYear.has(gid)) return;  // must have worked (have BonusData) this year
-    if(isInactive(gid)) return;           // active employees only
+    if(isInactive(gid)) return;           // SD3-flagged inactive
+    if(rosterDropped(gid)) return;        // fell off SD3's current employee report (leave-safe)
     if(amGids.has(gid)) return;           // no AMs
     if(gid===fullYearMgrGid) return;      // full-year manager -> salon review, not here
     const name = String((row&&row.payrollName)||'').trim() || nameByGid[gid] || '';
     if(!name) return;
-    out.push({ globalId:gid, name, position: posByGid[gid]||'' });
+    out.push({ globalId:gid, name, preferred: nameByGid[gid]||'', position: posByGid[gid]||'' });
   });
   return out.sort((a,b)=>fmtName(a.name).localeCompare(fmtName(b.name)));
 }
@@ -2588,8 +2605,8 @@ function renderReviewsTab(hostId, windowKind){
     bodyHtml = sts.length ? `
       <div style="font-size:12px;color:var(--text-muted);margin:10px 0 8px;">Stylists at ${salonDisplay(S_reviewSalonSel)} — click to open the annual review.</div>
       <div style="display:flex;flex-direction:column;gap:6px;max-width:540px;">
-        ${sts.map(s=>`<button onclick="openStylistReview('${s.globalId}', '${String(s.name||'').replace(/'/g,"\\'")}')" style="display:flex;justify-content:space-between;align-items:center;text-align:left;padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:#fff;cursor:pointer;font-size:13px;">
-          <span style="font-weight:600;">${fmtName(s.name||'')}</span>
+        ${sts.map(s=>`<button onclick="openStylistReview('${s.globalId}', '${reviewName(s.preferred,s.name).replace(/'/g,"\\'")}')" style="display:flex;justify-content:space-between;align-items:center;text-align:left;padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:#fff;cursor:pointer;font-size:13px;">
+          <span style="font-weight:600;">${reviewName(s.preferred, s.name)}</span>
           <span style="font-size:11px;color:var(--text-muted);">${s.position==='M'?'Manager':'Stylist'} · Review ›</span>
         </button>`).join('')}
       </div>` : '<div style="padding:24px;color:var(--text-muted);">No stylists on record for this salon yet.</div>';
@@ -8538,7 +8555,7 @@ function bulkPrintReviews(){
       const allSalons = [...new Set(Object.values(S.homeDataMap||{}).map(r=>String((r&&r.homeSalon)||'').trim()).filter(Boolean))].sort();
       const salons = (!salonSel || salonSel==='ALL') ? allSalons : [String(salonSel)];
       const seen=new Set(), people=[];
-      salons.forEach(sn=>{ (stylistsForSalon(sn)||[]).forEach(pp=>{ const g=String(pp.globalId||'').trim(); if(g && !seen.has(g)){ seen.add(g); people.push({globalId:g, name:pp.name||''}); } }); });
+      salons.forEach(sn=>{ (stylistsForSalon(sn)||[]).forEach(pp=>{ const g=String(pp.globalId||'').trim(); if(g && !seen.has(g)){ seen.add(g); people.push({globalId:g, name:pp.name||'', preferred:pp.preferred||''}); } }); });
 
       const reviews=[];
       people.forEach(pp=>{
@@ -8547,7 +8564,7 @@ function bulkPrintReviews(){
         const home = (S.homeDataMap && S.homeDataMap[pp.globalId]) || {};
         reviews.push({ ...rv,
           globalId: pp.globalId,
-          name: fmtName(pp.name || rv.payrollName || ''),
+          name: reviewName(pp.preferred, pp.name || rv.payrollName || ''),
           year,
           baseWage: parseFloat(home.baseWage)||0,
         });
