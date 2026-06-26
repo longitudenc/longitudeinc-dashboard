@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Compass Loader Preview</title>
+<style>
+  body{margin:0;font-family:'Segoe UI',system-ui,sans-serif;}
+  .loading-overlay{position:fixed;inset:0;background:rgba(26,26,46,.92);display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;font-weight:600;flex-direction:column;gap:0;}
+  /* compass + float (identical to the dashboard) */
+  .compass-loader svg{display:block;filter:drop-shadow(0 2px 7px rgba(0,0,0,.4));}
+  .compass-needle{transform-box:fill-box;transform-origin:center;animation:compassSpin 2.1s cubic-bezier(.55,.12,.4,.9) infinite;}
+  @keyframes compassSpin{to{transform:rotate(360deg);}}
+  @keyframes badgeFloat{0%,100%{transform:translateY(0);}50%{transform:translateY(-9px);}}
+  .loading-badge{animation:badgeFloat 3.4s ease-in-out infinite;}
+  /* stand-in for the real longitude-badge.png (a simple ring + wordmark) so the preview works without the asset */
+  .badge-standin{width:180px;height:180px;border-radius:50%;border:3px solid rgba(154,203,58,.85);display:flex;align-items:center;justify-content:center;flex-direction:column;color:#fff;margin-bottom:16px;background:radial-gradient(circle at 50% 40%, rgba(4,134,103,.55), rgba(3,101,78,.15));}
+  .badge-standin .b1{font-size:26px;font-weight:800;letter-spacing:2px;}
+  .badge-standin .b2{font-size:11px;letter-spacing:4px;opacity:.8;margin-top:2px;}
+  .note{position:fixed;bottom:14px;left:0;right:0;text-align:center;font-size:12px;color:rgba(255,255,255,.55);font-weight:400;}
+</style>
+</head>
+<body>
+<div class="loading-overlay">
+  <div class="badge-standin loading-badge"><div class="b1">LONGITUDE</div><div class="b2">I N C</div></div>
+  <div class="compass-loader" aria-hidden="true">
+    <svg viewBox="0 0 100 100" width="92" height="92">
+      <circle cx="50" cy="50" r="46" fill="none" stroke="rgba(255,255,255,.22)" stroke-width="2"/>
+      <circle cx="50" cy="50" r="46" fill="none" stroke="rgba(255,255,255,.5)" stroke-width="2" stroke-dasharray="1.5 7"/>
+      <g fill="rgba(255,255,255,.85)" font-family="Georgia,serif" font-size="9" font-weight="700" text-anchor="middle">
+        <text x="50" y="15">N</text><text x="50" y="93">S</text><text x="89" y="53.5">E</text><text x="11" y="53.5">W</text>
+      </g>
+      <g class="compass-needle">
+        <polygon points="50,17 55.5,50 50,55 44.5,50" fill="#9acb3a"/>
+        <polygon points="50,83 55.5,50 50,45 44.5,50" fill="rgba(255,255,255,.85)"/>
+      </g>
+      <circle cx="50" cy="50" r="3.4" fill="#fff" stroke="#03654e" stroke-width="1.2"/>
+    </svg>
+  </div>
+  <div style="margin-top:14px;">Charting your salons…</div>
+</div>
+<div class="note">Preview only — the real loader uses your longitude-badge.png logo (the ring here is a stand-in).</div>
+</body>
+</html>
