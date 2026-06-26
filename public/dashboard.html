@@ -327,7 +327,7 @@
 
 <!-- Loading overlay -->
 <div class="loading-overlay" id="loading">
-  <img src="longitude-badge.png?v=1" alt="Longitude Inc" style="width:96px;height:96px;margin-bottom:18px;opacity:.9;" />
+  <img src="longitude-badge.png?v=1" alt="Longitude Inc" style="width:220px;height:220px;margin-bottom:22px;opacity:.9;" />
   <div class="spinner"></div>
   <div>Loading AM Dashboard...</div>
 </div>
@@ -2624,7 +2624,7 @@ function renderReviewsTab(hostId, windowKind){
     bodyHtml = '<div style="padding:24px;color:var(--text-muted);">No salons available for reviews in this view.</div>';
   } else if(S_reviewSalonSel==='ALL'){
     if(S_reviewMode==='salon'){
-      bodyHtml = '<div style="padding:24px;color:var(--text-muted);">Pick a specific salon for its Salon / Manager review, or use the <strong>Stylist</strong> tab to view all employees across salons.</div>';
+      bodyHtml = reviewViewAllButton() + '<div style="padding:16px 0;color:var(--text-muted);">Click <strong>View All Reviews</strong> to page through every Salon / Manager review, or pick a single salon above.</div>';
     } else {
       const groups = salons.map(sn=>{
         const sts = stylistsForSalon(sn);
@@ -2650,7 +2650,7 @@ function renderReviewsTab(hostId, windowKind){
         </button>`).join('')}
       </div>` : '<div style="padding:24px;color:var(--text-muted);">No stylists on record for this salon yet.</div>';
   } else {
-    bodyHtml = renderSalonReviewBody(S_reviewSalonSel);
+    bodyHtml = reviewViewAllButton() + renderSalonReviewBody(S_reviewSalonSel);
   }
 
   host.innerHTML = `
@@ -8822,24 +8822,33 @@ let _allRevIdx = 0, _allRevMode = 'scroll';
 function openAllReviews(salonSel){
   const sel = (salonSel===undefined || salonSel===null) ? S_reviewSalonSel : salonSel;
   const year = (typeof _reviewYear!=='undefined' && _reviewYear) ? _reviewYear : (new Date().getFullYear());
-  let data;
-  try { data = gatherBulkReviews(sel, year); }
-  catch(e){ alert('Could not build reviews: '+(e&&e.message||e)); return; }
-  if(!data || !data.reviews.length){ alert('No reviews available for this selection yet.'); return; }
+  let cardsHTML='', count=0, label='Reviews';
+  try {
+    if(S_reviewMode==='salon'){
+      // Salon / Manager reviews: one card per salon in scope (respects the selector;
+      // ALL or no selection => every salon). Reuses the exact on-tab salon review body.
+      const salons = (sel==='ALL' || !sel) ? reviewSalonList() : [String(sel)];
+      cardsHTML = salons.map(sn=>`<div class="review-page"><div style="font-size:15px;font-weight:800;color:var(--primary-dark);border-bottom:2px solid var(--primary);padding-bottom:5px;margin-bottom:8px;">${salonDisplay(sn)} — Salon / Manager Review · ${year}</div>${renderSalonReviewBody(sn)}</div>`).join('');
+      count = salons.length; label = 'Salon Reviews';
+    } else {
+      const data = gatherBulkReviews(sel, year);
+      cardsHTML = buildAllReviewCardsHTML(data); count = data.reviews.length; label = 'Stylist Reviews';
+    }
+  } catch(e){ alert('Could not build reviews: '+(e&&e.message||e)); return; }
+  if(!count || !cardsHTML.trim()){ alert('No reviews available for this selection yet.'); return; }
   _allRevIdx = 0; _allRevMode = 'scroll';
-  const cardsHTML = buildAllReviewCardsHTML(data);
   const old = document.getElementById('all-reviews-overlay'); if(old) old.remove();
   const ov = document.createElement('div');
   ov.id = 'all-reviews-overlay';
-  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:18px;';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#fff;';
   ov.innerHTML = `
     <style>
-      #all-reviews-overlay .review-page{background:#fff;padding:16px;margin:0 auto 14px;max-width:920px;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,.18);}
+      #all-reviews-overlay .review-page{background:#fff;padding:18px;margin:0 auto 16px;max-width:1100px;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,.18);}
       #all-reviews-overlay table{border-collapse:collapse;} #all-reviews-overlay th,#all-reviews-overlay td{border:1px solid #ddd;}
     </style>
-    <div style="background:#fff;width:min(1000px,96vw);height:92vh;border-radius:10px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 10px 40px rgba(0,0,0,.35);">
+    <div style="background:#fff;width:100vw;height:100vh;display:flex;flex-direction:column;overflow:hidden;">
       <div style="background:var(--primary-dark);color:#fff;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-        <strong style="font-size:14px;">All Reviews — ${data.year} <span style="opacity:.7;font-weight:400;">· ${data.reviews.length}</span></strong>
+        <strong style="font-size:14px;">${label} — ${year} <span style="opacity:.7;font-weight:400;">· ${count}</span></strong>
         <div style="display:flex;align-items:center;gap:8px;">
           <span style="display:inline-flex;gap:2px;background:rgba(255,255,255,.15);border-radius:12px;padding:2px;">
             <button id="arv-scroll" onclick="setAllReviewsMode('scroll')" style="padding:4px 12px;border:none;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;">Scroll</button>
