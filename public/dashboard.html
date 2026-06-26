@@ -2863,7 +2863,7 @@ function salonLink(salonNum, label, fromTab){
   // drillIntoSalon re-checks canDrillSalon at the destination too, so this is
   // display-consistency layered on top of the security gate.
   if(!canDrillSalon(salonNum)) return `<span>${label}</span>`;
-  return `<span class="salon-link" onclick="drillIntoSalon('${salonNum}','${fromTab}')" title="View ${salonDisplay(salonNum)} trends">${label}</span>`;
+  return `<span class="salon-link" onclick="openSalonDrill('${salonNum}')" title="Open ${salonDisplay(salonNum)} store view">${label}</span>`;
 }
 // Can the CURRENT user drill into this salon?
 //  - owner/admin/viewer: any salon
@@ -2932,7 +2932,7 @@ function fmtWeek(iso){
 // changes stores without leaving. Weekly reads the per-week salon rows; Monthly
 // reads the TRUE monthly salon summary (S_salonSummaryPeriods) that drives manager
 // bonuses; Daily reuses the existing 7-day strip with week navigation.
-let S_sdSalon='', S_sdTab='weekly', S_sdRange='13', S_sdDailyWeek='';
+let S_sdSalon='', S_sdSection='performance', S_sdTab='weekly', S_sdRange='13', S_sdDailyWeek='';
 
 // Weekly columns read the canonical per-week salon row fields.
 const SD_WEEK_COLS=[
@@ -2969,14 +2969,16 @@ function _sdDrillSalons(){
     .filter(sn=>sn && canDrillSalon(sn)).sort((a,b)=>parseInt(a,10)-parseInt(b,10));
 }
 function _sdWeekRows(snum){
-  const all=[...S.weekHistory].sort((a,b)=>new Date(a.weekEnding)-new Date(b.weekEnding));
+  const today=_sdTodayIso();
+  const all=[...S.weekHistory].filter(w=>String(w.weekEnding)<today).sort((a,b)=>new Date(a.weekEnding)-new Date(b.weekEnding));
   let weeks=all;
   if(S_sdRange==='ytd'){ const anchor=all.length?fiscalYearStartIso(all[all.length-1].weekEnding):''; weeks=all.filter(w=>w.weekEnding>=anchor); }
   else if(S_sdRange!=='all'){ weeks=all.slice(-parseInt(S_sdRange)); }
   return weeks.map(w=>({label:fmtWeek(w.weekEnding), r:_sdRow(snum,w)})).filter(x=>x.r).reverse();
 }
 function _sdMonthRows(snum){
-  let periods=[...(S_salonSummaryPeriods||[])].sort((a,b)=>periodSortKey(a.periodKey)-periodSortKey(b.periodKey));
+  const _curMon=periodSortKey(periodKeyFromWeekEnd(_sdTodayIso())||'');
+  let periods=[...(S_salonSummaryPeriods||[])].filter(pp=>periodSortKey(pp.periodKey)<_curMon).sort((a,b)=>periodSortKey(a.periodKey)-periodSortKey(b.periodKey));
   if(S_sdRange==='ytd'){ const curFY=periodYear(periodKeyFromWeekEnd(S.currentWeek)||''); periods=periods.filter(pp=>periodYear(pp.periodKey)===curFY); }
   else if(S_sdRange!=='all'){ periods=periods.slice(-parseInt(S_sdRange)); }
   return periods.map(pp=>{ const r=(pp.salons||[]).find(x=>String(x.salonNum||'').trim()===String(snum).trim()); return r?{label:pp.periodKey, r, n:pp.weeksN}:null; }).filter(Boolean).reverse();
@@ -2996,7 +2998,10 @@ function _sdTbl(rows, cols){
   const totRow='<tr style="border-top:2px solid #2E4D8A;background:#eef1f8;"><td style="position:sticky;left:0;background:#eef1f8;font-weight:800;padding:7px 10px;">Average</td>'+totCells+'</tr>';
   return '<div style="background:#fff;border-radius:8px;overflow:auto;box-shadow:0 1px 4px rgba(0,0,0,.12);"><table style="width:100%;border-collapse:collapse;font-size:12.5px;"><thead><tr>'+head+'</tr></thead><tbody>'+bodyRows+totRow+'</tbody></table></div>';
 }
+function _sdTodayIso(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 function setSdTab(t){ S_sdTab=t; sdRender(); }
+function setSdSection(sec){ S_sdSection=sec; if(sec==='performance' && !S_sdTab) S_sdTab='weekly'; sdRender(); }
+function _sdPlaceholder(title,msg){ return '<div style="background:#fff;border-radius:8px;padding:40px 24px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.12);"><div style="font-size:16px;font-weight:700;margin-bottom:6px;">'+title+'</div><div style="color:var(--text-muted);font-size:13px;">'+msg+'</div></div>'; }
 function setSdRange(v){ S_sdRange=v; sdRender(); }
 function setSdSalon(sn){ if(!canDrillSalon(sn)) return; S_sdSalon=String(sn).trim(); sdRender(); }
 function flipSdSalon(dir){ const list=_sdDrillSalons(); if(!list.length) return; let i=list.indexOf(S_sdSalon); if(i<0) i=0; S_sdSalon=list[(i+dir+list.length)%list.length]; sdRender(); }
@@ -3010,57 +3015,77 @@ function sdRender(){
   const swWrap=document.getElementById('sd-salon');
   if(swWrap){ const list=_sdDrillSalons();
     swWrap.innerHTML='<button onclick="flipSdSalon(-1)" title="Previous salon" style="background:rgba(255,255,255,.15);color:#fff;border:none;border-radius:6px;width:26px;height:26px;cursor:pointer;">&#9664;</button>'
-      +'<select onchange="setSdSalon(this.value)" style="font-size:13px;padding:4px 8px;border-radius:6px;border:none;cursor:pointer;max-width:200px;">'+list.map(sn=>'<option value="'+sn+'" '+(sn===S_sdSalon?'selected':'')+'>'+salonDisplay(sn)+'</option>').join('')+'</select>'
+      +'<select onchange="setSdSalon(this.value)" style="font-size:13px;padding:4px 8px;border-radius:6px;border:none;cursor:pointer;max-width:210px;">'+list.map(sn=>'<option value="'+sn+'" '+(sn===S_sdSalon?'selected':'')+'>'+salonDisplay(sn)+'</option>').join('')+'</select>'
       +'<button onclick="flipSdSalon(1)" title="Next salon" style="background:rgba(255,255,255,.15);color:#fff;border:none;border-radius:6px;width:26px;height:26px;cursor:pointer;">&#9654;</button>';
   }
-  // tabs
-  const tWrap=document.getElementById('sd-tabs');
-  if(tWrap){ const on='background:#fff;color:var(--primary-dark);',off='background:transparent;color:#fff;',base='padding:4px 14px;border:none;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;';
-    tWrap.innerHTML=[['weekly','Weekly'],['monthly','Monthly'],['daily','Daily'],['reviews','Reviews']].map(([k,l])=>'<button onclick="setSdTab(\''+k+'\')" style="'+base+(S_sdTab===k?on:off)+'">'+l+'</button>').join('');
+  // top-level section nav
+  const secWrap=document.getElementById('sd-sections');
+  if(secWrap){ const on='background:#fff;color:var(--primary-dark);',off='background:transparent;color:#fff;',base='padding:5px 14px;border:none;border-radius:10px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap;';
+    secWrap.innerHTML=[['performance','Salon Performance'],['individual','Individual'],['bonuses','Bonuses'],['trends','Trends'],['reviews','Reviews']].map(function(x){ return '<button onclick="setSdSection(\''+x[0]+'\')" style="'+base+(S_sdSection===x[0]?on:off)+'">'+x[1]+'</button>'; }).join('');
   }
-  // range control (weekly/monthly only)
+  // grain sub-toggle (only inside Salon Performance)
+  const grWrap=document.getElementById('sd-grain');
+  if(grWrap){
+    if(S_sdSection==='performance'){
+      grWrap.style.display='inline-flex';
+      const on='background:#fff;color:var(--primary-dark);border:1px solid #fff;',off='background:transparent;color:#fff;border:1px solid rgba(255,255,255,.4);',base='padding:4px 12px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;';
+      grWrap.innerHTML=[['weekly','Weekly'],['monthly','Monthly'],['daily','Daily']].map(function(x){ return '<button onclick="setSdTab(\''+x[0]+'\')" style="'+base+(S_sdTab===x[0]?on:off)+'">'+x[1]+'</button>'; }).join('');
+    } else grWrap.style.display='none';
+  }
+  // range control (performance + weekly/monthly only)
   const rWrap=document.getElementById('sd-range-wrap'), rSel=document.getElementById('sd-range');
-  if(S_sdTab==='weekly'||S_sdTab==='monthly'){
-    if(rWrap) rWrap.style.display='inline-flex';
+  const showRange=(S_sdSection==='performance' && (S_sdTab==='weekly'||S_sdTab==='monthly'));
+  if(rWrap) rWrap.style.display=showRange?'inline-flex':'none';
+  if(showRange){
     const opts=S_sdTab==='weekly'?[['8','Last 8 weeks'],['13','Last 13 weeks'],['26','Last 26 weeks'],['ytd','YTD'],['all','All']]
                                  :[['3','Last 3 months'],['6','Last 6 months'],['12','Last 12 months'],['ytd','YTD'],['all','All']];
     if(!opts.some(o=>o[0]===S_sdRange)) S_sdRange=(S_sdTab==='weekly'?'13':'6');
     if(rSel) rSel.innerHTML=opts.map(o=>'<option value="'+o[0]+'" '+(S_sdRange===o[0]?'selected':'')+'>'+o[1]+'</option>').join('');
-  } else if(rWrap){ rWrap.style.display='none'; }
+  }
   // body
   const body=document.getElementById('sd-body'); if(!body) return;
+  if(S_sdSection==='reviews'){
+    try{ body.innerHTML='<div style="background:#fff;border-radius:8px;padding:14px;box-shadow:0 1px 4px rgba(0,0,0,.12);">'+renderSalonReviewBody(S_sdSalon)+'</div>'; }
+    catch(e){ body.innerHTML='<div style="padding:24px;color:var(--text-muted);">Review unavailable for this salon.</div>'; }
+    return;
+  }
+  if(S_sdSection==='individual'){ body.innerHTML=_sdPlaceholder('Individual Performance','Per-stylist performance for this store is coming to the store view next.'); return; }
+  if(S_sdSection==='bonuses'){ body.innerHTML=_sdPlaceholder('Bonuses','Salon-scoped manager and stylist bonuses are coming to the store view next.'); return; }
+  if(S_sdSection==='trends'){ body.innerHTML=_sdPlaceholder('Trends','Trend charts for this store are coming to the store view next.'); return; }
+  // ---- Salon Performance ----
   if(S_sdTab==='weekly'){ body.innerHTML=_sdTbl(_sdWeekRows(S_sdSalon), SD_WEEK_COLS); }
   else if(S_sdTab==='monthly'){
-    const note=(S_salonSummaryPeriods&&S_salonSummaryPeriods.length)?'<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Monthly salon summary — the same figures that drive manager bonuses (week count per row).</div>':'<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">No monthly salon summary loaded yet.</div>';
+    const note=(S_salonSummaryPeriods&&S_salonSummaryPeriods.length)?'<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Monthly salon summary &mdash; the same figures that drive manager bonuses (week count per row). Completed months only.</div>':'<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">No monthly salon summary loaded yet.</div>';
     body.innerHTML=note+_sdTbl(_sdMonthRows(S_sdSalon), SD_MONTH_COLS);
   }
   else if(S_sdTab==='daily'){
     body.innerHTML='<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">'
       +'<button onclick="stepSdDailyWeek(-1)" title="Previous week" style="border:1px solid var(--border);background:#fff;border-radius:6px;width:28px;height:28px;cursor:pointer;">&#9664;</button>'
-      +'<span style="font-size:13px;font-weight:700;">Week ending '+(S_sdDailyWeek?fmtWeek(S_sdDailyWeek):'—')+'</span>'
+      +'<span style="font-size:13px;font-weight:700;">Week ending '+(S_sdDailyWeek?fmtWeek(S_sdDailyWeek):'\u2014')+'</span>'
       +'<button onclick="stepSdDailyWeek(1)" title="Next week" style="border:1px solid var(--border);background:#fff;border-radius:6px;width:28px;height:28px;cursor:pointer;">&#9654;</button>'
       +'</div><div id="sd-daily-host"></div>';
     try{ openSalonDaily(S_sdSalon,'sd-daily-host',S_sdDailyWeek); }catch(e){}
   }
-  else if(S_sdTab==='reviews'){
-    try{ body.innerHTML='<div style="background:#fff;border-radius:8px;padding:14px;box-shadow:0 1px 4px rgba(0,0,0,.12);">'+renderSalonReviewBody(S_sdSalon)+'</div>'; }
-    catch(e){ body.innerHTML='<div style="padding:24px;color:var(--text-muted);">Review unavailable for this salon.</div>'; }
-  }
 }
 function openSalonDrill(salonNum){
   if(typeof canDrillSalon==='function' && !canDrillSalon(salonNum)) return;  // role/assignment gate
-  S_sdSalon=String(salonNum).trim(); S_sdTab='weekly'; S_sdRange='13'; S_sdDailyWeek=S.currentWeek;
+  S_sdSalon=String(salonNum).trim(); S_sdSection='performance'; S_sdTab='weekly'; S_sdRange='13'; S_sdDailyWeek=S.currentWeek;
   const old=document.getElementById('salon-drill-overlay'); if(old) old.remove();
   const ov=document.createElement('div'); ov.id='salon-drill-overlay';
   ov.style.cssText='position:fixed;inset:0;z-index:9999;background:#fff;display:flex;flex-direction:column;';
   ov.innerHTML=''
     +'<style>#salon-drill-overlay td.c1,#salon-drill-overlay td.c2,#salon-drill-overlay td.c3,#salon-drill-overlay td.c4{font-weight:600;}</style>'
-    +'<div style="background:var(--primary-dark);color:#fff;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">'
-    +  '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><strong style="font-size:15px;">Store View</strong><span id="sd-salon" style="display:inline-flex;align-items:center;gap:4px;"></span></div>'
-    +  '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'
-    +    '<span id="sd-tabs" style="display:inline-flex;gap:2px;background:rgba(255,255,255,.15);border-radius:12px;padding:2px;"></span>'
-    +    '<span id="sd-range-wrap" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;">Show <select id="sd-range" onchange="setSdRange(this.value)" style="font-size:12px;padding:3px 6px;border-radius:6px;border:none;cursor:pointer;"></select></span>'
+    +'<div style="background:var(--primary-dark);color:#fff;padding:10px 16px;display:flex;flex-direction:column;gap:9px;">'
+    +  '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">'
+    +    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><strong style="font-size:15px;">Store View</strong><span id="sd-salon" style="display:inline-flex;align-items:center;gap:4px;"></span></div>'
     +    '<button onclick="document.getElementById(\'salon-drill-overlay\').remove()" style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,.4);border-radius:6px;padding:4px 12px;cursor:pointer;font-size:13px;">Close</button>'
+    +  '</div>'
+    +  '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">'
+    +    '<span id="sd-sections" style="display:inline-flex;gap:3px;background:rgba(255,255,255,.13);border-radius:12px;padding:3px;flex-wrap:wrap;"></span>'
+    +    '<span style="display:inline-flex;align-items:center;gap:10px;flex-wrap:wrap;">'
+    +      '<span id="sd-grain" style="display:inline-flex;gap:4px;"></span>'
+    +      '<span id="sd-range-wrap" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;">Show <select id="sd-range" onchange="setSdRange(this.value)" style="font-size:12px;padding:3px 6px;border-radius:6px;border:none;cursor:pointer;"></select></span>'
+    +    '</span>'
     +  '</div>'
     +'</div>'
     +'<div id="sd-body" style="overflow:auto;flex:1;background:#f4f5f7;padding:16px;"></div>';
