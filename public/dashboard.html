@@ -1357,6 +1357,7 @@ function onDataLoaded(data){
     S.homeEffectiveDate = data.homeEffectiveDate || '';
     S.homeRetroUpdated = data.homeRetroUpdated || 0;
     S.homeDataMap = data.homeDataMap || {};
+    try{ updateUserChip(); }catch(e){}
     S.profileMap = data.profileMap || {};
     // Load bonus periods (sorted chronologically — re-run periods can arrive out of order)
     S_bonusPeriods = (data.bonusPeriods || []).slice().sort((a,b)=>periodSortKey(a.periodKey)-periodSortKey(b.periodKey));
@@ -2246,6 +2247,25 @@ function reviewName(preferred, legal){
   // legal/payroll name only when no preferred name exists.
   return fmtName(String(preferred||'')) || fmtName(String(legal||'')) || '';
 }
+// Resolve a friendly display name for a globalId from data already loaded: an AM's
+// configured name, else the preferred (SD3) name with legal fallback. Returns '' if
+// we can't resolve one (e.g. an admin with no stylist record) so callers fall back.
+function displayNameForGid(gid){
+  gid=String(gid||'').trim(); if(!gid) return '';
+  const am=Object.values(AMS).find(a=>String(a.globalId||'').trim()===gid);
+  if(am&&am.name) return am.name;
+  let preferred=''; (S.weekHistory||[]).forEach(sn=>(sn.emps||[]).forEach(e=>{ if(String(e.globalId||'').trim()===gid&&e.empName) preferred=e.empName; }));
+  const legal=(S.homeDataMap&&S.homeDataMap[gid])?S.homeDataMap[gid].payrollName:'';
+  return reviewName(preferred, legal)||'';
+}
+// Show WHO is signed in (their name) in the top-right chip, with the email kept as a
+// hover tooltip. Falls back to the email when no name can be resolved.
+function updateUserChip(){
+  const chip=document.getElementById('user-chip'); if(!chip) return;
+  const nm=displayNameForGid(SESSION.globalId);
+  chip.textContent = nm || SESSION.email || 'Unknown';
+  chip.title = SESSION.email || '';
+}
 function stylistsForSalon(sn){
   sn = String(sn).trim();
   // AMs never appear in the stylist review list.
@@ -2321,9 +2341,18 @@ function reviewSalonList(){
 
 function setReviewMode(m){ S_reviewMode=m; renderReviewsTab(S_reviewHostId, S_reviewWindow); }
 function setReviewSalon(v){ S_reviewSalonSel=v; renderReviewsTab(S_reviewHostId, S_reviewWindow); }
+// ◀ ▶ flip through salons in order, wrapping around. Entering from "View All",
+// ▶ lands on the first salon and ◀ on the last.
+function flipReviewSalon(dir){
+  const salons = reviewSalonList(); if(!salons.length) return;
+  let i = salons.indexOf(S_reviewSalonSel);
+  if(S_reviewSalonSel==='ALL' || i<0){ i = dir>0 ? -1 : 0; }
+  S_reviewSalonSel = salons[(i + dir + salons.length) % salons.length];
+  renderReviewsTab(S_reviewHostId, S_reviewWindow);
+}
 function openStylistReview(gid, name){
   if(typeof canViewPerson==='function' && !canViewPerson(gid)) return;
-  openProfile(gid, name);
+  openProfile(gid, name || displayNameForGid(gid));
   setTimeout(()=>{ try{ switchProfileTab('review'); }catch(e){} }, 60);
 }
 
@@ -2578,19 +2607,37 @@ function renderReviewsTab(hostId, windowKind){
   S_reviewWindow = windowKind || S_reviewWindow;
   const host = document.getElementById(S_reviewHostId); if(!host) return;
   const salons = reviewSalonList();
-  if(!S_reviewSalonSel || !salons.includes(S_reviewSalonSel)) S_reviewSalonSel = salons[0]||'';
+  if(!S_reviewSalonSel || (S_reviewSalonSel!=='ALL' && !salons.includes(S_reviewSalonSel))) S_reviewSalonSel = salons[0]||'';
 
   // Managers (once they get access) only ever see their own salon review.
   const mgrOnly = (typeof roleClean==='function' && roleClean()==='manager');
   if(mgrOnly) S_reviewMode='salon';
 
-  const salonOpts = salons.map(sn=>`<option value="${sn}" ${sn===S_reviewSalonSel?'selected':''}>${salonDisplay(sn)}</option>`).join('') || '<option value="">No salons</option>';
+  const allOpt = (!mgrOnly && salons.length>1) ? `<option value="ALL" ${S_reviewSalonSel==='ALL'?'selected':''}>View All Salons</option>` : '';
+  const salonOpts = allOpt + (salons.map(sn=>`<option value="${sn}" ${sn===S_reviewSalonSel?'selected':''}>${salonDisplay(sn)}</option>`).join('') || '<option value="">No salons</option>');
   const tBtn = (mode,label)=>`<button onclick="setReviewMode('${mode}')" style="padding:4px 14px;border-radius:12px;border:none;font-size:12px;font-weight:700;cursor:pointer;background:${S_reviewMode===mode?'var(--primary)':'transparent'};color:${S_reviewMode===mode?'#fff':'var(--primary)'};">${label}</button>`;
   const toggle = mgrOnly ? '' : `<span style="display:inline-flex;gap:2px;background:#e9e9e9;border:1px solid var(--border);border-radius:14px;padding:2px;">${tBtn('salon','Salon / Manager')}${tBtn('stylist','Stylist')}</span>`;
 
   let bodyHtml='';
   if(!S_reviewSalonSel){
     bodyHtml = '<div style="padding:24px;color:var(--text-muted);">No salons available for reviews in this view.</div>';
+  } else if(S_reviewSalonSel==='ALL'){
+    if(S_reviewMode==='salon'){
+      bodyHtml = '<div style="padding:24px;color:var(--text-muted);">Pick a specific salon for its Salon / Manager review, or use the <strong>Stylist</strong> tab to view all employees across salons.</div>';
+    } else {
+      const groups = salons.map(sn=>{
+        const sts = stylistsForSalon(sn);
+        if(!sts.length) return '';
+        return `<div style="font-size:12px;font-weight:700;color:var(--primary);margin:16px 0 6px;">${salonDisplay(sn)} <span style="font-weight:400;color:var(--text-muted);">· ${sts.length}</span></div>
+          <div style="display:flex;flex-direction:column;gap:6px;max-width:540px;">
+          ${sts.map(s=>`<button onclick="openStylistReview('${s.globalId}')" style="display:flex;justify-content:space-between;align-items:center;text-align:left;padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:#fff;cursor:pointer;font-size:13px;">
+            <span style="font-weight:600;">${reviewName(s.preferred, s.name)}</span>
+            <span style="font-size:11px;color:var(--text-muted);">${s.position==='M'?'Manager':'Stylist'} · Review &#8250;</span>
+          </button>`).join('')}
+          </div>`;
+      }).filter(Boolean).join('');
+      bodyHtml = '<div style="font-size:12px;color:var(--text-muted);margin:10px 0 0;">All employees across salons — click to open the annual review.</div>' + (groups || '<div style="padding:24px;color:var(--text-muted);">No stylists on record.</div>');
+    }
   } else if(S_reviewMode==='stylist'){
     const sts = stylistsForSalon(S_reviewSalonSel);
     bodyHtml = sts.length ? `
@@ -2610,8 +2657,10 @@ function renderReviewsTab(hostId, windowKind){
     <div style="padding:8px 1.25rem 1.5rem;">
       <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:6px;">
         ${toggle}
-        <label style="font-size:12px;color:var(--text-muted);">Salon
-          <select onchange="setReviewSalon(this.value)" style="font-size:13px;padding:5px 8px;border-radius:6px;border:1px solid var(--border);margin-left:6px;">${salonOpts}</select>
+        <label style="font-size:12px;color:var(--text-muted);display:inline-flex;align-items:center;gap:4px;">Salon
+          ${mgrOnly?'':`<button onclick="flipReviewSalon(-1)" title="Previous salon" style="border:1px solid var(--border);background:#fff;border-radius:6px;width:26px;height:26px;cursor:pointer;font-size:12px;line-height:1;color:var(--primary);margin-left:6px;">&#9664;</button>`}
+          <select onchange="setReviewSalon(this.value)" style="font-size:13px;padding:5px 8px;border-radius:6px;border:1px solid var(--border);">${salonOpts}</select>
+          ${mgrOnly?'':`<button onclick="flipReviewSalon(1)" title="Next salon" style="border:1px solid var(--border);background:#fff;border-radius:6px;width:26px;height:26px;cursor:pointer;font-size:12px;line-height:1;color:var(--primary);">&#9654;</button>`}
         </label>
       </div>
       ${bodyHtml}
@@ -8330,6 +8379,9 @@ function renderReview(data){
   </div>
 
   <div id="review-printable">
+  <div style="background:#FFF3CD;border:1px solid #E0C97F;color:#7D6608;padding:8px 12px;border-radius:4px;margin-bottom:10px;font-size:11px;line-height:1.45;">
+    <strong>PREVIEW — not final.</strong> This reflects year-to-date performance only. Any raise shown is <strong>earned only at the conclusion of the fiscal year</strong>, and once finalized it takes effect the following <strong>February</strong>. Figures will continue to change as the remaining weeks are completed.
+  </div>
   <!-- Header -->
   <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;border:1px solid #ccc;padding:10px;margin-bottom:8px;background:white;">
     <div><div style="font-size:9px;color:#888;text-transform:uppercase;">Stylist</div><div style="font-weight:700;font-size:13px;border-bottom:1px solid #999;">${_reviewName||data.payrollName}</div></div>
@@ -8614,6 +8666,9 @@ function openBulkPrintWindow(data){
 
     return `
     <div class="review-page">
+      <div style="background:#FFF3CD;border:1px solid #E0C97F;color:#7D6608;padding:8px 12px;border-radius:4px;margin-bottom:10px;font-size:11px;line-height:1.45;">
+    <strong>PREVIEW — not final.</strong> This reflects year-to-date performance only. Any raise shown is <strong>earned only at the conclusion of the fiscal year</strong>, and once finalized it takes effect the following <strong>February</strong>. Figures will continue to change as the remaining weeks are completed.
+  </div>
       <div class="rev-header">
         <table style="width:100%;border-collapse:collapse;border:1px solid #999;margin-bottom:8px;">
           <tr>
