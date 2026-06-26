@@ -83,37 +83,18 @@ async function fetchSalonRoster(): Promise<any[]> {
  * map is safe to send to the client. The dashboard uses it to mark inactive
  * employees in bonus views and to exclude them from the ADP export.
  */
-async function fetchInactiveMap(): Promise<Record<string, { inactive: boolean; inactiveDate: string; dateOfHire: string; rehireDate: string; droppedOff: boolean }>> {
+async function fetchInactiveMap(): Promise<Record<string, { inactive: boolean; inactiveDate: string; dateOfHire: string; rehireDate: string }>> {
   try {
     const rows = rowsToObjects(await readSheet('EmployeeProfile'))
-    // The profile scrape runs daily and rewrites EVERY currently-employed person's
-    // row (fresh scrapedAt). upsertSheet never deletes, so when someone leaves SD3's
-    // employee report their row lingers but its scrapedAt goes STALE (frozen at their
-    // last appearance). So "refreshed in the latest run" == still on SD3's active
-    // roster. Someone on leave/vacation is still returned by SD3 every day and stays
-    // fresh — this is leave-safe, unlike a weeks-since-worked heuristic.
-    //
-    // `droppedOff` is deliberately CONSERVATIVE: it's true only when a row EXISTS but
-    // has gone stale (positive evidence the person fell off the report). A missing row
-    // or a fresh row is never droppedOff, so an active person can't be wrongly flagged.
-    let latestMs = 0
-    for (const r of rows) {
-      const t = Date.parse(String((r as any).scrapedAt || ''))
-      if (t && t > latestMs) latestMs = t
-    }
-    const ROSTER_GRACE_MS = 3 * 24 * 3600 * 1000 // 3-day grace for cron timing / a flaky run
-    const map: Record<string, { inactive: boolean; inactiveDate: string; dateOfHire: string; rehireDate: string; droppedOff: boolean }> = {}
+    const map: Record<string, { inactive: boolean; inactiveDate: string; dateOfHire: string; rehireDate: string }> = {}
     for (const r of rows) {
       const gid = String((r as any).globalId || '').trim()
       if (!gid) continue
-      const ts = Date.parse(String((r as any).scrapedAt || '')) || 0
-      const droppedOff = latestMs > 0 && ts > 0 && (latestMs - ts) > ROSTER_GRACE_MS
       map[gid] = {
         inactive: String((r as any).inactive || '').trim().toLowerCase() === 'true',
         inactiveDate: String((r as any).inactiveDate || '').trim(),
         dateOfHire: String((r as any).dateOfHire || '').trim(),
         rehireDate: String((r as any).rehireDate || '').trim(),
-        droppedOff,
       }
     }
     return map

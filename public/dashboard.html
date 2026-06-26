@@ -916,14 +916,6 @@ let INACTIVE_MAP = {};
 // Is this employee currently inactive (termed/left)? Used to exclude from the
 // ADP export and to mark in bonus views. History is preserved either way.
 function isInactive(globalId){ const r = INACTIVE_MAP[String(globalId||'').trim()]; return !!(r && r.inactive); }
-// Did this person fall off SD3's CURRENT employee report? The daily profile scrape
-// refreshes every employed person's row (fresh scrapedAt); a stale row means they
-// dropped off the report = they're gone. Conservative: true ONLY for a stale EXISTING
-// row, so an active person (fresh row, or no row at all) is never wrongly excluded.
-// Used ONLY to filter the reviews roster — it deliberately does NOT touch isInactive
-// or any bonus math, so historical payouts are never rewritten. Leave-safe: someone on
-// vacation still comes back from SD3 daily and stays fresh.
-function rosterDropped(globalId){ const r = INACTIVE_MAP[String(globalId||'').trim()]; return !!(r && r.droppedOff); }
 function inactiveSince(globalId){ const r = INACTIVE_MAP[String(globalId||'').trim()]; return r ? (r.inactiveDate||'') : ''; }
 // Is this person blocked from being PAID (inactive, or disc-ineligible)? If so
 // their earned payout shows struck-through and is excluded from salon/company
@@ -2250,9 +2242,9 @@ let S_reviewHostId = 'am-reviews-body';
 // LEGAL/payroll name in parentheses, e.g. "Camil Moss (Derrick Felton)". When they are
 // the same person with no separate preferred name, just one is shown.
 function reviewName(preferred, legal){
-  const pp = fmtName(String(preferred||'')), ll = fmtName(String(legal||''));
-  if(pp && ll && pp.toLowerCase()!==ll.toLowerCase()) return pp+' ('+ll+')';
-  return pp || ll || '';
+  // Reviews display the PREFERRED name (SD3 "Employee Name"); fall back to the
+  // legal/payroll name only when no preferred name exists.
+  return fmtName(String(preferred||'')) || fmtName(String(legal||'')) || '';
 }
 function stylistsForSalon(sn){
   sn = String(sn).trim();
@@ -2299,8 +2291,7 @@ function stylistsForSalon(sn){
     gid=String(gid).trim(); if(!gid) return;
     if(homeOf(gid)!==sn) return;          // home salon only (floaters under home store)
     if(!workedThisYear.has(gid)) return;  // must have worked (have BonusData) this year
-    if(isInactive(gid)) return;           // SD3-flagged inactive
-    if(rosterDropped(gid)) return;        // fell off SD3's current employee report (leave-safe)
+    if(isInactive(gid)) return;           // SD3-flagged inactive (authoritative once profile backfilled)
     if(amGids.has(gid)) return;           // no AMs
     if(gid===fullYearMgrGid) return;      // full-year manager -> salon review, not here
     const name = String((row&&row.payrollName)||'').trim() || nameByGid[gid] || '';
