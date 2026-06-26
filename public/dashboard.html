@@ -3100,7 +3100,7 @@ function openSalonDrill(salonNum){
 }
 
 // ── Store View sections: Trends / Bonuses / Individual (reuse built logic) ───
-let S_sdBonusPeriod='', S_sdBonusType='manager', S_sdBonusView='month', S_sdTrendMetrics=['cc'];
+let S_sdBonusPeriod='', S_sdBonusType='manager', S_sdBonusView='month', S_sdTrendMetrics=['cc'], S_sdIndivRange='ytd';
 
 // TRENDS — embed the real Chart.js trend, scoped to this salon, into the overlay.
 function renderSdTrendsShell(){
@@ -3212,19 +3212,23 @@ function _sdMgrBonusYTD(snum){
 function _sdStylistBonusYTD(snum){
   const periods=_sdYtdPeriods();
   if(!periods.length) return '<div style="color:var(--text-muted);padding:10px;">No completed periods this fiscal year.</div>';
-  const byEmp={};
+  const byEmp={}, periodTot={};
   periods.forEach(function(pp){ var normLabel=normPeriodLabel(pp.periodLabel); var bp=(S_bonusPeriods||[]).find(p=>p.periodKey===normLabel||p.periodLabel===normLabel); if(!bp) return;
-    (bp.employees||[]).filter(e=>String(e.salonNum||'').trim()===String(snum).trim() && String(e.position||'').trim().toUpperCase()!=='M').forEach(function(e){ var gid=(e.globalId||'').trim()||('name:'+(e.empName||'')); var o=byEmp[gid]||(byEmp[gid]={gid:(e.globalId||'').trim(),name:e.empName,pay:0,pot:0}); o.pay+=payablePayout(e, bp.periodKey); o.pot+=parseFloat(e.potential)||0; }); });
+    (bp.employees||[]).filter(e=>String(e.salonNum||'').trim()===String(snum).trim() && String(e.position||'').trim().toUpperCase()!=='M').forEach(function(e){ var gid=(e.globalId||'').trim()||('name:'+(e.empName||'')); var o=byEmp[gid]||(byEmp[gid]={gid:(e.globalId||'').trim(),name:e.empName,byPk:{},pay:0,pot:0}); var pay=payablePayout(e, bp.periodKey); o.byPk[pp.periodKey]=(o.byPk[pp.periodKey]||0)+pay; o.pay+=pay; o.pot+=parseFloat(e.potential)||0; periodTot[pp.periodKey]=(periodTot[pp.periodKey]||0)+pay; }); });
   const people=Object.values(byEmp);
   if(!people.length) return '<div style="color:var(--text-muted);padding:10px;">No stylist bonus rows at this salon this fiscal year.</div>';
   people.sort((a,b)=>b.pay-a.pay);
-  let totPay=0, totPot=0;
+  var totPay=0, totPot=0;
+  const monthHead=periods.map(function(pp){ return '<th style="padding:7px 8px;text-align:right;white-space:nowrap;">'+pp.periodKey+'</th>'; }).join('');
   const rows=people.map(function(o){ totPay+=o.pay; totPot+=o.pot; var pct=o.pot>0?(o.pay/o.pot*100):0; var nm=fmtName(o.name||''); var nmSafe=nm.replace(/'/g,''); var nameCell=o.gid?('<span class="salon-link" onclick="openStylistBonus(\''+o.gid+'\',\''+nmSafe+'\')" style="cursor:pointer;">'+nm+'</span>'):nm;
-    return '<tr style="border-bottom:1px solid #eee;"><td style="padding:6px 10px;font-weight:600;">'+nameCell+'</td><td style="padding:6px 8px;text-align:right;">'+fmtMoney(o.pot)+'</td><td style="padding:6px 8px;text-align:right;font-weight:700;">'+fmtMoney(o.pay)+'</td><td style="padding:6px 8px;text-align:right;">'+pct.toFixed(0)+'%</td></tr>'; }).join('');
+    var monthCells=periods.map(function(pp){ var v=o.byPk[pp.periodKey]; return '<td style="padding:6px 8px;text-align:right;'+(v?'':'color:#ccc;')+'">'+(v?fmtMoney(v):'—')+'</td>'; }).join('');
+    return '<tr style="border-bottom:1px solid #eee;"><td style="position:sticky;left:0;background:#fff;padding:6px 10px;font-weight:600;white-space:nowrap;">'+nameCell+'</td>'+monthCells+'<td style="padding:6px 8px;text-align:right;font-weight:700;border-left:1px solid #e3e3e3;">'+fmtMoney(o.pay)+'</td><td style="padding:6px 8px;text-align:right;">'+fmtMoney(o.pot)+'</td><td style="padding:6px 8px;text-align:right;">'+pct.toFixed(0)+'%</td></tr>'; }).join('');
   var totPct=totPot>0?(totPay/totPot*100):0;
-  const totRow='<tr style="border-top:2px solid #2E4D8A;background:#eef1f8;"><td style="padding:7px 10px;font-weight:800;">YTD Total</td><td style="padding:7px 8px;text-align:right;font-weight:700;">'+fmtMoney(totPot)+'</td><td style="padding:7px 8px;text-align:right;font-weight:800;">'+fmtMoney(totPay)+'</td><td style="padding:7px 8px;text-align:right;font-weight:700;">'+totPct.toFixed(0)+'%</td></tr>';
-  return '<div style="background:#fff;border-radius:8px;overflow:auto;box-shadow:0 1px 4px rgba(0,0,0,.12);"><table style="width:100%;border-collapse:collapse;font-size:12.5px;"><thead><tr style="background:#2E4D8A;color:#fff;"><th style="padding:7px 10px;text-align:left;">Stylist</th><th style="padding:7px 8px;text-align:right;">YTD Potential</th><th style="padding:7px 8px;text-align:right;">YTD Payout</th><th style="padding:7px 8px;text-align:right;">Earned %</th></tr></thead><tbody>'+rows+totRow+'</tbody></table></div>';
+  const monthTotCells=periods.map(function(pp){ return '<td style="padding:7px 8px;text-align:right;font-weight:700;">'+fmtMoney(periodTot[pp.periodKey]||0)+'</td>'; }).join('');
+  const totRow='<tr style="border-top:2px solid #2E4D8A;background:#eef1f8;"><td style="position:sticky;left:0;background:#eef1f8;padding:7px 10px;font-weight:800;">All Stylists</td>'+monthTotCells+'<td style="padding:7px 8px;text-align:right;font-weight:800;border-left:1px solid #d8dce8;">'+fmtMoney(totPay)+'</td><td style="padding:7px 8px;text-align:right;font-weight:700;">'+fmtMoney(totPot)+'</td><td style="padding:7px 8px;text-align:right;font-weight:700;">'+totPct.toFixed(0)+'%</td></tr>';
+  return '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Month-by-month payout per stylist, then YTD totals. Click a name for their bonus history.</div><div style="background:#fff;border-radius:8px;overflow:auto;box-shadow:0 1px 4px rgba(0,0,0,.12);"><table style="width:100%;border-collapse:collapse;font-size:12.5px;"><thead><tr style="background:#2E4D8A;color:#fff;"><th style="position:sticky;left:0;background:#2E4D8A;padding:7px 10px;text-align:left;">Stylist</th>'+monthHead+'<th style="padding:7px 8px;text-align:right;border-left:1px solid rgba(255,255,255,.25);">YTD Payout</th><th style="padding:7px 8px;text-align:right;">YTD Potential</th><th style="padding:7px 8px;text-align:right;">Earned %</th></tr></thead><tbody>'+rows+totRow+'</tbody></table></div>';
 }
+function setSdIndivRange(v){ S_sdIndivRange=v; sdRender(); }
 function setSdBonusView(v){ S_sdBonusView=v; sdRender(); }
 function _sdStylistBonus(snum, normLabel){
   const bp=(S_bonusPeriods||[]).find(p=>p.periodKey===normLabel||p.periodLabel===normLabel);
@@ -3271,12 +3275,18 @@ function renderSdIndividual(snum){
   const today=_sdTodayIso();
   const completed=[...S.weekHistory].filter(w=>String(w.weekEnding)<today).sort((a,b)=>new Date(a.weekEnding)-new Date(b.weekEnding));
   if(!completed.length) return _sdPlaceholder('Individual Performance','No completed weeks loaded yet.');
-  const anchor=fiscalYearStartIso(completed[completed.length-1].weekEnding);
-  const weeks=completed.filter(w=>w.weekEnding>=anchor);
+  let weeks;
+  if(S_sdIndivRange==='all'){ weeks=completed; }
+  else if(S_sdIndivRange==='ytd'){ const anchor=fiscalYearStartIso(completed[completed.length-1].weekEnding); weeks=completed.filter(w=>w.weekEnding>=anchor); }
+  else { weeks=completed.slice(-parseInt(S_sdIndivRange)); }
+  const rangeOpts=[['8','Last 8 weeks'],['13','Last 13 weeks'],['26','Last 26 weeks'],['ytd','YTD'],['all','All']];
+  const ctrl='<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px;">'
+    +'<span style="font-size:11px;color:var(--text-muted);max-width:560px;">Per-stylist averages over the selected range. Hours shown are <strong>floor hours</strong> (time on the floor serving guests), not total clocked hours. Click a name for the full profile.</span>'
+    +'<span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;white-space:nowrap;">Range <select onchange="setSdIndivRange(this.value)" style="font-size:12px;padding:3px 6px;border-radius:6px;border:1px solid var(--border);cursor:pointer;">'+rangeOpts.map(o=>'<option value="'+o[0]+'" '+(S_sdIndivRange===o[0]?'selected':'')+'>'+o[1]+'</option>').join('')+'</select></span></div>';
   const byGid={};
   weeks.forEach(w=>{ (w.emps||[]).forEach(e=>{ if(String(e.salonNum||'').trim()!==String(snum).trim()) return; const gid=(e.globalId||'').trim()||('name:'+(e.empName||'')); const g=byGid[gid]||(byGid[gid]={gid:(e.globalId||'').trim(),name:e.empName,position:e.position,rows:[]}); g.rows.push(e); }); });
   const people=Object.values(byGid);
-  if(!people.length) return _sdPlaceholder('Individual Performance','No stylist activity recorded at this salon this fiscal year.');
+  if(!people.length) return ctrl+_sdPlaceholder('Individual Performance','No stylist activity recorded at this salon in the selected range.');
   const avgF=(rows,fn)=>{ const v=rows.map(fn).filter(x=>!isNaN(x)&&x!==0); return v.length?v.reduce((a,b)=>a+b,0)/v.length:NaN; };
   people.forEach(g=>{ g.hours=avgF(g.rows,r=>n(r.floorHours)); g.cc=avgF(g.rows,r=>n(r.custCount)); g.hc=avgF(g.rows,r=>n(r.hcTime)); g.mbc=avgF(g.rows,r=>n(r.mbc)); g.prod=avgF(g.rows,r=>p(r.product)); g.nr=avgF(g.rows,r=>p(r.nr)); g.rr=avgF(g.rows,r=>p(r.rr)); g.wks=g.rows.length; });
   people.sort((a,b)=>(b.hours||0)-(a.hours||0));
@@ -3292,8 +3302,8 @@ function renderSdIndividual(snum){
       +'<td class="'+cls(tierNR,g.nr)+'" style="padding:6px 8px;text-align:center;">'+f1(g.nr)+'%</td>'
       +'<td class="'+cls(tierRR,g.rr)+'" style="padding:6px 8px;text-align:center;">'+f1(g.rr)+'%</td>'
       +'<td style="padding:6px 8px;text-align:center;color:var(--text-muted);">'+g.wks+'</td></tr>'; }).join('');
-  return '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Fiscal-year averages per stylist at this salon. Click a name for the full profile.</div>'
-    +'<div style="background:#fff;border-radius:8px;overflow:auto;box-shadow:0 1px 4px rgba(0,0,0,.12);"><table style="width:100%;border-collapse:collapse;font-size:12.5px;"><thead><tr style="background:#2E4D8A;color:#fff;"><th style="padding:7px 10px;text-align:left;">Stylist</th><th style="padding:7px 8px;">Pos</th><th style="padding:7px 8px;">Hrs/wk</th><th style="padding:7px 8px;">CC</th><th style="padding:7px 8px;">HC</th><th style="padding:7px 8px;">MBC</th><th style="padding:7px 8px;">Prod%</th><th style="padding:7px 8px;">NR%</th><th style="padding:7px 8px;">RR%</th><th style="padding:7px 8px;">Wks</th></tr></thead><tbody>'+rowsHtml+'</tbody></table></div>';
+  return ctrl
+    +'<div style="background:#fff;border-radius:8px;overflow:auto;box-shadow:0 1px 4px rgba(0,0,0,.12);"><table style="width:100%;border-collapse:collapse;font-size:12.5px;"><thead><tr style="background:#2E4D8A;color:#fff;"><th style="padding:7px 10px;text-align:left;">Stylist</th><th style="padding:7px 8px;">Pos</th><th style="padding:7px 8px;">Floor Hrs/wk</th><th style="padding:7px 8px;">CC</th><th style="padding:7px 8px;">HC</th><th style="padding:7px 8px;">MBC</th><th style="padding:7px 8px;">Prod%</th><th style="padding:7px 8px;">NR%</th><th style="padding:7px 8px;">RR%</th><th style="padding:7px 8px;">Wks</th></tr></thead><tbody>'+rowsHtml+'</tbody></table></div>';
 }
 
 function buildSalonRow(r,cols,showAM=false){
