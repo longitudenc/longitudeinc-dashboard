@@ -4175,15 +4175,19 @@ function switchToAdmin(){
 // all matching days (correctly weighted). Reuses tier* coloring. Data comes from
 // the uncapped reader /api/gs/getDailyRange (SD_DAILY keys on storeId → salonNum
 // via ROSTER). Admin/viewer only (gated like full Company).
-let S_dowScope='ALL', S_dowRange='6wk', S_dowLY=true, S_dowCache={};
+let S_dowScope='ALL', S_dowRange='6wk', S_dowLY=true, S_dowCache={}, S_dowStart='', S_dowEnd='';
 const DOW_ORDER=[6,0,1,2,3,4,5];
 const DOW_NAME={0:'Sun',1:'Mon',2:'Tue',3:'Wed',4:'Thu',5:'Fri',6:'Sat'};
 function dowStore2Salon(){ const m={}; (ROSTER||[]).forEach(s=>{ const sn=String(s.salonNum||'').trim(), st=String(s.storeId||'').trim(); if(sn&&st) m[st]=sn; }); return m; }
 function dowAnchor(){ const d=new Date(); d.setUTCDate(d.getUTCDate()-1); return d.toISOString().slice(0,10); }
 function dowWindow(range){ const end=dowAnchor();
-  if(range==='6wk') return {start:dIsoAddDays(end,-41), end};
-  if(range==='r12') return {start:dIsoAddDays(end,-364), end};
-  if(range==='ytd') return {start:end.slice(0,4)+'-01-01', end};
+  if(range==='custom') return {start:(S_dowStart||dIsoAddDays(end,-41)), end:(S_dowEnd||end)};
+  if(range==='4wk')  return {start:dIsoAddDays(end,-27),  end};
+  if(range==='6wk')  return {start:dIsoAddDays(end,-41),  end};
+  if(range==='8wk')  return {start:dIsoAddDays(end,-55),  end};
+  if(range==='13wk') return {start:dIsoAddDays(end,-90),  end};
+  if(range==='r12')  return {start:dIsoAddDays(end,-364), end};
+  if(range==='ytd')  return {start:end.slice(0,4)+'-01-01', end};
   return {start:'2025-01-01', end}; }
 async function dowRows(start,end){ const r=await fetch(`/api/gs/getDailyRange?start=${start}&end=${end}`).then(r=>r.json()); if(!r.ok) throw new Error(r.error||'getDailyRange failed'); return r.rows||[]; }
 function dowAgg(rows,s2s){
@@ -4241,7 +4245,9 @@ const DOW_ROWS=[
   {label:'Sales (avg/day)',     get:m=>m.sales,      k:'money', pol:1,  sum:true},
 ];
 function dowSetScope(v){ S_dowScope=v; renderDayOfWeek(); }
-function dowSetRange(r){ S_dowRange=r; renderDayOfWeek(); }
+function dowSetRange(r){ if(r==='custom' && (!S_dowStart||!S_dowEnd)){ const w=dowWindow(S_dowRange==='custom'?'6wk':S_dowRange); S_dowStart=w.start; S_dowEnd=w.end; } S_dowRange=r; renderDayOfWeek(); }
+function dowSetStart(v){ S_dowStart=v; S_dowRange='custom'; renderDayOfWeek(); }
+function dowSetEnd(v){ S_dowEnd=v; S_dowRange='custom'; renderDayOfWeek(); }
 function dowSetLY(b){ S_dowLY=b; renderDayOfWeek(); }
 async function renderDayOfWeek(){
   const host=document.getElementById('section-dayofweek'); if(!host) return;
@@ -4250,7 +4256,7 @@ async function renderDayOfWeek(){
   const salonOpts=(ROSTER||[]).filter(s=>(s.status||'active')==='active' && canDrillSalon(s.salonNum))
     .sort((a,b)=>String(a.salonNum).localeCompare(String(b.salonNum)))
     .map(s=>`<option value="${s.salonNum}" ${S_dowScope===String(s.salonNum)?'selected':''}>${s.salonNum}${s.name?(' · '+s.name):''}</option>`).join('');
-  const rangeBtns=[['6wk','6 wk'],['ytd','YTD'],['r12','Rolling 12'],['all','All']]
+  const rangeBtns=[['4wk','4 wk'],['6wk','6 wk'],['8wk','8 wk'],['13wk','13 wk'],['ytd','YTD'],['r12','R12'],['all','All'],['custom','Custom']]
     .map(([k,l])=>`<button class="am-btn company-subnav-btn ${S_dowRange===k?'active':''}" onclick="dowSetRange('${k}')" style="font-size:12px;padding:5px 11px;">${l}</button>`).join('');
   host.innerHTML=`<div class="table-card-header" style="flex-wrap:wrap;gap:12px;align-items:center;">
       <div class="card-title" style="margin:0;">Day of Week — performance by weekday</div>
@@ -4258,19 +4264,26 @@ async function renderDayOfWeek(){
         <select onchange="dowSetScope(this.value)" style="padding:5px 9px;border:1px solid var(--border);border-radius:7px;font:inherit;">
           <option value="ALL" ${S_dowScope==='ALL'?'selected':''}>${canSeeAllSalons()?'Company — All Salons':'My Salons (all)'}</option>${salonOpts}
         </select>
-        <div style="display:flex;gap:4px;">${rangeBtns}</div>
+        <div style="display:flex;gap:4px;flex-wrap:wrap;">${rangeBtns}</div>
+        ${S_dowRange==='custom'?`<div style="display:flex;gap:6px;align-items:center;font-size:12px;">
+          <input type="date" value="${S_dowStart||''}" onchange="dowSetStart(this.value)" style="padding:4px 7px;border:1px solid var(--border);border-radius:6px;font:inherit;">
+          <span style="color:var(--text-muted);">→</span>
+          <input type="date" value="${S_dowEnd||''}" onchange="dowSetEnd(this.value)" style="padding:4px 7px;border:1px solid var(--border);border-radius:6px;font:inherit;">
+        </div>`:''}
         <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" ${S_dowLY?'checked':''} onchange="dowSetLY(this.checked)"> vs LY</label>
       </div></div>
     <div id="dow-grid" style="padding:6px 2px 2px;"><div class="no-data">Crunching…</div></div>`;
   let data;
   try{
-    if(!S_dowCache[S_dowRange]){
-      const w=dowWindow(S_dowRange);
+    const w=dowWindow(S_dowRange);
+    if(!w.start||!w.end||w.start>w.end){ const g=document.getElementById('dow-grid'); if(g) g.innerHTML='<div class="no-data">Pick a valid start and end date (start must be on or before end).</div>'; return; }
+    const ckey=w.start+'|'+w.end;
+    if(!S_dowCache[ckey]){
       const lyW={start:dIsoAddDays(w.start,-364), end:dIsoAddDays(w.end,-364)};
       const [ty,ly]=await Promise.all([dowRows(w.start,w.end), dowRows(lyW.start,lyW.end)]);
-      S_dowCache[S_dowRange]={ty,ly,win:w};
+      S_dowCache[ckey]={ty,ly,win:w};
     }
-    data=S_dowCache[S_dowRange];
+    data=S_dowCache[ckey];
   }catch(e){
     const g=document.getElementById('dow-grid');
     if(g) g.innerHTML=`<div class="no-data" style="color:#c0392b;">${e.message}<br><span style="font-size:11px;color:var(--text-muted);">Deploy app/api/gs/getDailyRange/route.ts, then reopen this tab.</span></div>`;
