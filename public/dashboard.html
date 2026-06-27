@@ -3990,7 +3990,9 @@ function amSubnavHtml(){
   const t=(atab,lbl)=>`<button class="am-btn am-subnav-btn${atab==='salon'?' active':''}" data-atab="${atab}" onclick="amSubTab('${atab}')" style="font-size:13px;padding:7px 10px;">${lbl}</button>`;
   return `<div id="am-subnav" style="display:none;padding-left:10px;border-left:2px solid var(--border);margin:2px 0 6px 14px;">`
     + t('score','Scorecard') + t('salon','Salon Performance') + t('individual',"My Team's Performance")
-    + t('trends','Trends') + t('bonus','Bonus 💰') + t('reviews','Reviews 📋') + `</div>`;
+    + t('trends','Trends') + t('bonus','Bonus 💰') + t('reviews','Reviews 📋')
+    + (canSeeDayOfWeek()?`<button class="am-btn am-subnav-btn" onclick="openDayOfWeek()" style="font-size:13px;padding:7px 10px;">Day of Week 📆</button>`:'')
+    + `</div>`;
 }
 function amSubTab(atab){
   if(!document.getElementById('page-am').classList.contains('active')){
@@ -4143,6 +4145,13 @@ function switchToCompany(){
   S_companyTab = 'allsalons';
   renderCompany(); 
 }
+function openDayOfWeek(){
+  clearActive();
+  const b=document.getElementById('btn-company'); if(b) b.classList.add('active');
+  document.getElementById('page-company').classList.add('active');
+  const csn=document.getElementById('company-subnav'); if(csn) csn.style.display='';
+  showCompanyTab('dayofweek');
+}
 function switchToAdmin(){
   initBulkPrintSelectors();
   clearActive();
@@ -4193,9 +4202,11 @@ function dowAgg(rows,s2s){
   });
   const wd={};
   Object.keys(byDate).forEach(dt=>{
+    const b=byDate[dt];
+    if(!(b.cc>0)) return;   // closed / no-business day (0 CC) — excluded from weekday averages
     const w=new Date(dt+'T00:00:00Z').getUTCDay();
     const a=wd[w]||(wd[w]={cc:0,noci:0,vd:0,fh:0,ss:0,ps:0,pay:0,hcMin:0,hcInv:0,ncwm:0,w15:0,nw15:0,nocc:0,tw:0,days:0});
-    const b=byDate[dt]; for(const k in b) a[k]+=b[k]; a.days++;
+    for(const k in b) a[k]+=b[k]; a.days++;
   });
   return wd;
 }
@@ -4209,11 +4220,16 @@ function dowMetrics(a){
     payrollPct:tot>0?a.pay/tot*100:null, productPct:tot>0?a.ps/tot*100:null,
     wkCC:(a.cc/a.days)*7 };
 }
+function dowAllBucket(agg){
+  const a={cc:0,noci:0,vd:0,fh:0,ss:0,ps:0,pay:0,hcMin:0,hcInv:0,ncwm:0,w15:0,nw15:0,nocc:0,tw:0,days:0};
+  Object.values(agg||{}).forEach(b=>{ for(const k in a) a[k]+=(b[k]||0); });
+  return a.days?a:null;
+}
 const DOW_ROWS=[
-  {label:'CC (avg/day)',        get:m=>m.cc,         k:'int',   pol:1},
-  {label:'Non-OCI CC (avg/day)',get:m=>m.noci,       k:'int',   pol:1},
-  {label:'Voids (avg/day)',     get:m=>m.vd,         k:'1',     pol:-1},
-  {label:'Floor Hours (avg/day)',get:m=>m.fh,        k:'1',     pol:0},
+  {label:'CC (avg/day)',        get:m=>m.cc,         k:'int',   pol:1,  sum:true},
+  {label:'Non-OCI CC (avg/day)',get:m=>m.noci,       k:'int',   pol:1,  sum:true},
+  {label:'Voids (avg/day)',     get:m=>m.vd,         k:'1',     pol:-1, sum:true},
+  {label:'Floor Hours (avg/day)',get:m=>m.fh,        k:'1',     pol:0,  sum:true},
   {label:'CPH',                 get:m=>m.cph,        k:'2',     pol:1,  col:m=>m.cph!=null?tierCPH(m.cph,m.wkCC):''},
   {label:'HC Time (min)',       get:m=>m.hcTime,     k:'1',     pol:0,  col:m=>m.hcTime!=null?tierHC(m.hcTime):''},
   {label:'MBC (wait-min/cust)', get:m=>m.mbc,        k:'1',     pol:-1, col:m=>m.mbc!=null?tierMBC(m.mbc):''},
@@ -4222,7 +4238,7 @@ const DOW_ROWS=[
   {label:'Avg Wait (min)',      get:m=>m.avgWait,    k:'1',     pol:-1},
   {label:'Payroll %',           get:m=>m.payrollPct, k:'pct',   pol:-1, col:m=>m.payrollPct!=null?tierPayroll(m.payrollPct,m.wkCC):''},
   {label:'Product %',           get:m=>m.productPct, k:'pct',   pol:1,  col:m=>m.productPct!=null?tierProd(m.productPct):''},
-  {label:'Sales (avg/day)',     get:m=>m.sales,      k:'money', pol:1},
+  {label:'Sales (avg/day)',     get:m=>m.sales,      k:'money', pol:1,  sum:true},
 ];
 function dowSetScope(v){ S_dowScope=v; renderDayOfWeek(); }
 function dowSetRange(r){ S_dowRange=r; renderDayOfWeek(); }
@@ -4261,7 +4277,16 @@ async function renderDayOfWeek(){
     return;
   }
   const tyA=dowAgg(data.ty,s2s), lyA=dowAgg(data.ly,s2s);
-  const head='<tr><th style="text-align:left;">Measure</th>'+DOW_ORDER.map(w=>`<th>${DOW_NAME[w]}</th>`).join('')+'</tr>';
+  const head='<tr><th style="text-align:left;">Measure</th>'+DOW_ORDER.map(w=>`<th>${DOW_NAME[w]}</th>`).join('')+'<th style="border-left:2px solid var(--border);">Total</th></tr>';
+  const tyAll=dowAllBucket(tyA), lyAll=dowAllBucket(lyA);
+  const lyd=(v,lv,row)=>{
+    if(v==null||lv==null) return '<div style="font-size:10px;color:#bbb;">LY —</div>';
+    const diff=v-lv, arrow=diff>0?'▲':(diff<0?'▼':'·');
+    const good=row.pol===0?null:((row.pol>0)?diff>0:diff<0);
+    const ac=good==null?'#999':(good?'#1f9d57':'#c0392b');
+    return `<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">LY ${dFmt(lv,row.k)} <span style="color:${ac};font-weight:700;">${arrow}</span></div>`;
+  };
+  const sumWk=(agg,row)=>{ if(!DOW_ORDER.some(w=>dowMetrics(agg[w]))) return null; return DOW_ORDER.reduce((s,w)=>{const mm=dowMetrics(agg[w]);const vv=mm?row.get(mm):null;return s+(vv||0);},0); };
   let body='';
   DOW_ROWS.forEach(row=>{
     body+='<tr><td style="text-align:left;font-weight:600;white-space:nowrap;">'+row.label+'</td>';
@@ -4269,23 +4294,22 @@ async function renderDayOfWeek(){
       const m=dowMetrics(tyA[w]); const v=m?row.get(m):null;
       const cls=(m&&row.col)?row.col(m):'';
       let cell=(v==null)?'—':dFmt(v,row.k);
-      if(S_dowLY){
-        const lm=dowMetrics(lyA[w]); const lv=lm?row.get(lm):null;
-        if(v!=null&&lv!=null){
-          const diff=v-lv; const arrow=diff>0?'▲':(diff<0?'▼':'·');
-          const good=row.pol===0?null:((row.pol>0)?diff>0:diff<0);
-          const ac=good==null?'#999':(good?'#1f9d57':'#c0392b');
-          cell+=`<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">LY ${dFmt(lv,row.k)} <span style="color:${ac};font-weight:700;">${arrow}</span></div>`;
-        } else { cell+='<div style="font-size:10px;color:#bbb;">LY —</div>'; }
-      }
+      if(S_dowLY){ const lm=dowMetrics(lyA[w]); const lv=lm?row.get(lm):null; cell+=lyd(v,lv,row); }
       body+=`<td class="${cls}">${cell}</td>`;
     });
+    // Total: additive rows → average weekly total; rate rows → overall weighted figure
+    let tv, tcls='';
+    if(row.sum){ tv=sumWk(tyA,row); }
+    else { const am=tyAll&&dowMetrics(tyAll); tv=am?row.get(am):null; tcls=(am&&row.col)?row.col(am):''; }
+    let tcell=(tv==null)?'—':dFmt(tv,row.k);
+    if(S_dowLY){ let lv; if(row.sum){ lv=sumWk(lyA,row); } else { const lam=lyAll&&dowMetrics(lyAll); lv=lam?row.get(lam):null; } tcell+=lyd(tv,lv,row); }
+    body+=`<td class="${tcls}" style="border-left:2px solid var(--border);font-weight:600;">${tcell}</td>`;
     body+='</tr>';
   });
   const win=data.win; const nDays=Object.values(tyA).reduce((s,a)=>s+a.days,0);
   const scopeLbl=(S_dowScope==='ALL')?'Company (all active salons)':salonDisplay(String(S_dowScope))+' ('+S_dowScope+')';
   const g=document.getElementById('dow-grid');
-  if(g) g.innerHTML=`<div style="font-size:11px;color:var(--text-muted);padding:0 2px 8px;line-height:1.5;">${scopeLbl} · ${win.start} → ${win.end} · ${nDays} salon-days · LY = same dates −364d. MBC = waiting-min per customer. CPH/Payroll color slides by a weekly-equivalent CC (provisional).</div>
+  if(g) g.innerHTML=`<div style="font-size:11px;color:var(--text-muted);padding:0 2px 8px;line-height:1.5;">${scopeLbl} · ${win.start} → ${win.end} · ${nDays} salon-days · LY = same dates −364d. MBC = waiting-min per customer. Closed days (0 CC) are excluded from averages. Total = weekly total for counts, overall rate for ratios. CPH/Payroll color slides by a weekly-equivalent CC (provisional).</div>
     <div style="overflow-x:auto;"><table class="data-table" style="min-width:760px;"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
 }
 
