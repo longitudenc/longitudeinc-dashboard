@@ -4226,7 +4226,7 @@ function dowAllBucket(agg){
   return a.days?a:null;
 }
 const DOW_ROWS=[
-  {label:'CC (avg/day)',        get:m=>m.cc,         k:'int',   pol:1,  sum:true},
+  {label:'CC (avg/day)',        get:m=>m.cc,         k:'int',   pol:1,  sum:true, pctWk:true},
   {label:'Non-OCI CC (avg/day)',get:m=>m.noci,       k:'int',   pol:1,  sum:true},
   {label:'Voids (avg/day)',     get:m=>m.vd,         k:'1',     pol:-1, sum:true},
   {label:'Floor Hours (avg/day)',get:m=>m.fh,        k:'1',     pol:0,  sum:true},
@@ -4290,10 +4290,12 @@ async function renderDayOfWeek(){
   let body='';
   DOW_ROWS.forEach(row=>{
     body+='<tr><td style="text-align:left;font-weight:600;white-space:nowrap;">'+row.label+'</td>';
+    const wkTot = row.pctWk ? sumWk(tyA,row) : null;
     DOW_ORDER.forEach(w=>{
       const m=dowMetrics(tyA[w]); const v=m?row.get(m):null;
       const cls=(m&&row.col)?row.col(m):'';
       let cell=(v==null)?'—':dFmt(v,row.k);
+      if(row.pctWk && v!=null && wkTot){ cell+=`<div style="font-size:9px;color:var(--text-muted);">${(v/wkTot*100).toFixed(0)}% of wk</div>`; }
       if(S_dowLY){ const lm=dowMetrics(lyA[w]); const lv=lm?row.get(lm):null; cell+=lyd(v,lv,row); }
       body+=`<td class="${cls}">${cell}</td>`;
     });
