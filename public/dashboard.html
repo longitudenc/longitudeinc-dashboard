@@ -7393,21 +7393,23 @@ function renderBonus(){
     if(S_bonusType==='stylist' && S_bonusPeriods.length){
       periodBar = `<div class="bonus-period-bar" style="margin-top:.75rem;">
         <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);">Period:</span>
-        ${S_bonusPeriods.map(p=>`<button class="bonus-period-btn ${S_bonusPeriod===p.periodKey?'active':''}"
+        ${bonusYearDropdown('renderBonus();')}
+        ${bonusPeriodsSel().map(p=>`<button class="bonus-period-btn ${S_bonusPeriod===p.periodKey?'active':''}"
           onclick="selectBonusPeriod('${p.periodKey}')">${formatBonusPeriod(p.periodKey)}</button>`).join('')}
       </div>
       <select class="bonus-period-select" onchange="selectBonusPeriod(this.value)" style="margin-top:.75rem;padding:6px 10px;border-radius:8px;border:1px solid var(--border);font-size:13px;font-weight:600;background:white;">
-        ${S_bonusPeriods.map(p=>`<option value="${p.periodKey}" ${S_bonusPeriod===p.periodKey?'selected':''}>${formatBonusPeriod(p.periodKey)}</option>`).join('')}
+        ${bonusPeriodsSel().map(p=>`<option value="${p.periodKey}" ${S_bonusPeriod===p.periodKey?'selected':''}>${formatBonusPeriod(p.periodKey)}</option>`).join('')}
       </select>`;
     } else if(S_bonusType==='manager' && S_salonSummaryPeriods.length){
       const activePk = S_bonusType==='manager' ? S_mgrBonusPeriod : S_amBonusPeriod;
       periodBar = `<div class="bonus-period-bar" style="margin-top:.75rem;">
         <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);">Period:</span>
-        ${S_salonSummaryPeriods.map(p=>`<button class="bonus-period-btn ${activePk===p.periodKey?'active':''}"
+        ${ssYearDropdown("setSsYear(this.value, S_bonusType==='manager'?'mgr':'am'); renderBonus();")}
+        ${ssPeriodsSel().map(p=>`<button class="bonus-period-btn ${activePk===p.periodKey?'active':''}"
           onclick="selectMgrOrAMPeriod('${p.periodKey}')">${normPeriodLabel(p.periodLabel)}</button>`).join('')}
       </div>
       <select class="bonus-period-select" onchange="selectMgrOrAMPeriod(this.value)" style="margin-top:.75rem;padding:6px 10px;border-radius:8px;border:1px solid var(--border);font-size:13px;font-weight:600;background:white;">
-        ${S_salonSummaryPeriods.map(p=>`<option value="${p.periodKey}" ${activePk===p.periodKey?'selected':''}>${normPeriodLabel(p.periodLabel)}</option>`).join('')}
+        ${ssPeriodsSel().map(p=>`<option value="${p.periodKey}" ${activePk===p.periodKey?'selected':''}>${normPeriodLabel(p.periodLabel)}</option>`).join('')}
       </select>`;
     }
   }
@@ -8740,11 +8742,12 @@ function renderCompanyBonus(){
   const periodBar = (coView === 'period') ? `
     <div class="bonus-period-bar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
       <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);">Period:</span>
-      ${S_bonusPeriods.map(p=>`<button class="bonus-period-btn ${S_bonusPeriod===p.periodKey?'active':''}"
+      ${bonusYearDropdown('renderCompanyBonus();')}
+      ${bonusPeriodsSel().map(p=>`<button class="bonus-period-btn ${S_bonusPeriod===p.periodKey?'active':''}"
         onclick="selectBonusPeriod('${p.periodKey}');renderCompanyBonus();">${formatBonusPeriod(p.periodKey)}</button>`).join('')}
     </div>
     <select class="bonus-period-select" onchange="selectBonusPeriod(this.value);renderCompanyBonus();" style="margin-top:.5rem;padding:6px 10px;border-radius:8px;border:1px solid var(--border);font-size:13px;font-weight:600;background:white;">
-      ${S_bonusPeriods.map(p=>`<option value="${p.periodKey}" ${S_bonusPeriod===p.periodKey?'selected':''}>${formatBonusPeriod(p.periodKey)}</option>`).join('')}
+      ${bonusPeriodsSel().map(p=>`<option value="${p.periodKey}" ${S_bonusPeriod===p.periodKey?'selected':''}>${formatBonusPeriod(p.periodKey)}</option>`).join('')}
     </select>` : '';
 
   const _cpk = S_bonusPeriod || '';
@@ -8783,11 +8786,12 @@ function renderCompanyStandouts(){
   const _clbl = formatBonusPeriod(_cpk);
   const periodBar = `<div class="bonus-period-bar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
     <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);">Period:</span>
-    ${S_bonusPeriods.map(p=>`<button class="bonus-period-btn ${S_bonusPeriod===p.periodKey?'active':''}"
+    ${bonusYearDropdown('renderCompanyStandouts();')}
+    ${bonusPeriodsSel().map(p=>`<button class="bonus-period-btn ${S_bonusPeriod===p.periodKey?'active':''}"
       onclick="S_bonusPeriod='${p.periodKey}';renderCompanyStandouts();">${formatBonusPeriod(p.periodKey)}</button>`).join('')}
   </div>
   <select class="bonus-period-select" onchange="S_bonusPeriod=this.value;renderCompanyStandouts();" style="margin-top:.5rem;padding:6px 10px;border-radius:8px;border:1px solid var(--border);font-size:13px;font-weight:600;background:white;">
-    ${S_bonusPeriods.map(p=>`<option value="${p.periodKey}" ${S_bonusPeriod===p.periodKey?'selected':''}>${formatBonusPeriod(p.periodKey)}</option>`).join('')}
+    ${bonusPeriodsSel().map(p=>`<option value="${p.periodKey}" ${S_bonusPeriod===p.periodKey?'selected':''}>${formatBonusPeriod(p.periodKey)}</option>`).join('')}
   </select>`;
   const exportBtn = `<button class="btn btn-secondary btn-sm export-bonus" onclick="exportExcellenceJPEG('${_cpk}')">📷 Export Image (${_clbl})</button>`;
   el.innerHTML = `
@@ -9142,7 +9146,7 @@ function renderCompanyAMBonus(){
     return;
   }
 
-  const periodBar = S_salonSummaryPeriods.map(p=>`
+  const periodBar = ssPeriodsSel().map(p=>`
     <button class="bonus-period-btn ${S_coAMBonusPeriod===p.periodKey?'active':''}"
       onclick="S_coAMBonusPeriod='${p.periodKey}';renderCompanyAMBonus();">
       ${normPeriodLabel(p.periodLabel)}</button>`).join('');
@@ -9163,10 +9167,11 @@ function renderCompanyAMBonus(){
     <div style="margin-bottom:.75rem;">${viewBar}</div>
     <div class="bonus-period-bar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:.75rem;">
       <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);">Period:</span>
+      ${ssYearDropdown("setSsYear(this.value,'coam'); renderCompanyAMBonus();")}
       ${periodBar}
     </div>
     <select class="bonus-period-select" onchange="S_coAMBonusPeriod=this.value;renderCompanyAMBonus();" style="margin-bottom:.75rem;padding:6px 10px;border-radius:8px;border:1px solid var(--border);font-size:13px;font-weight:600;background:white;">
-      ${S_salonSummaryPeriods.map(p=>`<option value="${p.periodKey}" ${S_coAMBonusPeriod===p.periodKey?'selected':''}>${normPeriodLabel(p.periodLabel)}</option>`).join('')}
+      ${ssPeriodsSel().map(p=>`<option value="${p.periodKey}" ${S_coAMBonusPeriod===p.periodKey?'selected':''}>${normPeriodLabel(p.periodLabel)}</option>`).join('')}
     </select>
     <div class="bonus-stat-grid" style="grid-template-columns:repeat(7,1fr);margin-bottom:1rem;">
       ${results.map(r=>`<div class="bonus-stat">
@@ -9195,8 +9200,36 @@ let S_bonusStyYear = null;    // Stylist YTD fiscal-year filter (e.g. 2026); nul
 let S_amBonusYear = null;     // AM-bonus YTD fiscal-year filter (e.g. 2026); null = latest
 // Fiscal year of a bonus period label ("May 26" → 2026).
 function periodYear(pk){ const p=String(pk||'').trim().split(/\s+/); return 2000 + (parseInt(p[1],10)||0); }
+// ── Bonus period selector: default to the current fiscal year's months ────────
+let S_bonusSelYear = null;  // null → follow the selected period / current FY
+function curBonusYear(){ return S_bonusPeriods.length ? Math.max(...S_bonusPeriods.map(p=>periodYear(p.periodKey))) : new Date().getFullYear(); }
+function bonusSelYear(){ if(S_bonusSelYear!=null) return S_bonusSelYear; if(S_bonusPeriod) return periodYear(S_bonusPeriod); return curBonusYear(); }
+function bonusYearsAvail(){ return [...new Set(S_bonusPeriods.map(p=>periodYear(p.periodKey)))].sort((a,b)=>b-a); }
+function bonusPeriodsSel(){ const y=bonusSelYear(); return S_bonusPeriods.filter(p=>periodYear(p.periodKey)===y); }
+function setBonusSelYear(y){ S_bonusSelYear=parseInt(y,10); const ps=bonusPeriodsSel(); if(ps.length && !ps.some(p=>p.periodKey===S_bonusPeriod)) S_bonusPeriod=ps[ps.length-1].periodKey; }
+function bonusYearDropdown(reRender){
+  const years=bonusYearsAvail(); if(years.length<=1) return '';
+  const cy=curBonusYear(), sel=bonusSelYear();
+  return '<select onchange="setBonusSelYear(this.value);'+reRender+'" title="Fiscal year" style="padding:4px 8px;border:1px solid var(--border);border-radius:8px;font-size:12px;font-weight:600;background:white;">'+
+    years.map(y=>'<option value="'+y+'"'+(y===sel?' selected':'')+'>'+(y===cy?('This year · '+y):('FY '+y))+'</option>').join('')+'</select>';
+}
 // Distinct fiscal years present in the loaded summary periods, newest first.
 function availableMgrYears(){ const ys=[...new Set(S_salonSummaryPeriods.map(p=>periodYear(p.periodLabel||p.periodKey)))]; return ys.sort((a,b)=>b-a); }
+let S_mgrSelYear = null;  // null → current fiscal year, for manager/AM bonus selectors
+function curMgrYear(){ return S_salonSummaryPeriods.length ? Math.max(...S_salonSummaryPeriods.map(p=>periodYear(p.periodLabel||p.periodKey))) : new Date().getFullYear(); }
+function ssSelYear(){ return S_mgrSelYear!=null ? S_mgrSelYear : curMgrYear(); }
+function ssPeriodsSel(){ const y=ssSelYear(); return S_salonSummaryPeriods.filter(p=>periodYear(p.periodLabel||p.periodKey)===y); }
+function setSsYear(y, which){
+  S_mgrSelYear=parseInt(y,10);
+  const ps=ssPeriodsSel(), last=ps.length?ps[ps.length-1].periodKey:null;
+  if(last){ if(which==='mgr')S_mgrBonusPeriod=last; else if(which==='am')S_amBonusPeriod=last; else if(which==='comgr')S_coMgrPeriod=last; else if(which==='coam')S_coAMBonusPeriod=last; }
+}
+function ssYearDropdown(onchangeJs){
+  const years=availableMgrYears(); if(years.length<=1) return '';
+  const cy=curMgrYear(), sel=ssSelYear();
+  return '<select onchange="'+onchangeJs+'" title="Fiscal year" style="padding:4px 8px;border:1px solid var(--border);border-radius:8px;font-size:12px;font-weight:600;background:white;">'+
+    years.map(y=>'<option value="'+y+'"'+(y===sel?' selected':'')+'>'+(y===cy?('This year · '+y):('FY '+y))+'</option>').join('')+'</select>';
+}
 // ── Bonus time-range filter: YTD (default) · Prior Year · Rolling 12 · All ────
 let S_bonusRange = 'ytd';  // 'ytd' | 'prior' | 'r12' | 'all'
 function bonusRangeFilter(items, keyFn, range){
@@ -9252,10 +9285,11 @@ function renderCompanyManagerBonus(){
 
   const periodBar = S_coMgrView==='period' ? `<div class="bonus-period-bar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:.75rem;">
     <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);">Period:</span>
-    ${S_salonSummaryPeriods.map(p=>`<button class="bonus-period-btn ${S_coMgrPeriod===p.periodKey?'active':''}" onclick="S_coMgrPeriod='${p.periodKey}';renderCompanyManagerBonus();">${p.periodLabel}</button>`).join('')}
+    ${ssYearDropdown("setSsYear(this.value,'comgr'); renderCompanyManagerBonus();")}
+    ${ssPeriodsSel().map(p=>`<button class="bonus-period-btn ${S_coMgrPeriod===p.periodKey?'active':''}" onclick="S_coMgrPeriod='${p.periodKey}';renderCompanyManagerBonus();">${p.periodLabel}</button>`).join('')}
   </div>
   <select class="bonus-period-select" onchange="S_coMgrPeriod=this.value;renderCompanyManagerBonus();" style="margin-top:.75rem;padding:6px 10px;border-radius:8px;border:1px solid var(--border);font-size:13px;font-weight:600;background:white;">
-    ${S_salonSummaryPeriods.map(p=>`<option value="${p.periodKey}" ${S_coMgrPeriod===p.periodKey?'selected':''}>${p.periodLabel}</option>`).join('')}
+    ${ssPeriodsSel().map(p=>`<option value="${p.periodKey}" ${S_coMgrPeriod===p.periodKey?'selected':''}>${p.periodLabel}</option>`).join('')}
   </select>` : '';
 
   const body = S_coMgrView==='ytd' ? buildCoMgrYTD() : buildCoMgrPeriod();
