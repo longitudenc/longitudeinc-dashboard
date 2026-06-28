@@ -3273,9 +3273,14 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
       </div>
 
       <div class="table-card">
-        <div class="table-card-header"><div class="card-title" style="margin:0;">Loaded Weeks</div></div>
+        <div class="table-card-header"><div class="card-title" style="margin:0;">Data Health</div></div>
         <div style="padding:1rem 1.25rem;" id="weeks-list">
-          <div class="no-data">No weeks loaded yet</div>
+          <div class="no-data">Loading…</div>
+        </div>
+        <div style="padding:0 1.25rem 1.25rem;">
+          <div style="font-weight:700;font-size:13px;margin-bottom:6px;">📝 Scrape / Load Notes <span style="font-weight:400;font-size:11px;color:var(--text-muted);">Jot anything off about a scrape or load — saved in this browser</span></div>
+          <textarea id="data-notes" oninput="saveDataNotes()" placeholder="e.g. 6/28 — monthly ran, but June bonuses still need processing" style="width:100%;min-height:84px;font:inherit;font-size:13px;padding:9px 11px;border:1px solid var(--border);border-radius:8px;resize:vertical;"></textarea>
+          <span id="data-notes-status" style="display:block;margin-top:5px;font-size:11px;color:var(--text-muted);"></span>
         </div>
       </div>
     </div>
@@ -3970,7 +3975,7 @@ function onDataLoaded(data){
         showPage('noaccess');
         document.getElementById('no-access-email').textContent = USER_EMAIL;
       }
-      if(isAdminRole()) renderWeeksList();
+      if(isAdminRole()){ renderWeeksList(); loadDataNotes(); }
       hideLoading();
     }, 100);
 
@@ -7217,24 +7222,59 @@ function setCoAMMode(mode){
 function renderWeeksList(){
   const el=document.getElementById('weeks-list');
   if(!el) return;
-  if(!S.weekHistory.length){ el.innerHTML='<div class="no-data">No weeks loaded yet — drop CSV files into your Google Drive upload folder</div>'; return; }
-  const sorted=[...S.weekHistory].sort((a,b)=>new Date(b.weekEnding)-new Date(a.weekEnding));
-
   const homeCount = S.homeCount || 0;
   const homeEffDate = S.homeEffectiveDate ? ' · Effective ' + S.homeEffectiveDate : '';
   const homeRetro = S.homeRetroUpdated > 0 ? ' · ' + S.homeRetroUpdated + ' historical rows synced' : '';
   const homeStatus = homeCount > 0
     ? `<div style="margin-bottom:1rem;padding:8px 12px;background:var(--exc-bg);border:1px solid var(--exc-border);border-radius:8px;font-size:12px;color:var(--exc-text);font-weight:600;">✓ Home salon file loaded — ${homeCount} stylists assigned${homeEffDate}${homeRetro}</div>`
     : `<div style="margin-bottom:1rem;padding:8px 12px;background:#fff8e8;border:1px solid #f0d060;border-radius:8px;font-size:12px;color:#7a5a00;">⚠ No home salon file loaded — multi-store employees will be skipped. Drop a file with "home" in the name into your upload folder.</div>`;
+  if(!S.weekHistory || !S.weekHistory.length){ el.innerHTML=homeStatus+'<div class="no-data">No weeks loaded yet — drop CSV files into your Google Drive upload folder.</div>'; return; }
 
-  el.innerHTML=homeStatus+`<table style="width:100%;border-collapse:collapse;font-size:13px;">
-    <thead><tr>
-      <th style="text-align:left;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--text-muted);font-size:11px;text-transform:uppercase;">Week Ending</th>
-      <th style="text-align:right;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--text-muted);font-size:11px;text-transform:uppercase;">Salons</th>
-      <th style="text-align:right;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--text-muted);font-size:11px;text-transform:uppercase;">Employees</th>
-    </tr></thead>
-    <tbody>${sorted.map(w=>`<tr style="border-bottom:1px solid #f0efec;"><td style="padding:8px 10px;font-weight:600;">${w.weekEnding}</td><td style="padding:8px 10px;text-align:right;">${w.salons.length}</td><td style="padding:8px 10px;text-align:right;">${w.emps.length}</td></tr>`).join('')}</tbody>
-  </table>`;
+  const weeks=[...S.weekHistory].sort((a,b)=>new Date(a.weekEnding)-new Date(b.weekEnding));
+  const latest=weeks[weeks.length-1];
+  const gaps=[];
+  for(let i=1;i<weeks.length;i++){
+    const days=Math.round((new Date(weeks[i].weekEnding)-new Date(weeks[i-1].weekEnding))/86400000);
+    if(days>7) gaps.push({after:weeks[i-1].weekEnding, before:weeks[i].weekEnding, missing:Math.round(days/7)-1});
+  }
+  const fmtP = k => (typeof formatBonusPeriod==='function'? formatBonusPeriod(k) : k);
+  const lastBonus   = (S_bonusPeriods&&S_bonusPeriods.length)? S_bonusPeriods[S_bonusPeriods.length-1].periodKey : null;
+  const lastMonthly = (typeof S_salonSummaryPeriods!=='undefined' && S_salonSummaryPeriods&&S_salonSummaryPeriods.length)? S_salonSummaryPeriods[S_salonSummaryPeriods.length-1].periodKey : null;
+
+  const row=(label,val,flag)=>`<div style="display:flex;justify-content:space-between;gap:12px;padding:7px 2px;border-bottom:1px solid #f0efec;font-size:13px;"><span style="color:var(--text-muted);">${label}</span><span style="font-weight:600;${flag==='bad'?'color:#9C0006;':flag==='good'?'color:#03654e;':''}">${val}</span></div>`;
+
+  const gapHtml = gaps.length
+    ? `<div style="margin-top:10px;padding:8px 12px;background:#fff0f0;border:1px solid #f0c0c0;border-radius:8px;font-size:12px;color:#9C0006;"><b>⚠ ${gaps.length} gap${gaps.length>1?'s':''} in the weekly data — possible missed scrape</b>${gaps.map(g=>`<div style="margin-top:3px;">${g.missing} week${g.missing>1?'s':''} missing between ${g.after} and ${g.before}</div>`).join('')}</div>`
+    : `<div style="margin-top:10px;padding:8px 12px;background:var(--exc-bg);border:1px solid var(--exc-border);border-radius:8px;font-size:12px;color:var(--exc-text);">✓ No gaps in the weekly sequence — ${weeks.length} consecutive weeks.</div>`;
+
+  el.innerHTML = homeStatus + `<div>
+      ${row('Most recent week loaded', latest.weekEnding, 'good')}
+      ${row('Weeks on file', weeks.length + ' &nbsp;(' + weeks[0].weekEnding + ' → ' + latest.weekEnding + ')')}
+      ${row('Salons in latest week', latest.salons.length)}
+      ${row('Bonuses / Standouts / Reviews through', lastBonus? fmtP(lastBonus) : 'none loaded', lastBonus? null : 'bad')}
+      ${row('Monthly salon summary through', lastMonthly? fmtP(lastMonthly) : '—')}
+    </div>
+    ${gapHtml}
+    <details style="margin-top:10px;"><summary style="cursor:pointer;font-size:12px;color:var(--text-muted);">Show all loaded weeks (${weeks.length})</summary>
+      <table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:6px;">
+        <thead><tr>
+          <th style="text-align:left;padding:5px 8px;border-bottom:1px solid var(--border);color:var(--text-muted);font-size:11px;text-transform:uppercase;">Week Ending</th>
+          <th style="text-align:right;padding:5px 8px;border-bottom:1px solid var(--border);color:var(--text-muted);font-size:11px;text-transform:uppercase;">Salons</th>
+          <th style="text-align:right;padding:5px 8px;border-bottom:1px solid var(--border);color:var(--text-muted);font-size:11px;text-transform:uppercase;">Employees</th>
+        </tr></thead>
+        <tbody>${[...weeks].reverse().map(w=>`<tr style="border-bottom:1px solid #f5f4f1;"><td style="padding:5px 8px;">${w.weekEnding}</td><td style="padding:5px 8px;text-align:right;">${w.salons.length}</td><td style="padding:5px 8px;text-align:right;">${w.emps.length}</td></tr>`).join('')}</tbody>
+      </table>
+    </details>`;
+}
+
+function saveDataNotes(){
+  try{
+    localStorage.setItem('li_data_notes', document.getElementById('data-notes').value);
+    const s=document.getElementById('data-notes-status'); if(s){ s.textContent='Saved'; setTimeout(()=>{ if(s) s.textContent=''; },1200); }
+  }catch(e){}
+}
+function loadDataNotes(){
+  try{ const v=localStorage.getItem('li_data_notes'); const t=document.getElementById('data-notes'); if(t&&v!=null) t.value=v; }catch(e){}
 }
 
 // ── Bonus Module ─────────────────────────────────────────────
