@@ -9,6 +9,7 @@
 
 import { NextResponse } from 'next/server'
 import { todayET, yesterdayET, dayOfWeek, isLastFridayOfMonth } from '@/lib/fiscal'
+import { runBonusPeriodForMonth } from '@/lib/bonus-period'
 import {
   runDailyScrape,
   runWeeklyScrape,
@@ -49,7 +50,7 @@ export async function GET(request: Request) {
 
   const fired: string[] = ['daily', 'employee-daily']
   if (isSaturday) fired.push('weekly')
-  if (isMonthEnd) fired.push('monthly')
+  if (isMonthEnd) fired.push('monthly', 'bonus-period')
 
   console.log(
     `[cron/run] today=${today} yesterday=${yesterday} isSat=${isSaturday} isMonthEnd=${isMonthEnd} → firing: ${fired.join(', ')}`
@@ -82,6 +83,12 @@ export async function GET(request: Request) {
   // 3. Monthly — only when yesterday was a month-end Friday.
   if (isMonthEnd) {
     results.push({ name: 'monthly', result: await runMonthlyScrape() })
+    // yesterday was the month-end Friday → scrape that just-closed fiscal month's
+    // bonuses (writes SalonSummaryData / BonusData / PayrollConsolidatedData, the
+    // tabs Bonus, Standouts and Reviews read). Disc eligibility is applied live at
+    // view time from dated points, so this only needs to pull the raw period.
+    const [by, bm] = yesterday.split('-').map(Number)
+    results.push({ name: 'bonus-period', result: await runBonusPeriodForMonth(by, bm) })
   }
 
   const allOk = results.every(r => r.result.ok)
