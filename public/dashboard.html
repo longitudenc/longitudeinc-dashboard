@@ -12162,6 +12162,22 @@ function openFeedback(){
   setTimeout(()=>document.getElementById('feedback-text').focus(), 50);
 }
 function closeFeedback(){ document.getElementById('feedback-modal').style.display = 'none'; }
+// Capture what the user is currently looking at (the viewport), excluding the
+// feedback modal/button themselves. Best-effort: any failure → null, and the
+// feedback still submits without a screenshot. html2canvas is already loaded.
+async function captureFeedbackShot(){
+  if (typeof html2canvas === 'undefined') return null;
+  try{
+    const canvas = await html2canvas(document.body, {
+      ignoreElements: el => el.id === 'feedback-modal' || el.id === 'feedback-fab',
+      x: window.scrollX, y: window.scrollY,
+      width: window.innerWidth, height: window.innerHeight,
+      scale: 1, useCORS: true, logging: false, backgroundColor: '#ffffff'
+    });
+    const url = canvas.toDataURL('image/jpeg', 0.6);
+    return (url && url.length < 1500000) ? url : null;   // drop if oversized
+  }catch(e){ return null; }
+}
 function submitFeedback(){
   const msg = document.getElementById('feedback-text').value.trim();
   const statusEl = document.getElementById('feedback-status');
@@ -12169,10 +12185,10 @@ function submitFeedback(){
   const btn = document.getElementById('feedback-send');
   btn.disabled = true; btn.textContent = 'Sending…';
   statusEl.style.color = 'var(--text-muted)'; statusEl.textContent = '';
-  fetch('/api/gs/saveFeedback', {
+  captureFeedbackShot().then(shot=>fetch('/api/gs/saveFeedback', {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ message: msg, category: _feedbackCat, page: currentFeedbackPage() })
-  }).then(r=>r.json()).then(res=>{
+    body: JSON.stringify({ message: msg, category: _feedbackCat, page: currentFeedbackPage(), screenshot: shot || undefined })
+  })).then(r=>r.json()).then(res=>{
     if(res && res.success){
       statusEl.style.color = '#2d7a1a'; statusEl.textContent = '✓ Thanks — your feedback was sent.';
       setTimeout(closeFeedback, 1100);

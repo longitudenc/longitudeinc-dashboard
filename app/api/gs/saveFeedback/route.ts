@@ -76,6 +76,16 @@ export async function POST(req: Request) {
     const category = String(body.category || 'other').slice(0, 40)
     const page = String(body.page || '').slice(0, 120)
 
+    // Optional page screenshot (data URL from html2canvas). Stored as an email
+    // attachment, not in the sheet (a PNG/JPEG won't fit in a cell). Best-effort
+    // and size-guarded — a bad/oversized value is simply ignored.
+    const screenshot = typeof body.screenshot === 'string' ? body.screenshot : ''
+    let shotAttachment: { filename: string; content: string } | null = null
+    if (screenshot.startsWith('data:image/') && screenshot.length < 6_000_000) {
+      const m = screenshot.match(/^data:image\/(png|jpeg|jpg|webp);base64,([A-Za-z0-9+/=]+)$/)
+      if (m) shotAttachment = { filename: `feedback-screenshot.${m[1] === 'jpeg' ? 'jpg' : m[1]}`, content: m[2] }
+    }
+
     const sheets = client()
     await ensureTabWithHeader(sheets)
 
@@ -109,6 +119,7 @@ export async function POST(req: Request) {
           from: FROM,
           to: NOTIFY_TO,
           replyTo: gate.email, // reply goes straight to the submitter
+          attachments: shotAttachment ? [shotAttachment] : undefined,
           subject: `Dashboard feedback (${catLabel[category] || category}) from ${gate.email}`,
           html: `
             <div style="font-family:Arial,sans-serif;max-width:540px;margin:0 auto;color:#222;">
@@ -120,6 +131,7 @@ export async function POST(req: Request) {
                 <tr><td style="padding:3px 10px 3px 0;color:#888;">Page</td><td style="padding:3px 0;">${esc(page) || '—'}</td></tr>
               </table>
               <div style="background:#eef6f2;border-radius:10px;padding:14px 16px;font-size:15px;line-height:1.5;white-space:pre-wrap;">${esc(safeMessage)}</div>
+              ${shotAttachment ? '<p style="color:#03654e;font-size:13px;margin-top:14px;">\uD83D\uDCCE Screenshot of the page they were viewing is attached.</p>' : ''}
               <p style="color:#999;font-size:12px;margin-top:16px;">Reply to this email to respond directly to ${esc(gate.email)}. All feedback is also logged in the Feedback tab of your dashboard sheet.</p>
             </div>
           `,
