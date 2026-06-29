@@ -6200,7 +6200,7 @@ function consolidateEmpsByPerson(emps){
 }
 
 const EMP_COLS=[
-  {k:'name', lbl:'Employee',   sv:e=>e.empName,          fv:e=>stylistLink(e.globalId,e.empName,e.salonNum),                                           cl:()=>''},
+  {k:'name', lbl:'Employee',   sv:e=>fmtName(e.empName).toLowerCase(),          fv:e=>stylistLink(e.globalId,e.empName,e.salonNum),                                           cl:()=>''},
   {k:'salon',lbl:'Salon',      sv:e=>e.salonNum,          fv:e=>salonLink(e.salonNum, salonLabelHtml(e.salonNum), 'individual')+(e.salonCount>1?` <span style="font-size:10px;color:var(--text-muted);" title="Works ${e.salonCount} salons — data consolidated">+${e.salonCount-1}</span>`:''),  cl:()=>''},
   // Position column removed
   {k:'hc',   lbl:'HC Time',    sv:e=>n(e.hcTime),         fv:e=>`${n(e.hcTime).toFixed(1)}`,                                                          cl:e=>tierHC(n(e.hcTime))},
@@ -6211,6 +6211,23 @@ const EMP_COLS=[
   {k:'nr',   lbl:'NR %',       sv:e=>e.nr&&e.nr.toString().includes('*')?-1:p(e.nr), fv:e=>e.nr&&e.nr.toString().includes('*')?'—':p(e.nr).toFixed(1)+'%',  cl:e=>e.nr&&e.nr.toString().includes('*')?'':tierNR(p(e.nr))},
   {k:'rr',   lbl:'RR %',       sv:e=>e.rr&&e.rr.toString().includes('*')?-1:p(e.rr), fv:e=>e.rr&&e.rr.toString().includes('*')?'—':p(e.rr).toFixed(1)+'%',  cl:e=>e.rr&&e.rr.toString().includes('*')?'':tierRR(p(e.rr))},
   {k:'pay',  lbl:'Payroll %',  sv:e=>p(e.payroll),        fv:e=>`${p(e.payroll).toFixed(1)}%`,                                                        cl:()=>''},
+];
+
+// YTD column set for "My Team's Performance" (matches the YTD table: Avg CC +
+// Weeks instead of Cust Count + Payroll). Used by filterEmps() in YTD mode so
+// search / salon-filter / sort all run against the same home-consolidated data.
+let _ytdEmpsCache = [];
+const YTD_EMP_COLS=[
+  {k:'name', lbl:'Employee',  sv:e=>fmtName(e.empName).toLowerCase(),       fv:e=>`<strong>${stylistLink(e.globalId,e.empName,e.salonNum)}</strong>`, cl:()=>''},
+  {k:'salon',lbl:'Salon',     sv:e=>e.salonNum,      fv:e=>salonLink(e.salonNum, salonLabelHtml(e.salonNum), 'individual')+(e.salonCount>1?` <span style="font-size:10px;color:var(--text-muted);" title="Works ${e.salonCount} salons — data consolidated">+${e.salonCount-1}</span>`:''), cl:()=>''},
+  {k:'hc',   lbl:'HC Time',   sv:e=>n(e.hcTime),     fv:e=>e.hcTime,        cl:e=>tierHC(parseFloat(e.hcTime))},
+  {k:'mbc',  lbl:'MBC',       sv:e=>n(e.mbc),        fv:e=>e.mbc,           cl:e=>tierMBC(parseFloat(e.mbc))},
+  {k:'prod', lbl:'Product %', sv:e=>p(e.product),    fv:e=>e.product+'%',   cl:e=>tierProd(parseFloat(e.product))},
+  {k:'fh',   lbl:'Floor Hrs', sv:e=>n(e.floorHours), fv:e=>e.floorHours,    cl:()=>''},
+  {k:'cc',   lbl:'Avg CC',    sv:e=>n(e.custCount),  fv:e=>e.custCount,     cl:()=>''},
+  {k:'nr',   lbl:'NR %',      sv:e=>p(e.nr),         fv:e=>e.nr+'%',        cl:e=>tierNR(parseFloat(e.nr))},
+  {k:'rr',   lbl:'RR %',      sv:e=>p(e.rr),         fv:e=>e.rr+'%',        cl:e=>tierRR(parseFloat(e.rr))},
+  {k:'wk',   lbl:'Weeks',     sv:e=>n(e.weekCount),  fv:e=>`<span style="color:var(--text-muted);">${e.weekCount}</span>`, cl:()=>''},
 ];
 
 let S_indivMode = 'weekly'; // 'weekly' or 'ytd'
@@ -6268,39 +6285,11 @@ function renderIndividual(){
       };
     });
 
+    _ytdEmpsCache = ytdEmps;
     const salons=[...new Set(ytdEmps.map(e=>e.salonNum))].sort();
     sf.innerHTML='<option value="">All Salons</option>'+salons.map(s=>`<option value="${s}">${salonDisplay(s)}</option>`).join('');
-    thead.innerHTML=`<tr>
-      <th><span>Employee</span><span class="si"></span></th>
-      <th><span>Salon</span><span class="si"></span></th>
-      <th><span>HC Time</span><span class="si"></span></th>
-      <th><span>MBC</span><span class="si"></span></th>
-      <th><span>Product %</span><span class="si"></span></th>
-      <th><span>Floor Hrs</span><span class="si"></span></th>
-      <th><span>Avg CC</span><span class="si"></span></th>
-      <th><span>NR %</span><span class="si"></span></th>
-      <th><span>RR %</span><span class="si"></span></th>
-      <th><span>Weeks</span><span class="si"></span></th>
-    </tr>`;
-
-    const s = document.getElementById('emp-search').value.toLowerCase();
-    const sfv = sf.value;
-    let filtered = ytdEmps;
-    if(s) filtered = filtered.filter(e=>(e.empName||'').toLowerCase().includes(s));
-    if(sfv) filtered = filtered.filter(e=>e.salonNum===sfv);
-
-    tbody.innerHTML = filtered.map(e=>`<tr>
-      <td><strong>${stylistLink(e.globalId, e.empName, e.salonNum)}</strong></td>
-      <td>${salonLink(e.salonNum, salonLabelHtml(e.salonNum), 'individual')}${e.salonCount>1?` <span style="font-size:10px;color:var(--text-muted);" title="Works ${e.salonCount} salons — data consolidated">+${e.salonCount-1}</span>`:''}</td>
-      <td class="${tierHC(parseFloat(e.hcTime))}">${e.hcTime}</td>
-      <td class="${tierMBC(parseFloat(e.mbc))}">${e.mbc}</td>
-      <td class="${tierProd(parseFloat(e.product))}">${e.product}%</td>
-      <td>${e.floorHours}</td>
-      <td>${e.custCount}</td>
-      <td class="${tierNR(parseFloat(e.nr))}">${e.nr}%</td>
-      <td class="${tierRR(parseFloat(e.rr))}">${e.rr}%</td>
-      <td style="color:var(--text-muted);">${e.weekCount}</td>
-    </tr>`).join('');
+    thead.innerHTML=`<tr>${YTD_EMP_COLS.map((c,i)=>`<th onclick="sortEmp(${i})" data-col="${i}"><span>${c.lbl}</span><span class="si"></span></th>`).join('')}</tr>`;
+    filterEmps();
 
   } else {
     // Weekly mode — shows employees who worked the selected week
@@ -6317,13 +6306,15 @@ function renderIndividual(){
 
 function filterEmps(){
   const s=document.getElementById('emp-search').value.toLowerCase(),sf=document.getElementById('emp-salon-filter').value;
-  let emps=consolidateEmpsByPerson(empsByAM(S.currentAM));
+  const ytd = (typeof S_globalMode!=='undefined' && S_globalMode==='ytd');
+  const cols = ytd ? YTD_EMP_COLS : EMP_COLS;
+  let emps = ytd ? _ytdEmpsCache.slice() : consolidateEmpsByPerson(empsByAM(S.currentAM));
   if(s)emps=emps.filter(e=>(e.empName||'').toLowerCase().includes(s));
   if(sf)emps=emps.filter(e=>e.salonNum===sf);
-  const cur=S.sortState['emp']; if(cur)emps=sortRows(emps,EMP_COLS,cur.col,cur.asc);
+  const cur=S.sortState['emp']; if(cur)emps=sortRows(emps,cols,cur.col,cur.asc);
   const tbody=document.getElementById('emp-tbody');
-  if(!emps.length){ tbody.innerHTML='<tr><td colspan="11" class="no-data">No employees found</td></tr>'; return; }
-  tbody.innerHTML=emps.map(e=>`<tr>${EMP_COLS.map(c=>`<td class="${c.cl(e)}">${c.fv(e)}</td>`).join('')}</tr>`).join('');
+  if(!emps.length){ tbody.innerHTML=`<tr><td colspan="${cols.length}" class="no-data">No employees found</td></tr>`; return; }
+  tbody.innerHTML=emps.map(e=>`<tr>${cols.map(c=>`<td class="${c.cl(e)}">${c.fv(e)}</td>`).join('')}</tr>`).join('');
 }
 function sortEmp(ci){ const cur=S.sortState['emp']; const asc=!(cur&&cur.col===ci&&cur.asc); S.sortState['emp']={col:ci,asc}; updateHeadSort(document.getElementById('emp-thead'),ci,asc); filterEmps(); }
 
