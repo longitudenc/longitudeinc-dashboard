@@ -4272,7 +4272,13 @@ async function renderDayOfWeek(){
     .sort((a,b)=>String(a.salonNum).localeCompare(String(b.salonNum)))
     .map(s=>`<option value="${s.salonNum}" ${S_dowScope===String(s.salonNum)?'selected':''}>${s.salonNum}${s.name?(' · '+s.name):''}</option>`).join('');
   const rangeBtns=[['4wk','4 wk'],['6wk','6 wk'],['8wk','8 wk'],['13wk','13 wk'],['ytd','YTD'],['r12','R12'],['all','All'],['custom','Custom']]
-    .map(([k,l])=>`<button class="am-btn company-subnav-btn ${S_dowRange===k?'active':''}" onclick="dowSetRange('${k}')" style="font-size:12px;padding:5px 11px;">${l}</button>`).join('');
+    .map(([k,l])=>{
+      const on = S_dowRange===k;
+      // Self-contained pills. Do NOT reuse .am-btn here — that's the sidebar nav
+      // style (width:100%, no chrome, active=green right-border) and it stacks
+      // these vertically with a stray green bar.
+      return `<button onclick="dowSetRange('${k}')" style="width:auto;flex:0 0 auto;font-size:12px;padding:5px 11px;line-height:1.2;border:1px solid ${on?'var(--primary-dark)':'var(--border)'};border-radius:7px;background:${on?'var(--primary-dark)':'#fff'};color:${on?'#fff':'var(--text)'};font-weight:${on?'700':'500'};cursor:pointer;">${l}</button>`;
+    }).join('');
   host.innerHTML=`<div class="table-card-header" style="flex-wrap:wrap;gap:12px;align-items:center;">
       <div class="card-title" style="margin:0;">Day of Week — performance by weekday</div>
       <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
@@ -5064,9 +5070,22 @@ function stylistsForSalon(sn){
       if(e.position) rec.position=e.position;
     });
   });
+  // Active-in-year gate. homeDataMap is the roster, but it retains people who left
+  // yet were never flagged inactive in EmployeeProfile (so isInactive misses them).
+  // A person shows only if they have real activity in the review year. Week history
+  // is the source here (NOT bonus rows): it records every salon a person touched,
+  // including satellite stores where stylists don't carry their own bonus row — so
+  // this drops long-gone staff without re-emptying the small salons.
+  const workedInYear = new Set(Object.keys(bonusByGid));
+  (S.weekHistory||[]).forEach(snap=>{
+    const wy = snap.weekEnding ? new Date(snap.weekEnding).getFullYear() : null;
+    if(wy!==_yr) return;
+    (snap.emps||[]).forEach(e=>{ const g=String(e.globalId||'').trim(); if(g) workedInYear.add(g); });
+  });
   const out=[];
   Object.keys(S.homeDataMap||{}).forEach(gid=>{
     if(homeOf(gid)!==sn) return;          // roster home is THIS salon
+    if(!workedInYear.has(gid)) return;    // no activity in the review year → gone
     if(isInactive(gid)) return;           // SD3-flagged inactive
     if(amGids.has(gid)) return;           // no AMs
     if(gid===fullYearMgrGid) return;      // full-year manager -> salon review, not here
