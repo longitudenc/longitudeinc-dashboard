@@ -5320,7 +5320,6 @@ function renderSalonReviewBody(salonNum){
   return `
     <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin:6px 0 12px;">
       <div><div style="font-size:10px;text-transform:uppercase;color:var(--text-muted);">Manager</div><div style="font-weight:700;font-size:15px;">${d.managerName?fmtName(d.managerName):'—'}</div></div>
-      <div><div style="font-size:10px;text-transform:uppercase;color:var(--text-muted);">Year</div>${srYearSelector()}</div>
     </div>
     ${banner}
     <div style="font-size:11.5px;color:var(--text-muted);margin:0 0 8px;">Tap any metric to see the month-by-month values that feed its 12-month average.</div>
@@ -5418,6 +5417,7 @@ function renderReviewsTab(hostId, windowKind){
           <select onchange="setReviewSalon(this.value)" style="font-size:13px;padding:5px 8px;border-radius:6px;border:1px solid var(--border);">${salonOpts}</select>
           ${mgrOnly?'':`<button onclick="flipReviewSalon(1)" title="Next salon" style="border:1px solid var(--border);background:#fff;border-radius:6px;width:26px;height:26px;cursor:pointer;font-size:12px;line-height:1;color:var(--primary);">&#9654;</button>`}
         </label>
+        <label style="font-size:12px;color:var(--text-muted);display:inline-flex;align-items:center;gap:6px;">Year ${srYearSelector()}</label>
       </div>
       ${bodyHtml}
     </div>`;
@@ -6541,7 +6541,14 @@ function renderTrendsDrill(salonNum){
 }
 
 function selectTrendMetric(key, btn, overrideSalon, hostId, storeView){
+  const _prevTrendMetric = S_trendMetric;
   S_trendMetric = key;
+  // #4: preserve which salon lines are visible across a metric switch. Skip on
+  // drill-in (overrideSalon set) and on plain re-renders where the metric is
+  // unchanged (e.g. exiting a drill), so those keep their intended defaults.
+  if(!overrideSalon && S_trendChart && key !== _prevTrendMetric){
+    try{ const snap={}; S_trendChart.data.datasets.forEach((ds,i)=>{ const base=(ds.label||'').endsWith(' (PY)')?ds.label.slice(0,-5):(ds.label||''); snap[base]=S_trendChart.isDatasetVisible(i); }); S_trendVisSnapshot=snap; }catch(e){}
+  }
   document.querySelectorAll('.trend-metric-btn').forEach(b=>b.classList.remove('active'));
   // If no btn passed, find and activate the matching one
   if(btn){
@@ -7290,6 +7297,8 @@ function loadDataNotes(){
 let S_bonusPeriods = [];      // all loaded bonus periods
 let S_bonusPeriod = null;     // selected period key
 let S_bonusType = 'stylist';  // 'stylist' | 'manager' | 'am'
+let S_bonusSalonFilter = '';  // #6: '' = all my salons, else a single salonNum to isolate
+function bonusSalonScope(){ const all=getAMSalonNums(); return (S_bonusSalonFilter && all.includes(S_bonusSalonFilter)) ? [S_bonusSalonFilter] : all; }
 let S_bonusView = 'month';    // stylist: 'month'|'ytd'|'salon' | manager: 'period'|'ytd' | am: 'period'|'ytd'
 let S_bonusSort = {col: null, asc: true};
 let S_salonSummaryPeriods = []; // salon summary data by period
@@ -7364,9 +7373,11 @@ function bonusByAM(amId, periodKey){
   if(!periodKey) return [];
   const period = S_bonusPeriods.find(p=>p.periodKey===periodKey);
   if(!period) return [];
-  if(amId==='kayla') return period.employees.filter(e=>{ const o=amOfPeriod(e.salonNum, periodKey); return !o || o==='kayla'; });
-  const salons = amSalonsForPeriod(amId, periodKey);
-  return period.employees.filter(e=>salons.includes(e.salonNum));
+  let res;
+  if(amId==='kayla'){ res = period.employees.filter(e=>{ const o=amOfPeriod(e.salonNum, periodKey); return !o || o==='kayla'; }); }
+  else { const salons = amSalonsForPeriod(amId, periodKey); res = period.employees.filter(e=>salons.includes(e.salonNum)); }
+  if(S_bonusSalonFilter) res = res.filter(e=>e.salonNum===S_bonusSalonFilter);  // #6 single-salon isolation
+  return res;
 }
 
 function renderBonus(){
@@ -7423,11 +7434,27 @@ function renderBonus(){
     }
   }
 
+  // #6: salon isolation picker (stylist + manager views; not the AM's own bonus).
+  let salonFilterBar = '';
+  if(S_bonusType!=='am'){
+    const amSnsFull = getAMSalonNums();
+    if(amSnsFull.length>1){
+      const opts = ['<option value="">All My Salons</option>'].concat(
+        amSnsFull.slice().sort((a,b)=>parseInt(a)-parseInt(b)).map(sn=>`<option value="${sn}" ${S_bonusSalonFilter===sn?'selected':''}>${salonDisplay(sn)}</option>`)).join('');
+      salonFilterBar = `<div style="margin-top:.6rem;display:inline-flex;align-items:center;gap:7px;flex-wrap:wrap;">
+        <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);">Salon:</span>
+        <select onchange="S_bonusSalonFilter=this.value;renderBonus();" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);font-size:13px;font-weight:600;background:white;">${opts}</select>
+        ${S_bonusSalonFilter?`<span style="font-size:11px;color:var(--primary);font-weight:700;">· showing ${salonDisplay(S_bonusSalonFilter)} only</span>`:''}
+      </div>`;
+    }
+  }
+
   container.innerHTML = `
     <div style="margin-bottom:.25rem;">
       <div class="bonus-subtabs">${typeBar}</div>
       <div class="bonus-subtabs" style="margin-top:4px;">${viewBar}</div>
       ${periodBar}
+      ${salonFilterBar}
     </div>
     <div id="bonus-content" style="margin-top:1rem;"></div>`;
 
@@ -7479,8 +7506,8 @@ function renderBonusContent(){
     else if(S_bonusView==='ytd')   el.innerHTML = buildBonusYTD();
     else if(S_bonusView==='salon') el.innerHTML = bonusRangeBar('rerenderBonusViews()') + buildBonusSalon();
   } else if(S_bonusType==='manager'){
-    if(S_bonusView==='period') el.innerHTML = buildManagerBonusPeriod(getAMSalonNums());
-    else if(S_bonusView==='ytd') el.innerHTML = buildManagerBonusYTD(getAMSalonNums());
+    if(S_bonusView==='period') el.innerHTML = buildManagerBonusPeriod(bonusSalonScope());
+    else if(S_bonusView==='ytd') el.innerHTML = buildManagerBonusYTD(bonusSalonScope());
   } else if(S_bonusType==='am'){
     if(S_bonusView==='period') el.innerHTML = buildAMBonus();
     else if(S_bonusView==='ytd') el.innerHTML = buildAMBonusYTD();
@@ -7604,7 +7631,7 @@ function buildBonusMonth(){
     <strong>Points:</strong> Prod%: &lt;4%=0pts+penalty / ≥4%=1pt / ≥6%=2pts &nbsp;|&nbsp;
     NR%: &lt;24%=0 / ≥24%=1 / ≥26%=2 &nbsp;|&nbsp; RR%: &lt;74%=0 / ≥74%=1 / ≥77%=2 &nbsp;|&nbsp;
     MBC: &gt;3=0 / ≤3=1 / ≤2=2 &nbsp;|&nbsp; HC Time: same as AM tiers<br>
-    <strong>Potential:</strong> Avg Wkly Hrs &gt;30→$200 ($20/pt) | ≥10→$100 ($10/pt) | &lt;10→ineligible &nbsp;|&nbsp;
+    <strong>Potential:</strong> Avg Floor Hrs &gt;30→$200 ($20/pt) | ≥10→$100 ($10/pt) | &lt;10→ineligible &nbsp;|&nbsp;
     <strong>Min 5 pts</strong> to earn &nbsp;|&nbsp; <strong>Product penalty:</strong> Prod% &lt;4% → entire payout ×0.25
   </div>`;
 
@@ -10051,7 +10078,7 @@ function buildCompanyBonusAllStylists(){
   html += `<div style="overflow-x:auto;"><table class="bonus-table">
     <thead><tr>
       ${bTh2(0,'Employee')}${bTh2(1,'Salon')}${bTh2(2,'AM')}
-      ${bTh2(3,'Avg Wkly Hrs')}${bTh2(4,'Prod %')}${bTh2(5,'NR %')}${bTh2(6,'RR %')}
+      ${bTh2(3,'Avg Floor Hrs')}${bTh2(4,'Prod %')}${bTh2(5,'NR %')}${bTh2(6,'RR %')}
       ${bTh2(7,'MBC')}${bTh2(8,'HC Time')}${bTh2(9,'Pts')}
       ${bTh2(10,'Potential')}${bTh2(11,'Payout')}
       ${bTh2(12,'% of Pot.')}<th>Notes</th>
@@ -11767,10 +11794,14 @@ function printReview(globalId){
   if(!w){ alert('Please allow pop-ups for this site, then click Print Review again.'); return; }
   w.document.write(`<!DOCTYPE html><html><head><title>Annual Review — ${_reviewName} ${_reviewYear}</title>
     <style>
-      body{font-family:Arial,sans-serif;margin:20px;font-size:11px;}
+      :root{--primary:#03654e;--primary-dark:#024c3a;--border:#dcdcdc;--text:#1a1a1a;--text-muted:#666;}
+      *{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+      body{font-family:Arial,sans-serif;margin:20px;font-size:11px;color:#1a1a1a;}
       table{border-collapse:collapse;width:100%;}
-      th,td{border:1px solid #ddd;padding:5px 6px;}
-      @media print{body{margin:10px;} button{display:none;}}
+      th,td{border:1px solid #ddd;padding:4px 6px;font-size:10px;}
+      #review-printable{page-break-inside:avoid;}
+      @page{size:letter portrait;margin:0.45in;}
+      @media print{body{margin:0;font-size:10px;} button{display:none;} table{font-size:9.5px;} th,td{padding:3px 5px;}}
     </style></head><body>`);
   w.document.write(el.outerHTML);
   w.document.write('</body></html>');
@@ -12014,13 +12045,18 @@ function openBulkPrintWindow(data){
   w.document.write(`<!DOCTYPE html><html><head>
     <title>Annual Reviews — ${data.year}</title>
     <style>
-      body { font-family: Arial, sans-serif; margin: 0; padding: 0; font-size: 11px; }
-      .review-page { padding: 16px; page-break-after: always; border-bottom: 3px solid #03654e; }
+      :root{--primary:#03654e;--primary-dark:#024c3a;--border:#dcdcdc;--text:#1a1a1a;--text-muted:#666;}
+      *{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+      body { font-family: Arial, sans-serif; margin: 0; padding: 0; font-size: 11px; color:#1a1a1a; }
+      @page { size: letter portrait; margin: 0.4in; }
+      .review-page { padding: 16px; page-break-after: always; page-break-inside: avoid; border-bottom: 3px solid #03654e; }
       .review-page:last-child { page-break-after: avoid; border-bottom: none; }
       @media print {
-        .review-page { padding: 10px; page-break-after: always; }
+        .review-page { padding: 8px; page-break-after: always; page-break-inside: avoid; border-bottom: none; font-size: 10px; }
         .review-page:last-child { page-break-after: avoid; }
         .no-print { display: none; }
+        table { font-size: 9.5px; }
+        th, td { padding: 3px 5px; }
       }
       table { border-collapse: collapse; }
       th, td { border: 1px solid #ddd; }
