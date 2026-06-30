@@ -7848,6 +7848,11 @@ function calcMgrBonusFromSalonRow(salonRow, bonusMgrRow, waiver, periodLabel, is
   const pcEmp = mgrGlobalId ? getPayrollHours(mgrGlobalId, normLabel) : null;
   const qualifyingHrsPerWeek = pcEmp !== null ? pcEmp.avgWeeklyQualifying : null;
   const hasPayrollData = pcEmp !== null;
+  // Components for the hours breakdown hover (avg per week). Older processed
+  // periods won't have these split out yet (re-run bonus-period to populate).
+  const hrFloor = pcEmp ? (pcEmp.avgWeeklyFloor ?? null) : null;
+  const hrVac   = pcEmp ? (pcEmp.avgWeeklyVacation ?? null) : null;
+  const hrHol   = pcEmp ? (pcEmp.avgWeeklyHoliday ?? null) : null;
 
   // Individual metrics: use bonusMgrRow if available, else look up by mgrGlobalId in bonus periods
   let mgrProduct = 0, mgrNR = 0;
@@ -7939,6 +7944,7 @@ function calcMgrBonusFromSalonRow(salonRow, bonusMgrRow, waiver, periodLabel, is
           cphResult, cphVal, nrResult, mgrNR, mgrProduct, earned, penalties,
           payPenAmt, prodPenAmt,
           floorHrs: qualifyingHrsPerWeek, floorHrsOk, hoursDisqualified, hoursUnknown,
+          hrFloor, hrVac, hrHol,
           hasPayrollData, hoursThreshold,
           payrollWaived: !!waiver.payroll, hoursWaived: !!waiver.hours,
           waiverNotes: waiver.notes||'',
@@ -8105,6 +8111,15 @@ function buildManagerBonusYTD(amSalonNums){
   return html;
 }
 
+// Tooltip text for the manager/AM qualifying-hours figure. Shows the floor +
+// vacation + holiday split when the period has been processed with components
+// (re-run bonus-period to populate older months).
+function hoursBreakdownTitle(floorHrs, hrFloor, hrVac, hrHol){
+  if(floorHrs===null || floorHrs===undefined) return 'Qualifying hours = floor + vacation + holiday';
+  if(hrFloor===null || hrFloor===undefined)
+    return 'Qualifying hours = floor + vacation + holiday — re-run bonus processing to see the split';
+  return `Floor ${(+hrFloor).toFixed(1)} + Vacation ${(+(hrVac||0)).toFixed(1)} + Holiday ${(+(hrHol||0)).toFixed(1)} = ${(+floorHrs).toFixed(1)} hrs/wk`;
+}
 function renderMgrSalonCard(snum, salonRow, result, mgrInfo, bonusMgrRow, isAMFallback, am){
   const {totalPotential,finalPayout,pctEarned,payrollMissed,productPenalty,
          nrKicker,sl,metrics,perGrw,perExc,cphAmt,cphResult,cphVal,
@@ -8143,7 +8158,7 @@ function renderMgrSalonCard(snum, salonRow, result, mgrInfo, bonusMgrRow, isAMFa
     <span>CC band <strong style="color:var(--text);">${Math.round(result.cc)}</strong> <span style="opacity:.7;">(${sl.min}–${sl.max})</span></span>
     <span>Payroll goal <strong style="color:var(--text);">≤${sl.grwPay}%</strong> G / <strong style="color:var(--text);">≤${sl.excPay}%</strong> E</span>
     <span>CPH goal <strong style="color:var(--text);">${sl.cph}</strong></span>
-    <span title="Floor + vacation + holiday" style="text-decoration:underline dotted;cursor:help;">Qualifying hrs/wk
+    <span title="${hoursBreakdownTitle(floorHrs, result.hrFloor, result.hrVac, result.hrHol)}" style="text-decoration:underline dotted;cursor:help;">Qualifying hrs/wk
       <strong style="color:${hoursUnknown?'#c8a800':floorHrsOk?'#2d7a1a':'#9C0006'};">${floorHrs!==null?floorHrs.toFixed(1):'—'}</strong>
       ${hoursUnknown
         ? `<span style="color:#c8a800;">⚠ unverified</span>`
@@ -8615,6 +8630,9 @@ function calcAMBonus(amId, periodLabel){
   // AM's qualifying hours from payroll consolidated
   const pcEmp = am.globalId ? getPayrollHours(am.globalId, normLabel) : null;
   const amQualHrs = pcEmp ? pcEmp.avgWeeklyQualifying : null;
+  const amHrFloor = pcEmp ? (pcEmp.avgWeeklyFloor ?? null) : null;
+  const amHrVac   = pcEmp ? (pcEmp.avgWeeklyVacation ?? null) : null;
+  const amHrHol   = pcEmp ? (pcEmp.avgWeeklyHoliday ?? null) : null;
   const amThreshold = isKayla ? 0 : amHoursThreshold(amId, normLabel);
   const amHrsOk = isKayla ? true : (amQualHrs === null ? null : amQualHrs >= amThreshold);
   const amHoursDisqualified = !isKayla && amHrsOk === false;
@@ -8662,7 +8680,7 @@ function calcAMBonus(amId, periodLabel){
     }
   });
 
-  return {amId, am, isKayla, amQualHrs, amThreshold, amHrsOk, amHoursDisqualified,
+  return {amId, am, isKayla, amQualHrs, amHrFloor, amHrVac, amHrHol, amThreshold, amHrsOk, amHoursDisqualified,
           salonDetails, totalPayout, periodLabel: normLabel};
 }
 
@@ -8689,7 +8707,7 @@ function buildAMBonus(){
 }
 
 function buildAMBonusCard(r){
-  const {am, amQualHrs, amThreshold, amHrsOk, amHoursDisqualified, salonDetails, totalPayout, isKayla} = r;
+  const {am, amQualHrs, amHrFloor, amHrVac, amHrHol, amThreshold, amHrsOk, amHoursDisqualified, salonDetails, totalPayout, isKayla} = r;
 
   let card = `<div class="table-card" style="margin:0;">
     <div style="padding:.85rem 1rem;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
@@ -8699,7 +8717,7 @@ function buildAMBonusCard(r){
           ${isKayla?'50% of all salons · No hours requirement':'30% override on non-managed salons · '+amThreshold+'hr/wk threshold'}
         </div>
         ${!isKayla?`<div style="font-size:11px;margin-top:2px;color:${amHoursDisqualified?'#9C0006':amHrsOk?'#2d7a1a':'#c8a800'};">
-          Qualifying hrs/wk<span title="Floor + vacation + holiday" style="cursor:help;"> ⓘ</span>: ${amQualHrs!==null?amQualHrs.toFixed(1):'—'}
+          Qualifying hrs/wk<span title="${hoursBreakdownTitle(amQualHrs, amHrFloor, amHrVac, amHrHol)}" style="cursor:help;"> ⓘ</span>: ${amQualHrs!==null?amQualHrs.toFixed(1):'—'}
           ${amHoursDisqualified?'⚠ <'+amThreshold+' → entire AM bonus $0':amHrsOk===true?'✓ ≥'+amThreshold:'⚠ No payroll consolidated data'}
         </div>`:''}
       </div>
@@ -9442,7 +9460,7 @@ function buildCoMgrPeriod(){
       <td style="font-size:12px;">${shortName(mgrName)}</td>
       <td>${amChip(am)}</td>
       <td style="text-align:center;">${Math.round(result.cc)}</td>
-      <td style="text-align:center;${result.hoursUnknown?'color:#c8a800;':result.floorHrsOk?'':'color:#9C0006;'}" title="${result.hoursUnknown?'Load Payroll Consolidated for hours':'Floor+Vac+Holiday'}">${result.floorHrs!==null?result.floorHrs.toFixed(1):'—'}</td>
+      <td style="text-align:center;${result.hoursUnknown?'color:#c8a800;':result.floorHrsOk?'':'color:#9C0006;'}" title="${result.hoursUnknown?'Load Payroll Consolidated for hours':hoursBreakdownTitle(result.floorHrs, result.hrFloor, result.hrVac, result.hrHol)}">${result.floorHrs!==null?result.floorHrs.toFixed(1):'—'}</td>
       <td style="text-align:center;${result.payrollMissed?'color:#9C0006;font-weight:700;':''}">${result.payroll.toFixed(1)}%</td>
       <td style="text-align:center;${result.cphResult==='hit'?'':'color:#9C0006;'}">${result.cphVal.toFixed(1)}</td>
       <td class="${pCls}" style="text-align:center;">${fmtMoney(result.finalPayout)}</td>
@@ -11382,15 +11400,25 @@ function loadDiscPoints(cb){
 function populateDiscControls(){
   const sel = document.getElementById('disc-emp');
   if(!sel) return;
-  // Build employee list from all known stylists across loaded weeks (globalId → name)
+  // Build the list from EVERY source so anyone on record can receive points — not
+  // just stylists with a recent weekly row. homeDataMap is the full roster
+  // (globalId → payrollName/homeSalon); week history and bonus employees fill any
+  // gaps. This is what brings managers / low-activity staff into the picker.
   const byId = {};
-  (S.weekHistory||[]).forEach(w=>(w.emps||[]).forEach(e=>{
-    const gid = String(e.globalId||'').trim();
-    if(gid && !byId[gid]) byId[gid] = { name: e.empName||e.employeeName||gid, salon: e.salonNum||'' };
-  }));
+  const add = (gid,name,salon)=>{
+    gid = String(gid||'').trim(); if(!gid) return;
+    const nm = String(name||'').trim(), sn = String(salon||'').trim();
+    if(!byId[gid]) byId[gid] = { name: nm||gid, salon: sn };
+    else { if((!byId[gid].name||byId[gid].name===gid)&&nm) byId[gid].name=nm; if(!byId[gid].salon&&sn) byId[gid].salon=sn; }
+  };
+  Object.entries(S.homeDataMap||{}).forEach(([gid,r])=>add(gid, r&&r.payrollName, r&&r.homeSalon));
+  (S.weekHistory||[]).forEach(w=>(w.emps||[]).forEach(e=>add(e.globalId, e.empName||e.employeeName, e.salonNum)));
+  (S_bonusPeriods||[]).forEach(p=>(p.employees||[]).forEach(e=>add(e.globalId, e.empName, e.salonNum)));
+  Object.entries(S_managerTable||{}).forEach(([sn,m])=>add(m&&m.globalId, m&&m.name, sn)); // managers (e.g. non-cutting) absent from the above
+  Object.entries(INACTIVE_MAP||{}).forEach(([gid,r])=>add(gid, r&&r.name, r&&r.homeSalon)); // full EmployeeProfile roster — everyone on record, incl. non-cutting staff
   const opts = Object.entries(byId)
-    .sort((a,b)=>a[1].name.localeCompare(b[1].name))
-    .map(([gid,o])=>`<option value="${gid}" data-name="${o.name.replace(/"/g,'')}">${o.name} (${o.salon})</option>`)
+    .sort((a,b)=>fmtName(a[1].name).localeCompare(fmtName(b[1].name)))
+    .map(([gid,o])=>`<option value="${gid}" data-name="${String(o.name).replace(/"/g,'')}">${fmtName(o.name)}${o.salon?` (${o.salon})`:''}</option>`)
     .join('');
   sel.innerHTML = '<option value="">— Select employee —</option>' + opts;
   // default date to today

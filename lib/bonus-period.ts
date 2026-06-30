@@ -60,6 +60,7 @@ const BONUS_COLUMNS = [
 const PAYROLL_CONSOLIDATED_COLUMNS = [
   'periodKey', 'periodLabel', 'weeksN', 'salonNum', 'globalId', 'payId',
   'empName', 'avgWeeklyQualifying', 'floorHoursTotal', 'weeksWithData', 'scrapedAt',
+  'avgWeeklyFloor', 'avgWeeklyVacation', 'avgWeeklyHoliday',
 ] as const
 
 export interface BonusPeriodResult {
@@ -514,9 +515,13 @@ export async function runBonusPeriodScrape(
     for (const [gid, rows] of Object.entries(byPayEmp)) {
       const last = rows[rows.length - 1]
       // Qualifying hours = floor + vacation + holiday (Great Clips bonus rule).
-      // All three are stored per-employee in SD_PAYROLL; sum them for the threshold.
-      const qualifyingTotal =
-        sum(rows, 'floorHours') + sum(rows, 'vacationHours') + sum(rows, 'holidayHours')
+      // All three are stored per-employee in SD_PAYROLL; sum them for the threshold
+      // AND emit each component's weekly average so the bonus card hover can show
+      // the floor + vacation + holiday breakdown.
+      const floorTot = sum(rows, 'floorHours')
+      const vacTot   = sum(rows, 'vacationHours')
+      const holTot   = sum(rows, 'holidayHours')
+      const qualifyingTotal = floorTot + vacTot + holTot
       payrollRows.push({
         periodKey, periodLabel, weeksN,
         salonNum: storeToSalon[String(last.storeId)] || last.salonNum || '',
@@ -525,6 +530,9 @@ export async function runBonusPeriodScrape(
         empName: String(last.employeeName || '').trim(),
         avgWeeklyQualifying: weeksN ? qualifyingTotal / weeksN : qualifyingTotal,
         floorHoursTotal: qualifyingTotal,
+        avgWeeklyFloor:    weeksN ? floorTot / weeksN : floorTot,
+        avgWeeklyVacation: weeksN ? vacTot / weeksN : vacTot,
+        avgWeeklyHoliday:  weeksN ? holTot / weeksN : holTot,
         weeksWithData: rows.length,
         scrapedAt: new Date().toISOString(),
       })

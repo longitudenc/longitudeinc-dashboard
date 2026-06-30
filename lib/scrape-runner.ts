@@ -1373,6 +1373,8 @@ const EMP_PROFILE_TAB = 'EmployeeProfile'
 
 const PROFILE_COLUMNS = [
   'globalId',       // join key — from globalEmployeeKey (e.g. "2023-0000-7354")
+  'name',           // "Last, First" — already shown across the dashboard; used to
+                    // resolve everyone (incl. non-cutting staff) for the disc picker
   'email',          // emailAddress, lowercased — AUTH USE ONLY (see PII note below)
   'inactive',       // 'true'/'false' — SD3 inactive flag (termed/left). Excludes
                     // from ADP export + marks in bonus views; access auto-revokes.
@@ -1413,8 +1415,14 @@ function profileRow(e: any): Record<string, any> | null {
   const home = (e?.primaryStoreDict && typeof e.primaryStoreDict === 'object')
     ? e.primaryStoreDict as Record<string, any>
     : {}
+  const lastN  = String(e?.lastName ?? e?.lastname ?? '').trim()
+  const firstN = String(e?.firstName ?? e?.firstname ?? '').trim()
+  const name = (lastN || firstN)
+    ? [lastN, firstN].filter(Boolean).join(', ')
+    : String(e?.employeeName ?? e?.name ?? e?.fullName ?? '').trim()
   return {
     globalId,
+    name,
     email: e?.emailAddress ? String(e.emailAddress).trim().toLowerCase() : '',
     inactive: e?.inactive === true ? 'true' : 'false',
     inactiveDate: e?.inactiveDate ? String(e.inactiveDate).trim() : '',

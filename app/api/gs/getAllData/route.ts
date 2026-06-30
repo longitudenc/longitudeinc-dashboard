@@ -83,16 +83,18 @@ async function fetchSalonRoster(): Promise<any[]> {
  * map is safe to send to the client. The dashboard uses it to mark inactive
  * employees in bonus views and to exclude them from the ADP export.
  */
-async function fetchInactiveMap(): Promise<Record<string, { inactive: boolean; inactiveDate: string; dateOfHire: string; rehireDate: string }>> {
+async function fetchInactiveMap(): Promise<Record<string, { inactive: boolean; inactiveDate: string; dateOfHire: string; rehireDate: string; name: string; homeSalon: string }>> {
   try {
     const rows = rowsToObjects(await readSheet('EmployeeProfile'))
-    const map: Record<string, { inactive: boolean; inactiveDate: string; dateOfHire: string; rehireDate: string }> = {}
+    const map: Record<string, { inactive: boolean; inactiveDate: string; dateOfHire: string; rehireDate: string; name: string; homeSalon: string }> = {}
     for (const r of rows) {
       const gid = String((r as any).globalId || '').trim()
       if (!gid) continue
       map[gid] = {
         inactive: String((r as any).inactive || '').trim().toLowerCase() === 'true',
         inactiveDate: String((r as any).inactiveDate || '').trim(),
+        name: String((r as any).name || '').trim(),
+        homeSalon: String((r as any).homeStoreNum || '').trim(),
         dateOfHire: String((r as any).dateOfHire || '').trim(),
         rehireDate: String((r as any).rehireDate || '').trim(),
       }
@@ -214,6 +216,9 @@ function formatAllData(raw: any, scrapedWeeks: any[], rosterRows: any[]) {
       ...row,
       avgWeeklyQualifying: Number(row.avgWeeklyQualifying) || 0,
       floorHoursTotal: Number(row.floorHoursTotal) || 0,
+      avgWeeklyFloor: Number(row.avgWeeklyFloor) || 0,
+      avgWeeklyVacation: Number(row.avgWeeklyVacation) || 0,
+      avgWeeklyHoliday: Number(row.avgWeeklyHoliday) || 0,
     })
   })
 
