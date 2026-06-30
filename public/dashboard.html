@@ -5046,29 +5046,39 @@ function stylistsForSalon(sn){
   // backstop: long-gone employees still sitting in homeDataMap (but never flagged
   // inactive in SD3's profile) are dropped because they have no current-year data.
   const _yr = _reviewYear || (new Date().getFullYear());
-  const workedThisYear = new Set();
+  // Source candidates from BonusData (S_bonusPeriods.employees) for the review
+  // year. This is the data every role reliably has for its OWN scope — an AM's
+  // payload is server-scoped to their salons, which is exactly the set they
+  // should see. Each row carries salonNum/name/position; we resolve one home
+  // salon per person, preferring their roster home when it matches a billed salon.
+  const bonusByGid = {};
   (S_bonusPeriods||[]).forEach(per=>{
     if(periodYear(per.periodKey)!==_yr) return;
-    (per.employees||[]).forEach(e=>{ const g=String(e.globalId||'').trim(); if(g) workedThisYear.add(g); });
+    (per.employees||[]).forEach(e=>{
+      const g=String(e.globalId||'').trim(); if(!g) return;
+      const rec = bonusByGid[g] || (bonusByGid[g]={salons:{},name:'',position:''});
+      const k=String(e.salonNum||'').trim(); if(k) rec.salons[k]=(rec.salons[k]||0)+1;
+      if(e.empName && !rec.name) rec.name=e.empName;
+      if(e.position) rec.position=e.position;
+    });
   });
-  // Candidate gids: roster home map UNION anyone seen in week history. This keeps
-  // the list working in a scoped AM view where homeDataMap may be sparse. We
-  // require current-year BonusData only when that year's periods are actually
-  // loaded; otherwise fall back to week-history presence so AMs still see stylists.
-  const haveYearBonus = workedThisYear.size > 0;
-  const candGids = new Set([...Object.keys(S.homeDataMap||{}), ...Object.keys(posByGid), ...Object.keys(nameByGid)]
-    .map(g=>String(g||'').trim()).filter(Boolean));
+  const reviewHomeOf = gid => {
+    const ho = homeOf(gid);
+    const bs = bonusByGid[gid] ? bonusByGid[gid].salons : {};
+    if(ho && bs[ho]!=null) return ho;                        // roster home matches a billed salon
+    const top = Object.keys(bs).sort((a,b)=>bs[b]-bs[a])[0]; // else the salon they billed at most
+    return top || ho || '';
+  };
   const out=[];
-  candGids.forEach(gid=>{
-    if(homeOf(gid)!==sn) return;          // home salon only (floaters under home store)
-    if(haveYearBonus && !workedThisYear.has(gid)) return;  // worked this year, when we have that year's data
+  Object.keys(bonusByGid).forEach(gid=>{
+    if(reviewHomeOf(gid)!==sn) return;
     if(isInactive(gid)) return;           // SD3-flagged inactive
     if(amGids.has(gid)) return;           // no AMs
     if(gid===fullYearMgrGid) return;      // full-year manager -> salon review, not here
-    const row = (S.homeDataMap||{})[gid];
-    const name = String((row&&row.payrollName)||'').trim() || nameByGid[gid] || '';
+    const hrow=(S.homeDataMap||{})[gid];
+    const name = String((hrow&&hrow.payrollName)||'').trim() || nameByGid[gid] || bonusByGid[gid].name || '';
     if(!name) return;
-    out.push({ globalId:gid, name, preferred: nameByGid[gid]||'', position: posByGid[gid]||'' });
+    out.push({ globalId:gid, name, preferred: nameByGid[gid]||'', position: bonusByGid[gid].position || posByGid[gid] || '' });
   });
   return out.sort((a,b)=>fmtName(a.name).localeCompare(fmtName(b.name)));
 }

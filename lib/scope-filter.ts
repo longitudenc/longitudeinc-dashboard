@@ -31,10 +31,10 @@ function withoutWage(row: any): any {
 }
 
 // Period buckets look like { ..., employees: [{ salonNum, ... }] }.
-function scopePeriods(periods: any[], inScope: (sn: any) => boolean): any[] {
+function scopePeriods(periods: any[], keep: (e: any) => boolean): any[] {
   return (periods || []).map(p => ({
     ...p,
-    employees: (p.employees || []).filter((e: any) => inScope(e.salonNum)),
+    employees: (p.employees || []).filter((e: any) => keep(e)),
   }))
 }
 
@@ -46,6 +46,16 @@ export function scopeAllData(data: any, access: Access): any {
     const salons = amSalonSet(access)
     const inScope = (sn: any) => salons.has(String(sn || '').trim())
     const homeSalonOf = (gid: string) => data.homeDataMap?.[gid]?.homeSalon
+    // Managers/AMs assigned to one of THIS AM's salons: keep their personal bonus
+    // & payroll rows even when their own primary salon sits outside this AM's
+    // scope. Without this, such a manager's aggregated row is dropped entirely and
+    // the manager bonus falls back to salon product % for the −25% penalty.
+    const keepGids = new Set<string>()
+    for (const m of (data.managerTable || [])) {
+      if (m && m.globalId && inScope(m.salonNum)) keepGids.add(String(m.globalId).trim())
+    }
+    const empInScope = (e: any) =>
+      inScope(e.salonNum) || keepGids.has(String(e.globalId || '').trim())
     const out: any = { ...data }
 
     // 1) Pay: keep baseWage only for employees homed at the AM's salons.
@@ -56,8 +66,8 @@ export function scopeAllData(data: any, access: Access): any {
       }
     }
     // 2) Per-employee buckets -> the AM's salons only.
-    out.bonusPeriods = scopePeriods(data.bonusPeriods, inScope)
-    out.payrollConsolidatedPeriods = scopePeriods(data.payrollConsolidatedPeriods, inScope)
+    out.bonusPeriods = scopePeriods(data.bonusPeriods, empInScope)
+    out.payrollConsolidatedPeriods = scopePeriods(data.payrollConsolidatedPeriods, empInScope)
     if (Array.isArray(data.empWeeklyConsRows))
       out.empWeeklyConsRows = data.empWeeklyConsRows.filter((r: any) => inScope(r.salonNum))
     // 3) Disciplinary tracker (keyed by globalId) -> only the AM's employees.
