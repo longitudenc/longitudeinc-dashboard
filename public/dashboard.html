@@ -5071,16 +5071,21 @@ function stylistsForSalon(sn){
     });
   });
   // Active-in-year gate. homeDataMap is the roster, but it retains people who left
-  // yet were never flagged inactive in EmployeeProfile (so isInactive misses them).
-  // A person shows only if they have real activity in the review year. Week history
-  // is the source here (NOT bonus rows): it records every salon a person touched,
-  // including satellite stores where stylists don't carry their own bonus row — so
-  // this drops long-gone staff without re-emptying the small salons.
-  const workedInYear = new Set(Object.keys(bonusByGid));
+  // yet were never flagged inactive in EmployeeProfile (so isInactive misses them) —
+  // and the weekly snapshots keep carrying those departed names at ZERO hours. So
+  // mere presence in a week is not enough: a person qualifies only with real FLOOR
+  // HOURS in the review year. Week history (not bonus rows) is the source because it
+  // records every salon a person touched, including satellite stores where stylists
+  // don't carry their own bonus row — so this keeps low-hour satellite staff while
+  // dropping zero-hour ghosts.
+  const workedInYear = new Set(Object.keys(bonusByGid));   // any BonusData row that year = worked
   (S.weekHistory||[]).forEach(snap=>{
     const wy = snap.weekEnding ? new Date(snap.weekEnding).getFullYear() : null;
     if(wy!==_yr) return;
-    (snap.emps||[]).forEach(e=>{ const g=String(e.globalId||'').trim(); if(g) workedInYear.add(g); });
+    (snap.emps||[]).forEach(e=>{
+      if((parseFloat(e.floorHours)||0) <= 0) return;       // roster carries departed staff at 0 hrs
+      const g=String(e.globalId||'').trim(); if(g) workedInYear.add(g);
+    });
   });
   const out=[];
   Object.keys(S.homeDataMap||{}).forEach(gid=>{
