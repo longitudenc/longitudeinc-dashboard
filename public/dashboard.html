@@ -11415,7 +11415,7 @@ function populateDiscControls(){
   (S.weekHistory||[]).forEach(w=>(w.emps||[]).forEach(e=>add(e.globalId, e.empName||e.employeeName, e.salonNum)));
   (S_bonusPeriods||[]).forEach(p=>(p.employees||[]).forEach(e=>add(e.globalId, e.empName, e.salonNum)));
   Object.entries(S_managerTable||{}).forEach(([sn,m])=>add(m&&m.globalId, m&&m.name, sn)); // managers (e.g. non-cutting) absent from the above
-  Object.entries(INACTIVE_MAP||{}).forEach(([gid,r])=>add(gid, r&&r.name, r&&r.homeSalon)); // full EmployeeProfile roster — everyone on record, incl. non-cutting staff
+  Object.entries(INACTIVE_MAP||{}).forEach(([gid,r])=>{ if(r&&r.inactive) return; add(gid, r&&r.name, r&&r.homeSalon); }); // EmployeeProfile roster — ACTIVE staff only (incl. non-cutting); termed are excluded from the picker
   const opts = Object.entries(byId)
     .sort((a,b)=>fmtName(a[1].name).localeCompare(fmtName(b[1].name)))
     .map(([gid,o])=>`<option value="${gid}" data-name="${String(o.name).replace(/"/g,'')}">${fmtName(o.name)}${o.salon?` (${o.salon})`:''}</option>`)
