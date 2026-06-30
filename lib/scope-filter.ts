@@ -55,7 +55,13 @@ export function scopeAllData(data: any, access: Access): any {
       if (m && m.globalId && inScope(m.salonNum)) keepGids.add(String(m.globalId).trim())
     }
     const empInScope = (e: any) =>
-      inScope(e.salonNum) || keepGids.has(String(e.globalId || '').trim())
+      inScope(e.salonNum) ||
+      keepGids.has(String(e.globalId || '').trim()) ||
+      // Keep ALL manager (position "M") rows. The AM only DISPLAYS managers for
+      // their own salons, but the manager bonus needs each manager's personal
+      // product %, and a manager's single aggregated bonus row can be attributed
+      // to a salon outside this AM's scope. This guarantees it's always present.
+      String(e.position || '').trim().toUpperCase() === 'M' 
     const out: any = { ...data }
 
     // 1) Pay: keep baseWage only for employees homed at the AM's salons.
