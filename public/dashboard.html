@@ -5051,14 +5051,21 @@ function stylistsForSalon(sn){
     if(periodYear(per.periodKey)!==_yr) return;
     (per.employees||[]).forEach(e=>{ const g=String(e.globalId||'').trim(); if(g) workedThisYear.add(g); });
   });
+  // Candidate gids: roster home map UNION anyone seen in week history. This keeps
+  // the list working in a scoped AM view where homeDataMap may be sparse. We
+  // require current-year BonusData only when that year's periods are actually
+  // loaded; otherwise fall back to week-history presence so AMs still see stylists.
+  const haveYearBonus = workedThisYear.size > 0;
+  const candGids = new Set([...Object.keys(S.homeDataMap||{}), ...Object.keys(posByGid), ...Object.keys(nameByGid)]
+    .map(g=>String(g||'').trim()).filter(Boolean));
   const out=[];
-  Object.entries(S.homeDataMap||{}).forEach(([gid,row])=>{
-    gid=String(gid).trim(); if(!gid) return;
+  candGids.forEach(gid=>{
     if(homeOf(gid)!==sn) return;          // home salon only (floaters under home store)
-    if(!workedThisYear.has(gid)) return;  // must have worked (have BonusData) this year
-    if(isInactive(gid)) return;           // SD3-flagged inactive (authoritative once profile backfilled)
+    if(haveYearBonus && !workedThisYear.has(gid)) return;  // worked this year, when we have that year's data
+    if(isInactive(gid)) return;           // SD3-flagged inactive
     if(amGids.has(gid)) return;           // no AMs
     if(gid===fullYearMgrGid) return;      // full-year manager -> salon review, not here
+    const row = (S.homeDataMap||{})[gid];
     const name = String((row&&row.payrollName)||'').trim() || nameByGid[gid] || '';
     if(!name) return;
     out.push({ globalId:gid, name, preferred: nameByGid[gid]||'', position: posByGid[gid]||'' });
@@ -7527,7 +7534,7 @@ function buildBonusMonth(){
   html += `<div class="table-card"><div style="overflow-x:auto;"><table class="bonus-table">
     <thead><tr>
       ${bTh(0,'Employee')}
-      ${bTh(1,'Avg Wkly Hrs')}${bTh(2,'Prod %')}${bTh(3,'NR %')}${bTh(4,'RR %')}${bTh(5,'MBC')}
+      ${bTh(1,'Avg Floor Hrs')}${bTh(2,'Prod %')}${bTh(3,'NR %')}${bTh(4,'RR %')}${bTh(5,'MBC')}
       ${bTh(6,'HC Time')}${bTh(7,'Pts')}${bTh(8,'$/Pt')}${bTh(9,'Potential')}${bTh(10,'Payout')}
       ${bTh(11,'% of Pot.')}<th>Notes</th>
     </tr></thead><tbody>`;
@@ -8099,7 +8106,7 @@ function renderMgrSalonCard(snum, salonRow, result, mgrInfo, bonusMgrRow, isAMFa
     <span>CC band <strong style="color:var(--text);">${Math.round(result.cc)}</strong> <span style="opacity:.7;">(${sl.min}–${sl.max})</span></span>
     <span>Payroll goal <strong style="color:var(--text);">≤${sl.grwPay}%</strong> G / <strong style="color:var(--text);">≤${sl.excPay}%</strong> E</span>
     <span>CPH goal <strong style="color:var(--text);">${sl.cph}</strong></span>
-    <span>Qualifying hrs/wk
+    <span title="Floor + vacation + holiday" style="text-decoration:underline dotted;cursor:help;">Qualifying hrs/wk
       <strong style="color:${hoursUnknown?'#c8a800':floorHrsOk?'#2d7a1a':'#9C0006'};">${floorHrs!==null?floorHrs.toFixed(1):'—'}</strong>
       ${hoursUnknown
         ? `<span style="color:#c8a800;">⚠ unverified</span>`
@@ -8593,7 +8600,9 @@ function calcAMBonus(amId, periodLabel){
 
     if(isManager){
       // Full manager bonus
-      const result = calcMgrBonusFromSalonRow(salonRow, null, waiver, normLabel, true, am.globalId);
+      const _bp = (S_bonusPeriods||[]).find(p=>p.periodKey===normLabel||p.periodLabel===normLabel)||null;
+      const amBonusRow = _bp ? (getAMBonusRow(am, _bp) || _bp.employees.find(e=>e.globalId===am.globalId) || null) : null;
+      const result = calcMgrBonusFromSalonRow(salonRow, amBonusRow, waiver, normLabel, true, am.globalId);
       const amPayout = amHoursDisqualified ? 0 : result.finalPayout;
       salonDetails.push({snum, role:'manager', salonPayout:result.finalPayout,
         preHoursPayout:result.finalPayout, amPayout, pct:100,
@@ -8602,7 +8611,10 @@ function calcAMBonus(amId, periodLabel){
     } else {
       // Override: % of salon manager bonus after payroll/product penalties, before hours
       const mgrGId = mgrInfo ? mgrInfo.globalId : '';
-      const mgrResult = calcMgrBonusFromSalonRow(salonRow, null, waiver, normLabel, false, mgrGId);
+      const _bp = (S_bonusPeriods||[]).find(p=>p.periodKey===normLabel||p.periodLabel===normLabel)||null;
+      let mgrBonusRow = (_bp && mgrGId) ? (_bp.employees.find(e=>e.globalId===mgrGId)||null) : null;
+      if(!mgrBonusRow && _bp && mgrGId){ const _mAm=Object.values(AMS).find(a=>a.globalId===mgrGId); if(_mAm) mgrBonusRow=getAMBonusRow(_mAm, _bp); }
+      const mgrResult = calcMgrBonusFromSalonRow(salonRow, mgrBonusRow, waiver, normLabel, false, mgrGId);
       const preHoursPayout = Math.max(0, mgrResult.earned - mgrResult.penalties);
       const pct = isKayla ? 50 : 30;
       const amPayout = amHoursDisqualified ? 0 : preHoursPayout * (pct/100);
@@ -8650,7 +8662,7 @@ function buildAMBonusCard(r){
           ${isKayla?'50% of all salons · No hours requirement':'30% override on non-managed salons · '+amThreshold+'hr/wk threshold'}
         </div>
         ${!isKayla?`<div style="font-size:11px;margin-top:2px;color:${amHoursDisqualified?'#9C0006':amHrsOk?'#2d7a1a':'#c8a800'};">
-          Qualifying hrs/wk: ${amQualHrs!==null?amQualHrs.toFixed(1):'—'}
+          Qualifying hrs/wk<span title="Floor + vacation + holiday" style="cursor:help;"> ⓘ</span>: ${amQualHrs!==null?amQualHrs.toFixed(1):'—'}
           ${amHoursDisqualified?'⚠ <'+amThreshold+' → entire AM bonus $0':amHrsOk===true?'✓ ≥'+amThreshold:'⚠ No payroll consolidated data'}
         </div>`:''}
       </div>
@@ -8935,7 +8947,7 @@ function buildCompanyBonusAll(){
   html += `<div style="overflow-x:auto;"><table class="bonus-table" style="margin-top:1rem;">
     <thead><tr>
       <th style="text-align:left;">Employee</th><th style="text-align:left;">Salon</th><th style="text-align:left;">AM</th>
-      <th>Avg Wkly Hrs</th><th>Prod %</th><th>NR %</th><th>RR %</th><th>MBC</th><th>HC Time</th>
+      <th>Avg Floor Hrs</th><th>Prod %</th><th>NR %</th><th>RR %</th><th>MBC</th><th>HC Time</th>
       <th>Pts</th><th>Potential</th><th>Payout</th><th>% of Pot.</th><th>Notes</th>
     </tr></thead><tbody>`;
 
@@ -9372,7 +9384,7 @@ function buildCoMgrPeriod(){
       <th style="text-align:left;">Manager</th>
       <th style="text-align:left;">AM</th>
       <th>Avg CC</th>
-      <th>Floor Hrs/Wk</th>
+      <th title="Qualifying hours = floor + vacation + holiday">Qual Hrs/Wk</th>
       <th>Payroll %</th>
       <th>CPH</th>
       <th>Payout</th>
@@ -9685,7 +9697,7 @@ function exportBonusJPEG(periodKey){
   const headerHTML = `<tr style="background:var(--primary-dark);color:white;font-size:13px;">
     <th style="padding:8px 10px;text-align:left;min-width:180px;">Employee</th>
     <th style="padding:8px 10px;text-align:left;min-width:160px;">Salon</th>
-    <th style="padding:8px 10px;text-align:center;min-width:80px;">Avg Wkly Hrs</th>
+    <th style="padding:8px 10px;text-align:center;min-width:80px;">Avg Floor Hrs</th>
     <th style="padding:8px 10px;text-align:center;min-width:70px;">Prod %</th>
     <th style="padding:8px 10px;text-align:center;min-width:70px;">NR %</th>
     <th style="padding:8px 10px;text-align:center;min-width:70px;">RR %</th>
