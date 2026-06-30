@@ -5910,8 +5910,11 @@ function sdDrawMultiMetric(){
 
 // BONUSES — real manager bonus card + stylist payouts for this salon, by period.
 function _sdBonusPeriodsList(){
-  const cur=periodSortKey(periodKeyFromWeekEnd(_sdTodayIso())||'');
-  return [...(S_salonSummaryPeriods||[])].filter(pp=>periodSortKey(pp.periodKey)<cur).sort((a,b)=>periodSortKey(b.periodKey)-periodSortKey(a.periodKey));
+  // Salon-summary periods only exist once a fiscal month has closed and been
+  // scraped, so every entry here is a completed period. The old "< today's
+  // calendar month" guard wrongly dropped the just-finished month (e.g. on
+  // 6/30 it excluded the 5/30–6/26 June period, whose key is also "Jun 26").
+  return [...(S_salonSummaryPeriods||[])].sort((a,b)=>periodSortKey(b.periodKey)-periodSortKey(a.periodKey));
 }
 function setSdBonusPeriod(pk){ S_sdBonusPeriod=pk; sdRender(); }
 function _sdMgrResult(snum, ssPeriod){
