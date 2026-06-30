@@ -30,9 +30,15 @@
 // ---------------------------------------------------------------------------
 
 import { readSheet, rowsToObjects, upsertSheet, writeSheet } from '@/lib/sheets'
-import { fetchSalons, authenticate, fetchEmployeePerformanceCsv, type SD3Session } from '@/lib/sd3'
+import { fetchSalons, authenticate, fetchEmployeePerformanceCsv, fetchGroupedSummary, fetchDailyStoreSummary, type SD3Session } from '@/lib/sd3'
 import { parseCsv, rowsToObjectsAt, num as csvNum, returnRate } from '@/lib/csv'
 import { salonMonth, salonMonthsBetween, type SalonMonth } from '@/lib/salon-month'
+
+// Sat (6) / Sun (0). Parse as UTC midnight so the weekday never shifts by TZ.
+function isWeekendIso(iso: string): boolean {
+  const d = new Date(String(iso || '') + 'T00:00:00Z').getUTCDay()
+  return d === 0 || d === 6
+}
 
 const SD_WEEKLY_TAB = 'SD_WEEKLY'
 const SD_EMP_WEEKLY_TAB = 'SD_EMP_WEEKLY'
@@ -444,6 +450,35 @@ export async function runBonusPeriodScrape(
       const dollarsPerCut = sum(rows, 'haircutCount') ? sum(rows, 'grossHaircutSales') / sum(rows, 'haircutCount') : 0
       const cph = dollarsPerCut ? productivity / dollarsPerCut : 0
       const totSales = sum(rows, 'totalSales')
+      // ── Waits: SD3's grouped wait count is non-additive across weeks (summing
+      //    the 4 weekly grouped counts does NOT equal the month's count), and the
+      //    per-week daily fetch returns different weekend counts than the monthly
+      //    fetch. The SalonSummary report is computed over the MONTH window, so we
+      //    pull the month-window grouped + daily directly and use those. Falls back
+      //    to the weekly-summed values if the live fetch fails, so backfills never
+      //    hard-stop. (overall = waitOver15MinsCount / customerCount; Sat/Sun from
+      //    the month's weekend daily rows.)
+      let waitsVal = pctSum(rows, 'waitOver15Count', 'cc')
+      let ssWaitsVal = (() => { const d = sum(rows, 'ssCustCount'); return d ? (sum(rows, 'ssWaitCount') / d) * 100 : 0 })()
+      try {
+        const [mg, md] = await Promise.all([
+          fetchGroupedSummary(session, Number(sid), monthStart, monthEnd),
+          fetchDailyStoreSummary(session, Number(sid), monthStart, monthEnd),
+        ])
+        if (mg) {
+          const ccM = Number((mg as any).customerCount) || 0
+          const w15 = Number((mg as any).waitOver15MinsCount) || 0
+          if (ccM) waitsVal = (w15 / ccM) * 100
+        }
+        if (Array.isArray(md) && md.length) {
+          const wknd = md.filter((d: any) => isWeekendIso(String(d.date || '')))
+          const ssW = wknd.reduce((t: number, d: any) => t + (Number(d.waitOver15MinsCount) || 0), 0)
+          const ssC = wknd.reduce((t: number, d: any) => t + (Number(d.customerCount) || 0), 0)
+          if (ssC) ssWaitsVal = (ssW / ssC) * 100
+        }
+      } catch (e: any) {
+        result.errors.push(`monthly waits fetch failed for salon ${salonNum} — used weekly fallback (${e?.message || e})`)
+      }
       ssRows.push({
         periodKey, periodLabel, weeksN, salonNum, storeId: sid,
         avgWeeklyCC: avgPresent(rows, 'cc').avg,
@@ -457,8 +492,8 @@ export async function runBonusPeriodScrape(
         mbc: avgPresent(rows, 'mbc').avg,
         nr: avgPresent(rows, 'nr').avg,
         rr: avgPresent(rows, 'rr').avg,
-        waits: pctSum(rows, 'waitOver15Count', 'cc'),
-        ssWaits: (() => { const d = sum(rows, 'ssCustCount'); return d ? (sum(rows, 'ssWaitCount') / d) * 100 : 0 })(),
+        waits: waitsVal,
+        ssWaits: ssWaitsVal,
         weeksWithData: rows.length,
         scrapedAt: new Date().toISOString(),
       })
