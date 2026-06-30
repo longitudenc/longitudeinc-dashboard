@@ -5046,39 +5046,35 @@ function stylistsForSalon(sn){
   // backstop: long-gone employees still sitting in homeDataMap (but never flagged
   // inactive in SD3's profile) are dropped because they have no current-year data.
   const _yr = _reviewYear || (new Date().getFullYear());
-  // Source candidates from BonusData (S_bonusPeriods.employees) for the review
-  // year. This is the data every role reliably has for its OWN scope — an AM's
-  // payload is server-scoped to their salons, which is exactly the set they
-  // should see. Each row carries salonNum/name/position; we resolve one home
-  // salon per person, preferring their roster home when it matches a billed salon.
+  // Source candidates from the ROSTER HOME (homeDataMap): every active employee
+  // whose home salon resolves to THIS salon. homeDataMap is the complete, reliable
+  // source of who works where. Bonus rows are NOT a valid source — they only exist
+  // for people who billed under that salon's own store number, so small satellite
+  // salons (whose stylists bill at sister stores) would lose their entire roster.
+  // homeOf() already gives each person exactly one salon (roster home, or most-worked
+  // week-history salon when home is blank), which is exactly the one-salon-per-person
+  // rule reviews need. Bonus data is kept only as a name/position fallback.
   const bonusByGid = {};
   (S_bonusPeriods||[]).forEach(per=>{
     if(periodYear(per.periodKey)!==_yr) return;
     (per.employees||[]).forEach(e=>{
       const g=String(e.globalId||'').trim(); if(!g) return;
-      const rec = bonusByGid[g] || (bonusByGid[g]={salons:{},name:'',position:''});
-      const k=String(e.salonNum||'').trim(); if(k) rec.salons[k]=(rec.salons[k]||0)+1;
+      const rec = bonusByGid[g] || (bonusByGid[g]={name:'',position:''});
       if(e.empName && !rec.name) rec.name=e.empName;
       if(e.position) rec.position=e.position;
     });
   });
-  const reviewHomeOf = gid => {
-    const ho = homeOf(gid);
-    const bs = bonusByGid[gid] ? bonusByGid[gid].salons : {};
-    if(ho && bs[ho]!=null) return ho;                        // roster home matches a billed salon
-    const top = Object.keys(bs).sort((a,b)=>bs[b]-bs[a])[0]; // else the salon they billed at most
-    return top || ho || '';
-  };
   const out=[];
-  Object.keys(bonusByGid).forEach(gid=>{
-    if(reviewHomeOf(gid)!==sn) return;
+  Object.keys(S.homeDataMap||{}).forEach(gid=>{
+    if(homeOf(gid)!==sn) return;          // roster home is THIS salon
     if(isInactive(gid)) return;           // SD3-flagged inactive
     if(amGids.has(gid)) return;           // no AMs
     if(gid===fullYearMgrGid) return;      // full-year manager -> salon review, not here
     const hrow=(S.homeDataMap||{})[gid];
-    const name = String((hrow&&hrow.payrollName)||'').trim() || nameByGid[gid] || bonusByGid[gid].name || '';
+    const bg = bonusByGid[gid] || {};
+    const name = String((hrow&&hrow.payrollName)||'').trim() || nameByGid[gid] || bg.name || '';
     if(!name) return;
-    out.push({ globalId:gid, name, preferred: nameByGid[gid]||'', position: bonusByGid[gid].position || posByGid[gid] || '' });
+    out.push({ globalId:gid, name, preferred: nameByGid[gid]||'', position: bg.position || posByGid[gid] || '' });
   });
   return out.sort((a,b)=>fmtName(a.name).localeCompare(fmtName(b.name)));
 }
