@@ -12,7 +12,7 @@
 // Safe to leave in the repo; requires CRON_SECRET like every scrape route.
 
 import { NextResponse } from 'next/server'
-import { authenticate, fetchGroupedSummary, fetchDailyStoreSummary } from '@/lib/sd3'
+import { authenticate, fetchSalons, fetchGroupedSummary, fetchDailyStoreSummary } from '@/lib/sd3'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -31,24 +31,35 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
   }
   const p = new URL(request.url).searchParams
-  const storeId = parseInt(p.get('storeId') || '', 10)
+  let storeId = parseInt(p.get('storeId') || '', 10)
+  const salonNum = (p.get('salonNum') || '').trim()
   const start = p.get('start') || ''
   const end = p.get('end') || ''
-  if (!storeId || !/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
+  if ((!storeId && !salonNum) || !/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
     return NextResponse.json(
-      { ok: false, error: 'need ?storeId=N&start=YYYY-MM-DD&end=YYYY-MM-DD' },
+      { ok: false, error: 'need ?salonNum=3053 (or ?storeId=N) &start=YYYY-MM-DD&end=YYYY-MM-DD' },
       { status: 400 },
     )
   }
 
   try {
     const session = await authenticate()
+    // Resolve salonNum -> storeId so callers don't need the internal SD3 store id.
+    if (!storeId && salonNum) {
+      const salons = await fetchSalons(session)
+      const match = salons.find(s => String(s.salonNum).trim() === salonNum)
+      if (!match) {
+        return NextResponse.json({ ok: false, error: `salonNum ${salonNum} not found in SD3` }, { status: 404 })
+      }
+      storeId = match.storeId
+    }
     const [grouped, daily] = await Promise.all([
       fetchGroupedSummary(session, storeId, start, end),
       fetchDailyStoreSummary(session, storeId, start, end),
     ])
     return NextResponse.json({
       ok: true,
+      salonNum: salonNum || undefined,
       storeId, start, end,
       groupedFieldCount: grouped ? Object.keys(grouped).length : 0,
       grouped, // FULL raw grouped row — every field SD3 returns over the range

@@ -7906,7 +7906,7 @@ function calcMgrBonusFromSalonRow(salonRow, bonusMgrRow, waiver, periodLabel, is
     const r = mgrScore(m.actual, m.grw, m.exc, m.lib);
     if(m.label==='Payroll %' && r==='miss') payrollMissed=true;
     // Penalty uses MANAGER personal product %
-    if(m.label==='Product %' && mgrProduct < 4) productPenalty=true;
+    if(m.label==='Product %' && Math.round(mgrProduct*10)/10 < 4) productPenalty=true; // compare at displayed precision: a value that shows 4.0 must not penalize
     const amt = r==='exc' ? (perGrw + perExc) : r==='grw' ? perGrw : 0;
     earned += amt;
     return {...m, result:r, amt};
@@ -11415,8 +11415,9 @@ function populateDiscControls(){
   (S.weekHistory||[]).forEach(w=>(w.emps||[]).forEach(e=>add(e.globalId, e.empName||e.employeeName, e.salonNum)));
   (S_bonusPeriods||[]).forEach(p=>(p.employees||[]).forEach(e=>add(e.globalId, e.empName, e.salonNum)));
   Object.entries(S_managerTable||{}).forEach(([sn,m])=>add(m&&m.globalId, m&&m.name, sn)); // managers (e.g. non-cutting) absent from the above
-  Object.entries(INACTIVE_MAP||{}).forEach(([gid,r])=>{ if(r&&r.inactive) return; add(gid, r&&r.name, r&&r.homeSalon); }); // EmployeeProfile roster — ACTIVE staff only (incl. non-cutting); termed are excluded from the picker
+  Object.entries(INACTIVE_MAP||{}).forEach(([gid,r])=>add(gid, r&&r.name, r&&r.homeSalon)); // full profile roster (names); inactive + nameless are filtered out below
   const opts = Object.entries(byId)
+    .filter(([gid,o])=> o.name && o.name!==gid && !isInactive(gid))   // active + identifiable only — no bare-globalId rows, no termed staff
     .sort((a,b)=>fmtName(a[1].name).localeCompare(fmtName(b[1].name)))
     .map(([gid,o])=>`<option value="${gid}" data-name="${String(o.name).replace(/"/g,'')}">${fmtName(o.name)}${o.salon?` (${o.salon})`:''}</option>`)
     .join('');
