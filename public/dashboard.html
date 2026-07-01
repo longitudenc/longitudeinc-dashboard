@@ -4211,8 +4211,8 @@ function dowAgg(rows,s2s){
     if(S_dowScope==='ALL'){ if(!canDrillSalon(sn)) return; }   // 'ALL' = every salon this role may see
     else if(sn!==String(S_dowScope)) return;
     const dt=String(r.date||'').slice(0,10); if(!dt) return;
-    const b=byDate[dt]||(byDate[dt]={cc:0,noci:0,vd:0,fh:0,ss:0,ps:0,pay:0,hcMin:0,hcInv:0,ncwm:0,w15:0,nw15:0,nocc:0,tw:0});
-    b.cc+=n(r.customerCount); b.noci+=n(r.nonOciCustomerCount); b.vd+=n(r.voidCount); b.fh+=n(r.floorHours);
+    const b=byDate[dt]||(byDate[dt]={cc:0,noci:0,vd:0,fh:0,ss:0,ps:0,pay:0,hcMin:0,hcInv:0,ncwm:0,w15:0,nw15:0,nocc:0,tw:0,nc:0});
+    b.cc+=n(r.customerCount); b.noci+=n(r.nonOciCustomerCount); b.vd+=n(r.voidCount); b.fh+=n(r.floorHours); b.nc+=n(r.newCustomerCount);
     b.ss+=n(r.serviceSales); b.ps+=n(r.productSales); b.pay+=n(r.approximatePayrollAmount);
     b.hcMin+=n(r.haircutOnlyServiceMinutes); b.hcInv+=n(r.haircutOnlyInvoiceCount);
     b.ncwm+=n(r.nonCutWithCustWaitingMinutes); b.w15+=n(r.waitOver15MinsCount);
@@ -4223,7 +4223,7 @@ function dowAgg(rows,s2s){
     const b=byDate[dt];
     if(!(b.cc>0)) return;   // closed / no-business day (0 CC) — excluded from weekday averages
     const w=new Date(dt+'T00:00:00Z').getUTCDay();
-    const a=wd[w]||(wd[w]={cc:0,noci:0,vd:0,fh:0,ss:0,ps:0,pay:0,hcMin:0,hcInv:0,ncwm:0,w15:0,nw15:0,nocc:0,tw:0,days:0});
+    const a=wd[w]||(wd[w]={cc:0,noci:0,vd:0,fh:0,ss:0,ps:0,pay:0,hcMin:0,hcInv:0,ncwm:0,w15:0,nw15:0,nocc:0,tw:0,nc:0,days:0});
     for(const k in b) a[k]+=b[k]; a.days++;
   });
   return wd;
@@ -4232,19 +4232,20 @@ function dowMetrics(a){
   if(!a||!a.days) return null;
   const tot=a.ss+a.ps;
   return { days:a.days,
-    cc:a.cc/a.days, noci:a.noci/a.days, vd:a.vd/a.days, fh:a.fh/a.days, sales:tot/a.days, avgWait:a.cc>0?a.tw/a.cc:null,
+    cc:a.cc/a.days, noci:a.noci/a.days, newCust:a.nc/a.days, vd:a.vd/a.days, fh:a.fh/a.days, sales:tot/a.days, avgWait:a.cc>0?a.tw/a.cc:null,
     cph:a.fh>0?a.cc/a.fh:null, hcTime:a.hcInv>0?a.hcMin/a.hcInv:null, mbc:a.cc>0?a.ncwm/a.cc:null,
     waitsPct:a.cc>0?a.w15/a.cc*100:null, nWaitsPct:a.nocc>0?a.nw15/a.nocc*100:null,
     payrollPct:tot>0?a.pay/tot*100:null, productPct:tot>0?a.ps/tot*100:null,
     wkCC:(a.cc/a.days)*7 };
 }
 function dowAllBucket(agg){
-  const a={cc:0,noci:0,vd:0,fh:0,ss:0,ps:0,pay:0,hcMin:0,hcInv:0,ncwm:0,w15:0,nw15:0,nocc:0,tw:0,days:0};
+  const a={cc:0,noci:0,vd:0,fh:0,ss:0,ps:0,pay:0,hcMin:0,hcInv:0,ncwm:0,w15:0,nw15:0,nocc:0,tw:0,nc:0,days:0};
   Object.values(agg||{}).forEach(b=>{ for(const k in a) a[k]+=(b[k]||0); });
   return a.days?a:null;
 }
 const DOW_ROWS=[
   {label:'CC (avg/day)',        get:m=>m.cc,         k:'int',   pol:1,  sum:true, pctWk:true},
+  {label:'New Customers (avg/day)',get:m=>m.newCust,  k:'int',   pol:1,  sum:true},
   {label:'Non-OCI CC (avg/day)',get:m=>m.noci,       k:'int',   pol:1,  sum:true},
   {label:'Voids (avg/day)',     get:m=>m.vd,         k:'1',     pol:-1, sum:true},
   {label:'Floor Hours (avg/day)',get:m=>m.fh,        k:'1',     pol:0,  sum:true},
