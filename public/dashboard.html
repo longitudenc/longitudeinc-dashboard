@@ -3336,7 +3336,6 @@ function canSeeDayOfWeek(){ return canSeeAllSalons() || isAMRole(); }  // each r
 
 const AMS = {
   cassi:     {name:'Cassi Sharpe',       init:'CS', color:'#a03030', globalId:'2014-0001-6376', salons:['3015','3058','4138']},
-  dawn:      {name:'Dawn Bowersox',      init:'DB', color:'#2a6a9a', globalId:'2014-0001-6880', salons:['3062','3071','9489']},
   luann:     {name:'Luann Wetherington', init:'LW', color:'#6b3fa0', globalId:'2014-0001-5804', salons:['1304','3043','3545','8725']},
   dana:      {name:'Dana Gainous',       init:'DG', color:'#2a7a4a', globalId:'2014-0001-2977', salons:['3025','3027','7728']},
   bridgette: {name:'Bridgette Stout',    init:'BS', color:'#9a5a2a', globalId:'2014-0001-5799', salons:['3053','3685','9689']},
@@ -3425,7 +3424,7 @@ const PAYROLL_MAP = [
 ];
 
 const NAMED = new Set(['3015','3058','4138','3062','3071','9489','1304','3043','3545','8725','3025','3027','7728','3053','3685','9689']);
-const AM_ORDER = ['cassi','dawn','luann','dana','bridgette','kayla'];
+const AM_ORDER = ['cassi','luann','dana','bridgette','kayla'];
 
 // Clean salon name display lookup
 const SALON_NAMES = {
@@ -3497,7 +3496,7 @@ let ACTIVE_SALONS = [...new Set([
   ...Object.values(AMS).flatMap(am=>am.salons||[]),
   ...Object.keys(SALON_NAMES)
 ])].sort((a,b)=>parseInt(a)-parseInt(b));
-const REGULAR_AMS = new Set(['cassi','dawn','luann','dana','bridgette']);
+const REGULAR_AMS = new Set(['cassi','luann','dana','bridgette']);
 
 // Every currently-active salon (sold/closed excluded). Used everywhere a view
 // needs "the salon universe right now."
@@ -9265,7 +9264,7 @@ function renderCompanyAMBonus(){
       ${normPeriodLabel(p.periodLabel)}</button>`).join('');
 
   const normLabel = normPeriodLabel(S_salonSummaryPeriods.find(p=>p.periodKey===S_coAMBonusPeriod)?.periodLabel||'');
-  const amOrder = ['cassi','dawn','luann','dana','bridgette','kayla'];
+  const amOrder = ['cassi','luann','dana','bridgette','kayla'];
   const results = amOrder.map(amId=>calcAMBonus(amId, normLabel)).filter(Boolean);
 
   if(!results.length){
