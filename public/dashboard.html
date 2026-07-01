@@ -4988,6 +4988,25 @@ let S_reviewMode = 'salon';        // 'salon' | 'stylist'
 let S_reviewSalonSel = '';         // selected salonNum
 let S_reviewWindow = 'am';         // 'am' | 'company' (for salon scoping)
 let S_reviewHostId = 'am-reviews-body';
+let S_reviewHideTermed = false;    // mirrors Team Performance "Hide termed"
+
+// Render the clickable stylist buttons for the Reviews tab. Honors the Hide-termed
+// toggle and badges anyone tagged termed (SD3-flagged inactive, or no current-year
+// work). Shared by the single-salon and View-All-Salons lists.
+function reviewStylistBtns(sts){
+  const vis = S_reviewHideTermed ? sts.filter(s=>!s.termed) : sts;
+  return vis.map(s=>{
+    const since = (typeof inactiveSince==='function') ? inactiveSince(s.globalId) : '';
+    const badge = s.termed
+      ? ` <span style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:#b3261e;background:#fdecea;border:1px solid #f4c4be;border-radius:4px;padding:1px 5px;vertical-align:middle;white-space:nowrap;" title="No current-year activity${since?(' — last active '+since):''}">termed${since?(' '+since):''}</span>`
+      : '';
+    const nm = reviewName(s.preferred, s.name).replace(/'/g,"\\'");
+    return `<button onclick="openStylistReview('${s.globalId}', '${nm}')" style="display:flex;justify-content:space-between;align-items:center;text-align:left;padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:${s.termed?'#fafafa':'#fff'};cursor:pointer;font-size:13px;${s.termed?'opacity:.78;':''}">
+      <span style="font-weight:600;">${reviewName(s.preferred, s.name)}${badge}</span>
+      <span style="font-size:11px;color:var(--text-muted);">${s.position==='M'?'Manager':'Stylist'} · Review &#8250;</span>
+    </button>`;
+  }).join('');
+}
 
 // Distinct people who worked a given salon, from loaded weekly employee data.
 // Reviews show the PREFERRED name (SD3 "Employee Name", e.g. "Moss, Camil") with the
@@ -5070,37 +5089,37 @@ function stylistsForSalon(sn){
       if(e.position) rec.position=e.position;
     });
   });
-  // Active-in-year gate. homeDataMap is the roster, but it retains people who left
-  // yet were never flagged inactive in EmployeeProfile (so isInactive misses them) —
-  // and the weekly snapshots keep carrying those departed names at ZERO hours. So
-  // mere presence in a week is not enough: a person qualifies only with real FLOOR
-  // HOURS in the review year. Week history (not bonus rows) is the source because it
-  // records every salon a person touched, including satellite stores where stylists
-  // don't carry their own bonus row — so this keeps low-hour satellite staff while
-  // dropping zero-hour ghosts.
-  const workedInYear = new Set(Object.keys(bonusByGid));   // any BonusData row that year = worked
+  // Activity signal for the review year: real FLOOR HOURS in any week that year, OR a
+  // BonusData row that year. This is a HARD gate — only people who actually worked this
+  // year appear (staff lingering in the roster from prior years are dropped entirely).
+  // Of those, anyone SD3-flagged inactive (i.e. worked part of this year, then terminated)
+  // is TAGGED termed: shown with a badge, sorted to the bottom, and hideable via the
+  // Hide-termed toggle (mirrors Team Performance). Hard exclusions remain: AMs and the
+  // full-year manager (who reviews at salon level).
+  const active2026 = new Set(Object.keys(bonusByGid));   // any BonusData row that year = worked
   (S.weekHistory||[]).forEach(snap=>{
     const wy = snap.weekEnding ? new Date(snap.weekEnding).getFullYear() : null;
     if(wy!==_yr) return;
     (snap.emps||[]).forEach(e=>{
-      if((parseFloat(e.floorHours)||0) <= 0) return;       // roster carries departed staff at 0 hrs
-      const g=String(e.globalId||'').trim(); if(g) workedInYear.add(g);
+      if((parseFloat(e.floorHours)||0) <= 0) return;     // roster carries departed staff at 0 hrs
+      const g=String(e.globalId||'').trim(); if(g) active2026.add(g);
     });
   });
   const out=[];
   Object.keys(S.homeDataMap||{}).forEach(gid=>{
     if(homeOf(gid)!==sn) return;          // roster home is THIS salon
-    if(!workedInYear.has(gid)) return;    // no activity in the review year → gone
-    if(isInactive(gid)) return;           // SD3-flagged inactive
+    if(!active2026.has(gid)) return;      // must have worked this year (drops long-gone staff)
     if(amGids.has(gid)) return;           // no AMs
     if(gid===fullYearMgrGid) return;      // full-year manager -> salon review, not here
     const hrow=(S.homeDataMap||{})[gid];
     const bg = bonusByGid[gid] || {};
     const name = String((hrow&&hrow.payrollName)||'').trim() || nameByGid[gid] || bg.name || '';
     if(!name) return;
-    out.push({ globalId:gid, name, preferred: nameByGid[gid]||'', position: bg.position || posByGid[gid] || '' });
+    const termed = isInactive(gid);       // worked this year but since terminated → badge + hideable
+    out.push({ globalId:gid, name, preferred: nameByGid[gid]||'', position: bg.position || posByGid[gid] || '', termed });
   });
-  return out.sort((a,b)=>fmtName(a.name).localeCompare(fmtName(b.name)));
+  // Active first (alpha), then termed (alpha).
+  return out.sort((a,b)=> (a.termed?1:0)-(b.termed?1:0) || fmtName(a.name).localeCompare(fmtName(b.name)));
 }
 
 // Salons selectable in the Reviews tab for the current window + role.
@@ -5412,26 +5431,22 @@ function renderReviewsTab(hostId, windowKind){
     } else {
       const groups = salons.map(sn=>{
         const sts = stylistsForSalon(sn);
-        if(!sts.length) return '';
-        return `<div style="font-size:12px;font-weight:700;color:var(--primary);margin:16px 0 6px;">${salonDisplay(sn)} <span style="font-weight:400;color:var(--text-muted);">· ${sts.length}</span></div>
+        const vis = S_reviewHideTermed ? sts.filter(s=>!s.termed) : sts;
+        if(!vis.length) return '';
+        return `<div style="font-size:12px;font-weight:700;color:var(--primary);margin:16px 0 6px;">${salonDisplay(sn)} <span style="font-weight:400;color:var(--text-muted);">· ${vis.length}</span></div>
           <div style="display:flex;flex-direction:column;gap:6px;max-width:540px;">
-          ${sts.map(s=>`<button onclick="openStylistReview('${s.globalId}')" style="display:flex;justify-content:space-between;align-items:center;text-align:left;padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:#fff;cursor:pointer;font-size:13px;">
-            <span style="font-weight:600;">${reviewName(s.preferred, s.name)}</span>
-            <span style="font-size:11px;color:var(--text-muted);">${s.position==='M'?'Manager':'Stylist'} · Review &#8250;</span>
-          </button>`).join('')}
+          ${reviewStylistBtns(sts)}
           </div>`;
       }).filter(Boolean).join('');
       bodyHtml = reviewViewAllButton() + '<div style="font-size:12px;color:var(--text-muted);margin:10px 0 0;">All employees across salons — click to open the annual review.</div>' + (groups || '<div style="padding:24px;color:var(--text-muted);">No stylists on record.</div>');
     }
   } else if(S_reviewMode==='stylist'){
     const sts = stylistsForSalon(S_reviewSalonSel);
-    bodyHtml = sts.length ? reviewViewAllButton() + `
+    const vis = S_reviewHideTermed ? sts.filter(s=>!s.termed) : sts;
+    bodyHtml = vis.length ? reviewViewAllButton() + `
       <div style="font-size:12px;color:var(--text-muted);margin:10px 0 8px;">Stylists at ${salonDisplay(S_reviewSalonSel)} — click to open the annual review.</div>
       <div style="display:flex;flex-direction:column;gap:6px;max-width:540px;">
-        ${sts.map(s=>`<button onclick="openStylistReview('${s.globalId}', '${reviewName(s.preferred,s.name).replace(/'/g,"\\'")}')" style="display:flex;justify-content:space-between;align-items:center;text-align:left;padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:#fff;cursor:pointer;font-size:13px;">
-          <span style="font-weight:600;">${reviewName(s.preferred, s.name)}</span>
-          <span style="font-size:11px;color:var(--text-muted);">${s.position==='M'?'Manager':'Stylist'} · Review ›</span>
-        </button>`).join('')}
+        ${reviewStylistBtns(sts)}
       </div>` : '<div style="padding:24px;color:var(--text-muted);">No stylists on record for this salon yet.</div>';
   } else {
     bodyHtml = reviewViewAllButton() + renderSalonReviewBody(S_reviewSalonSel);
@@ -5448,6 +5463,7 @@ function renderReviewsTab(hostId, windowKind){
           ${mgrOnly?'':`<button onclick="flipReviewSalon(1)" title="Next salon" style="border:1px solid var(--border);background:#fff;border-radius:6px;width:26px;height:26px;cursor:pointer;font-size:12px;line-height:1;color:var(--primary);">&#9654;</button>`}
         </label>
         <label style="font-size:12px;color:var(--text-muted);display:inline-flex;align-items:center;gap:6px;">Year ${srYearSelector()}</label>
+        ${S_reviewMode==='stylist'?`<label style="font-size:12px;color:var(--text-muted);display:inline-flex;align-items:center;gap:5px;cursor:pointer;" title="Hide employees with no current-year activity"><input type="checkbox" ${S_reviewHideTermed?'checked':''} onchange="S_reviewHideTermed=this.checked;renderReviewsTab(S_reviewHostId,S_reviewWindow);" style="cursor:pointer;">Hide termed</label>`:''}
       </div>
       ${bodyHtml}
     </div>`;
@@ -5659,6 +5675,11 @@ function salonsForPerson(globalId){
   const out = new Set();
   // AMs themselves
   Object.values(AMS).forEach(a=>{ if(a.globalId===gid) (a.salons||[]).forEach(s=>out.add(String(s).trim())); });
+  // Roster home salon — present even for satellite-salon stylists who carry no bonus
+  // row, so canViewPerson() doesn't wrongly deny opening their review.
+  const hd=(S.homeDataMap||{})[gid]; if(hd&&hd.homeSalon) out.add(String(hd.homeSalon).trim());
+  // Every salon they actually clocked into (flat weekly emps list).
+  (S.weekHistory||[]).forEach(w=>{ (w.emps||[]).forEach(e=>{ if(String(e.globalId||'').trim()===gid && e.salonNum) out.add(String(e.salonNum).trim()); }); });
   // From bonus periods (employees carry salonNum)
   (S_bonusPeriods||[]).forEach(p=>{ (p.employees||[]).forEach(e=>{ if(String(e.globalId||'').trim()===gid && e.salonNum) out.add(String(e.salonNum).trim()); }); });
   // From weekly history salons' employees if present
