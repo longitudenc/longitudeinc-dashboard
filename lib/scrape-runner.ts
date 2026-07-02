@@ -90,7 +90,10 @@ const DAILY_COLUMNS = [
   'haircutOnlyServiceMinutes', 'waitOver15MinsCount', 'nonOciWaitOver15MinsCount',
   'nonOciCustomerCount', 'ociCompletedInvoiceCount', 'nonCutWithCustWaitingMinutes',
   'totalCustomerWaitMinutes', 'longestWaitMinutes', 'voidCount', 'redoAmount',
-  'serviceDiscounts', 'productDiscounts', 'scrapedAt',
+  'serviceDiscounts', 'productDiscounts',
+  // cash reconciliation — straight from the daily store-summary JSON (added 2026-07)
+  'overShort', 'paidInAmount', 'paidInCount', 'paidOutAmount', 'paidOutCount',
+  'scrapedAt',
 ] as const
 
 const PERIOD_COLUMNS = [
