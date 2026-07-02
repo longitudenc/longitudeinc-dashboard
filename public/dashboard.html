@@ -5247,7 +5247,7 @@ function computeSalonReview(salonNum, year){
 
   const mean=arr=>arr.length?arr.reduce((a,b)=>a+b,0)/arr.length:null;
   const monthMeans=(bucket,key)=>{ const v=[]; Object.keys(bucket).forEach(m=>{ const mm=mean(bucket[m][key]); if(mm!==null) v.push(mm); }); return v.length?mean(v):null; };
-  const ccAvg=(()=>{ const sums=[]; Object.keys(salMon).forEach(m=>{ const a=salMon[m].cc; if(a.length) sums.push(a.reduce((x,y)=>x+y,0)); }); return sums.length?mean(sums):null; })();
+  const ccAvg=monthMeans(salMon,'cc');   // avg WEEKLY CC (mean of each month's weekly counts) — matches the weekly-CC band + payrollTargets, like every other row
   const prodAvg=(()=>{ const v=[]; Object.keys(prodMon).forEach(m=>{ const P=prodMon[m]; if(P.fh>0) v.push(P.ss/P.fh); }); return v.length?mean(v):null; })();
   const M12=(bucket,key,agg)=>{ const out=[]; for(let m=1;m<=12;m++){ const b=bucket[m]; if(!b||!b[key]||!b[key].length){ out.push(null); continue; } const arr=b[key]; out.push(agg==='sum'?arr.reduce((x,y)=>x+y,0):mean(arr)); } return out; };
   const prod12=(()=>{ const out=[]; for(let m=1;m<=12;m++){ const P=prodMon[m]; out.push(P&&P.fh>0?P.ss/P.fh:null); } return out; })();
@@ -5274,7 +5274,7 @@ function computeSalonReview(salonNum, year){
     mk('S/S Wait > 15 Min %','≤15 / 19 / 23',pct,a.ssw,M12(salMon,'ssw'),srSSWait),
     mk('Wait > 15 Min %','≤15 / 19 / 23',pct,a.wt,M12(salMon,'wt'),srWait),
     mk('Payroll %','≤'+pt.exc+' / '+pt.grw,pct,a.pay,M12(salMon,'pay'),(v)=>srPayroll(v,pt.exc,pt.grw)),
-    mk('Customer Count','≥500 / 400 / 300',ct,a.cc,M12(salMon,'cc','sum'),srCC),
+    mk('Customer Count','≥500 / 400 / 300',ct,a.cc,M12(salMon,'cc'),srCC),
     mk('Customer Count Growth %','≥5 / 3 / 1',pct,a.ccg,M12(salMon,'ccg'),srCCG),
   ];
   const mgrRows=[
