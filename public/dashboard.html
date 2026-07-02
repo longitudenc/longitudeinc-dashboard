@@ -10612,10 +10612,10 @@ function profileDiscCardHtml(globalId){
   const ek = periodSortKey(cur);
   const rows = evs.length ? evs.map(e=>{
     const mk = discMonthKey(e.date);
-    const expired = mk===null || (ek-mk)>11;
+    const expired = mk===null || (ek-mk)>12;
     let rollOff = '';
     const m = String(e.date||'').match(/^(\d{4})-(\d{2})/);
-    if(m){ let y=+m[1], mo=(+m[2]-1)+12; y+=Math.floor(mo/12); mo=mo%12; rollOff = REVIEW_MONTHS[mo]+' '+String(y).slice(2); }
+    if(m){ let y=+m[1], mo=(+m[2]-1)+13; y+=Math.floor(mo/12); mo=mo%12; rollOff = REVIEW_MONTHS[mo]+' '+String(y).slice(2); }
     return `<tr style="${expired?'opacity:.45;':''}">
       <td style="padding:3px 8px;white-space:nowrap;">${e.date}</td>
       <td style="padding:3px 8px;text-align:center;font-weight:700;">${e.points}</td>
@@ -11429,7 +11429,7 @@ function activeDiscPoints(globalId, periodKey){
     const mk = discMonthKey(e.date);
     if(mk===null) continue;
     const diff = evalKey - mk;
-    if(diff >= 0 && diff <= 11) total += Number(e.points)||0; // within 12-month window
+    if(diff >= 1 && diff <= 12) total += Number(e.points)||0; // penalty starts the month AFTER the incident, active a full 12 months (Jun incident → Jul…next-Jun)
   }
   return total;
 }
@@ -11494,7 +11494,7 @@ function renderDiscTable(){
     const flag = active>=6?'<span style="color:#9C0006;font-weight:700;"> · raise+bonus ineligible</span>':active>=4?'<span style="color:#843C0C;font-weight:700;"> · bonus ineligible</span>':'';
     const rows = evs.map(e=>{
       const mk = discMonthKey(e.date), ek = periodSortKey(curPeriod);
-      const expired = mk===null || (ek-mk)>11;
+      const expired = mk===null || (ek-mk)>12;
       return `<tr style="${expired?'opacity:.45;':''}">
         <td style="padding:3px 8px;">${e.date}</td>
         <td style="padding:3px 8px;font-weight:700;">${e.points}</td>
