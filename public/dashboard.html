@@ -3256,10 +3256,15 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
           </div>
           <div style="background:#f0f4ff;border:1px solid #c0cef0;border-radius:8px;padding:12px;margin-bottom:1rem;">
             <div style="font-weight:700;font-size:13px;color:#03654e;margin-bottom:8px;">🖨 Bulk Print Annual Reviews</div>
-            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-              <select id="bulk-salon-select" style="font-size:13px;padding:6px 10px;border-radius:6px;border:1px solid var(--border);">
-                <option value="ALL">All Salons</option>
-              </select>
+            <div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap;">
+              <div style="display:flex;flex-direction:column;gap:6px;">
+                <div style="display:flex;gap:8px;align-items:center;">
+                  <span style="font-size:12px;font-weight:600;color:var(--text);">Salons</span>
+                  <button type="button" onclick="bulkSalonsAll(true)" style="font-size:11px;padding:2px 8px;border:1px solid var(--border);border-radius:5px;background:#fff;cursor:pointer;">Select all</button>
+                  <button type="button" onclick="bulkSalonsAll(false)" style="font-size:11px;padding:2px 8px;border:1px solid var(--border);border-radius:5px;background:#fff;cursor:pointer;">Clear</button>
+                </div>
+                <div id="bulk-salon-checks" style="display:flex;flex-wrap:wrap;gap:4px 14px;max-width:640px;max-height:150px;overflow:auto;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:#fff;"></div>
+              </div>
               <select id="bulk-year-select" style="font-size:13px;padding:6px 10px;border-radius:6px;border:1px solid var(--border);">
               </select>
               <button class="btn btn-primary" onclick="bulkPrintReviews()" id="bulk-print-btn">🖨 Generate Reviews</button>
@@ -11894,27 +11899,20 @@ function printReview(globalId){
 
 // ── Bulk Print Reviews ───────────────────────────────────────
 function initBulkPrintSelectors(){
-  // Populate salon selector
-  const sel = document.getElementById('bulk-salon-select');
-  if(!sel) return;
-  const salons = [...new Set(S.weekHistory.flatMap(w=>w.salons.map(r=>r.salonNum)))].sort((a,b)=>parseInt(a)-parseInt(b));
-  salons.forEach(sn=>{
-    const opt = document.createElement('option');
-    opt.value = sn;
-    opt.textContent = salonDisplay(sn);
-    sel.appendChild(opt);
-  });
-  // Populate year selector
+  // Salon multi-select (checkboxes) — pick any combination of salons to print.
+  const box = document.getElementById('bulk-salon-checks');
+  if(box){
+    const salons = [...new Set(S.weekHistory.flatMap(w=>w.salons.map(r=>r.salonNum)))].sort((a,b)=>parseInt(a)-parseInt(b));
+    box.innerHTML = salons.map(sn=>`<label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;white-space:nowrap;"><input type="checkbox" class="bulk-salon-cb" value="${sn}" checked style="cursor:pointer;">${salonDisplay(sn)}</label>`).join('');
+  }
+  // Year selector (guard against duplicate options on re-init)
   const yrSel = document.getElementById('bulk-year-select');
-  if(!yrSel) return;
-  const cur = new Date().getFullYear();
-  [cur, cur-1, cur-2].forEach(y=>{
-    const opt = document.createElement('option');
-    opt.value = y;
-    opt.textContent = y;
-    yrSel.appendChild(opt);
-  });
+  if(yrSel && !yrSel.options.length){
+    const cur = new Date().getFullYear();
+    [cur, cur-1, cur-2].forEach(y=>{ const opt=document.createElement('option'); opt.value=y; opt.textContent=y; yrSel.appendChild(opt); });
+  }
 }
+function bulkSalonsAll(on){ document.querySelectorAll('#bulk-salon-checks .bulk-salon-cb').forEach(cb=>{ cb.checked=!!on; }); }
 
 // Shared gatherer: collect the reviewable people for a salon (or 'ALL') and compute
 // each one's review via computeReviewData — the SAME consolidated-BonusData logic
@@ -11922,7 +11920,9 @@ function initBulkPrintSelectors(){
 // reader all match exactly.
 function gatherBulkReviews(salonSel, year){
   const allSalons = [...new Set(Object.values(S.homeDataMap||{}).map(r=>String((r&&r.homeSalon)||'').trim()).filter(Boolean))].sort();
-  const salons = (!salonSel || salonSel==='ALL') ? allSalons : [String(salonSel)];
+  const salons = (!salonSel || salonSel==='ALL') ? allSalons
+               : Array.isArray(salonSel) ? salonSel.map(String)
+               : [String(salonSel)];
   const seen=new Set(), people=[];
   salons.forEach(sn=>{ (stylistsForSalon(sn)||[]).forEach(pp=>{ const g=String(pp.globalId||'').trim(); if(g && !seen.has(g)){ seen.add(g); people.push({globalId:g, name:pp.name||'', preferred:pp.preferred||''}); } }); });
   const reviews=[];
@@ -11940,10 +11940,13 @@ function gatherBulkReviews(salonSel, year){
 }
 
 function bulkPrintReviews(){
-  const salonSel = document.getElementById('bulk-salon-select')?.value || 'ALL';
+  const cbs      = [...document.querySelectorAll('#bulk-salon-checks .bulk-salon-cb')];
+  const checked  = cbs.filter(cb=>cb.checked).map(cb=>cb.value);
   const year     = parseInt(document.getElementById('bulk-year-select')?.value) || (new Date().getFullYear());
   const btn      = document.getElementById('bulk-print-btn');
   const status   = document.getElementById('bulk-print-status');
+  if(!checked.length){ if(status) status.textContent='Select at least one salon.'; return; }
+  const salonSel = (checked.length===cbs.length) ? 'ALL' : checked;   // all checked → fast ALL path
   if(btn){ btn.disabled = true; btn.textContent = '⏳ Generating...'; }
   if(status) status.textContent = 'Building reviews from consolidated data…';
   setTimeout(()=>{
