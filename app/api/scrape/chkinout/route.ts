@@ -1,16 +1,23 @@
 // app/api/scrape/chkinout/route.ts
 //
-// Manual + backfill endpoint for actual employee clock punches (EmpChkInOut).
-// Thin wrapper over runChkInOutScrape() in lib/scrape-runner.ts.
+// Manual + backfill endpoint for the employee clock-punch (chkinout) scrape.
+// Thin wrapper over runChkInOutScrape() in lib/scrape-runner.ts — the nightly
+// cron calls the same runner, so there's one source of truth.
 //
-// This is the COMPLETE coverage source (every employee, every segment), with
-// role flags and breakTime — it replaces the incomplete SD_SHIFTS feed for
-// computing floor coverage in the heat map.
+// Endpoint: /rest/storeconfig/{storeId}/empchkinout (per store, checkInTime
+//   window) → SD_CHKINOUT tab, upserted by (date, storeId, chkPk). One row per
+//   employee per punch segment: checkIn/checkOut, hours, breakTime, and role
+//   flags (asStylist/asAdmin/asRecept/asTraining) — the feed behind Break/Admin
+//   time in the Daily View.
 //
 // Usage:
 //   ?secret=...                       required (or Authorization: Bearer ...)
-//   (no dates)                        current fiscal week-to-date
-//   ?start=YYYY-MM-DD&end=YYYY-MM-DD  explicit range (backfill)
+//   (no dates)                        current fiscal week-to-date (Sat → yesterday ET)
+//   ?start=YYYY-MM-DD&end=YYYY-MM-DD  BACKFILL: that explicit range
+//
+// Each store is a single windowed fetch, so a multi-week backfill is still one
+// call per salon. Keep production backfills modest (a few weeks) to stay under
+// the 60s cap; run large historical backfills from localhost.
 
 import { NextResponse } from 'next/server'
 import { runChkInOutScrape } from '@/lib/scrape-runner'
@@ -49,6 +56,7 @@ export async function GET(request: Request) {
     processed: result.processed,
     inserted: result.inserted,
     updated: result.updated,
+    skipped: result.skipped,
     durationMs: Date.now() - startedAt,
     error: result.error,
   }, { status: result.ok ? 200 : 500 })

@@ -21,6 +21,7 @@ import {
   runPayrollScrape,
   runProfileScrape,
   runShiftsScrape,
+  runChkInOutScrape,
 } from '@/lib/scrape-runner'
 
 export const runtime = 'nodejs'
@@ -68,6 +69,9 @@ export async function GET(request: Request) {
   // Schedule variance (scheduled vs actual shift) → SD_SHIFTS. Defaults to the
   // current fiscal week-to-date, so each day's run fills the week in place.
   results.push({ name: 'shifts', result: await runShiftsScrape() })
+  // Employee clock punches → SD_CHKINOUT (in/out, breakTime, asAdmin). Same
+  // week-to-date default as shifts; this is the feed behind Break/Admin time.
+  results.push({ name: 'chkinout', result: await runChkInOutScrape() })
 
   // 2. Weekly — only on Saturday. Salon weekly first, then the three
   //    weekly-cadence entity scrapers. Each runner catches its own errors
