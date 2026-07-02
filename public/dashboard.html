@@ -3658,8 +3658,12 @@ function sgn(v,dec=1){return(v>0?'+':'')+v.toFixed(dec);}
 
 // ── Data accessors ────────────────────────────────────────────
 let S_wtdSnap = null;   // synthetic in-progress-week (WTD) snapshot — kept OUT of weekHistory
-// In-progress fiscal week's ending Friday = one week past the last completed week.
-function wtdWeekEnding(){ return S.currentWeek ? dIsoAddDays(S.currentWeek, 7) : null; }
+// In-progress fiscal week's ending Friday = one week past the LAST COMPLETED week
+// (max weekEnding in history). Anchored to history, NOT S.currentWeek — otherwise
+// selecting the WTD week shifts the anchor forward and the snapshot targets a future,
+// empty range that also fails the getSnap match.
+function lastCompletedWeekEnd(){ const ws=(S.weekHistory||[]).map(w=>w.weekEnding).filter(Boolean).sort(); return ws.length?ws[ws.length-1]:null; }
+function wtdWeekEnding(){ const lc=lastCompletedWeekEnd(); return lc ? dIsoAddDays(lc, 7) : null; }
 function isWtdWeek(wk){ const w=wtdWeekEnding(); return !!w && wk===w; }
 
 // Build a synthetic weekly snapshot for the in-progress week by summing SD_DAILY
