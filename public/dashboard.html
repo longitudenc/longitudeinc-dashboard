@@ -5337,7 +5337,7 @@ function renderSalonReviewBody(salonNum){
         +(has?('<div><span style="display:inline-block;min-width:16px;border-radius:4px;background:'+srColor(ss)+';color:#fff;font-size:10px;font-weight:700;">'+ss+'</span></div>'):'')
         +'</div>';
     }
-    return '<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:5px;">'+cells+'</div>';
+    return '<div class="sr-month-grid" style="display:grid;grid-template-columns:repeat(6,1fr);gap:5px;">'+cells+'</div>';
   };
   const row=(r,sec,i)=>{
     const id='sr-d-'+salonNum+'-'+sec+'-'+i;
@@ -12183,6 +12183,9 @@ function openAllReviews(salonSel){
   } catch(e){ alert('Could not build reviews: '+(e&&e.message||e)); return; }
   if(!count || !cardsHTML.trim()){ alert('No reviews available for this selection yet.'); return; }
   _allRevIdx = 0; _allRevMode = 'scroll';
+  // Salon/Manager reviews are wide (the 12-month Key-Results table) — print landscape
+  // so each fits on one page. Stylist reviews are tall and stay portrait.
+  const printLandscape = (S_reviewMode==='salon');
   const old = document.getElementById('all-reviews-overlay'); if(old) old.remove();
   const ov = document.createElement('div');
   ov.id = 'all-reviews-overlay';
@@ -12192,8 +12195,10 @@ function openAllReviews(salonSel){
       #all-reviews-overlay .review-page{background:#fff;padding:18px;margin:0 auto 16px;max-width:1100px;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,.18);}
       #all-reviews-overlay table{border-collapse:collapse;} #all-reviews-overlay th,#all-reviews-overlay td{border:1px solid #ddd;}
       /* PRINT: only the review cards. Without this, window.print() dumps the whole
-         dashboard (sidebar, week selector, "last updated") behind the overlay. */
-      @page{ size:letter portrait; margin:0.4in; }
+         dashboard (sidebar, week selector, "last updated") behind the overlay.
+         Salon/Manager reviews print LANDSCAPE and reflow each 12-month strip to a
+         single row (repeat 12) + compact type so each salon fits on one page. */
+      @page{ size:letter ${printLandscape?'landscape':'portrait'}; margin:0.35in; }
       @media print {
         *{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }
         body > *:not(#all-reviews-overlay){ display:none !important; }
@@ -12203,6 +12208,11 @@ function openAllReviews(salonSel){
         #arv-body{ overflow:visible !important; height:auto !important; flex:none !important; background:#fff !important; padding:0 !important; }
         #all-reviews-overlay .review-page{ display:block !important; box-shadow:none !important; margin:0 !important; max-width:none !important; border-radius:0 !important; padding:8px !important; page-break-after:always; page-break-inside:avoid; }
         #all-reviews-overlay .review-page:last-child{ page-break-after:avoid; }
+        ${printLandscape ? `
+        #all-reviews-overlay .sr-month-grid{ grid-template-columns:repeat(12,1fr) !important; gap:3px !important; }
+        #all-reviews-overlay .review-page{ font-size:9px !important; }
+        #all-reviews-overlay .review-page table th, #all-reviews-overlay .review-page table td{ padding:2px 3px !important; }
+        ` : ''}
       }
     </style>
     <div style="background:#fff;width:100vw;height:100vh;display:flex;flex-direction:column;overflow:hidden;">
