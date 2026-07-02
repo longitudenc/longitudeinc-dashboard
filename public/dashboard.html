@@ -3697,11 +3697,56 @@ function aggDailySalons(rows, s2s){
   });
 }
 function _maxDate(rows){ return (rows||[]).reduce((m,r)=>{ const d=String(r.date||'').slice(0,10); return d>m?d:m; },''); }
+function _daysList(rows){ return [...new Set((rows||[]).filter(r=>n(r.customerCount)>0).map(r=>String(r.date||'').slice(0,10)))].sort(); }
+// Employee daily rows come from /api/gs/getDaily (returns empDaily); salon rows keep
+// using /api/gs/getDailyRange (the proven WTD/MTD path).
+async function dailyEmpRows(start,end){
+  try{ const r=await fetch(`/api/gs/getDaily?start=${start}&end=${end}`).then(x=>x.json()); return (r&&r.success)?(r.empDaily||[]):[]; }
+  catch(e){ return []; }
+}
+// Roll SD_EMP_DAILY up per person (consolidated across salons) into weekly-emp shape.
+// SD_EMP_DAILY carries daily RATES, not raw numerators — so rate metrics are
+// volume-weighted (hc/mbc/product/payroll by custCount, productivity by floor hours),
+// while custCount/floorHours sum and cph recomputes. NR/RR aren't in the feed → "***"
+// (renders "—"). Approximate but correct for an in-progress view.
+function aggDailyEmps(empRows){
+  const byGid={};
+  (empRows||[]).forEach(e=>{
+    const gid=String(e.globalId||'').trim(); if(!gid) return;
+    const cc=n(e.custCount), fh=n(e.floorHours);
+    const r=byGid[gid]||(byGid[gid]={gid, name:'', pos:'', salons:{}, cc:0, fh:0, hcW:0, mbcW:0, prodW:0, payW:0, prodvW:0, wBase:0, fhBase:0});
+    if(e.employeeName && !r.name) r.name=e.employeeName;
+    if(e.position && !r.pos) r.pos=e.position;
+    const sn=String(e.salonNum||'').trim(); if(sn) r.salons[sn]=(r.salons[sn]||0)+cc;
+    r.cc+=cc; r.fh+=fh;
+    r.hcW+=n(e.hcTime)*cc; r.mbcW+=n(e.mbc)*cc; r.prodW+=n(e.productPct)*cc; r.payW+=n(e.payrollPct)*cc; r.wBase+=cc;
+    r.prodvW+=n(e.productivity)*fh; r.fhBase+=fh;
+  });
+  return Object.values(byGid).map(r=>{
+    const home=Object.keys(r.salons).sort((a,b)=>r.salons[b]-r.salons[a])[0]||'';
+    return { globalId:r.gid, empName:r.name, salonNum:home, salonCount:Object.keys(r.salons).length, position:r.pos,
+      custCount:r.cc, floorHours:r.fh, cph:r.fh>0?r.cc/r.fh:0,
+      hcTime:r.wBase>0?r.hcW/r.wBase:0, mbc:r.wBase>0?r.mbcW/r.wBase:0,
+      product:r.wBase>0?r.prodW/r.wBase:0, payroll:r.wBase>0?r.payW/r.wBase:0,
+      productivity:r.fhBase>0?r.prodvW/r.fhBase:0, nr:'***', rr:'***', _wtd:true };
+  });
+}
+// "Includes M/D–M/D · N days" for whichever partial period is active (MTD, or WTD week).
+function dailyCoverageNote(){
+  let days=null;
+  if(S_globalMode==='mtd' && S_mtdSnap) days=S_mtdSnap.days;
+  else if(S_wtdSnap && S.currentWeek===S_wtdSnap.weekEnding) days=S_wtdSnap.days;
+  if(!days || !days.length) return '';
+  const f=iso=>{ const [y,m,d]=String(iso).split('-').map(Number); return m+'/'+d; };
+  return `Includes ${f(days[0])}–${f(days[days.length-1])} · ${days.length} day${days.length!==1?'s':''}`;
+}
 
 async function buildWtdSnap(){
   const fri = wtdWeekEnding(); if(!fri){ S_wtdSnap=null; return; }
-  const rows = await dowRows(dIsoAddDays(fri,-6), fri);
-  S_wtdSnap = { weekEnding:fri, salons:aggDailySalons(rows, dowStore2Salon()), emps:[], _wtd:true, throughDate:_maxDate(rows) };
+  const sat = dIsoAddDays(fri,-6);
+  const [rows, empRows] = await Promise.all([dowRows(sat,fri), dailyEmpRows(sat,fri)]);
+  S_wtdSnap = { weekEnding:fri, salons:aggDailySalons(rows, dowStore2Salon()), emps:aggDailyEmps(empRows),
+    _wtd:true, throughDate:_maxDate(rows), days:_daysList(rows) };
 }
 
 // ── MTD (fiscal month-to-date) ────────────────────────────────
@@ -3719,8 +3764,9 @@ function currentFiscalMonthRange(){
 }
 async function buildMtdSnap(){
   const r = currentFiscalMonthRange(); if(!r){ S_mtdSnap=null; return; }
-  const rows = await dowRows(r.start, r.end);
-  S_mtdSnap = { salons:aggDailySalons(rows, dowStore2Salon()), key:r.key, start:r.start, throughDate:_maxDate(rows), _wtd:true };
+  const [rows, empRows] = await Promise.all([dowRows(r.start, r.end), dailyEmpRows(r.start, r.end)]);
+  S_mtdSnap = { salons:aggDailySalons(rows, dowStore2Salon()), emps:aggDailyEmps(empRows),
+    key:r.key, start:r.start, throughDate:_maxDate(rows), days:_daysList(rows), _wtd:true };
 }
 
 function getSnap(){
@@ -6255,7 +6301,10 @@ function renderSalonTab(){
   thead.innerHTML=buildHead(SALON_COLS,'salon-table','sortSalon');
   // Update week label in salon tab header
   const swl = document.getElementById('salon-week-label');
-  if(swl) swl.textContent = isYTD ? 'YTD Average' : (S.currentWeek?fmtWeek(S.currentWeek):'—');
+  if(swl) swl.textContent = isMTD ? ('Month to Date — ' + dailyCoverageNote())
+        : isYTD ? 'YTD Average'
+        : isWtdWeek(S.currentWeek) ? (fmtWeek(S.currentWeek) + ' · In Progress — ' + dailyCoverageNote())
+        : (S.currentWeek?fmtWeek(S.currentWeek):'—');
 
   // Build YTD avg row
   function ytdRow(a){
@@ -6398,7 +6447,7 @@ function renderIndividual(){
   const thead=document.getElementById('emp-thead'),tbody=document.getElementById('emp-tbody'),sf=document.getElementById('emp-salon-filter');
   // Use global mode toggle
   const badge = document.getElementById('indiv-mode-badge');
-  if(badge) badge.textContent = S_globalMode==='ytd' ? 'YTD Average' : 'This Week';
+  if(badge) badge.textContent = S_globalMode==='ytd' ? 'YTD Average' : S_globalMode==='mtd' ? 'Month to Date' : (isWtdWeek(S.currentWeek)?'Week to Date':'This Week');
 
   if(S_globalMode === 'ytd'){
     // YTD: aggregate all weeks per employee name+salon
@@ -6445,10 +6494,10 @@ function renderIndividual(){
     filterEmps();
 
   } else {
-    // Weekly mode — shows employees who worked the selected week
-    const emps=consolidateEmpsByPerson(empsByAM(S.currentAM));
+    // Weekly / WTD / MTD mode — WTD flows through getSnap(); MTD reads S_mtdSnap.
+    const emps=consolidateEmpsByPerson(empsByAM(S.currentAM, S_globalMode==='mtd'?S_mtdSnap:undefined));
     const noteEl = document.getElementById('indiv-count-note');
-    if(noteEl) noteEl.textContent = emps.length ? emps.length + ' employees worked week ending ' + (S.currentWeek||'—') + ' · Switch to YTD for full roster' : '';
+    if(noteEl) noteEl.textContent = emps.length ? (emps.length + ' employees · ' + (S_globalMode==='mtd' ? ('month to date — '+dailyCoverageNote()) : isWtdWeek(S.currentWeek) ? ('week to date — '+dailyCoverageNote()) : ('week ending '+(S.currentWeek||'—')+' · Switch to YTD for full roster'))) : '';
     if(!emps.length){ tbody.innerHTML='<tr><td colspan="9" class="no-data"><div class="no-data-icon">👥</div>No employee data for this week</td></tr>'; thead.innerHTML=''; return; }
     const salons=[...new Set(emps.map(e=>e.salonNum))].sort();
     sf.innerHTML='<option value="">All Salons</option>'+salons.map(s=>`<option value="${s}">${salonDisplay(s)}</option>`).join('');
@@ -6461,7 +6510,7 @@ function filterEmps(){
   const s=document.getElementById('emp-search').value.toLowerCase(),sf=document.getElementById('emp-salon-filter').value;
   const ytd = (typeof S_globalMode!=='undefined' && S_globalMode==='ytd');
   const cols = ytd ? YTD_EMP_COLS : EMP_COLS;
-  let emps = ytd ? _ytdEmpsCache.slice() : consolidateEmpsByPerson(empsByAM(S.currentAM));
+  let emps = ytd ? _ytdEmpsCache.slice() : consolidateEmpsByPerson(empsByAM(S.currentAM, S_globalMode==='mtd'?S_mtdSnap:undefined));
   if(s)emps=emps.filter(e=>(e.empName||'').toLowerCase().includes(s));
   if(sf)emps=emps.filter(e=>e.salonNum===sf);
   if(S_hideTermed)emps=emps.filter(e=>!isInactive(e.globalId));
@@ -7201,8 +7250,12 @@ function renderCompany(){
       ? ytdWeeks().flatMap(w=>_coFilt(w.salons))
       : _coFilt(snap?snap.salons:[]);
     const allAForAM = calcAvgs(allForAMAvg);
-    document.getElementById('company-sub').textContent = isYTD
+    document.getElementById('company-sub').textContent = isMTD
+      ? ('All Salons · Month to Date — ' + dailyCoverageNote())
+      : isYTD
       ? 'All Salons · YTD Average · ' + ytdWeeks().length + ' weeks'
+      : isWtdWeek(S.currentWeek)
+      ? ('All Salons · '+fmtWeek(S.currentWeek)+' · In Progress — '+dailyCoverageNote())
       : 'All Salons · Week Ending '+(S.currentWeek?fmtWeek(S.currentWeek):'—');
     const allA=calcAvgs(all);
     // For the summary cards, collapse salon-weeks → distinct salons (averaged),
