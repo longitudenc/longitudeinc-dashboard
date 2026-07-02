@@ -4864,6 +4864,37 @@ function dedupEmp(arr){
   }
   return out;
 }
+// Time-of-day label like "8:45a" from an ISO punch timestamp.
+function dHM(iso){ const m=String(iso||'').match(/T(\d{2}):(\d{2})/); if(!m) return ''; let h=+m[1]; const ap=h<12?'a':'p'; h=h%12||12; return h+':'+m[2]+ap; }
+// Order/punctuation-independent name key so punch names (fname lname) match the
+// performance-CSV "Employee Name" regardless of "First Last" vs "Last, First".
+function dNameKey(s){ return String(s||'').toUpperCase().replace(/[^A-Z\s]/g,' ').split(/\s+/).filter(Boolean).sort().join(' '); }
+// Per-employee break + admin for a salon/day from the loaded punch feed.
+// Break = the gap between a segment's checkout and the next segment's checkin,
+// sized by breakTime (confirmed against Xitlali's day). Admin = asAdmin segments,
+// each with its own in/out window. → { nameKey: {brkMin, admMin, brkD:[], admD:[]} }.
+function dEmpPunchAgg(sn, date){
+  const out={};
+  const segs=((S_dailyData&&S_dailyData.chkinout)||[]).filter(s=>String(s.salonNum||'').trim()===String(sn).trim() && String(s.date)===String(date));
+  const byEmp={};
+  segs.forEach(s=>{ const k=(s.employeeId!=null&&s.employeeId!=='')?('id:'+s.employeeId):('nm:'+dNameKey((s.fname||'')+' '+(s.lname||''))); (byEmp[k]||(byEmp[k]=[])).push(s); });
+  Object.values(byEmp).forEach(list=>{
+    list.sort((a,b)=>String(a.checkInTime||'').localeCompare(String(b.checkInTime||'')));
+    const nk=dNameKey((list[0].fname||'')+' '+(list[0].lname||''));
+    let brkMin=0, admMin=0; const brkD=[], admD=[];
+    list.forEach((s,i)=>{
+      if(hmTrue(s.asAdmin)){
+        const a=dMinOfDay(s.checkInTime), b=dMinOfDay(s.checkOutTime);
+        const mins=(a!=null&&b!=null&&b>a)?(b-a):(n(s.hours)>0?n(s.hours)*60:0);
+        if(mins>0){ admMin+=mins; admD.push(dHM(s.checkInTime)+'–'+dHM(s.checkOutTime)); }
+      }
+      const bt=n(s.breakTime);
+      if(!isNaN(bt)&&bt>0){ brkMin+=bt; const nx=list[i+1]; brkD.push(dHM(s.checkOutTime)+(nx?('–'+dHM(nx.checkInTime)):'')+' ('+Math.round(bt)+'m)'); }
+    });
+    out[nk]={brkMin, admMin, brkD, admD};
+  });
+  return out;
+}
 function openDayDetail(sn, date, targetId){
   sn = String(sn).trim();
   S_dailyDetail = { salonNum: sn, date };
@@ -4876,8 +4907,11 @@ function openDayDetail(sn, date, targetId){
   const salonRow = S_dailyData.salonDaily.find(r=>(r.salonNum||'').trim()===sn && r.date===date);
   const sm = dSalonMetrics(salonRow);
 
-  let rows='', sH=0, sC=0, prodWeighted=0, prodHours=0;
+  const punch = dEmpPunchAgg(sn, date);
+  let rows='', sH=0, sC=0, prodWeighted=0, prodHours=0, sBrk=0, sAdm=0;
   emps.forEach(e=>{
+    const pa = punch[dNameKey(e.employeeName)] || {brkMin:0,admMin:0,brkD:[],admD:[]};
+    sBrk+=pa.brkMin; sAdm+=pa.admMin;
     const hrs=n(e.floorHours), cc=n(e.custCount), cph=n(e.cph), hc=n(e.hcTime), pr=p(e.productPct), mb=n(e.mbc), pay=p(e.payrollPct), pdv=n(e.productivity);
     if(!isNaN(hrs)) sH+=hrs; if(!isNaN(cc)) sC+=cc;
     if(!isNaN(pdv)&&!isNaN(hrs)&&hrs>0){ prodWeighted+=pdv*hrs; prodHours+=hrs; }
@@ -4891,6 +4925,8 @@ function openDayDetail(sn, date, targetId){
       <td style="text-align:center;" class="${(!isNaN(mb)&&mb>0)?tierMBC(mb):''}">${(isNaN(mb)||mb===0)?'—':mb.toFixed(1)}</td>
       <td style="text-align:center;">${(isNaN(pay)||pay===0)?'—':pay.toFixed(1)+'%'}</td>
       <td style="text-align:center;" class="${(!isNaN(pdv))?gradeVsGoal(pdv, prodGoal):''}">${isNaN(pdv)?'—':'$'+pdv.toFixed(2)}</td>
+      <td style="text-align:center;" ${pa.brkD.length?`title="${pa.brkD.join(', ')}"`:''}>${pa.brkMin>0?Math.round(pa.brkMin)+'m':'—'}</td>
+      <td style="text-align:center;" ${pa.admD.length?`title="${pa.admD.join(', ')}"`:''}>${pa.admMin>0?Math.round(pa.admMin)+'m':'—'}</td>
     </tr>`;
   });
 
@@ -4907,17 +4943,30 @@ function openDayDetail(sn, date, targetId){
     <td style="text-align:center;">${sm&&sm.mbc!==null?sm.mbc.toFixed(1):'—'}</td>
     <td style="text-align:center;">${sm&&sm.payrollPct!==null?sm.payrollPct.toFixed(1)+'%':'—'}</td>
     <td style="text-align:center;" class="${tProd!==null?gradeVsGoal(tProd, prodGoal):''}">${tProd===null?'—':'$'+tProd.toFixed(2)}</td>
+    <td style="text-align:center;">${sBrk>0?Math.round(sBrk)+'m':'—'}</td>
+    <td style="text-align:center;">${sAdm>0?Math.round(sAdm)+'m':'—'}</td>
   </tr>`;
 
   const dn = dDayName(date);
+  const _money=v=>{ const x=parseFloat(v); return isNaN(x)?null:(x<0?'−$'+Math.abs(x).toFixed(2):'$'+x.toFixed(2)); };
+  const _cashParts=[];
+  const _has=v=>v!==''&&v!=null;
+  if(salonRow){
+    if(_has(salonRow.overShort)){ const v=_money(salonRow.overShort); if(v!==null) _cashParts.push('Over/Short '+v); }
+    if(_has(salonRow.paidInAmount)){ const v=_money(salonRow.paidInAmount); if(v!==null) _cashParts.push('Paid In '+v+(n(salonRow.paidInCount)>0?' ('+Math.round(n(salonRow.paidInCount))+')':'')); }
+    if(_has(salonRow.paidOutAmount)){ const v=_money(salonRow.paidOutAmount); if(v!==null) _cashParts.push('Paid Out '+v+(n(salonRow.paidOutCount)>0?' ('+Math.round(n(salonRow.paidOutCount))+')':'')); }
+  }
+  const cashLine = _cashParts.length ? `<div style="font-size:11px;color:var(--text-muted);margin:-2px 0 8px;">${_cashParts.join(' &nbsp;·&nbsp; ')}</div>` : '';
   const bodyHtml = emps.length
-    ? `<table class="data-table" style="min-width:680px;">
+    ? `<table class="data-table" style="min-width:820px;">
         <thead><tr>
           <th style="text-align:left;">Stylist</th><th style="text-align:center;">Hours</th>
           <th style="text-align:center;">Customers</th><th style="text-align:center;">CPH</th>
           <th style="text-align:center;">HC Time</th><th style="text-align:center;">Product %</th>
           <th style="text-align:center;">MBC</th><th style="text-align:center;">Payroll %</th>
           <th style="text-align:center;">Productivity${prodGoal?'<br><span style="font-weight:400;font-size:10px;opacity:.85;">Goal $'+prodGoal.toFixed(1)+'</span>':''}</th>
+          <th style="text-align:center;" title="Total break minutes — hover a cell for each break's window">Break</th>
+          <th style="text-align:center;" title="Total admin minutes — hover a cell for each admin window">Admin</th>
         </tr></thead>
         <tbody>${rows}${totalRow}</tbody>
       </table>`
@@ -4925,6 +4974,7 @@ function openDayDetail(sn, date, targetId){
 
   host.innerHTML = `<div style="border-top:2px solid #eee;border-left:3px solid var(--primary);margin:4px 0 0 14px;padding:12px 0 0 14px;">
     <div style="font-weight:700;color:var(--primary);margin-bottom:6px;">${dn} ${dFmtMDY(date)} — who worked</div>
+    ${cashLine}
     <div style="overflow-x:auto;">${bodyHtml}</div>
     ${dShiftBlock(sn, date)}
   </div>`;
