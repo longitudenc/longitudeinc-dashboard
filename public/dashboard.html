@@ -3042,6 +3042,7 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
       </div>
       <!-- BONUS TAB -->
       <div id="tab-reviews" style="display:none;"><div id="am-reviews-body"></div></div>
+      <div id="tab-dayreview" style="display:none;"></div>
       <div id="tab-bonus" style="display:none;">
         <div id="bonus-container">
           <div class="no-data"><div class="no-data-icon">💰</div>No bonus data loaded yet.<br><span style="font-size:12px;color:var(--text-muted);">Drop a monthly employee CSV with "bonus" in the filename into your upload folder.</span></div>
@@ -4124,7 +4125,7 @@ function amSubnavHtml(){
   const t=(atab,lbl)=>`<button class="am-btn am-subnav-btn${atab==='salon'?' active':''}" data-atab="${atab}" onclick="amSubTab('${atab}')" style="font-size:13px;padding:7px 10px;">${lbl}</button>`;
   return `<div id="am-subnav" style="display:none;padding-left:10px;border-left:2px solid var(--border);margin:2px 0 6px 14px;">`
     + t('score','Scorecard') + t('salon','Salon Performance') + t('individual',"My Team's Performance")
-    + t('trends','Trends') + t('bonus','Bonus 💰') + t('reviews','Reviews 📋')
+    + t('trends','Trends') + t('bonus','Bonus 💰') + t('reviews','Reviews 📋') + t('dayreview','Day Review 📅')
     + (canSeeDayOfWeek()?`<button class="am-btn am-subnav-btn" onclick="openDayOfWeek()" style="font-size:13px;padding:7px 10px;">Day of Week 📆</button>`:'')
     + `</div>`;
 }
@@ -4634,7 +4635,7 @@ function dShiftName(f,l){ return (dTitle(f)+' '+dTitle(l)).trim(); }
 function dShiftBlock(sn, date){
   sn=String(sn).trim();
   const rows=(S_dailyData && S_dailyData.shifts)
-    ? S_dailyData.shifts.filter(s=>(s.salonNum||'').trim()===sn && String(s.date)===date)
+    ? S_dailyData.shifts.filter(s=>(s.salonNum||'').trim()===sn && String(s.date)===date && String(s.isNonFloor).toLowerCase()!=='true')
     : [];
   if(!rows.length) return '<div style="font-size:11px;color:var(--text-muted);margin-top:12px;">No schedule/variance data for this day yet.</div>';
   // SD_SHIFTS comes from SD3's schedule/variance report (Current Schedule), so it
@@ -4999,12 +5000,19 @@ function dReviewWeekCC(sn, dateIso){
   const wk=(S.weekHistory||[]).find(w=>w.weekEnding===dReviewWeekEnd(dateIso)); if(!wk) return null;
   const row=(wk.salons||[]).find(r=>(r.salonNum||'').trim()===sn); return row?Math.round(n(row.ccThis)):null;
 }
-function dReviewStep(delta){ const max=dReviewDefaultDate(); let nd=dIsoAddDays(S_dayReviewDate||max, delta); if(nd>max) nd=max; S_dayReviewDate=nd; renderDayReview(); }
-function dReviewPick(v){ if(!v) return; S_dayReviewDate=v; renderDayReview(); }
+function _dayReviewRerender(){ if(S_dayReviewHost==='am-day-review') renderAMDayReview(); else renderDayReview(); }
+function dReviewStep(delta){ const max=dReviewDefaultDate(); let nd=dIsoAddDays(S_dayReviewDate||max, delta); if(nd>max) nd=max; S_dayReviewDate=nd; _dayReviewRerender(); }
+function dReviewPick(v){ if(!v) return; S_dayReviewDate=v; _dayReviewRerender(); }
+
+// Day Review host prefix (body/detail element IDs) + optional salon scope.
+// Company view = all salons (scope null); AM view = only that AM's salons.
+let S_dayReviewHost = 'day-review';
+let S_dayReviewScope = null;
 
 function renderDayReview(){
   const host=document.getElementById('section-day-review'); if(!host) return;
   if(!canSeeDayReview()){ host.innerHTML=''; return; }
+  S_dayReviewHost = 'day-review'; S_dayReviewScope = null;   // company: every salon
   const max=dReviewDefaultDate();
   if(!S_dayReviewDate) S_dayReviewDate=max;
   if(S_dayReviewDate>max) S_dayReviewDate=max;
@@ -5022,8 +5030,8 @@ function renderDayReview(){
 }
 
 function loadDayReview(dateIso){
-  const body=document.getElementById('day-review-body'); if(!body) return;
-  const det=document.getElementById('day-review-detail'); if(det) det.innerHTML='';
+  const body=document.getElementById(S_dayReviewHost+'-body'); if(!body) return;
+  const det=document.getElementById(S_dayReviewHost+'-detail'); if(det) det.innerHTML='';
   const cacheKey='dayreview|'+dateIso, py=dIsoAddDays(dateIso,-364);
   if(S_dailyData && S_dailyData.key===cacheKey){ renderDayReviewTable(dateIso); return; }
   body.innerHTML='<div class="no-data">Loading…</div>';
@@ -5039,11 +5047,11 @@ function loadDayReview(dateIso){
 }
 
 function renderDayReviewTable(dateIso){
-  const body=document.getElementById('day-review-body'); if(!body || !S_dailyData) return;
+  const body=document.getElementById(S_dayReviewHost+'-body'); if(!body || !S_dailyData) return;
   const pyIso=dIsoAddDays(dateIso,-364), idx={}, idxPY={};
   S_dailyData.salonDaily.forEach(r=>{ const sn=(r.salonNum||'').trim();
     if(r.date===dateIso) idx[sn]=r; else if(r.date===pyIso) idxPY[sn]=r; });
-  const sns=Object.keys(idx).sort((a,b)=>salonDisplay(a).localeCompare(salonDisplay(b)));
+  const sns=Object.keys(idx).filter(sn=>!S_dayReviewScope||S_dayReviewScope.has(sn)).sort((a,b)=>salonDisplay(a).localeCompare(salonDisplay(b)));
   if(!sns.length){ body.innerHTML='<div class="no-data">No salon data for '+dFmtMDY(dateIso)+'. Pick another day — daily history is backfilled to late 2025.</div>'; return; }
 
   let T={cc:0,fh:0,ss:0,ps:0,pay:0,hcMin:0,hcInv:0,ncwm:0,w15:0}, TPY={cc:0,ss:0,ps:0};
@@ -5055,7 +5063,7 @@ function renderDayReviewTable(dateIso){
     T.ncwm+=n(r.nonCutWithCustWaitingMinutes)||0; T.w15+=n(r.waitOver15MinsCount)||0;
     const pr=idxPY[sn]; if(pr){ TPY.cc+=n(pr.customerCount)||0; TPY.ss+=n(pr.serviceSales)||0; TPY.ps+=n(pr.productSales)||0; }
     const ccChg=m?dChange(m.cc, py?py.cc:null):null, slChg=m?dChange(m.sales, py?py.sales:null):null;
-    rows += `<tr onclick="openDayDetail('${sn}','${dateIso}','day-review-detail')" style="cursor:pointer;">
+    rows += `<tr onclick="openDayDetail('${sn}','${dateIso}','${S_dayReviewHost}-detail')" style="cursor:pointer;">
       <td style="text-align:left;font-weight:600;">${salonDisplay(sn)}</td>
       <td>${dFmt(m.cc,'int')}</td><td>${dChangeCell(ccChg)}</td>
       <td>${dFmt(m.sales,'money')}</td><td>${dChangeCell(slChg)}</td>
@@ -5072,7 +5080,7 @@ function renderDayReviewTable(dateIso){
     tProd=tTotal>0?(T.ps/tTotal)*100:null;
   const tCcChg=dChange(T.cc, TPY.cc), tSlChg=dChange(tTotal, TPY.ss+TPY.ps);
   const totalRow=`<tr class="avg-row">
-    <td style="text-align:left;">Company Total</td>
+    <td style="text-align:left;">${S_dayReviewScope?'Total':'Company Total'}</td>
     <td>${dFmt(T.cc,'int')}</td><td>${dChangeCell(tCcChg)}</td>
     <td>${dFmt(tTotal,'money')}</td><td>${dChangeCell(tSlChg)}</td>
     <td>${dFmt(tCph,'2')}</td><td>${dFmt(tHc,'1')}</td><td>${dFmt(tMbc,'1')}</td>
@@ -5080,21 +5088,45 @@ function renderDayReviewTable(dateIso){
     <td>${dFmt(tWaits,'pct')}</td><td>${dFmt(tPay,'pct')}</td>
   </tr>`;
   const head=`<tr><th style="text-align:left;">Salon</th><th>CC</th><th>CC Δ LY</th><th>Sales</th><th>Sales Δ LY</th><th>CPH</th><th>HC Time</th><th>MBC</th><th>Product %</th><th>Waits %</th><th>Payroll %</th></tr>`;
-  body.innerHTML=`<div style="font-size:11px;color:var(--text-muted);padding:0 2px 8px;">${dDayName(dateIso)} ${dFmtMDY(dateIso)} · all salons. Δ LY = vs the same day last year. Click any salon to see who worked and how they performed.</div>
+  body.innerHTML=`<div style="font-size:11px;color:var(--text-muted);padding:0 2px 8px;">${dDayName(dateIso)} ${dFmtMDY(dateIso)} · ${S_dayReviewScope?'your salons':'all salons'}. Δ LY = vs the same day last year. Click any salon to see who worked and how they performed.</div>
     <div class="sticky-head-scroll" style="overflow:auto;max-height:72vh;"><table class="data-table" style="min-width:840px;"><thead>${head}</thead><tbody>${rows}${totalRow}</tbody></table></div>` + dDayHeatStrip(dateIso, sns);
+}
+
+// AM Day Review — the same day drill, scoped to the current AM's salons.
+function renderAMDayReview(){
+  const host=document.getElementById('tab-dayreview'); if(!host) return;
+  S_dayReviewHost='am-day-review';
+  const all=(typeof ACTIVE_SALONS!=='undefined'?ACTIVE_SALONS:[]);
+  S_dayReviewScope=new Set(all.filter(sn=>amOf(sn)===S.currentAM));
+  const max=dReviewDefaultDate();
+  if(!S_dayReviewDate) S_dayReviewDate=max;
+  if(S_dayReviewDate>max) S_dayReviewDate=max;
+  const nm=(AMS[S.currentAM]&&AMS[S.currentAM].name)||'';
+  host.innerHTML=`<div class="table-card-header">
+      <div class="card-title" style="margin:0;">Day Review — ${nm?nm.split(' ')[0]+"'s salons":'my salons'}</div>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <button class="btn btn-secondary btn-sm" onclick="dReviewStep(-1)">‹ Prev</button>
+        <input type="date" id="am-day-review-date" value="${S_dayReviewDate}" max="${max}" onchange="dReviewPick(this.value)" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;font:inherit;">
+        <button class="btn btn-secondary btn-sm" onclick="dReviewStep(1)">Next ›</button>
+      </div>
+    </div>
+    <div id="am-day-review-body"><div class="no-data">Loading…</div></div>
+    <div id="am-day-review-detail" style="margin-top:12px;"></div>`;
+  loadDayReview(S_dayReviewDate);
 }
 
 function switchTab(tab,el){ 
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active')); 
   const _tb=el||document.getElementById('tb-'+tab); if(_tb) _tb.classList.add('active');
   document.querySelectorAll('.am-subnav-btn').forEach(b=>b.classList.toggle('active', b.dataset.atab===tab));
-  ['score','salon','individual','trends','bonus','reviews'].forEach(t=>{ const el2=document.getElementById('tab-'+t); if(el2) el2.style.display=t===tab?'block':'none'; });
+  ['score','salon','individual','trends','bonus','reviews','dayreview'].forEach(t=>{ const el2=document.getElementById('tab-'+t); if(el2) el2.style.display=t===tab?'block':'none'; });
   if(tab==='individual') renderIndividual();
   if(tab==='salon') renderSalonTab();
   if(tab==='score') renderScorecard();
   if(tab==='trends') renderTrends();
   if(tab==='bonus') renderBonus();
   if(tab==='reviews') renderReviewsTab('am-reviews-body','am');
+  if(tab==='dayreview') renderAMDayReview();
 }
 
 // — Week dropdown ────────────────────────────────────────────
