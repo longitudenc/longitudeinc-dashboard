@@ -227,26 +227,45 @@ export function bonusRowsFromMonthlyCsv(
     ;(byEmp[gid] ||= []).push(o)
   }
   const out: Record<string, any>[] = []
+  let totalsHit = 0, totalsMiss = 0
   for (const [gid, list] of Object.entries(byEmp)) {
     // Primary salon = where they worked the most hours (row attribution)
     const primary = list.slice().sort(
       (a, b) => (csvNum(b['Floor Hours']) || 0) - (csvNum(a['Floor Hours']) || 0)
     )[0]
-    const totalHrs = list.reduce((t, o) => t + (csvNum(o['Floor Hours']) || 0), 0)
-    const totalCust = list.reduce((t, o) => t + (csvNum(o['Cust Count']) || 0), 0)
+    // ALWAYS take the consolidated line straight from SD3's per-employee
+    // Totals/Averages row when present. SD3 already computes the correct month
+    // across every salon (hours, customers, HC, MBC, product, productivity, and
+    // the rolling-window NR/RR). Re-deriving from the per-salon rows dropped hours
+    // for salons we didn't recognize and collapsed multi-salon stylists onto a
+    // single salon's numbers — which is what threw the June bonus off.
+    const totalsRow = totalsByEmp[gid]
+    let totalHrs = 0, totalCust = 0
+    let prodPct: number | null = null, hc: number | null = null, mbc: number | null = null
+    let nr: number | null = null, rr: number | null = null, productivity: number | null = null
 
-    let prodPct: number | null, hc: number | null, mbc: number | null
-    let nr: number | null, rr: number | null, productivity: number | null
-    if (list.length === 1) {
-      // Pass SD3's monthly values through exactly
-      prodPct = vOrNull(csvNum(primary['Stnd Prod %']))
-      hc = vOrNull(csvNum(primary['Avg HC Time']))
-      mbc = vOrNull(csvNum(primary['Avg Min Btwn Cust w/ Cust Waiting']))
-      nr = vOrNull(returnRate(primary['Stylist New Cust Return %']))
-      rr = vOrNull(returnRate(primary['Stylist Repeat Cust Return %']))
-      productivity = vOrNull(csvNum(primary['Productivity']))
+    const passThrough = (o: Record<string, string>) => {
+      totalHrs     = csvNum(o['Floor Hours']) || 0
+      totalCust    = csvNum(o['Cust Count']) || 0
+      prodPct      = vOrNull(csvNum(o['Stnd Prod %']))
+      hc           = vOrNull(csvNum(o['Avg HC Time']))
+      mbc          = vOrNull(csvNum(o['Avg Min Btwn Cust w/ Cust Waiting']))
+      nr           = vOrNull(returnRate(o['Stylist New Cust Return %']))
+      rr           = vOrNull(returnRate(o['Stylist Repeat Cust Return %']))
+      productivity = vOrNull(csvNum(o['Productivity']))
+    }
+
+    if (totalsRow) {
+      totalsHit++
+      passThrough(totalsRow)                 // straight off SD3's Totals/Averages
+    } else if (list.length === 1) {
+      totalsMiss++
+      passThrough(primary)                   // single salon — the one row IS the month
     } else {
-      // Weighted merge across salons
+      totalsMiss++
+      // Multi-salon with NO totals row (should be rare) — customer-weighted merge fallback.
+      totalHrs  = list.reduce((t, o) => t + (csvNum(o['Floor Hours']) || 0), 0)
+      totalCust = list.reduce((t, o) => t + (csvNum(o['Cust Count']) || 0), 0)
       let hcW = 0, hcC = 0, mbcW = 0, mbcC = 0, nrW = 0, nrC = 0, rrW = 0, rrC = 0
       let prodW = 0, svc = 0, prtyW = 0, prtyH = 0
       for (const o of list) {
@@ -272,18 +291,6 @@ export function bonusRowsFromMonthlyCsv(
       rr = rrC > 0 ? rrW / rrC : null
       prodPct = svc > 0 ? prodW / svc : null
       productivity = prtyH > 0 ? prtyW / prtyH : null
-
-      // NR/RR cannot be reconstructed by averaging across salons (SD3 computes
-      // them over a rolling 105-day window). If SD3 gave us a Totals/Averages
-      // row for this employee, use its authoritative combined NR/RR instead of
-      // the weighted re-merge above. (Other metrics keep the merge.)
-      const totalsRow = totalsByEmp[gid]
-      if (totalsRow) {
-        const tNr = vOrNull(returnRate(totalsRow['Stylist New Cust Return %']))
-        const tRr = vOrNull(returnRate(totalsRow['Stylist Repeat Cust Return %']))
-        if (tNr !== null) nr = tNr
-        if (tRr !== null) rr = tRr
-      }
     }
 
     const avgWkHrs = weeksN ? totalHrs / weeksN : 0
@@ -313,6 +320,7 @@ export function bonusRowsFromMonthlyCsv(
       scrapedAt: new Date().toISOString(),
     })
   }
+  console.log(`[bonus] Totals/Averages coverage: ${totalsHit}/${totalsHit+totalsMiss} used SD3 totals row (${totalsMiss} fell back)`)
   return out
 }
 
