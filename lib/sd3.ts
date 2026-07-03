@@ -454,6 +454,7 @@ export async function fetchEmpChkInOut(
   const rows = asRowArray(await res.json())
   return rows.map(r => {
     const emp = ((r as any).employee?.objectId?.idSnapshot) || {}
+    const empObj = ((r as any).employee) || {}   // name fields live here, not top-level
     const chk = ((r as any).objectId?.idSnapshot) || {}
     return {
       chkPk: numOrNull(chk.employeecheckinoutpk),
@@ -461,8 +462,8 @@ export async function fetchEmpChkInOut(
       date: String(r.date ?? ''),
       employeePk: numOrNull(emp.employeepk),
       employeeId: numOrNull(r.employeeId),
-      fname: String(r.fname ?? r.firstName ?? ''),
-      lname: String(r.lname ?? r.lastName ?? ''),
+      fname: String(empObj.fname ?? empObj.firstName ?? r.fname ?? r.firstName ?? ''),
+      lname: String(empObj.lname ?? empObj.lastName ?? r.lname ?? r.lastName ?? ''),
       checkInTime: r.checkInTime ? String(r.checkInTime) : null,
       checkOutTime: (r.checkOutTime ?? r.checkOutTimeNonNull)
         ? String(r.checkOutTime ?? r.checkOutTimeNonNull) : null,
