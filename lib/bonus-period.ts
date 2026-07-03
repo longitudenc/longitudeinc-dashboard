@@ -320,6 +320,8 @@ export function bonusRowsFromMonthlyCsv(
       scrapedAt: new Date().toISOString(),
     })
   }
+  ;(out as any).totalsHit = totalsHit
+  ;(out as any).totalsMiss = totalsMiss
   console.log(`[bonus] Totals/Averages coverage: ${totalsHit}/${totalsHit+totalsMiss} used SD3 totals row (${totalsMiss} fell back)`)
   return out
 }
@@ -591,6 +593,9 @@ export async function runBonusPeriodScrape(
         storesInPeriod: Object.keys(byStore).length,
         sampleSalonSummary: ssRows.find(r => String(r.storeId) === '19436') || ssRows[0],
         sampleBonus: bonusRows[0],
+        totalsCoverage: `${(bonusRows as any).totalsHit ?? 0}/${((bonusRows as any).totalsHit ?? 0) + ((bonusRows as any).totalsMiss ?? 0)} used SD3 totals row (${(bonusRows as any).totalsMiss ?? 0} fell back to merge/pass-through)`,
+        sampleAdams: bonusRows.find((b: any) => /adams,\s*renee/i.test(b.empName || '')) || null,
+        sampleKayla: bonusRows.find((b: any) => /aldridge,\s*kayla/i.test(b.empName || '')) || null,
         samplePayroll: payrollRows[0],
       }
     }
