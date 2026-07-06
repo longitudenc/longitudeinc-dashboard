@@ -3605,21 +3605,24 @@ let S_globalMode = 'weekly'; // 'weekly' or 'ytd'
 
 async function setGlobalMode(mode){
   S_globalMode = mode;
-  if(mode==='mtd'){ try{ await buildMtdSnap(); }catch(e){} }   // fiscal month-to-date snapshot
-  // Update button styles
+  // Immediate visual feedback FIRST — never block the button/label update on the
+  // async MTD fetch (that's why the toggle felt dead).
   const wb = document.getElementById('mode-weekly-btn');
   const yb = document.getElementById('mode-ytd-btn');
   if(wb){ wb.style.background = mode==='weekly' ? 'white' : 'transparent'; wb.style.color = mode==='weekly' ? 'var(--primary)' : 'rgba(255,255,255,.7)'; }
   if(yb){ yb.style.background = mode==='ytd' ? 'white' : 'transparent'; yb.style.color = mode==='ytd' ? 'var(--primary)' : 'rgba(255,255,255,.7)'; }
-  // Per-box toggles (the header toggle was retired in favor of these)
   document.querySelectorAll('.gmode-btn').forEach(b=>{
     const on = b.dataset.gmode===mode;
     b.style.background = on ? 'var(--primary)' : 'transparent';
     b.style.color = on ? '#fff' : 'var(--primary)';
   });
-  // Show/hide week selector (not needed in YTD or MTD mode)
   const wl = document.getElementById('week-label');
   if(wl) wl.style.opacity = (mode==='ytd'||mode==='mtd') ? '0.4' : '1';
+  // MTD needs its fiscal month-to-date daily snapshot before rendering.
+  if(mode==='mtd'){
+    try{ await buildMtdSnap(); if(!S_mtdSnap || !(S_mtdSnap.salons||[]).length) console.warn('[MTD] snapshot empty — range/fetch returned no salons', S_mtdSnap); }
+    catch(e){ console.error('[MTD] buildMtdSnap failed:', e); }
+  }
   // Re-render current view
   const companyActive = document.getElementById('page-company')?.classList.contains('active');
   const amActive = document.getElementById('page-am')?.classList.contains('active');
