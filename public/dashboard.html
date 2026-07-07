@@ -6106,8 +6106,7 @@ function openSalonBonusYTD(snum){
 }
 function onBonusSalonPick(v){
   S_bonusSalonFilter = v || '';
-  if(v) openSalonBonusYTD(v);   // pick a salon → all-months YTD, like Company Overview
-  else renderBonus();           // "All My Salons" → back to the normal list
+  renderBonus();   // in-place: manager view swaps to the per-month drill for that salon
 }
 let S_sdBonusPeriod='', S_sdBonusType='manager', S_sdBonusView='month', S_sdTrendMetrics=['cc'], S_sdIndivRange='ytd';
 
@@ -7796,7 +7795,8 @@ function renderBonusContent(){
     else if(S_bonusView==='ytd')   el.innerHTML = buildBonusYTD();
     else if(S_bonusView==='salon') el.innerHTML = bonusRangeBar('rerenderBonusViews()') + buildBonusSalon();
   } else if(S_bonusType==='manager'){
-    if(S_bonusView==='period') el.innerHTML = buildManagerBonusPeriod(bonusSalonScope());
+    if(S_bonusSalonFilter) el.innerHTML = buildCoMgrDrill(S_bonusSalonFilter, "S_bonusSalonFilter='';renderBonus();");
+    else if(S_bonusView==='period') el.innerHTML = buildManagerBonusPeriod(bonusSalonScope());
     else if(S_bonusView==='ytd') el.innerHTML = buildManagerBonusYTD(bonusSalonScope());
   } else if(S_bonusType==='am'){
     if(S_bonusView==='period') el.innerHTML = buildAMBonus();
@@ -8420,7 +8420,7 @@ function renderMgrSalonCard(snum, salonRow, result, mgrInfo, bonusMgrRow, isAMFa
   let card = `<div class="table-card" id="mgr-card-${snum}" style="margin:0;overflow:hidden;transition:outline .2s;">
     <div style="padding:1.1rem 1.25rem;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px;">
       <div style="min-width:200px;">
-        <div class="salon-link" onclick="openSalonBonusYTD('${snum}')" title="View all months YTD" style="font-size:16px;font-weight:700;color:var(--primary);line-height:1.2;cursor:pointer;">${salonDisplay(snum)}</div>
+        <div class="salon-link" onclick="S_bonusSalonFilter='${snum}';renderBonus();" title="View all months (YTD)" style="font-size:16px;font-weight:700;color:var(--primary);line-height:1.2;cursor:pointer;">${salonDisplay(snum)}</div>
         <div style="font-size:13px;color:var(--text);margin-top:5px;">Manager: <strong>${(mgrInfo&&mgrInfo.globalId&&!isAMFallback)?stylistLink(mgrInfo.globalId,mgrName):mgrName}</strong>${mgrWarning}</div>
       </div>
       <div style="text-align:right;min-width:150px;">
@@ -9868,14 +9868,15 @@ function coMgrDrillInto(snum){
   renderCompanyManagerBonus();
 }
 
-function buildCoMgrDrill(snum){
+function buildCoMgrDrill(snum, backAction){
   const S_salonSummaryPeriods = ssPeriodsInRange();
   const mgrInfo = S_managerTable[snum];
   const amId = amOfPeriod(snum, S_coMgrPeriod); const am = AMS[amId]||{name:'?',color:'#999'};
   const isAMFallback = !mgrInfo || !mgrInfo.name;
   const mgrName = isAMFallback ? (am.name+' (AM)') : mgrInfo.name;
+  const _back = backAction || "S_coMgrDrillSalon=null;renderCompanyManagerBonus();";
 
-  let html = `<button class="back-btn" onclick="S_coMgrDrillSalon=null;renderCompanyManagerBonus();">← Back to Summary</button>
+  let html = `<button class="back-btn" onclick="${_back}">← Back to Summary</button>
     <div class="drill-header" style="margin-bottom:1.25rem;">
       <div>
         <div style="font-size:18px;font-weight:700;color:var(--primary);">${salonDisplay(snum)}</div>
