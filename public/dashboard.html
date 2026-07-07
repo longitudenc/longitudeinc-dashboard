@@ -11934,6 +11934,10 @@ function renderReview(data){
   const baseWage = home ? (parseFloat(home.baseWage)||0) : 0;
   const amId = amOf(data.homeSalon);
   const am   = AMS[amId] || {name:'—'};
+  // Manager = the salon's ASSIGNED manager; fall back to the AM only when the
+  // salon has no manager on file.
+  const _rMgr = S_managerTable[data.homeSalon];
+  const mgrDisplay = (_rMgr && _rMgr.globalId) ? cleanMgrName(_rMgr.name) : (am.name==='—' ? '—' : am.name+' (AM)');
 
   // Year selector — only 2025 onward (no individual data before that).
   const currentYear = new Date().getFullYear();
@@ -11979,7 +11983,7 @@ function renderReview(data){
   <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;border:1px solid #ccc;padding:10px;margin-bottom:8px;background:white;">
     <div><div style="font-size:9px;color:#888;text-transform:uppercase;">Stylist</div><div style="font-weight:700;font-size:13px;border-bottom:1px solid #999;">${_reviewName||data.payrollName}</div></div>
     <div><div style="font-size:9px;color:#888;text-transform:uppercase;">Salon</div><div style="font-weight:700;font-size:13px;border-bottom:1px solid #999;">${data.homeSalon}</div></div>
-    <div><div style="font-size:9px;color:#888;text-transform:uppercase;">Manager</div><div style="font-weight:700;font-size:13px;border-bottom:1px solid #999;">${am.name}</div></div>
+    <div><div style="font-size:9px;color:#888;text-transform:uppercase;">Manager</div><div style="font-weight:700;font-size:13px;border-bottom:1px solid #999;">${mgrDisplay}</div></div>
     <div><div style="font-size:9px;color:#888;text-transform:uppercase;">Hire Date</div><div style="font-weight:700;font-size:13px;border-bottom:1px solid #999;">${data.effectiveDate||'—'}</div></div>
     <div><div style="font-size:9px;color:#888;text-transform:uppercase;">Base Wage</div><div style="font-weight:700;font-size:13px;border-bottom:1px solid #999;">$${baseWage.toFixed(2)}</div></div>
     <div><div style="font-size:9px;color:#888;text-transform:uppercase;">Year</div><div style="font-weight:700;font-size:13px;border-bottom:1px solid #999;">${_reviewYear}</div></div>
@@ -12246,7 +12250,10 @@ function buildAllReviewCardsHTML(data){
       if(!pts) Object.keys(data.discPts).forEach(k=>{ if(nl.includes(k.split(',')[0].trim())||k.includes(nl.split(',')[0].trim())) pts=data.discPts[k]||0; });
       return pts;
     })();
-    const discIneligible = discPts >= 4;
+    const discIneligible = discPts >= 6;   // 6+ → no raise (matches the single review)
+    const _bAm = AMS[amOf(r.homeSalon)] || {name:'—'};
+    const _bMgr = S_managerTable[r.homeSalon];
+    const mgrDisplay = (_bMgr && _bMgr.globalId) ? cleanMgrName(_bMgr.name) : (_bAm.name==='—' ? '—' : _bAm.name+' (AM)');
     const baseWage = parseFloat(r.baseWage)||0;
     const proratedRaise = r.monthsWorked < 12 ? r.raiseEarned*(r.monthsWorked/12) : r.raiseEarned;
     const newBase = baseWage + (discIneligible||r.totalPts<11?0:proratedRaise);
@@ -12257,22 +12264,16 @@ function buildAllReviewCardsHTML(data){
     <strong>PREVIEW — not final.</strong> This reflects year-to-date performance only. Any raise shown is <strong>earned only at the conclusion of the fiscal year</strong>, and once finalized it takes effect the following <strong>February</strong>. Figures will continue to change as the remaining months are completed.
   </div>
       <div class="rev-header">
-        <table style="width:100%;border-collapse:collapse;border:1px solid #999;margin-bottom:8px;">
-          <tr>
-            <td style="padding:6px 8px;border:1px solid #999;"><span style="font-size:9px;color:#888;display:block;text-transform:uppercase;">Stylist</span><strong>${r.name||r.payrollName}</strong></td>
-            <td style="padding:6px 8px;border:1px solid #999;"><span style="font-size:9px;color:#888;display:block;text-transform:uppercase;">Salon</span><strong>${r.homeSalon}</strong></td>
-            <td style="padding:6px 8px;border:1px solid #999;"><span style="font-size:9px;color:#888;display:block;text-transform:uppercase;">Hire Date</span><strong>${(()=>{
-      if(!r.effectiveDate) return '—';
-      const d = new Date(r.effectiveDate);
-      if(!isNaN(d.getTime())) return (d.getMonth()+1)+'/'+ d.getDate()+'/'+d.getFullYear();
-      return r.effectiveDate;
-    })()}</strong></td>
-            <td style="padding:6px 8px;border:1px solid #999;"><span style="font-size:9px;color:#888;display:block;text-transform:uppercase;">Year</span><strong>${r.year}</strong></td>
-            <td style="padding:6px 8px;border:1px solid #999;"><span style="font-size:9px;color:#888;display:block;text-transform:uppercase;">Base Wage</span><strong>$${baseWage.toFixed(2)}</strong></td>
-            <td style="padding:6px 8px;border:1px solid #999;"><span style="font-size:9px;color:#888;display:block;text-transform:uppercase;">Months Worked</span><strong>${r.monthsWorked} of 12</strong></td>
-            <td style="padding:6px 8px;border:1px solid #999;background:${discIneligible?'#FFC7CE':'inherit'};"><span style="font-size:9px;color:#888;display:block;text-transform:uppercase;">Disc. Points</span><strong style="color:${discIneligible?'#9C0006':'inherit'};">${discPts}${discIneligible?' ⚠':''}</strong></td>
-          </tr>
-        </table>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;border:1px solid #ccc;padding:10px;margin-bottom:8px;background:white;">
+          <div><div style="font-size:9px;color:#888;text-transform:uppercase;">Stylist</div><div style="font-weight:700;font-size:13px;border-bottom:1px solid #999;">${r.name||r.payrollName}</div></div>
+          <div><div style="font-size:9px;color:#888;text-transform:uppercase;">Salon</div><div style="font-weight:700;font-size:13px;border-bottom:1px solid #999;">${r.homeSalon}</div></div>
+          <div><div style="font-size:9px;color:#888;text-transform:uppercase;">Manager</div><div style="font-weight:700;font-size:13px;border-bottom:1px solid #999;">${mgrDisplay}</div></div>
+          <div><div style="font-size:9px;color:#888;text-transform:uppercase;">Hire Date</div><div style="font-weight:700;font-size:13px;border-bottom:1px solid #999;">${(()=>{ if(!r.effectiveDate) return '—'; const d=new Date(r.effectiveDate); if(!isNaN(d.getTime())) return (d.getMonth()+1)+'/'+d.getDate()+'/'+d.getFullYear(); return r.effectiveDate; })()}</div></div>
+          <div><div style="font-size:9px;color:#888;text-transform:uppercase;">Base Wage</div><div style="font-weight:700;font-size:13px;border-bottom:1px solid #999;">$${baseWage.toFixed(2)}</div></div>
+          <div><div style="font-size:9px;color:#888;text-transform:uppercase;">Year</div><div style="font-weight:700;font-size:13px;border-bottom:1px solid #999;">${r.year}</div></div>
+          <div><div style="font-size:9px;color:#888;text-transform:uppercase;">Months Worked</div><div style="font-weight:700;font-size:13px;border-bottom:1px solid #999;">${r.monthsWorked} of 12</div></div>
+          <div><div style="font-size:9px;color:#888;text-transform:uppercase;">Disc. Points</div><div style="font-weight:700;font-size:13px;border-bottom:1px solid #999;color:${discPts>=4?'#9C0006':'inherit'};">${discPts}${discIneligible?' ⚠':''}</div></div>
+        </div>
       </div>
 
       <!-- Monthly performance -->
