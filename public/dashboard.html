@@ -6070,9 +6070,9 @@ function sdRender(){
     try{ openSalonDaily(S_sdSalon,'sd-daily-host',S_sdDailyWeek); }catch(e){}
   }
 }
-function openSalonDrill(salonNum){
+function openSalonDrill(salonNum, section){
   if(typeof canDrillSalon==='function' && !canDrillSalon(salonNum)) return;  // role/assignment gate
-  S_sdSalon=String(salonNum).trim(); S_sdSection='performance'; S_sdTab='weekly'; S_sdRange='13'; S_sdDailyWeek=S.currentWeek;
+  S_sdSalon=String(salonNum).trim(); S_sdSection=section||'performance'; S_sdTab='weekly'; S_sdRange='13'; S_sdDailyWeek=S.currentWeek;
   const old=document.getElementById('salon-drill-overlay'); if(old) old.remove();
   const ov=document.createElement('div'); ov.id='salon-drill-overlay';
   ov.style.cssText='position:fixed;inset:0;z-index:9999;background:#fff;display:flex;flex-direction:column;';
@@ -6096,7 +6096,19 @@ function openSalonDrill(salonNum){
   sdRender();
 }
 
-// ── Store View sections: Trends / Bonuses / Individual (reuse built logic) ───
+// Open the Store View straight to Bonuses → YTD (all months for the salon) —
+// the same per-salon breakdown the Company Overview shows. Used from the AM
+// bonus tab so picking/clicking a salon lands on its month-by-month YTD.
+function openSalonBonusYTD(snum){
+  S_sdBonusType = (typeof S_bonusType!=='undefined' && S_bonusType==='stylist') ? 'stylist' : 'manager';
+  S_sdBonusView = 'ytd';
+  openSalonDrill(snum, 'bonus');
+}
+function onBonusSalonPick(v){
+  S_bonusSalonFilter = v || '';
+  if(v) openSalonBonusYTD(v);   // pick a salon → all-months YTD, like Company Overview
+  else renderBonus();           // "All My Salons" → back to the normal list
+}
 let S_sdBonusPeriod='', S_sdBonusType='manager', S_sdBonusView='month', S_sdTrendMetrics=['cc'], S_sdIndivRange='ytd';
 
 // TRENDS — embed the real Chart.js trend, scoped to this salon, into the overlay.
@@ -7721,7 +7733,7 @@ function renderBonus(){
         amSnsFull.slice().sort((a,b)=>parseInt(a)-parseInt(b)).map(sn=>`<option value="${sn}" ${S_bonusSalonFilter===sn?'selected':''}>${salonDisplay(sn)}</option>`)).join('');
       salonFilterBar = `<div style="margin-top:.6rem;display:inline-flex;align-items:center;gap:7px;flex-wrap:wrap;">
         <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);">Salon:</span>
-        <select onchange="S_bonusSalonFilter=this.value;renderBonus();" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);font-size:13px;font-weight:600;background:white;">${opts}</select>
+        <select onchange="onBonusSalonPick(this.value)" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);font-size:13px;font-weight:600;background:white;">${opts}</select>
         ${S_bonusSalonFilter?`<span style="font-size:11px;color:var(--primary);font-weight:700;">· showing ${salonDisplay(S_bonusSalonFilter)} only</span>`:''}
       </div>`;
     }
@@ -8408,7 +8420,7 @@ function renderMgrSalonCard(snum, salonRow, result, mgrInfo, bonusMgrRow, isAMFa
   let card = `<div class="table-card" id="mgr-card-${snum}" style="margin:0;overflow:hidden;transition:outline .2s;">
     <div style="padding:1.1rem 1.25rem;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px;">
       <div style="min-width:200px;">
-        <div style="font-size:16px;font-weight:700;color:var(--primary);line-height:1.2;">${salonDisplay(snum)}</div>
+        <div class="salon-link" onclick="openSalonBonusYTD('${snum}')" title="View all months YTD" style="font-size:16px;font-weight:700;color:var(--primary);line-height:1.2;cursor:pointer;">${salonDisplay(snum)}</div>
         <div style="font-size:13px;color:var(--text);margin-top:5px;">Manager: <strong>${(mgrInfo&&mgrInfo.globalId&&!isAMFallback)?stylistLink(mgrInfo.globalId,mgrName):mgrName}</strong>${mgrWarning}</div>
       </div>
       <div style="text-align:right;min-width:150px;">
