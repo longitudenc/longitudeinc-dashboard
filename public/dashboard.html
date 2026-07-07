@@ -4020,6 +4020,7 @@ function initWithSession(email, role, amId){
 function onDataLoaded(data){
   try {
     if(!data || !data.success){ console.error(data ? data.error : 'No data'); hideLoading(); return; }
+    if(!_discLoaded) loadDiscPoints();   // load the disc-points feed once, early, for every bonus/standouts path
 
     // Salon roster — source of truth for active/sold/closed + AM assignment.
     ROSTER = data.salonRoster || [];
@@ -7604,7 +7605,9 @@ function amOfPeriod(salonNum, periodLabel){
   if(!rows.length) return amOf(sn); // no history recorded → current mapping
   const sk = periodSortKey(normPeriodLabel(periodLabel));
   const hit = rows.find(a=>assignmentCovers(a, sk));
-  return hit ? String(hit.amKey||'').toLowerCase() : '';
+  if(!hit) return amOf(sn);
+  const key = String(hit.amKey||'').toLowerCase();
+  return AMS[key] ? key : amOf(sn); // resolved AM was removed (e.g. Dawn) → current mapping (Kayla)
 }
 // The salon set an AM owned during a given period (regular AMs only).
 function amSalonsForPeriod(amId, periodLabel){
@@ -9053,6 +9056,10 @@ function setCoBonusType(type){
 function renderCompanyBonus(){
   const el = document.getElementById('co-bonus-container');
   if(!el) return;
+  // Disc-points gate needs the DiscPoints feed; the company bonus path (unlike
+  // renderBonus) never triggered the load, so ineligibility silently passed.
+  // Load it if missing and re-render once it lands.
+  if(!_discLoaded){ loadDiscPoints(()=>renderCompanyBonus()); }
   // Bonus pay breakdowns are owner/admin/viewer only; limited roles use the
   // separate Monthly Standouts section instead.
   if(!canSeeAllSalons()){ el.innerHTML=''; return; }
