@@ -4056,7 +4056,7 @@ function onDataLoaded(data){
     S_salonSummaryPeriods = (data.salonSummaryPeriods || []).slice().sort((a,b)=>periodSortKey(a.periodKey)-periodSortKey(b.periodKey));
     // Load manager table
     S_managerTable = {};
-    (data.managerTable || []).forEach(m => { if(m.salonNum) S_managerTable[m.salonNum] = {name: m.managerName||'', globalId: m.globalId||''}; });
+    (data.managerTable || []).forEach(m => { if(m.salonNum) S_managerTable[m.salonNum] = {name: cleanMgrName(m.managerName||''), globalId: m.globalId||''}; });
     // Load penalty waivers
     S_penaltyWaivers = data.penaltyWaivers || [];
     // Load effective-dated AM assignments (salon→AM history for bonus views)
@@ -6178,7 +6178,7 @@ function _sdMgrResult(snum, ssPeriod){
   const amId=amOf(snum), am=AMS[amId];
   let bonusMgrRow=null, isAMFallback=false;
   if(mgrInfo && mgrInfo.globalId && bonusPeriod){ bonusMgrRow=bonusPeriod.employees.find(e=>e.globalId===mgrInfo.globalId)||null; isAMFallback=Object.values(AMS).some(a=>a.globalId===mgrInfo.globalId); }
-  if(!bonusMgrRow && am && am.globalId && bonusPeriod){ bonusMgrRow=getAMBonusRow(am, bonusPeriod); if(bonusMgrRow) isAMFallback=true; }
+  if(!bonusMgrRow && !(mgrInfo && mgrInfo.globalId) && am && am.globalId && bonusPeriod){ bonusMgrRow=getAMBonusRow(am, bonusPeriod); if(bonusMgrRow) isAMFallback=true; }
   const result=calcMgrBonusFromSalonRow(salonRow, bonusMgrRow, getWaiver(snum, normLabel), normLabel, isAMFallback, (mgrInfo&&mgrInfo.globalId)||(bonusMgrRow&&bonusMgrRow.globalId)||"");
   return {result, salonRow, mgrInfo, bonusMgrRow, isAMFallback, am};
 }
@@ -8243,7 +8243,7 @@ function buildManagerBonusPeriod(amSalonNums){
       isAMFallback = Object.values(AMS).some(a=>a.globalId===mgrInfo.globalId);
     }
     // Fall back to AM if no manager assigned or no matching bonus row
-    if(!bonusMgrRow && am && am.globalId && bonusPeriod){
+    if(!bonusMgrRow && !(mgrInfo && mgrInfo.globalId) && am && am.globalId && bonusPeriod){
       bonusMgrRow = getAMBonusRow(am, bonusPeriod);
       if(bonusMgrRow) isAMFallback = true;
     }
@@ -8807,15 +8807,15 @@ function renderManagerTableInner(el, uniqueSalons){
     if(amGlobalIds.has(e.globalId)){
       // The employee IS an AM — show their name once with the (AM) tag, no
       // duplication (was "Name — Name (AM)").
-      amEmps.push({...e, displayName: `${fmtName(e.name)} (AM)`});
+      amEmps.push({...e, displayName: `${cleanMgrName(fmtName(e.name))} (AM)`});
     } else {
-      regularEmps.push({...e, displayName: fmtName(e.name)});
+      regularEmps.push({...e, displayName: cleanMgrName(fmtName(e.name))});
     }
   });
 
   // Add any AMs not in home file
   Object.values(AMS).filter(a=>a.globalId && !_homeEmployees.find(e=>e.globalId===a.globalId))
-    .forEach(a=>amEmps.push({name:a.name, globalId:a.globalId, salon:'AM', displayName:`${fmtName(a.name)} (AM)`}));
+    .forEach(a=>amEmps.push({name:a.name, globalId:a.globalId, salon:'AM', displayName:`${cleanMgrName(fmtName(a.name))} (AM)`}));
 
   amEmps.sort((a,b)=>a.displayName.localeCompare(b.displayName));
   regularEmps.sort((a,b)=>a.displayName.localeCompare(b.displayName));
@@ -8838,12 +8838,19 @@ function renderManagerTableInner(el, uniqueSalons){
 
   uniqueSalons.forEach(snum=>{
     const current = S_managerTable[snum] || {name:'', globalId:''};
+    const curInList = current.globalId && (amEmps.some(e=>e.globalId===current.globalId) || regularEmps.some(e=>e.globalId===current.globalId));
+    // Keep an assigned manager visible/selected even if they've left the roster
+    // (e.g. an ex-AM repositioned as manager whose employee record hasn't flowed yet).
+    const orphanOpt = (current.globalId && !curInList)
+      ? `<option value="${current.globalId}" data-name="${cleanMgrName(current.name)}" selected>${cleanMgrName(current.name)||current.globalId} — not in current roster</option>`
+      : '';
     tbl += `<tr style="border-bottom:1px solid #f0efec;">
       <td style="padding:5px 8px;font-weight:600;">${salonLink(snum, salonDisplay(snum), 'bonus')}</td>
       <td style="padding:5px 8px;">
         <select style="width:100%;font-size:12px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;background:white;color:var(--text);"
           id="mgr-sel-${snum}" onchange="onMgrSelect('${snum}',this)">
           <option value="">— Select manager —</option>
+          ${orphanOpt}
           ${amOptions}
           <optgroup label="── Stylists ──">
             ${regularEmps.map(e=>`<option value="${e.globalId}" data-name="${fmtName(e.name)}" ${e.globalId===current.globalId?'selected':''}>${e.displayName}</option>`).join('')}
@@ -9653,7 +9660,7 @@ function getMgrBonusForSalon(snum, ssPeriodKey){
     bonusMgrRow = bonusPeriod.employees.find(e=>e.globalId===mgrInfo.globalId) || null;
     isAMFallback = Object.values(AMS).some(a=>a.globalId===mgrInfo.globalId);
   }
-  if(!bonusMgrRow && am && am.globalId && bonusPeriod){
+  if(!bonusMgrRow && !(mgrInfo && mgrInfo.globalId) && am && am.globalId && bonusPeriod){
     bonusMgrRow = getAMBonusRow(am, bonusPeriod);
     if(bonusMgrRow) isAMFallback = true;
   }
@@ -10738,6 +10745,16 @@ function shortName(name){
   const first = parts[0];
   const lastInit = parts[parts.length-1].charAt(0).toUpperCase();
   return (first + ' ' + lastInit + '.' + suffix).trim();
+}
+// Strip stale "(AM)" annotations and "X — X" self-duplication that got baked into
+// saved ManagerTable names (e.g. "Dawn Bowersox (AM) — Dawn Bowersox (AM)" when a
+// manager was assigned while still an AM). Idempotent.
+function cleanMgrName(name){
+  let s = String(name||'').trim();
+  const parts = s.split(/\s+—\s+/).map(x=>x.trim()).filter(Boolean);
+  if(parts.length) s = parts[0];                       // collapse "A — A" → "A"
+  s = s.replace(/\s*\(AM\)\s*/gi,' ').replace(/\s{2,}/g,' ').trim();  // drop (AM)
+  return s;
 }
 function stylistLink(globalId, name, salonNum){
   const disp = shortName(name);
