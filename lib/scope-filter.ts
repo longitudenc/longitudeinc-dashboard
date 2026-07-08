@@ -46,14 +46,14 @@ export function scopeAllData(data: any, access: Access): any {
     const salons = amSalonSet(access)
     const inScope = (sn: any) => salons.has(String(sn || '').trim())
     const homeSalonOf = (gid: string) => data.homeDataMap?.[gid]?.homeSalon
-    // TEMP DEBUG — remove after diagnosing AM review scope. Prints what the filter
-    // sees for one known case (Emma Allen, home 1304).
+    // TEMP DEBUG — attached to the response so it's readable in the browser.
+    let _scopeDbg: any = null
     try {
       const _g = '2018-0001-0905'
       const _emmaRows = (data.bonusPeriods || []).flatMap((p: any) =>
         (p.employees || []).filter((e: any) => String(e.globalId || '').trim() === _g)
           .map((e: any) => ({ period: p.periodKey, salonNum: e.salonNum })))
-      console.log('[SCOPE-DEBUG]', JSON.stringify({
+      _scopeDbg = {
         role: access.role,
         accessSalons: access.salons,
         salonSet: [...salons],
@@ -62,8 +62,8 @@ export function scopeAllData(data: any, access: Access): any {
         emmaHomeInScope: inScope(homeSalonOf(_g)),
         emmaHasHomeDataRow: !!(data.homeDataMap && data.homeDataMap[_g]),
         emmaBonusRowsInFull: _emmaRows,
-      }))
-    } catch (err) { console.log('[SCOPE-DEBUG] err', String(err)) }
+      }
+    } catch (err) { _scopeDbg = { err: String(err) } }
     // Managers/AMs assigned to one of THIS AM's salons: keep their personal bonus
     // & payroll rows even when their own primary salon sits outside this AM's
     // scope. Without this, such a manager's aggregated row is dropped entirely and
@@ -85,6 +85,7 @@ export function scopeAllData(data: any, access: Access): any {
       // to a salon outside this AM's scope. This guarantees it's always present.
       String(e.position || '').trim().toUpperCase() === 'M' 
     const out: any = { ...data }
+    out._scopeDebug = _scopeDbg   // TEMP — remove after diagnosing
 
     // 1) Pay: keep baseWage only for employees homed at the AM's salons.
     if (data.homeDataMap) {
