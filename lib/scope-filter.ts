@@ -56,6 +56,10 @@ export function scopeAllData(data: any, access: Access): any {
     }
     const empInScope = (e: any) =>
       inScope(e.salonNum) ||
+      // Employees HOMED at one of this AM's salons keep ALL their bonus rows even
+      // when a given month is attributed to a salon they floated to. Reviews list
+      // stylists by home salon, so without this their review comes back empty.
+      inScope(homeSalonOf(String(e.globalId || '').trim())) ||
       keepGids.has(String(e.globalId || '').trim()) ||
       // Keep ALL manager (position "M") rows. The AM only DISPLAYS managers for
       // their own salons, but the manager bonus needs each manager's personal
