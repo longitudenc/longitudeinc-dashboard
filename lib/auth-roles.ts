@@ -52,28 +52,28 @@ const norm = (s: unknown) => String(s ?? '').trim().toLowerCase()
 // includes today. amKey matches the AreaManagers key.
 function currentSalonsForAm(amKey: string, assignments: any[], roster: any[]): string[] {
   const key = norm(amKey)
-  const out = new Set<string>()
-  let sawOverride = false
-  for (const a of assignments) {
-    if (norm(a.amKey) !== key) continue
-    sawOverride = true
-    // An assignment is "current" if it has no end, i.e. still in effect.
-    if (!String(a.endPeriod || '').trim()) {
-      if (a.salonNum) out.add(String(a.salonNum).trim())
-    }
-  }
-  // FALLBACK: AMAssignments is an override/change log — it only contains rows
-  // for AMs whose assignments have CHANGED (e.g. the Dawn step-down). Most AMs
-  // have no rows at all. When an AM has no override rows, derive their current
-  // salons from the SalonRoster `am` column (the maintained salon→AM mapping).
-  // This way unchanged AMs still resolve correctly without manual backfill.
-  if (!sawOverride && Array.isArray(roster)) {
+  // PRIMARY: the SalonRoster `am` column is the MAINTAINED current salon→AM mapping
+  // — the same source the whole app uses via amOf(). Trust it for current scope.
+  const rosterSalons = new Set<string>()
+  if (Array.isArray(roster)) {
     for (const r of roster) {
       if (norm(r.am) !== key) continue
       const status = norm(r.status || 'active')
       if (status === 'sold' || status === 'closed') continue // not a current salon
-      if (r.salonNum) out.add(String(r.salonNum).trim())
+      if (r.salonNum) rosterSalons.add(String(r.salonNum).trim())
     }
+  }
+  if (rosterSalons.size) return [...rosterSalons]
+
+  // FALLBACK: only when the roster has nothing for this AM, derive from the
+  // AMAssignments change-log (current = no endPeriod). AMAssignments is an
+  // effective-dated LOG and can carry stale/partial rows, so it must NOT override
+  // the roster — doing so scoped an AM to a single wrong salon (e.g. Luann→9489).
+  const out = new Set<string>()
+  for (const a of assignments) {
+    if (norm(a.amKey) !== key) continue
+    if (String(a.endPeriod || '').trim()) continue // ended → not current
+    if (a.salonNum) out.add(String(a.salonNum).trim())
   }
   return [...out]
 }
