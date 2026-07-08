@@ -5399,6 +5399,10 @@ function computeSalonReview(salonNum, year){
   const inYear = iso=>{ const m=String(iso||'').match(/^(\d{4})/); return m && +m[1]===year; };
   const monthOf = iso=>{ const m=String(iso||'').match(/^\d{4}-(\d{2})/); return m?+m[1]:0; };
   const pf=(arr,v)=>{ if(v!==null&&v!==undefined&&!isNaN(v)) arr.push(v); };
+  // Only COMPLETED fiscal months belong in the review — the current month is still
+  // accumulating, so its partial numbers must not show up as a column.
+  const _curMon = periodSortKey(periodKeyFromWeekEnd(new Date().toISOString().slice(0,10))||'');
+  const monthComplete = iso => periodSortKey(periodKeyFromWeekEnd(iso)||'') < _curMon;
 
   const salMon={};   // m -> {nr:[],rr:[],hc:[],mbc:[],product:[],ssw:[],wt:[],pay:[],cc:[],ccg:[]}
   const prodMon={};  // m -> {ss,fh}  (salon Prod$ = Σ prod×hrs / Σ hrs)
@@ -5409,6 +5413,7 @@ function computeSalonReview(salonNum, year){
 
   (S.weekHistory||[]).forEach(snap=>{
     if(!inYear(snap.weekEnding)) return;
+    if(!monthComplete(snap.weekEnding)) return;   // current month still open → exclude
     const m=monthOf(snap.weekEnding); if(!m) return;
     const s=(snap.salons||[]).find(x=>String(x.salonNum||'').trim()===salonNum);
     if(s){
