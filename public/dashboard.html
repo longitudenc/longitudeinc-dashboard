@@ -5381,7 +5381,7 @@ function openStylistReview(gid, name){
 // (e.g. 79.5), matching how the dashboard stores nr/rr/product/waits/payroll/ccg.
 function srNR(v){ return v>=25.945?4:v>=23.945?3:v>=20.945?2:1; }
 function srRR(v){ return v>=75.9?4:v>=72.9?3:v>=69.9?2:1; }
-function srHC(v){ if(v<10.95)return 1; if(v<11.95)return 2; if(v<14.05)return 4; if(v<17.05)return 3; if(v<18.05)return 2; return 1; }
+function srHC(v){ v=Number((+v).toFixed(1)); if(v<10.95)return 1; if(v<11.95)return 2; if(v<14.05)return 4; if(v<17.05)return 3; if(v<18.05)return 2; return 1; }
 function srMBC(v){ return v<2.05?4:v<3.05?3:v<4.05?2:1; }
 function srProductivity(v,goal){ return (goal&&v>=goal)?2:1; }   // 2 or 1 (Prod$ vs goal)
 function srProductPct(v){ return v>=5.95?4:v>=3.95?3:v>=2.45?2:1; }
@@ -5503,6 +5503,21 @@ function computeSalonReview(salonNum, year){
 
   const dataMonths=Object.keys(salMon).map(Number).sort((x,y)=>x-y);
   const heldAllYear = !!mgrGid && dataMonths.length>0 && dataMonths.every(m=>mgrPosMonths.has(m));
+  // Manager POSITION START — earliest week (across ALL history, not just this year)
+  // this person held position "M" at THIS salon. There's no stored role-start date,
+  // so this is derived from the data; it's the first week they appear as manager.
+  let mgrPosStart='';
+  if(mgrGid){
+    (S.weekHistory||[]).forEach(snap=>{
+      const we=snap.weekEnding; if(!we) return;
+      (snap.emps||[]).forEach(e=>{
+        if(String(e.globalId||'').trim()===mgrGid
+          && String(e.salonNum||'').trim()===salonNum
+          && String(e.position||'').trim().toUpperCase()==='M'
+          && (!mgrPosStart || we<mgrPosStart)) mgrPosStart=we;
+      });
+    });
+  }
   const curPeriod = periodKeyFromWeekEnd(S.currentWeek)||periodKeyFromWeekEnd(new Date().toISOString());
   const discPts = (typeof activeDiscPoints==='function' && mgrGid) ? activeDiscPoints(mgrGid,curPeriod) : 0;
   const discElim = discPts>=4;
@@ -5510,7 +5525,7 @@ function computeSalonReview(salonNum, year){
   const raise = eligible ? srRaise(totalPts) : 0;
 
   return { salonNum, year, managerName:mgr.name, managerGid:mgrGid, salonRows, mgrRows,
-    salonPts, mgrPts, totalPts, raise, heldAllYear, discPts, discElim, eligible,
+    salonPts, mgrPts, totalPts, raise, heldAllYear, discPts, discElim, eligible, mgrPosStart,
     hasData:dataMonths.length>0, dataMonths, exPay:pt.exc, grPay:pt.grw, prodGoal:goal };
 }
 
@@ -5603,6 +5618,7 @@ function renderSalonReviewBody(salonNum){
           ${raiseBox}
           <div style="font-size:12px;color:var(--text-muted);line-height:1.5;">
             Salon ${d.salonPts} + Manager ${d.mgrPts}.<br>
+            ${d.mgrPosStart?`Manager since <b>${(()=>{const dt=new Date(d.mgrPosStart);return isNaN(dt.getTime())?d.mgrPosStart:(dt.getMonth()+1)+'/'+dt.getDate()+'/'+dt.getFullYear();})()}</b>.<br>`:''}
             ${d.discPts>0?`${d.discPts} disciplinary pt(s). `:''}Eligibility: manager in seat all ${_reviewYear} ${d.heldAllYear?'✓':'✗'}.
           </div>
         </div>
@@ -10806,7 +10822,9 @@ function openProfile(globalId, name){
   if(!canViewPerson(globalId)){ return; }
   _reviewGlobalId = globalId;
   _reviewName     = name;
-  _reviewYear     = new Date().getFullYear();
+  // Keep whatever review year is currently selected (default is set once, globally)
+  // so the year stays consistent whether you arrive via the list or a profile link.
+  if(!_reviewYear) _reviewYear = new Date().getFullYear();
   const overlay = document.getElementById('profile-overlay');
   const drawer  = document.getElementById('profile-drawer');
   overlay.style.display = 'block';
@@ -11663,7 +11681,7 @@ function drawProfileChart(mk){
 // ── Annual Review ────────────────────────────────────────────
 let _reviewGlobalId = null;
 let _reviewName     = null;
-let _reviewYear     = new Date().getFullYear() - 1; // default prior year
+let _reviewYear     = new Date().getFullYear(); // default current year (consistent for every role)
 let _discEvents     = [];   // [{eventId,globalId,employeeName,points,date,reason}]
 let _discByEmp      = {};   // globalId -> [events]
 let _discLoaded     = false;
@@ -11807,7 +11825,7 @@ const REVIEW_QUARTERS = {Q1:['Jan','Feb','Mar'],Q2:['Apr','May','Jun'],Q3:['Jul'
 
 function scoreNR(v){  return v>=26?4:v>=24?3:v>=21?2:1; }
 function scoreRR(v){  return v>=77?4:v>=73?3:v>=70?2:1; }
-function scoreHC(v){  return (v>=12&&v<=14)?4:(v>=14.01&&v<=17)?3:((v>=17.1&&v<=18)||(v>=11&&v<=11.9))?2:1; }
+function scoreHC(v){  v=Number((+v).toFixed(1)); return (v>=12&&v<=14)?4:(v>=14.01&&v<=17)?3:((v>=17.1&&v<=18)||(v>=11&&v<=11.9))?2:1; }
 function scoreMBC(v){ return v<=2?4:v<=3?3:v<=3.5?2:1; }
 function scoreProd(v){return v>=6?4:v>=4?3:v>=2.5?2:1; }
 
