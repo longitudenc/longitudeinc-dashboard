@@ -6750,7 +6750,13 @@ let S_trendMetric = 'cc';
 let S_trendWindow = 20; // Trends weeks shown: 20 | 52 | 'ytd' | 'all' (default: recent 20)
 let S_trendChart = null;
 let S_trendPriorYear = false; // Overlay prior-year (−52wk) line on trend charts
-function setTrendWindow(w){ S_trendWindow = w; renderTrends(); }
+function setTrendWindow(w){
+  // Preserve which lines are toggled on/off across the timeline change. Without
+  // this the chart rebuilds fresh (all lines visible) because the metric is
+  // unchanged, so selectTrendMetric skips its own snapshot.
+  if(S_trendChart){ try{ const snap={}; S_trendChart.data.datasets.forEach((ds,i)=>{ const base=(ds.label||'').endsWith(' (PY)')?ds.label.slice(0,-5):(ds.label||''); snap[base]=S_trendChart.isDatasetVisible(i); }); S_trendVisSnapshot=snap; }catch(e){} }
+  S_trendWindow = w; renderTrends();
+}
 let S_trendVisSnapshot = null; // {label: visible} captured across PY-toggle rebuilds
 function toggleTrendPriorYear(){
   // Capture current salon visibility so toggling PY doesn't snap back to the
