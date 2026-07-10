@@ -3097,7 +3097,10 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
       <div class="table-card" id="section-all-salons">
         <div class="table-card-header" style="cursor:pointer;" onclick="toggleSection('all-salons')">
           <div class="card-title" style="margin:0;">All Salons — Detail</div>
-          <span id="section-all-salons-icon" style="font-size:16px;color:var(--text-muted);">▾</span>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();printAllSalons();" style="font-size:11px;padding:4px 10px;">🖨 Print</button>
+            <span id="section-all-salons-icon" style="font-size:16px;color:var(--text-muted);">▾</span>
+          </div>
         </div>
         <div id="section-all-salons-body">
           <div class="sticky-head-scroll" style="overflow:auto;max-height:72vh;"><table class="data-table"><thead id="co-all-thead"></thead><tbody id="co-all-tbody"><tr><td colspan="16" class="no-data">Loading...</td></tr></tbody></table></div>
@@ -6756,6 +6759,40 @@ function setTrendWindow(w){
   // unchanged, so selectTrendMetric skips its own snapshot.
   if(S_trendChart){ try{ const snap={}; S_trendChart.data.datasets.forEach((ds,i)=>{ const base=(ds.label||'').endsWith(' (PY)')?ds.label.slice(0,-5):(ds.label||''); snap[base]=S_trendChart.isDatasetVisible(i); }); S_trendVisSnapshot=snap; }catch(e){} }
   S_trendWindow = w; renderTrends();
+}
+
+// Print just the All Salons summary table — clean, landscape, no sidebar/nav.
+function printAllSalons(){
+  const body = document.getElementById('section-all-salons-body');
+  if(!body) return;
+  const period = ((document.getElementById('company-sub')||{}).textContent || 'All Salons').trim();
+  const old = document.getElementById('all-salons-print'); if(old) old.remove();
+  const w = document.createElement('div');
+  w.id = 'all-salons-print';
+  w.innerHTML = `
+    <style>
+      @media screen{ #all-salons-print{ display:none; } }
+      @page{ size:letter landscape; margin:0.4in; }
+      @media print{
+        *{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+        body > *:not(#all-salons-print){ display:none !important; }
+        #all-salons-print{ display:block !important; }
+        #all-salons-print .sticky-head-scroll{ overflow:visible !important; max-height:none !important; }
+        #all-salons-print table{ width:100% !important; border-collapse:collapse !important; font-size:9px !important; }
+        #all-salons-print th, #all-salons-print td{ padding:2px 4px !important; }
+        #all-salons-print thead{ display:table-header-group; }
+      }
+      #all-salons-print h1{ font-size:15px; margin:0 0 2px; color:#03654e; }
+      #all-salons-print .meta{ font-size:11px; color:#666; margin-bottom:10px; }
+    </style>
+    <h1>Longitude Inc — All Salons Summary</h1>
+    <div class="meta">${period} · printed ${new Date().toLocaleDateString()}</div>
+    ${body.innerHTML}`;
+  document.body.appendChild(w);
+  const cleanup = ()=>{ const el=document.getElementById('all-salons-print'); if(el) el.remove(); window.removeEventListener('afterprint', cleanup); };
+  window.addEventListener('afterprint', cleanup);
+  window.print();
+  setTimeout(cleanup, 1500);
 }
 let S_trendVisSnapshot = null; // {label: visible} captured across PY-toggle rebuilds
 function toggleTrendPriorYear(){
