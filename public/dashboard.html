@@ -3564,16 +3564,16 @@ function payrollTargets(cc){
 }
 
 // ── Tier functions ────────────────────────────────────────────
-function tierNR(v)    { return v>=26?'c4':v>=24?'c3':v>=21?'c2':'c1'; }
-function tierRR(v)    { return v>=77?'c4':v>=73.9?'c3':v>=70.9?'c2':'c1'; }
-function tierCC(v)    { return v>=520?'c4':v>=420?'c3':v>=320?'c2':'c1'; }
-function tierCCG(v)   { return v>=5?'c4':v>=3?'c3':v>=1?'c2':'c1'; }
-function tierSGR(v)   { return v>=5?'c4':v>=3?'c3':v>=1?'c2':'c1'; }
-function tierWaits(v) { return v<=15?'c4':v<=19?'c3':v<=23?'c2':'c1'; }
-function tierMBC(v)   { return v<=2.0?'c4':v<=3.0?'c3':v<=3.5?'c2':'c1'; }
-function tierProd(v)  { return v>=6?'c4':v>=4.0?'c3':v>=2.5?'c2':'c1'; }
-function tierHC(v)    { if(v>=12&&v<=15)return'c4'; if((v>=11&&v<12)||(v>15&&v<=17))return'c3'; if(v>17&&v<=18)return'c2'; return'c1'; }
-function tierPayroll(v,cc){ const t=payrollTargets(cc); return v<=t.exc?'c4':v<=t.grw?'c3':'c1'; }
+function tierNR(v)    { v=Math.round(v*10)/10; return v>=26?'c4':v>=24?'c3':v>=21?'c2':'c1'; }
+function tierRR(v)    { v=Math.round(v*10)/10; return v>=77?'c4':v>=73.9?'c3':v>=70.9?'c2':'c1'; }
+function tierCC(v)    { v=Math.round(v); return v>=520?'c4':v>=420?'c3':v>=320?'c2':'c1'; }
+function tierCCG(v)   { v=Math.round(v*10)/10; return v>=5?'c4':v>=3?'c3':v>=1?'c2':'c1'; }
+function tierSGR(v)   { v=Math.round(v*10)/10; return v>=5?'c4':v>=3?'c3':v>=1?'c2':'c1'; }
+function tierWaits(v) { v=Math.round(v*10)/10; return v<=15?'c4':v<=19?'c3':v<=23?'c2':'c1'; }
+function tierMBC(v)   { v=Math.round(v*10)/10; return v<=2.0?'c4':v<=3.0?'c3':v<=3.5?'c2':'c1'; }
+function tierProd(v)  { v=Math.round(v*10)/10; return v>=6?'c4':v>=4.0?'c3':v>=2.5?'c2':'c1'; }
+function tierHC(v)    { v=Math.round(v*10)/10; if(v>=12&&v<=15)return'c4'; if((v>=11&&v<12)||(v>15&&v<=17))return'c3'; if(v>17&&v<=18)return'c2'; return'c1'; }
+function tierPayroll(v,cc){ v=Math.round(v*10)/10; const t=payrollTargets(cc); return v<=t.exc?'c4':v<=t.grw?'c3':'c1'; }
 function tierCPH(v,cc)    { const t=payrollTargets(cc); return v>=t.cph?'c4':'c1'; }
 function tierToScore(t)   { return t==='c4'?2:t==='c3'?1:0; }
 
@@ -5437,6 +5437,31 @@ function computeSalonReview(salonNum, year){
       }
     });
   });
+
+  // ── DATA CONSISTENCY: overwrite the salon-month buckets with the authoritative
+  // monthly salon summary (S_salonSummaryPeriods) — the backend's exact Σ/Σ figures
+  // (e.g. payroll% = Σ payrollAmount / Σ totalSales) and the SAME rows that drive
+  // the manager bonus. Re-averaging weekly percentages here produced values that
+  // disagreed with the bonus AND varied by login (weekHistory is role-scoped).
+  // Weekly averages remain only as fallback for months with no summary row.
+  // HC Time and CC Growth stay weekly-derived (the summary doesn't carry them).
+  {
+    const MN={Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12};
+    const numv=v=>{ const x=parseFloat(v); return isNaN(x)?null:x; };
+    (S_salonSummaryPeriods||[]).forEach(pp=>{
+      if(periodYear(pp.periodKey)!==year) return;
+      const m=MN[String(pp.periodKey||'').trim().split(/\s+/)[0]]; if(!m) return;
+      const S=(pp.salons||[]).find(x=>String(x.salonNum||'').trim()===salonNum); if(!S) return;
+      const M=salMon[m]||(salMon[m]={nr:[],rr:[],hc:[],mbc:[],product:[],ssw:[],wt:[],pay:[],cc:[],ccg:[]});
+      const set=(key,v)=>{ const x=numv(v); if(x!==null) M[key]=[x]; };
+      set('pay', (S.adjPayrollPct!==''&&S.adjPayrollPct!=null)?S.adjPayrollPct:S.payrollPct);
+      set('product', S.productPct);
+      set('nr', S.nr); set('rr', S.rr); set('mbc', S.mbc);
+      set('wt', S.waits); set('ssw', S.ssWaits);
+      set('cc', S.avgWeeklyCC);
+      const pd=numv(S.productivity); if(pd!==null) prodMon[m]={ss:pd, fh:1};
+    });
+  }
 
   // Manager's OWN metric values come from consolidated BonusData (one row per month,
   // merged across every salon they worked), NOT the per-salon weekly fragments — so a
