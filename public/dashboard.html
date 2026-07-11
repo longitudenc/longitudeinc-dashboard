@@ -11866,11 +11866,11 @@ const REVIEW_MIN_PTS = 11;
 const REVIEW_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const REVIEW_QUARTERS = {Q1:['Jan','Feb','Mar'],Q2:['Apr','May','Jun'],Q3:['Jul','Aug','Sep'],Q4:['Oct','Nov','Dec']};
 
-function scoreNR(v){  return v>=26?4:v>=24?3:v>=21?2:1; }
-function scoreRR(v){  return v>=77?4:v>=73?3:v>=70?2:1; }
+function scoreNR(v){  v=Number((+v).toFixed(1)); return v>=26?4:v>=24?3:v>=21?2:1; }
+function scoreRR(v){  v=Number((+v).toFixed(1)); return v>=77?4:v>=73?3:v>=70?2:1; }
 function scoreHC(v){  v=Number((+v).toFixed(1)); return (v>=12&&v<=14)?4:(v>=14.01&&v<=17)?3:((v>=17.1&&v<=18)||(v>=11&&v<=11.9))?2:1; }
-function scoreMBC(v){ return v<=2?4:v<=3?3:v<=3.5?2:1; }
-function scoreProd(v){return v>=6?4:v>=4?3:v>=2.5?2:1; }
+function scoreMBC(v){ v=Number((+v).toFixed(1)); return v<=2?4:v<=3?3:v<=3.5?2:1; }
+function scoreProd(v){v=Number((+v).toFixed(1)); return v>=6?4:v>=4?3:v>=2.5?2:1; }
 
 // Color for monthly cell
 function revCellColor(metric, val){

@@ -134,7 +134,7 @@ function weightedProductPct(rows: Record<string, any>[]): { avg: number; count: 
 // ── Stylist bonus engine (mirrors dashboard BONUS_CFG) ─────────
 // Points: Prod% <4=0+penalty / ≥4=1 / ≥6=2 · NR% ≥24=1 / ≥26=2 ·
 //         RR% ≥74=1 / ≥77=2 · MBC ≤3=1 / ≤2=2 · HC 12–15=2 / 11–12 or 15–17=1
-// Potential by avg weekly floor hrs: >30 → $200 ($20/pt) · ≥10 → $100 ($10/pt) · <10 → $0
+// Potential by avg weekly floor hrs: >=30 → $200 ($20/pt) · ≥10 → $100 ($10/pt) · <10 → $0
 // Min 5 pts to earn · Prod <4% → payout ×0.25
 const STY = {
   PROD_1: 4, PROD_2: 6,        // product thresholds in % points
@@ -171,8 +171,8 @@ function calcStylistBonus(
     : h !== null && h >= STY.HC_G_LO1 && h <= STY.HC_G_HI2 ? 1 : 0
 
   const hrs = r1(avgWkHrs)
-  const potential = hrs > STY.HRS_EXC ? STY.POT_EXC : hrs >= STY.HRS_INEL ? STY.POT_GROW : 0
-  const perPt = hrs > STY.HRS_EXC ? STY.PPT_EXC : hrs >= STY.HRS_INEL ? STY.PPT_GROW : 0
+  const potential = hrs >= STY.HRS_EXC ? STY.POT_EXC : hrs >= STY.HRS_INEL ? STY.POT_GROW : 0
+  const perPt = hrs >= STY.HRS_EXC ? STY.PPT_EXC : hrs >= STY.HRS_INEL ? STY.PPT_GROW : 0
 
   const eligible = points >= STY.MIN_PTS
   const prodPenalty = p !== null && p < STY.PROD_1
