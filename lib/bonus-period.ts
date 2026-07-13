@@ -452,31 +452,25 @@ export async function runBonusPeriodScrape(
     }
 
     const ssRows: Record<string, any>[] = []
+    let mgProbe: any = null   // TEMP: full month-window grouped payload for 3027 (field discovery)
     for (const [sid, rows] of Object.entries(byStore)) {
       const salonNum = storeToSalon[sid] || sid
       const grossSvc = sum(rows, 'serviceSales') + sum(rows, 'serviceDiscounts') + sum(rows, 'redoAmount')
       const floorHrs = sum(rows, 'floorHours')
       const productivity = floorHrs ? grossSvc / floorHrs : 0
       const dollarsPerCut = sum(rows, 'haircutCount') ? sum(rows, 'grossHaircutSales') / sum(rows, 'haircutCount') : 0
-      // Product % and CPH: use SD3's OWN weekly values weighted to the month,
-      // not a re-derivation from raw components. SD3's "Standard Prod %" and
-      // "Cuts Per Hour" have in-house definitions (e.g. standard products only)
-      // that raw derivation over/under-shot (4.2 vs 3.9 product, 2.3 vs 2.5 CPH).
-      // Weighting SD3's weekly figures by their denominators reproduces the
-      // monthly number in SD3's own terms. Derived formulas remain as fallback
-      // for rows missing the weekly columns.
-      const wAvg = (valKey: string, wKey: string): number => {
-        let num = 0, den = 0
-        for (const r of rows) {
-          const v = Number(r[valKey]); const w = Number(r[wKey])
-          if (isFinite(v) && v !== 0 && isFinite(w) && w > 0) { num += v * w; den += w }
-        }
-        return den ? num / den : 0
-      }
-      const cphW = wAvg('cph', 'floorHours')
-      const cph = cphW || (dollarsPerCut ? productivity / dollarsPerCut : 0)
-      let prodPctW = wAvg('productPct', 'serviceSales')
-      if (prodPctW > 0 && prodPctW < 0.5) prodPctW *= 100   // fraction-stored guard
+      // Product % and CPH — formulas identified empirically against the SD3
+      // salon report (18-salon fit): Product % = productSales / totalSales,
+      // CPH = customerCount / floorHours. Both are computed over the MONTH
+      // WINDOW from SD3's grouped month fetch (in the try below) because SD3's
+      // month figures are NOT reconstructable by summing its weekly rows —
+      // the same non-additivity already discovered and handled for waits.
+      // Weekly-summed versions remain as fallback when the live fetch fails.
+      const _wkTS = sum(rows, 'totalSales')
+      let productPctVal = _wkTS ? (sum(rows, 'productSales') / _wkTS) * 100
+                                : (grossSvc ? (sum(rows, 'productSales') / grossSvc) * 100 : 0)
+      let cphVal = floorHrs ? sum(rows, 'cc') / floorHrs
+                            : (dollarsPerCut ? productivity / dollarsPerCut : 0)
       const totSales = sum(rows, 'totalSales')
       // ── Waits: SD3's grouped wait count is non-additive across weeks (summing
       //    the 4 weekly grouped counts does NOT equal the month's count), and the
@@ -498,6 +492,15 @@ export async function runBonusPeriodScrape(
           const w15 = Number((mg as any).waitOver15MinsCount) || 0
           if (ccM) waitsVal = (w15 / ccM) * 100
         }
+        if (mg) {
+          if (String(salonNum) === '3027') mgProbe = mg   // TEMP probe
+          const mts = Number((mg as any).totalSales) || 0
+          const mps = Number((mg as any).productSales) || 0
+          const mcc = Number((mg as any).customerCount) || 0
+          const mfh = Number((mg as any).floorHours) || 0
+          if (mts > 0) productPctVal = (mps / mts) * 100
+          if (mfh > 0 && mcc > 0) cphVal = mcc / mfh
+        }
         if (Array.isArray(md) && md.length) {
           const wknd = md.filter((d: any) => isWeekendIso(String(d.date || '')))
           const ssW = wknd.reduce((t: number, d: any) => t + (Number(d.waitOver15MinsCount) || 0), 0)
@@ -514,9 +517,9 @@ export async function runBonusPeriodScrape(
         payrollPct: pctSum(rows, 'payrollAmount', 'totalSales'),
         // Adjusted payroll = total payroll % minus receptionist % (bonus goal rule).
         adjPayrollPct: totSales ? ((sum(rows, 'payrollAmount') - sum(rows, 'receptionistPay')) / totSales) * 100 : 0,
-        productPct: prodPctW || (grossSvc ? (sum(rows, 'productSales') / grossSvc) * 100 : 0),
+        productPct: productPctVal,
         productivity,
-        cph,
+        cph: cphVal,
         mbc: avgPresent(rows, 'mbc').avg,
         nr: avgPresent(rows, 'nr').avg,
         rr: avgPresent(rows, 'rr').avg,
@@ -611,6 +614,7 @@ export async function runBonusPeriodScrape(
         storesInPeriod: Object.keys(byStore).length,
         sampleSalonSummary: ssRows.find(r => String(r.storeId) === '19436') || ssRows[0],
         sampleSummary3027: ssRows.find(r => String(r.salonNum) === '3027') || null,
+        mgProbe3027: mgProbe,
         sampleBonus: bonusRows[0],
         totalsCoverage: `${(bonusRows as any).totalsHit ?? 0}/${((bonusRows as any).totalsHit ?? 0) + ((bonusRows as any).totalsMiss ?? 0)} used SD3 totals row (${(bonusRows as any).totalsMiss ?? 0} fell back to merge/pass-through)`,
         sampleAdams: bonusRows.find((b: any) => /adams,\s*renee/i.test(b.empName || '')) || null,
