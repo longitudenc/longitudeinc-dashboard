@@ -481,6 +481,7 @@ export async function runBonusPeriodScrape(
       // weekly-summed versions remain only as fallback when the fetch fails.
       let productivityVal = productivity
       let mbcVal = avgPresent(rows, 'mbc').avg
+      let recPayVal = sum(rows, 'receptionistPay')   // weekly under-reports; month window overrides below
       let productPctVal = grossSvc ? (sum(rows, 'productSales') / grossSvc) * 100 : 0
       let cphVal = dollarsPerCut ? productivity / dollarsPerCut : 0
       const totSales = sum(rows, 'totalSales')
@@ -515,6 +516,9 @@ export async function runBonusPeriodScrape(
           // MBC — SD3's definition on SD3's month window: non-cut-with-customer-waiting minutes / customers.
           const mNCWM = g('nonCutWithCustWaitingMinutes'), mCC = g('customerCount')
           if (mCC > 0) mbcVal = mNCWM / mCC
+          // Receptionist pay — weekly rows under-report it (3685: $323 weekly-summed
+          // vs ~$897 true); the month window carries the full figure.
+          recPayVal = g('receptionistPay')
         }
         if (Array.isArray(md) && md.length) {
           const wknd = md.filter((d: any) => isWeekendIso(String(d.date || '')))
@@ -531,7 +535,7 @@ export async function runBonusPeriodScrape(
         avgWeeklySales: avgPresent(rows, 'totalSales').avg,
         payrollPct: pctSum(rows, 'payrollAmount', 'totalSales'),
         // Adjusted payroll = total payroll % minus receptionist % (bonus goal rule).
-        adjPayrollPct: totSales ? ((sum(rows, 'payrollAmount') - sum(rows, 'receptionistPay')) / totSales) * 100 : 0,
+        adjPayrollPct: totSales ? ((sum(rows, 'payrollAmount') - recPayVal) / totSales) * 100 : 0,
         productPct: productPctVal,
         productivity: productivityVal,
         cph: cphVal,
