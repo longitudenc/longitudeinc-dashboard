@@ -8256,9 +8256,12 @@ function calcMgrBonusFromSalonRow(salonRow, bonusMgrRow, waiver, periodLabel, is
 
   // Payout weights derived from April 1304 reference: ($23.18G + $46.25E)*7 + $69.43CPH = $555.46
   const REF_BASE=555.46, REF_GRW=23.18, REF_EXC=46.25, REF_CPH=69.43;
+  // Every dollar line is rounded to CENTS at creation, and the total is the sum
+  // of those rounded lines — so the card's rows always add up to its total.
+  const r2 = v => Math.round(v*100)/100;
   const perGrw = basePotential * (REF_GRW / REF_BASE);
   const perExc = basePotential * (REF_EXC / REF_BASE);
-  const cphAmt = basePotential * (REF_CPH / REF_BASE);
+  const cphAmt = r2(basePotential * (REF_CPH / REF_BASE));
 
   const metrics = [
     {label:'Payroll %',       actual:payroll,     grw:sl.grwPay, exc:sl.excPay, lib:true,  fmt:(v)=>v.toFixed(1)+'%', fmtG:sl.grwPay+'%', fmtE:sl.excPay+'%'},
@@ -8276,7 +8279,7 @@ function calcMgrBonusFromSalonRow(salonRow, bonusMgrRow, waiver, periodLabel, is
     if(m.label==='Payroll %' && r==='miss') payrollMissed=true;
     // Penalty uses MANAGER personal product %
     if(m.label==='Product %' && Math.round(mgrProduct*10)/10 < 4) productPenalty=true; // compare at displayed precision: a value that shows 4.0 must not penalize
-    const amt = r==='exc' ? (perGrw + perExc) : r==='grw' ? perGrw : 0;
+    const amt = r==='exc' ? r2(perGrw + perExc) : r==='grw' ? r2(perGrw) : 0;
     earned += amt;
     return {...m, result:r, amt};
   });
@@ -8298,14 +8301,14 @@ function calcMgrBonusFromSalonRow(salonRow, bonusMgrRow, waiver, periodLabel, is
     : (qualifyingHrsPerWeek >= hoursThreshold) || !!waiver.hours;
   const hoursUnknown = qualifyingHrsPerWeek === null && !waiver.hours;
 
-  const payPenAmt = payrollPenaltyActive ? earned*0.5 : 0;
+  const payPenAmt = payrollPenaltyActive ? r2(earned*0.5) : 0;
   if(payrollPenaltyActive) penalties += payPenAmt;
-  const prodPenAmt = productPenalty ? earned*0.25 : 0;
+  const prodPenAmt = productPenalty ? r2(earned*0.25) : 0;
   if(productPenalty) penalties += prodPenAmt;
 
   // Floor hours disqualification — full $0 payout if hours not met (no waiver)
   const hoursDisqualified = !floorHrsOk;
-  const finalPayout = hoursDisqualified ? 0 : Math.max(0, earned - penalties);
+  const finalPayout = hoursDisqualified ? 0 : r2(Math.max(0, earned - penalties));
   const pctEarned = totalPotential>0 ? finalPayout/totalPotential : 0;
 
   return {totalPotential, finalPayout, pctEarned, payrollMissed, productPenalty,
