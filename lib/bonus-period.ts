@@ -140,7 +140,7 @@ const STY = {
   PROD_1: 4, PROD_2: 6,        // product thresholds in % points
   NR_1: 24, NR_2: 26,
   RR_1: 74, RR_2: 77,
-  MBC_1: 3, MBC_2: 2,
+  MBC_1: 3, MBC_2: 2,        // MBC 1-pt tier tightens to <=2.5 effective Aug 26 (see mbc1TierFor)
   HC_G_LO1: 11, HC_G_HI2: 17, HC_E_LO: 12, HC_E_HI: 15,
   HRS_EXC: 30, HRS_INEL: 10,
   POT_EXC: 200, PPT_EXC: 20, POT_GROW: 100, PPT_GROW: 10,
@@ -148,13 +148,24 @@ const STY = {
 }
 const r1 = (x: number) => Math.round(x * 10) / 10 // rounding credit: score the value as displayed (1 decimal)
 
+// MBC 1-point tier by period: <=3.0 through Jul 26; <=2.5 effective the Aug 26
+// bonus onward (comp-plan change dated 2026-08). Historical re-processing keeps
+// the tier that was in force, so June/July payouts never shift retroactively.
+function mbc1TierFor(periodKey: string): number {
+  const parts = String(periodKey || '').trim().split(/\s+/)
+  const mi = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].indexOf(parts[0]) + 1
+  const y = 2000 + (parseInt(parts[1], 10) || 0)
+  return (y > 2026 || (y === 2026 && mi >= 8)) ? 2.5 : STY.MBC_1
+}
+
 function calcStylistBonus(
   prodPct: number | null, // in % points (e.g. 4.1), null if no data
   nrPct: number | null,
   rrPct: number | null,
   mbc: number | null,
   hc: number | null,
-  avgWkHrs: number
+  avgWkHrs: number,
+  mbc1Tier: number = STY.MBC_1
 ) {
   const p = prodPct === null ? null : r1(prodPct)
   const nrr = nrPct === null ? null : r1(nrPct)
@@ -166,7 +177,7 @@ function calcStylistBonus(
   points += p !== null && p >= STY.PROD_2 ? 2 : p !== null && p >= STY.PROD_1 ? 1 : 0
   points += nrr !== null && nrr >= STY.NR_2 ? 2 : nrr !== null && nrr >= STY.NR_1 ? 1 : 0
   points += rrr !== null && rrr >= STY.RR_2 ? 2 : rrr !== null && rrr >= STY.RR_1 ? 1 : 0
-  points += m !== null && m <= STY.MBC_2 ? 2 : m !== null && m <= STY.MBC_1 ? 1 : 0
+  points += m !== null && m <= STY.MBC_2 ? 2 : m !== null && m <= mbc1Tier ? 1 : 0
   points += h !== null && h >= STY.HC_E_LO && h <= STY.HC_E_HI ? 2
     : h !== null && h >= STY.HC_G_LO1 && h <= STY.HC_G_HI2 ? 1 : 0
 
@@ -294,7 +305,7 @@ export function bonusRowsFromMonthlyCsv(
     }
 
     const avgWkHrs = weeksN ? totalHrs / weeksN : 0
-    const sty = calcStylistBonus(prodPct, nr, rr, mbc, hc, avgWkHrs)
+    const sty = calcStylistBonus(prodPct, nr, rr, mbc, hc, avgWkHrs, mbc1TierFor(periodKey))
     out.push({
       periodKey, periodLabel, weeksN,
       salonNum: String(primary['Salon #'] || '').trim(),
@@ -356,7 +367,8 @@ function bonusRowsFromWeekly(
       rr.count ? rr.avg : null,
       mbcA.count ? mbcA.avg : null,
       hcA.count ? hcA.avg : null,
-      avgWkHrs
+      avgWkHrs,
+      mbc1TierFor(periodKey)
     )
     out.push({
       periodKey, periodLabel, weeksN,

@@ -3570,7 +3570,7 @@ function tierCC(v)    { v=Math.round(v); return v>=520?'c4':v>=420?'c3':v>=320?'
 function tierCCG(v)   { v=Math.round(v*10)/10; return v>=5?'c4':v>=3?'c3':v>=1?'c2':'c1'; }
 function tierSGR(v)   { v=Math.round(v*10)/10; return v>=5?'c4':v>=3?'c3':v>=1?'c2':'c1'; }
 function tierWaits(v) { v=Math.round(v*10)/10; return v<=15?'c4':v<=19?'c3':v<=23?'c2':'c1'; }
-function tierMBC(v)   { v=Math.round(v*10)/10; return v<=2.0?'c4':v<=3.0?'c3':v<=3.5?'c2':'c1'; }
+function tierMBC(v)   { v=Math.round(v*10)/10; return v<=2.0?'c4':v<=2.5?'c3':v<=3.0?'c2':'c1'; }
 function tierProd(v)  { v=Math.round(v*10)/10; return v>=6?'c4':v>=4.0?'c3':v>=2.5?'c2':'c1'; }
 function tierHC(v)    { v=Math.round(v*10)/10; if(v>=12&&v<=15)return'c4'; if((v>=11&&v<12)||(v>15&&v<=17))return'c3'; if(v>17&&v<=18)return'c2'; return'c1'; }
 function tierPayroll(v,cc){ v=Math.round(v*10)/10; const t=payrollTargets(cc); return v<=t.exc?'c4':v<=t.grw?'c3':'c1'; }
@@ -5385,7 +5385,7 @@ function openStylistReview(gid, name){
 function srNR(v){ return v>=25.945?4:v>=23.945?3:v>=20.945?2:1; }
 function srRR(v){ return v>=75.9?4:v>=72.9?3:v>=69.9?2:1; }
 function srHC(v){ v=Number((+v).toFixed(1)); if(v<10.95)return 1; if(v<11.95)return 2; if(v<14.05)return 4; if(v<17.05)return 3; if(v<18.05)return 2; return 1; }
-function srMBC(v){ return v<2.05?4:v<3.05?3:v<4.05?2:1; }
+function srMBC(v){ return v<2.05?4:v<2.55?3:v<3.05?2:1; }
 function srProductivity(v,goal){ return (goal&&v>=goal)?2:1; }   // 2 or 1 (Prod$ vs goal)
 function srProductPct(v){ return v>=5.95?4:v>=3.95?3:v>=2.45?2:1; }
 function srSSWait(v){ return v<15.05?4:v<19.05?3:v<23.05?2:1; }
@@ -10990,7 +10990,7 @@ function buildProfileSummaryHtml(globalId, empRows, bonusRows){
     {k:'nr',   lbl:'NR %',      val:cpa(r=>p(r.nr)),      fmt:v=>v.toFixed(1)+'%', g:'≥24%',  e:'≥26%'},
     {k:'rr',   lbl:'RR %',      val:cpa(r=>p(r.rr)),      fmt:v=>v.toFixed(1)+'%', g:'≥74%',  e:'≥77%'},
     {k:'hc',   lbl:'HC Time',   val:cpa(r=>n(r.hcTime)),  fmt:v=>v.toFixed(1),     g:'11–17', e:'12–15'},
-    {k:'mbc',  lbl:'MBC',       val:cpa(r=>n(r.mbc)),     fmt:v=>v.toFixed(1),     g:'≤3.0',  e:'≤2.0'},
+    {k:'mbc',  lbl:'MBC',       val:cpa(r=>n(r.mbc)),     fmt:v=>v.toFixed(1),     g:'≤2.5',  e:'≤2.0'},
     {k:'prod', lbl:'Product %', val:cpa(r=>p(r.product)), fmt:v=>v.toFixed(1)+'%', g:'≥4%',   e:'≥6%'},
   ];
   const hrs = cpa(r=>n(r.floorHours));
@@ -11050,7 +11050,7 @@ function buildProfileSummaryHtml(globalId, empRows, bonusRows){
       {k:'nr',  lbl:'NR %',      val:(lc.nr!=null&&lc.nr!=='')?num(lc.nr)*100:null,                fmt:v=>v.toFixed(1)+'%', g:'≥24%',  e:'≥26%'},
       {k:'rr',  lbl:'RR %',      val:(lc.rr!=null&&lc.rr!=='')?num(lc.rr)*100:null,                fmt:v=>v.toFixed(1)+'%', g:'≥74%',  e:'≥77%'},
       {k:'hc',  lbl:'HC Time',   val:num(lc.hcTime),                                               fmt:v=>v.toFixed(1),     g:'11–17', e:'12–15'},
-      {k:'mbc', lbl:'MBC',       val:num(lc.mbc),                                                  fmt:v=>v.toFixed(1),     g:'≤3.0',  e:'≤2.0'},
+      {k:'mbc', lbl:'MBC',       val:num(lc.mbc),                                                  fmt:v=>v.toFixed(1),     g:'≤2.5',  e:'≤2.0'},
       {k:'prod',lbl:'Product %', val:(lc.product!=null&&lc.product!=='')?num(lc.product)*100:null, fmt:v=>v.toFixed(1)+'%', g:'≥4%',   e:'≥6%'},
     ];
     const lrows=LM.map(m=>{
@@ -11894,7 +11894,7 @@ const REVIEW_QUARTERS = {Q1:['Jan','Feb','Mar'],Q2:['Apr','May','Jun'],Q3:['Jul'
 function scoreNR(v){  v=Number((+v).toFixed(1)); return v>=26?4:v>=24?3:v>=21?2:1; }
 function scoreRR(v){  v=Number((+v).toFixed(1)); return v>=77?4:v>=73?3:v>=70?2:1; }
 function scoreHC(v){  v=Number((+v).toFixed(1)); return (v>=12&&v<=14)?4:(v>=14.01&&v<=17)?3:((v>=17.1&&v<=18)||(v>=11&&v<=11.9))?2:1; }
-function scoreMBC(v){ v=Number((+v).toFixed(1)); return v<=2?4:v<=3?3:v<=3.5?2:1; }
+function scoreMBC(v){ v=Number((+v).toFixed(1)); return v<=2?4:v<=2.5?3:v<=3?2:1; }
 function scoreProd(v){v=Number((+v).toFixed(1)); return v>=6?4:v>=4?3:v>=2.5?2:1; }
 
 // Color for monthly cell
