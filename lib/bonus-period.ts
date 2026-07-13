@@ -468,6 +468,7 @@ export async function runBonusPeriodScrape(
       // weekly-summed discounts $266 vs the true month $2,638.57). The
       // weekly-summed versions remain only as fallback when the fetch fails.
       let productivityVal = productivity
+      let mbcVal = avgPresent(rows, 'mbc').avg
       let productPctVal = grossSvc ? (sum(rows, 'productSales') / grossSvc) * 100 : 0
       let cphVal = dollarsPerCut ? productivity / dollarsPerCut : 0
       const totSales = sum(rows, 'totalSales')
@@ -499,6 +500,9 @@ export async function runBonusPeriodScrape(
           if (mAdj > 0) productPctVal = (mPS / mAdj) * 100
           if (mAdj > 0 && mFH > 0) productivityVal = mAdj / mFH
           if (mAdj > 0 && mFH > 0 && mGHS > 0 && mHCt > 0) cphVal = (mAdj / mFH) / (mGHS / mHCt)
+          // MBC — SD3's definition on SD3's month window: non-cut-with-customer-waiting minutes / customers.
+          const mNCWM = g('nonCutWithCustWaitingMinutes'), mCC = g('customerCount')
+          if (mCC > 0) mbcVal = mNCWM / mCC
         }
         if (Array.isArray(md) && md.length) {
           const wknd = md.filter((d: any) => isWeekendIso(String(d.date || '')))
@@ -519,7 +523,7 @@ export async function runBonusPeriodScrape(
         productPct: productPctVal,
         productivity: productivityVal,
         cph: cphVal,
-        mbc: avgPresent(rows, 'mbc').avg,
+        mbc: mbcVal,
         nr: avgPresent(rows, 'nr').avg,
         rr: avgPresent(rows, 'rr').avg,
         waits: waitsVal,
