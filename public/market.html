@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>CLT Market Compare · Longitude</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root{ --primary:#03654e; --primary-dark:#05463a; --ink:#1d2b26; --muted:#6b7a74; --line:#e7ece9; --bg:#f3f6f4; }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:var(--ink);background:var(--bg);}
+  header{background:var(--primary-dark);color:#eafaf3;padding:12px 18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+  header h1{font-size:16px;margin:0;font-weight:700;letter-spacing:.02em;}
+  header .spacer{flex:1;}
+  header a.back{color:#bfe9d8;font-size:13px;text-decoration:none;border:1px solid #2b7d66;padding:6px 11px;border-radius:8px;}
+  header a.back:hover{background:#0a5a46;}
+  header .chip{font-size:12px;color:#9fd6c3;}
+  .controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+  .controls label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#9fd6c3;margin-right:4px;}
+  select{font-size:13px;padding:6px 9px;border-radius:8px;border:1px solid #2b7d66;background:#0a5a46;color:#eafaf3;cursor:pointer;}
+  .summary{padding:8px 18px;font-size:12.5px;color:var(--muted);background:#fff;border-bottom:1px solid var(--line);}
+  .summary b{color:var(--ink);}
+  .wrap{display:grid;grid-template-columns:minmax(340px,1fr) minmax(360px,460px);gap:14px;padding:14px;align-items:start;}
+  @media (max-width:900px){ .wrap{grid-template-columns:1fr;} }
+  #map{height:560px;border-radius:12px;border:1px solid var(--line);box-shadow:0 1px 3px rgba(0,0,0,.06);}
+  @media (max-width:900px){ #map{height:380px;} }
+  .rail{display:flex;flex-direction:column;gap:14px;}
+  .card{background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.05);overflow:hidden;}
+  .card h2{margin:0;font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:#fff;background:var(--primary);padding:9px 13px;font-weight:700;display:flex;align-items:center;gap:8px;}
+  .card h2 .sub{font-weight:500;text-transform:none;letter-spacing:0;color:#bfe9d8;font-size:11px;margin-left:auto;}
+  .card .body{padding:6px 0;}
+  .row{display:flex;align-items:center;gap:9px;padding:7px 13px;font-size:13px;border-bottom:1px solid #f4f6f5;cursor:default;}
+  .row:last-child{border-bottom:none;}
+  .row:hover{background:#f5f8f6;}
+  .row.us{background:#fff6ef;}
+  .row.us:hover{background:#ffeede;}
+  .dot{width:11px;height:11px;border-radius:50%;flex:0 0 auto;border:1px solid rgba(0,0,0,.15);}
+  .rk{width:26px;text-align:right;color:var(--muted);font-variant-numeric:tabular-nums;font-size:12px;flex:0 0 auto;}
+  .nm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .nm small{color:var(--muted);font-weight:400;}
+  .val{font-variant-numeric:tabular-nums;font-weight:600;flex:0 0 auto;}
+  .val .delta{font-weight:600;font-size:11.5px;margin-left:6px;}
+  .up{color:#1c8a4e;} .dn{color:#c0392b;}
+  .op-pill{font-size:10.5px;color:var(--muted);background:#eef2f0;border-radius:20px;padding:1px 7px;margin-left:6px;}
+  .prox-store{padding:9px 13px;border-bottom:1px solid #eef2f0;}
+  .prox-store:last-child{border-bottom:none;}
+  .prox-store .head{font-weight:700;font-size:13px;margin-bottom:5px;display:flex;align-items:center;gap:8px;}
+  .prox-store .vs{display:flex;align-items:center;gap:9px;font-size:12.5px;padding:3px 0;}
+  .prox-store .vs .who{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .prox-store .vs .mi{color:var(--muted);font-size:11px;}
+  .legend{line-height:1.5;}
+  .legend .li{display:flex;align-items:center;gap:7px;font-size:12px;padding:1px 0;}
+  .leaflet-popup-content{font-size:12.5px;line-height:1.5;}
+  .leaflet-popup-content .pt{font-weight:700;font-size:13px;}
+  .loading{padding:40px;text-align:center;color:var(--muted);}
+  .metric-note{font-size:11px;color:var(--muted);padding:4px 13px 10px;}
+</style>
+</head>
+<body>
+<header>
+  <h1>🗺 CLT Market Compare</h1>
+  <div class="controls">
+    <span><label>Week</label><select id="sel-week"></select></span>
+    <span><label>Metric</label><select id="sel-metric"></select></span>
+  </div>
+  <div class="spacer"></div>
+  <span class="chip" id="user-chip"></span>
+  <a class="back" href="/dashboard.html">← Dashboard</a>
+</header>
+<div class="summary" id="summary"></div>
+<div id="root"><div class="loading">Loading market data…</div></div>
+
+<script>
+// ── Config ────────────────────────────────────────────────────
+const OPCOLOR = {
+  Bullard:'#e8792b', Bloodworth:'#d12f2f', Brooker:'#2f6fd1',
+  Naylor:'#e8c020', Shepherd:'#2e9e5b', Tapia:'#7d3fb3', Lamba:'#8a5a2b'
+};
+const US = 'Bullard';           // Longitude = Trey's stores
+const US_RING = '#a1490f';      // dark-orange ring on our pins
+
+// Metric definitions: key, label, whether higher is better, formatter
+const METRICS = [
+  { k:'cc',      label:'Customer Count',   hi:true,  fmt:v=>Math.round(v).toLocaleString() },
+  { k:'sales',   label:'Total Sales',      hi:true,  fmt:v=>'$'+Math.round(v).toLocaleString() },
+  { k:'ccChg',   label:'CC Growth %',      hi:true,  fmt:v=>v.toFixed(1)+'%' },
+  { k:'cph',     label:'Cuts / Hour',      hi:true,  fmt:v=>v.toFixed(2) },
+  { k:'invoice', label:'Avg Invoice',      hi:true,  fmt:v=>'$'+v.toFixed(2) },
+  { k:'product', label:'Product %',        hi:true,  fmt:v=>v.toFixed(1)+'%' },
+  { k:'nr',      label:'New Cust Return %', hi:true,  fmt:v=>v.toFixed(1)+'%' },
+  { k:'rr',      label:'Repeat Return %',  hi:true,  fmt:v=>v.toFixed(1)+'%' },
+  { k:'payroll', label:'Payroll %',        hi:false, fmt:v=>v.toFixed(1)+'%' },
+  { k:'waits',   label:'Waits >15m %',     hi:false, fmt:v=>v.toFixed(1)+'%' },
+  { k:'mbc',     label:'MBC (min)',        hi:false, fmt:v=>v.toFixed(2) },
+];
+const PROX_RADIUS_MI = 3;   // nearest competitors within this many miles
+const PROX_MAX = 3;
+
+// ── State ─────────────────────────────────────────────────────
+let ALL_WEEKS = [], CUR_WEEK = null, CUR_METRIC = 'cc', ROWS = [];
+let MAP = null, MARKERS = {}, STORE_OP_FILTER = US;
+
+// ── Helpers ───────────────────────────────────────────────────
+const metricDef = k => METRICS.find(m=>m.k===k);
+const num = v => (v===null||v===undefined||v==='') ? null : (typeof v==='number'?v:parseFloat(v));
+const hasVal = (r,k) => num(r[k])!==null && Number.isFinite(num(r[k]));
+function haversine(a,b,c,d){ // miles
+  const R=3958.8, t=Math.PI/180;
+  const dLat=(c-a)*t, dLng=(d-b)*t;
+  const x=Math.sin(dLat/2)**2 + Math.cos(a*t)*Math.cos(c*t)*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(x));
+}
+function opCounts(){ const c={}; ROWS.forEach(r=>{c[r.do]=(c[r.do]||0)+1;}); return c; }
+// rank all salons on a metric: returns Map salonNum -> rank (1 = best)
+function rankMap(k){
+  const d=metricDef(k);
+  const vals=ROWS.filter(r=>hasVal(r,k)).map(r=>({sn:r.salonNum, v:num(r[k])}));
+  vals.sort((a,b)=> d.hi ? b.v-a.v : a.v-b.v);
+  const m=new Map(); vals.forEach((x,i)=>m.set(x.sn,i+1)); return m;
+}
+function marketAvg(k){
+  const vs=ROWS.filter(r=>hasVal(r,k)).map(r=>num(r[k]));
+  return vs.length ? vs.reduce((a,b)=>a+b,0)/vs.length : null;
+}
+
+// ── Data load ─────────────────────────────────────────────────
+async function loadWeek(week){
+  const q = week ? ('?week='+encodeURIComponent(week)) : '';
+  const r = await fetch('/api/market/data'+q).then(x=>x.json());
+  if(!r || !r.success) throw new Error('market data load failed');
+  ALL_WEEKS = r.weeks || [];
+  CUR_WEEK = r.week;
+  ROWS = r.rows || [];
+  renderAll();
+}
+
+// ── Rendering ─────────────────────────────────────────────────
+function renderAll(){
+  buildShell();
+  buildSelectors();
+  renderSummary();
+  renderMap();
+  renderScorecard();
+  renderAvgRank();
+  renderStoreRanks();
+  renderOutliers();
+  renderProximity();
+}
+
+function buildShell(){
+  const root=document.getElementById('root');
+  if(document.getElementById('map')) return; // already built once
+  root.innerHTML =
+    '<div class="wrap">'+
+      '<div id="map"></div>'+
+      '<div class="rail">'+
+        '<div class="card" id="c-score"></div>'+
+        '<div class="card" id="c-avgrank"></div>'+
+        '<div class="card" id="c-ranks"></div>'+
+        '<div class="card" id="c-outliers"></div>'+
+        '<div class="card" id="c-prox"></div>'+
+      '</div>'+
+    '</div>';
+}
+
+function buildSelectors(){
+  const w=document.getElementById('sel-week');
+  if(!w.dataset.built){
+    w.innerHTML = ALL_WEEKS.slice().reverse().map(x=>'<option value="'+x+'">'+fmtWeek(x)+'</option>').join('');
+    w.value = CUR_WEEK;
+    w.onchange = ()=>loadWeek(w.value);
+    w.dataset.built='1';
+    const m=document.getElementById('sel-metric');
+    m.innerHTML = METRICS.map(x=>'<option value="'+x.k+'">'+x.label+'</option>').join('');
+    m.value = CUR_METRIC;
+    m.onchange = ()=>{ CUR_METRIC=m.value; renderSummary(); renderMap(); renderScorecard(); renderAvgRank(); renderStoreRanks(); renderOutliers(); renderProximity(); };
+  } else {
+    w.value = CUR_WEEK;
+  }
+}
+function fmtWeek(iso){
+  const [y,mo,da]=iso.split('-'); return mo+'/'+da+'/'+y;
+}
+
+function renderSummary(){
+  const d=metricDef(CUR_METRIC);
+  const ops=Object.keys(opCounts()).length;
+  document.getElementById('summary').innerHTML =
+    'Week ending <b>'+fmtWeek(CUR_WEEK)+'</b> · <b>'+ROWS.length+'</b> salons · <b>'+ops+'</b> operators · metric: <b>'+d.label+'</b>'+
+    (d.hi?' (higher is better)':' (lower is better)');
+}
+
+// Map
+function renderMap(){
+  if(!MAP){
+    MAP = L.map('map',{scrollWheelZoom:true}).setView([35.24,-80.83],10);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{
+      attribution:'&copy; OpenStreetMap &copy; CARTO', maxZoom:19, subdomains:'abcd'
+    }).addTo(MAP);
+    MAP._legend = L.control({position:'bottomleft'});
+    MAP._legend.onAdd=function(){ const div=L.DomUtil.create('div'); div.id='map-legend'; div.style.cssText='background:#fff;padding:8px 10px;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.25);'; return div; };
+    MAP._legend.addTo(MAP);
+  }
+  // clear old markers
+  Object.values(MARKERS).forEach(m=>MAP.removeLayer(m)); MARKERS={};
+  const d=metricDef(CUR_METRIC);
+  const pts=[];
+  ROWS.forEach(r=>{
+    const lat=num(r.lat), lng=num(r.lng);
+    if(lat===null||lng===null) return;
+    const us = r.do===US;
+    const col = OPCOLOR[r.do] || '#888';
+    const mk = L.circleMarker([lat,lng],{
+      radius: us?9:7, weight: us?3:1.4,
+      color: us?US_RING:'#ffffff', fillColor:col, fillOpacity:.9
+    }).addTo(MAP);
+    const v = hasVal(r,CUR_METRIC) ? d.fmt(num(r[CUR_METRIC])) : '—';
+    mk.bindPopup(
+      '<div class="pt" style="color:'+col+'">'+esc(r.name)+'</div>'+
+      '<div><small>#'+esc(r.salonNum)+' · '+esc(r.do)+(us?' (you)':'')+'</small></div>'+
+      '<div style="margin-top:5px;">'+d.label+': <b>'+v+'</b></div>'+
+      '<div style="color:#6b7a74;font-size:11.5px;margin-top:3px;">CC '+(hasVal(r,'cc')?Math.round(num(r.cc)):'—')+
+        ' · CPH '+(hasVal(r,'cph')?num(r.cph).toFixed(2):'—')+
+        ' · Sales $'+(hasVal(r,'sales')?Math.round(num(r.sales)).toLocaleString():'—')+'</div>'
+    );
+    MARKERS[r.salonNum]=mk;
+    pts.push([lat,lng]);
+  });
+  // legend
+  const counts=opCounts();
+  const order=Object.keys(OPCOLOR).filter(o=>counts[o]);
+  const leg=document.getElementById('map-legend');
+  if(leg){
+    leg.innerHTML='<div class="legend">'+order.map(o=>
+      '<div class="li"><span class="dot" style="background:'+OPCOLOR[o]+'"></span>'+o+(o===US?' (you)':'')+' <span style="color:#6b7a74;">'+counts[o]+'</span></div>'
+    ).join('')+'</div>';
+  }
+  if(pts.length && !MAP._fitted){ MAP.fitBounds(pts,{padding:[30,30]}); MAP._fitted=true; }
+}
+function emphasize(sn,on){
+  const mk=MARKERS[sn]; if(!mk) return;
+  const r=ROWS.find(x=>x.salonNum===sn); const us=r&&r.do===US;
+  mk.setStyle({radius: on?(us?13:12):(us?9:7), weight: on?4:(us?3:1.4)});
+  if(on) mk.bringToFront();
+}
+
+function hoverRow(el,sn){
+  el.addEventListener('mouseenter',()=>emphasize(sn,true));
+  el.addEventListener('mouseleave',()=>emphasize(sn,false));
+  el.addEventListener('click',()=>{ const mk=MARKERS[sn]; if(mk){ MAP.panTo(mk.getLatLng()); mk.openPopup(); } });
+  el.style.cursor='pointer';
+}
+
+// Scorecard — average metric VALUE by operator
+function renderScorecard(){
+  const d=metricDef(CUR_METRIC);
+  const byOp={};
+  ROWS.forEach(r=>{ if(hasVal(r,CUR_METRIC)){ (byOp[r.do]=byOp[r.do]||[]).push(num(r[CUR_METRIC])); }});
+  const list=Object.entries(byOp).map(([op,vs])=>({op, avg:vs.reduce((a,b)=>a+b,0)/vs.length, n:vs.length}));
+  list.sort((a,b)=> d.hi ? b.avg-a.avg : a.avg-b.avg);
+  document.getElementById('c-score').innerHTML =
+    '<h2>Franchisee Scorecard<span class="sub">avg '+d.label+'</span></h2><div class="body">'+
+    list.map((x,i)=>
+      '<div class="row'+(x.op===US?' us':'')+'"><span class="rk">'+(i+1)+'</span>'+
+      '<span class="dot" style="background:'+(OPCOLOR[x.op]||'#888')+'"></span>'+
+      '<span class="nm">'+x.op+(x.op===US?' <small>(you)</small>':'')+' <small>· '+x.n+' stores</small></span>'+
+      '<span class="val">'+d.fmt(x.avg)+'</span></div>'
+    ).join('')+'</div>';
+}
+
+// Avg store RANK by operator (position, not value)
+function renderAvgRank(){
+  const d=metricDef(CUR_METRIC);
+  const rm=rankMap(CUR_METRIC);
+  const byOp={};
+  ROWS.forEach(r=>{ if(rm.has(r.salonNum)){ (byOp[r.do]=byOp[r.do]||[]).push(rm.get(r.salonNum)); }});
+  const list=Object.entries(byOp).map(([op,rs])=>({op, avg:rs.reduce((a,b)=>a+b,0)/rs.length, n:rs.length}));
+  list.sort((a,b)=>a.avg-b.avg); // lower rank = better
+  document.getElementById('c-avgrank').innerHTML =
+    '<h2>Avg Store Rank<span class="sub">by position · lower = better</span></h2><div class="body">'+
+    '<div class="metric-note">Ranks all '+rm.size+' salons on '+d.label+', then averages each operator’s positions.</div>'+
+    list.map((x,i)=>
+      '<div class="row'+(x.op===US?' us':'')+'"><span class="rk">'+(i+1)+'</span>'+
+      '<span class="dot" style="background:'+(OPCOLOR[x.op]||'#888')+'"></span>'+
+      '<span class="nm">'+x.op+(x.op===US?' <small>(you)</small>':'')+' <small>· '+x.n+' stores</small></span>'+
+      '<span class="val">'+x.avg.toFixed(1)+'</span></div>'
+    ).join('')+'</div>';
+}
+
+// Store ranks — dropdown: Longitude / each competitor / All
+function renderStoreRanks(){
+  const d=metricDef(CUR_METRIC);
+  const ops=Object.keys(opCounts());
+  const opts=[US].concat(ops.filter(o=>o!==US).sort()).concat(['__ALL__']);
+  const sel = STORE_OP_FILTER && (opts.includes(STORE_OP_FILTER)) ? STORE_OP_FILTER : US;
+  STORE_OP_FILTER = sel;
+  let rows = ROWS.filter(r=>hasVal(r,CUR_METRIC));
+  if(sel!=='__ALL__') rows = rows.filter(r=>r.do===sel);
+  rows.sort((a,b)=> d.hi ? num(b[CUR_METRIC])-num(a[CUR_METRIC]) : num(a[CUR_METRIC])-num(b[CUR_METRIC]));
+  const optHtml = opts.map(o=>{
+    const lbl = o==='__ALL__' ? 'All operators (full board)' : (o===US? o+' (you)' : o);
+    return '<option value="'+o+'"'+(o===sel?' selected':'')+'>'+lbl+'</option>';
+  }).join('');
+  document.getElementById('c-ranks').innerHTML =
+    '<h2>Store Ranks<span class="sub"><select id="rank-op" style="font-size:11px;padding:2px 6px;">'+optHtml+'</select></span></h2>'+
+    '<div class="body" id="rank-body">'+
+    rows.map((r,i)=>
+      '<div class="row'+(r.do===US?' us':'')+'" data-sn="'+r.salonNum+'"><span class="rk">'+(i+1)+'</span>'+
+      '<span class="dot" style="background:'+(OPCOLOR[r.do]||'#888')+'"></span>'+
+      '<span class="nm">'+esc(r.name)+' <small>#'+esc(r.salonNum)+'</small>'+(sel==='__ALL__'?'<span class="op-pill">'+esc(r.do)+'</span>':'')+'</span>'+
+      '<span class="val">'+d.fmt(num(r[CUR_METRIC]))+'</span></div>'
+    ).join('')+'</div>';
+  document.getElementById('rank-op').onchange = function(){ STORE_OP_FILTER=this.value; renderStoreRanks(); };
+  document.querySelectorAll('#rank-body .row').forEach(el=>hoverRow(el, el.dataset.sn));
+}
+
+// Outliers — where to look (our stores vs market avg on the metric)
+function renderOutliers(){
+  const d=metricDef(CUR_METRIC);
+  const mAvg=marketAvg(CUR_METRIC);
+  if(mAvg===null){ document.getElementById('c-outliers').innerHTML='<h2>Where to Look</h2><div class="metric-note">No data for this metric.</div>'; return; }
+  const ours=ROWS.filter(r=>r.do===US && hasVal(r,CUR_METRIC)).map(r=>{
+    const v=num(r[CUR_METRIC]);
+    const raw=v-mAvg;                 // positive = above market
+    const good = d.hi ? raw : -raw;   // positive good = better than market in the right direction
+    return {r, v, raw, good};
+  });
+  const leads=ours.slice().sort((a,b)=>b.good-a.good).slice(0,3);
+  const gaps =ours.slice().sort((a,b)=>a.good-b.good).slice(0,3);
+  const line = o=>{
+    const deltaTxt=(o.raw>=0?'+':'')+d.fmt(Math.abs(o.raw)).replace(/^[-$]/,m=>m==='$'?'$':'')+'';
+    const cls = o.good>=0?'up':'dn';
+    return '<div class="row us" data-sn="'+o.r.salonNum+'"><span class="dot" style="background:'+OPCOLOR[US]+'"></span>'+
+      '<span class="nm">'+esc(o.r.name)+' <small>#'+esc(o.r.salonNum)+'</small></span>'+
+      '<span class="val">'+d.fmt(o.v)+'<span class="delta '+cls+'">'+(o.raw>=0?'+':'−')+d.fmt(Math.abs(o.raw))+'</span></span></div>';
+  };
+  document.getElementById('c-outliers').innerHTML =
+    '<h2>Where to Look<span class="sub">vs market avg '+d.fmt(mAvg)+'</span></h2>'+
+    '<div class="body">'+
+      '<div class="metric-note" style="color:#1c8a4e;font-weight:700;">Biggest leads</div>'+ leads.map(line).join('')+
+      '<div class="metric-note" style="color:#c0392b;font-weight:700;margin-top:4px;">Biggest gaps</div>'+ gaps.map(line).join('')+
+    '</div>';
+  document.querySelectorAll('#c-outliers .row').forEach(el=>hoverRow(el, el.dataset.sn));
+}
+
+// Proximity — nearest competitors to each of our stores, head-to-head on metric
+function renderProximity(){
+  const d=metricDef(CUR_METRIC);
+  const ours=ROWS.filter(r=>r.do===US && num(r.lat)!==null && num(r.lng)!==null);
+  const others=ROWS.filter(r=>r.do!==US && num(r.lat)!==null && num(r.lng)!==null);
+  const html = ours.map(u=>{
+    const uLat=num(u.lat), uLng=num(u.lng);
+    let near=others.map(o=>({o, mi:haversine(uLat,uLng,num(o.lat),num(o.lng))})).sort((a,b)=>a.mi-b.mi);
+    let pick=near.filter(x=>x.mi<=PROX_RADIUS_MI).slice(0,PROX_MAX);
+    if(pick.length===0 && near.length) pick=[near[0]]; // always show the single nearest
+    const uv = hasVal(u,CUR_METRIC)?num(u[CUR_METRIC]):null;
+    const vsRows = pick.map(x=>{
+      const ov = hasVal(x.o,CUR_METRIC)?num(x.o[CUR_METRIC]):null;
+      let delta='';
+      if(uv!==null && ov!==null){
+        const raw=uv-ov; const good=d.hi?raw:-raw;
+        delta='<span class="delta '+(good>=0?'up':'dn')+'">'+(raw>=0?'+':'−')+d.fmt(Math.abs(raw))+'</span>';
+      }
+      return '<div class="vs"><span class="dot" style="background:'+(OPCOLOR[x.o.do]||'#888')+'"></span>'+
+        '<span class="who">'+esc(x.o.name)+' <span class="mi">'+x.mi.toFixed(1)+' mi · '+esc(x.o.do)+'</span></span>'+
+        '<span class="val">'+(ov!==null?d.fmt(ov):'—')+delta+'</span></div>';
+    }).join('');
+    return '<div class="prox-store" data-sn="'+u.salonNum+'">'+
+      '<div class="head"><span class="dot" style="background:'+OPCOLOR[US]+'"></span>'+esc(u.name)+
+        ' <small style="color:#6b7a74;font-weight:400;">#'+esc(u.salonNum)+' · you '+(uv!==null?d.fmt(uv):'—')+'</small></div>'+
+      (vsRows||'<div class="mi" style="color:#6b7a74;font-size:12px;">No competitors within '+PROX_RADIUS_MI+' mi</div>')+
+    '</div>';
+  }).join('');
+  document.getElementById('c-prox').innerHTML =
+    '<h2>Proximity Head-to-Head<span class="sub">nearest ≤'+PROX_RADIUS_MI+' mi · '+d.label+'</span></h2>'+
+    '<div class="body" style="padding:0;">'+html+'</div>';
+  document.querySelectorAll('#c-prox .prox-store').forEach(el=>hoverRow(el, el.dataset.sn));
+}
+
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+// ── Init: gate on the shared session, then load ───────────────
+fetch('/api/auth/me').then(r=>r.json()).then(me=>{
+  if(!me || !me.access){ window.location.href='/dashboard.html'; return; }
+  if(me.access.role==='none'){
+    document.getElementById('root').innerHTML='<div class="loading">Your account doesn’t have dashboard access yet.</div>';
+    return;
+  }
+  const chip=document.getElementById('user-chip'); if(chip) chip.textContent=me.email||'';
+  loadWeek(null).catch(e=>{
+    document.getElementById('root').innerHTML='<div class="loading">Failed to load market data: '+esc(e.message)+'</div>';
+  });
+}).catch(()=>{ window.location.href='/dashboard.html'; });
+</script>
+</body>
+</html>
