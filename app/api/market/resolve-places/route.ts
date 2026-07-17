@@ -134,6 +134,6 @@ export async function GET(request: Request) {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('[market/resolve-places]', msg)
-    return NextResponse.json({ ok: false, error: msg }, { status: 500 })
+    return NextResponse.json({ ok: false, error: msg }, { status: 50 })
   }
 }
