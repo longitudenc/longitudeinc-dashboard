@@ -32,9 +32,9 @@
     body{height:100vh;display:flex;flex-direction:column;overflow:hidden;}
     header{flex:0 0 auto;}
     .summary{flex:0 0 auto;}
-    .wrap{flex:1 1 auto;min-height:0;grid-template-rows:minmax(0,1fr);}
-    #map{height:100%;min-height:0;}
-    .rail{height:100%;min-height:0;overflow-y:auto;padding-right:4px;}
+    .wrap{flex:1 1 auto;min-height:0;display:flex;}
+    #map{flex:1 1 auto;height:100%;min-height:0;}
+    .rail{flex:0 0 460px;height:100%;min-height:0;overflow-y:auto;padding-right:4px;}
   }
   /* Mobile: normal page scroll, fixed-height map */
   @media (max-width:900px){ .wrap{grid-template-columns:1fr;} #map{height:380px;} }
@@ -175,8 +175,13 @@ function aggregate(weeks){
     const last=rs[rs.length-1];
     const a={ weekEnding:weeks[weeks.length-1], salonNum:sn, name:last.name, do:last.do, lat:last.lat, lng:last.lng, __agg:true };
     const sum={};
-    SUM_COLS.forEach(k=>{ let s=0,any=false; rs.forEach(r=>{ const v=num(r[k]); if(v!==null){s+=v;any=true;} }); sum[k]=any?s:null; a[k]=sum[k]; });
-    a.invoice  = (sum.cc && sum.sales!=null) ? sum.sales/sum.cc : null;
+    SUM_COLS.forEach(k=>{ let s=0,any=false; rs.forEach(r=>{ const v=num(r[k]); if(v!==null){s+=v;any=true;} }); sum[k]=any?s:null; });
+    const N=weeks.length;
+    a.cc      = sum.cc==null?null:sum.cc/N;        // weekly average across the scope
+    a.sales   = sum.sales==null?null:sum.sales/N;
+    a.ccLY    = sum.ccLY==null?null:sum.ccLY/N;
+    a.salesLY = sum.salesLY==null?null:sum.salesLY/N;
+    a.invoice  = (sum.cc && sum.sales!=null) ? sum.sales/sum.cc : null;      // = avgSales/avgCC (exact)
     a.ccChg    = (sum.ccLY && sum.cc!=null)  ? (sum.cc/sum.ccLY-1)*100 : null;
     a.salesChg = (sum.salesLY && sum.sales!=null) ? (sum.sales/sum.salesLY-1)*100 : null;
     WT_COLS.forEach(k=>{ let wsum=0,vsum=0; rs.forEach(r=>{ const v=num(r[k]),c=num(r.cc); if(v!==null&&c!==null){vsum+=v*c;wsum+=c;} }); a[k]=wsum>0?vsum/wsum:null; });
@@ -285,9 +290,10 @@ function renderSummary(){
   const multi=SCOPE.length>1;
   let note='';
   if(multi){
-    if(d.agg==='week') note=' · <span class="note">'+d.label+' is single-week only; pick a Single week to see it.</span>';
-    else if(d.agg==='wt') note=' · <span class="note">multi-week: CC &amp; Sales summed, '+d.label+' is customer-weighted</span>';
-    else note=' · <span class="note">multi-week: summed / recomputed from totals</span>';
+    if(d.agg==='week') note=' · <span class="note">'+d.label+' is single-week only — pick Single week to see it</span>';
+    else if(d.agg==='sum') note=' · <span class="note">'+d.label+' = weekly average across '+SCOPE.length+' weeks</span>';
+    else if(d.agg==='wt') note=' · <span class="note">'+d.label+' = customer-weighted across '+SCOPE.length+' weeks</span>';
+    else note=' · <span class="note">'+d.label+' computed from '+SCOPE.length+'-week totals</span>';
   }
   document.getElementById('summary').innerHTML =
     scopeLabel()+' · <b>'+ROWS.length+'</b> salons · metric: <b>'+d.label+'</b>'+(d.hi?' (higher better)':' (lower better)')+note;
@@ -357,7 +363,7 @@ function renderMap(){
   const counts=opCounts(); const order=Object.keys(OPCOLOR).filter(o=>counts[o]);
   const leg=document.getElementById('map-legend');
   if(leg) leg.innerHTML='<div class="legend">'+order.map(o=>'<div class="li"><span class="dot" style="background:'+OPCOLOR[o]+'"></span>'+o+(o===US?' (you)':'')+' <span style="color:#6b7a74;">'+counts[o]+'</span></div>').join('')+'</div>';
-  if(pts.length && !MAP._fitted){ MAP.invalidateSize(); MAP.fitBounds(pts,{padding:[24,24]}); MAP.setZoom(MAP.getZoom()+1); MAP._fitted=true; }
+  if(pts.length && !MAP._fitted){ MAP.invalidateSize(); MAP.fitBounds(pts,{padding:[30,30]}); MAP._fitted=true; }
 }
 function emphasize(sn,on){
   const mk=MARKERS[sn]; if(!mk) return; const r=ROWS.find(x=>x.salonNum===sn); const us=r&&r.do===US;
