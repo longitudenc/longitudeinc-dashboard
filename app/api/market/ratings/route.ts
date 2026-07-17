@@ -1,14 +1,13 @@
 // app/api/market/ratings/route.ts
 //
-// Recurring rating refresh: reads the GooglePlaces tab (resolved place IDs) and
-// re-fetches each salon's current rating, review count, and business status via
-// Places API (New) Place Details, then upserts the tab in place. Name/address/
-// distance columns are preserved (only the rating fields + resolvedAt change).
+// Recurring rating refresh: reads GooglePlaces (resolved place IDs), re-fetches
+// each salon's current rating / reviews / business status via Place Details,
+// upserts GooglePlaces in place, AND appends a monthly snapshot to RatingHistory
+// (keyed salonNum + month) so rating/reviews build a month-by-month time series.
 //
 //   GET /api/market/ratings?secret=<CRON_SECRET>
 //
-// Runs monthly via cron (Vercel adds the Bearer CRON_SECRET header automatically)
-// or on demand. Requires env GOOGLE_PLACES_KEY.
+// Monthly via cron; also runnable on demand. Requires env GOOGLE_PLACES_KEY.
 
 import { NextResponse } from 'next/server'
 import { readSheet, rowsToObjects, upsertSheet } from '@/lib/sheets'
@@ -18,7 +17,9 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 const TAB = 'GooglePlaces'
+const HIST_TAB = 'RatingHistory'
 const COLS = ['salonNum','salonName','placeId','matchedName','matchedAddress','businessStatus','distanceM','rating','reviews','resolvedAt']
+const HIST_COLS = ['salonNum','month','rating','reviews','businessStatus','snapshotAt']
 const DETAILS_URL = 'https://places.googleapis.com/v1/places/'
 const DETAILS_MASK = 'rating,userRatingCount,businessStatus'
 
@@ -50,8 +51,11 @@ export async function GET(request: Request) {
       return NextResponse.json({ ok: false, error: 'no place IDs in GooglePlaces — run resolve-places first' }, { status: 400 })
     }
 
-    const now = new Date().toISOString()
+    const now = new Date()
+    const nowIso = now.toISOString()
+    const month = nowIso.slice(0, 7)   // YYYY-MM
     let updated = 0, errored = 0
+
     await mapLimit(withId, 5, async (r: any) => {
       const res = await fetch(DETAILS_URL + encodeURIComponent(String(r.placeId).trim()), {
         method: 'GET',
@@ -62,15 +66,26 @@ export async function GET(request: Request) {
       if (typeof p.rating === 'number') r.rating = p.rating
       if (typeof p.userRatingCount === 'number') r.reviews = p.userRatingCount
       if (p.businessStatus) r.businessStatus = p.businessStatus
-      r.resolvedAt = now
+      r.resolvedAt = nowIso
       updated++
     })
 
-    // write full rows back so nothing else is disturbed
+    // 1) refresh GooglePlaces (full rows, nothing else disturbed)
     const outRows = rows.map((r: any) => { const o: Record<string, any> = {}; COLS.forEach(c => o[c] = r[c] ?? ''); return o })
     await upsertSheet(TAB, [...COLS], ['salonNum'], outRows)
 
-    return NextResponse.json({ ok: true, refreshed: updated, errored, total: withId.length })
+    // 2) append this month's snapshot (upsert by salonNum+month so a re-run in
+    //    the same month overwrites rather than duplicates)
+    const histRows = rows
+      .filter((r: any) => String(r.placeId || '').trim())
+      .map((r: any) => ({
+        salonNum: r.salonNum, month,
+        rating: r.rating ?? '', reviews: r.reviews ?? '',
+        businessStatus: r.businessStatus ?? '', snapshotAt: nowIso,
+      }))
+    await upsertSheet(HIST_TAB, [...HIST_COLS], ['salonNum', 'month'], histRows)
+
+    return NextResponse.json({ ok: true, refreshed: updated, errored, total: withId.length, snapshotMonth: month, snapshotRows: histRows.length })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('[market/ratings]', msg)

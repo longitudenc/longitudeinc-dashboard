@@ -143,15 +143,15 @@ const METRICS = [
   { k:'payroll', label:'Payroll %',         hi:false, agg:'wt',  fmt:v=>v.toFixed(1)+'%' },
   { k:'waits',   label:'Waits >15m %',      hi:false, agg:'wt',  fmt:v=>v.toFixed(1)+'%' },
   { k:'mbc',     label:'MBC (min)',         hi:false, agg:'wt',  fmt:v=>v.toFixed(2) },
-  { k:'rating',  label:'Google Rating',     hi:true,  agg:'const', noTrend:true, fmt:v=>v.toFixed(1)+'\u2605' },
-  { k:'reviews', label:'Google Reviews',    hi:true,  agg:'const', noTrend:true, fmt:v=>Math.round(v).toLocaleString() },
+  { k:'rating',  label:'Google Rating',     hi:true,  agg:'const', monthly:true, fmt:v=>v.toFixed(1)+'\u2605' },
+  { k:'reviews', label:'Google Reviews',    hi:true,  agg:'const', monthly:true, fmt:v=>Math.round(v).toLocaleString() },
 ];
 const SUM_COLS=['cc','sales','ccLY','salesLY'], WT_COLS=['cph','product','payroll','waits','ssWaits','mbc','oci','newCust'], WEEK_ONLY=['nr','rr'];
 const PROX_RADIUS_MI=3, PROX_MAX=3;
 const MARKET_COLOR='#7a8a83';
 
 // ── State ─────────────────────────────────────────────────────
-let ALLROWS=[], WEEKS=[], WEEKSET=new Set(), BYWEEK={};
+let ALLROWS=[], WEEKS=[], WEEKSET=new Set(), BYWEEK={}, RATING_HISTORY=[], RH_BY_MONTH={}, SALON_OP={};
 let ANCHOR=null, TF='week', RANGE={from:null,to:null}, PRIOR=false, CUR_METRIC='cc', STORE_OP_FILTER=US, MONTHSMAP={}, FYMAP={};
 let MAP=null, MARKERS={}, ROWS=[], SCOPE=[];
 let MODE='map';
@@ -219,6 +219,9 @@ async function loadAll(){
   if(!r||!r.success) throw new Error('market data load failed');
   ALLROWS=r.rows||[]; WEEKS=(r.weeks||[]).slice().sort(); WEEKSET=new Set(WEEKS);
   BYWEEK={}; ALLROWS.forEach(x=>{ (BYWEEK[x.weekEnding]=BYWEEK[x.weekEnding]||[]).push(x); });
+  RATING_HISTORY=r.ratingHistory||[];
+  RH_BY_MONTH={}; RATING_HISTORY.forEach(x=>{ (RH_BY_MONTH[x.month]=RH_BY_MONTH[x.month]||[]).push(x); });
+  SALON_OP={}; const _lw=(r.weeks||[]).slice().sort().pop(); (BYWEEK[_lw]||[]).forEach(x=>{ SALON_OP[x.salonNum]=x.do; });
   ANCHOR=WEEKS[WEEKS.length-1];
   RANGE={ from:WEEKS[Math.max(0,WEEKS.length-5)], to:WEEKS[WEEKS.length-1] };
   T_METRIC=CUR_METRIC;
@@ -426,6 +429,10 @@ function seriesOp(op,weeks,k){ return weeks.map(w=>opAvgAt(op,w,k)); }
 function seriesMkt(weeks,k){ return weeks.map(w=>mktAvgAt(w,k)); }
 function seriesSalon(sn,weeks,k){ return weeks.map(w=>salonAt(sn,w,k)); }
 function seriesPY(weeks,fn){ return weeks.map(w=>{ const pw=pyWeekOf(w); return pw?fn(pw):null; }); }
+const isRatingMetric=k=>k==='rating'||k==='reviews';
+function rhOpAt(op,month,k){ const a=(RH_BY_MONTH[month]||[]).filter(x=>SALON_OP[x.salonNum]===op && x[k]!==null && x[k]!==''&&Number.isFinite(+x[k])); return a.length?mean(a.map(x=>+x[k])):null; }
+function rhMktAt(month,k){ const a=(RH_BY_MONTH[month]||[]).filter(x=>x[k]!==null&&x[k]!==''&&Number.isFinite(+x[k])); return a.length?mean(a.map(x=>+x[k])):null; }
+function rhSalonAt(sn,month,k){ const x=(RH_BY_MONTH[month]||[]).find(y=>y.salonNum===sn); return x&&x[k]!==null&&x[k]!==''&&Number.isFinite(+x[k])?+x[k]:null; }
 
 function selectTMetric(k){ if(T_CHART) snapTrendVis(); T_METRIC=k; syncMetricSidebar(); renderTrends(); }
 function syncMetricSidebar(){ document.querySelectorAll('.tmetric-btn').forEach(b=>b.classList.toggle('active',b.dataset.k===T_METRIC)); }
@@ -439,19 +446,26 @@ function snapTrendVis(){ try{ const s={}; T_CHART.data.datasets.forEach((ds,i)=>
 
 function buildTrendDatasets(weeks,k){
   const ds=[];
+  const rat=isRatingMetric(k);
+  const opS=(op)=>rat?weeks.map(w=>rhOpAt(op,w.slice(0,7),k)):seriesOp(op,weeks,k);
+  const mktS=()=>rat?weeks.map(w=>rhMktAt(w.slice(0,7),k)):seriesMkt(weeks,k);
+  const salS=(sn)=>rat?weeks.map(w=>rhSalonAt(sn,w.slice(0,7),k)):seriesSalon(sn,weeks,k);
+  const opAt=(op)=>rat?(pw=>rhOpAt(op,pw.slice(0,7),k)):(pw=>opAvgAt(op,pw,k));
+  const mktAt=()=>rat?(pw=>rhMktAt(pw.slice(0,7),k)):(pw=>mktAvgAt(pw,k));
+  const salAt=(sn)=>rat?(pw=>rhSalonAt(sn,pw.slice(0,7),k)):(pw=>salonAt(sn,pw,k));
   const mk=(label,color,data,opt)=>{ opt=opt||{}; ds.push({ label, data, borderColor:color, backgroundColor:color, borderWidth:opt.w||2, borderDash:opt.dash||[], pointRadius:opt.pts===false?0:3, pointHoverRadius:opt.pts===false?0:6, pointStyle:opt.pstyle||'circle', tension:0.25, spanGaps:true, __ref:!!opt.ref }); if(T_PY){ ds.push({ label:label+' (PY)', data:seriesPY(weeks,(pw)=>opt.at?opt.at(pw):null), borderColor:fade(color.startsWith('#')?color:'#888',0.55), backgroundColor:fade(color.startsWith('#')?color:'#888',0.55), borderWidth:1.5, borderDash:[3,3], pointRadius:0, pointHoverRadius:0, tension:0.25, spanGaps:true, __py:true }); } };
   if(T_VIEW==='lvm'){
-    mk('Longitude (you)',OPCOLOR[US],seriesOp(US,weeks,k),{w:2.8,pstyle:'circle',at:pw=>opAvgAt(US,pw,k)});
-    mk('Market Avg',MARKET_COLOR,seriesMkt(weeks,k),{dash:[6,4],pts:false,ref:true,at:pw=>mktAvgAt(pw,k)});
+    mk('Longitude (you)',OPCOLOR[US],opS(US),{w:2.8,pstyle:'circle',at:opAt(US)});
+    mk('Market Avg',MARKET_COLOR,mktS(),{dash:[6,4],pts:false,ref:true,at:mktAt()});
   } else if(T_VIEW==='ops'){
     const ops=[US].concat(Object.keys(OPCOLOR).filter(o=>o!==US));
-    ops.forEach(op=>{ if((BYWEEK[weeks[weeks.length-1]]||[]).some(r=>r.do===op)) mk(op+(op===US?' (you)':''),OPCOLOR[op],seriesOp(op,weeks,k),{w:op===US?3:2,pstyle:OP_STYLE[op]||'circle',at:pw=>opAvgAt(op,pw,k)}); });
-    mk('Market Avg',MARKET_COLOR,seriesMkt(weeks,k),{dash:[6,4],pts:false,ref:true,at:pw=>mktAvgAt(pw,k)});
+    ops.forEach(op=>{ if((BYWEEK[weeks[weeks.length-1]]||[]).some(r=>r.do===op)) mk(op+(op===US?' (you)':''),OPCOLOR[op],opS(op),{w:op===US?3:2,pstyle:OP_STYLE[op]||'circle',at:opAt(op)}); });
+    mk('Market Avg',MARKET_COLOR,mktS(),{dash:[6,4],pts:false,ref:true,at:mktAt()});
   } else {
     const sn=T_SALON, sr=ALLROWS.find(x=>x.salonNum===sn), op=sr?sr.do:US, col=OPCOLOR[op]||'#888', nm=sr?sr.name:sn;
-    mk(nm+' #'+sn+(op===US?' (you)':''),col,seriesSalon(sn,weeks,k),{w:2.8,pstyle:OP_STYLE[op]||'circle',at:pw=>salonAt(sn,pw,k)});
-    mk(op+' Avg',col,seriesOp(op,weeks,k),{dash:[2,2],pts:false,ref:true,at:pw=>opAvgAt(op,pw,k)});
-    mk('Market Avg',MARKET_COLOR,seriesMkt(weeks,k),{dash:[6,4],pts:false,ref:true,at:pw=>mktAvgAt(pw,k)});
+    mk(nm+' #'+sn+(op===US?' (you)':''),col,salS(sn),{w:2.8,pstyle:OP_STYLE[op]||'circle',at:salAt(sn)});
+    mk(op+' Avg',col,opS(op),{dash:[2,2],pts:false,ref:true,at:opAt(op)});
+    mk('Market Avg',MARKET_COLOR,mktS(),{dash:[6,4],pts:false,ref:true,at:mktAt()});
   }
   return ds;
 }
@@ -486,7 +500,7 @@ function renderTrends(){
   const wins=[{w:20,l:'20 wk'},{w:52,l:'52 wk'},{w:'ytd',l:'YTD'},{w:'all',l:'All'}].map(o=>{ const arg=typeof o.w==='string'?("'"+o.w+"'"):o.w; return '<button class="tbtn'+(T_WIN===o.w?' active':'')+'" onclick="setTWin('+arg+')">'+o.l+'</button>'; }).join('');
   const pyBtn='<button class="tbtn'+(T_PY?' active':'')+'" onclick="toggleTPY()" title="Overlay the same weeks one year earlier">'+(T_PY?'✓ ':'')+'Prior Year</button>';
   main.innerHTML=
-    '<div class="trend-head"><div><div class="trend-title">'+d.label+' — trend</div><div class="trend-sub">'+weeks.length+' weeks · '+fmtWeek(weeks[0])+' → '+fmtWeek(weeks[weeks.length-1])+'</div></div>'+
+    '<div class="trend-head"><div><div class="trend-title">'+d.label+' — trend</div><div class="trend-sub">'+weeks.length+' weeks · '+fmtWeek(weeks[0])+' → '+fmtWeek(weeks[weeks.length-1])+(d.monthly?' · monthly snapshots (builds over time)':'')+'</div></div>'+
     '<div style="margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">'+viewSel+salonSel+pyBtn+wins+'</div></div>'+
     '<div class="tstats" id="trend-stats"></div>'+
     '<div class="chart-wrap"><canvas id="trend-canvas"></canvas></div>'+
