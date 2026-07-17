@@ -180,6 +180,49 @@ function _pricePop(r){
   if(!hasVal(r,'regPrice')&&!hasVal(r,'csPrice')) return '';
   return '<div style="margin-top:3px;font-size:11.5px;color:#6b7a74;">\u2702 Reg $'+(hasVal(r,'regPrice')?num(r.regPrice).toFixed(0):'\u2014')+' \u00b7 Child/Sr $'+(hasVal(r,'csPrice')?num(r.csPrice).toFixed(0):'\u2014')+'</div>';
 }
+// full metric grid for the popup (short labels), rating/reviews/prices live in the header band
+const GRID_METRICS=[
+  {k:'cc',plabel:'CC',fmt:v=>Math.round(v).toLocaleString()},
+  {k:'ccChg',plabel:'Growth',fmt:v=>(v>=0?'+':'')+v.toFixed(1)+'%'},
+  {k:'sales',plabel:'Total Sales',fmt:v=>'$'+Math.round(v).toLocaleString()},
+  {k:'serviceSales',plabel:'Svc Sales',fmt:v=>'$'+Math.round(v).toLocaleString()},
+  {k:'invoice',plabel:'Avg Invoice',fmt:v=>'$'+v.toFixed(2)},
+  {k:'cph',plabel:'CPH',fmt:v=>v.toFixed(2)},
+  {k:'hcTime',plabel:'HC Time',fmt:v=>v.toFixed(1)},
+  {k:'mbc',plabel:'MBC',fmt:v=>v.toFixed(2)},
+  {k:'avgEffWage',plabel:'Eff Wage',fmt:v=>'$'+v.toFixed(2)},
+  {k:'payroll',plabel:'Payroll',fmt:v=>v.toFixed(1)+'%'},
+  {k:'product',plabel:'Product',fmt:v=>v.toFixed(1)+'%'},
+  {k:'serviceDisc',plabel:'Svc Disc',fmt:v=>v.toFixed(1)+'%'},
+  {k:'voidPct',plabel:'Void',fmt:v=>v.toFixed(2)+'%'},
+  {k:'nr',plabel:'NR',fmt:v=>v.toFixed(1)+'%'},
+  {k:'rr',plabel:'RR',fmt:v=>v.toFixed(1)+'%'},
+  {k:'newCust',plabel:'New Cust',fmt:v=>v.toFixed(1)+'%'},
+  {k:'oci',plabel:'% OCI',fmt:v=>v.toFixed(1)+'%'},
+  {k:'waits',plabel:'Waits',fmt:v=>v.toFixed(1)+'%'},
+  {k:'ssWaits',plabel:'S/S Waits',fmt:v=>v.toFixed(1)+'%'},
+  {k:'nonOciWaits',plabel:'Non-OCI Wt',fmt:v=>v.toFixed(1)+'%'},
+];
+const _pv=(r,m)=>hasVal(r,m.k)?m.fmt(num(r[m.k])):'\u2014';
+function buildPopup(r,rm,total){
+  const d=metricDef(CUR_METRIC), us=r.do===US, col=OPCOLOR[r.do]||'#888';
+  // header band: google + prices + closed
+  const hp=[];
+  if(hasVal(r,'rating')) hp.push('\u2B50 '+num(r.rating).toFixed(1)+(hasVal(r,'reviews')?' <span style="color:#6b7a74;">('+Math.round(num(r.reviews)).toLocaleString()+')</span>':''));
+  if(hasVal(r,'regPrice')||hasVal(r,'csPrice')) hp.push('\u2702 $'+(hasVal(r,'regPrice')?num(r.regPrice).toFixed(0):'\u2014')+'/'+(hasVal(r,'csPrice')?num(r.csPrice).toFixed(0):'\u2014'));
+  if(r.googleStatus==='CLOSED_TEMPORARILY') hp.push('<span style="color:#c0392b;font-weight:700;">temp closed</span>');
+  else if(r.googleStatus==='CLOSED_PERMANENTLY') hp.push('<span style="color:#c0392b;font-weight:700;">closed</span>');
+  const header=hp.length?'<div style="background:#f3f6f4;border-radius:6px;padding:4px 9px;margin:6px 0 5px;font-size:12.5px;display:flex;gap:14px;flex-wrap:wrap;align-items:center;">'+hp.join('')+'</div>':'';
+  // selected metric, called out with rank
+  const sv=hasVal(r,CUR_METRIC)?d.fmt(num(r[CUR_METRIC])):'\u2014';
+  const rankTxt=rm.has(r.salonNum)?'<span style="color:#6b7a74;font-weight:400;"> \u00b7 rank #'+rm.get(r.salonNum)+' of '+total+'</span>':'';
+  const sel='<div style="background:'+fade(col,0.10)+';border-left:3px solid '+col+';border-radius:0 6px 6px 0;padding:5px 9px;margin-bottom:6px;font-size:13px;">'+esc(d.label)+': <b>'+sv+'</b>'+rankTxt+'</div>';
+  // grid of everything else
+  const cells=GRID_METRICS.filter(m=>m.k!==CUR_METRIC).map(m=>'<div style="display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid #f1f4f2;padding:1px 0;"><span style="color:#7a8a83;">'+m.plabel+'</span><b style="white-space:nowrap;">'+_pv(r,m)+'</b></div>').join('');
+  const grid='<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px;font-size:11.5px;">'+cells+'</div>';
+  const link='<div style="margin-top:8px;"><a href="#" onclick="viewSalonTrend(\''+r.salonNum+'\');return false;" style="color:#03654e;font-weight:700;text-decoration:none;font-size:12px;">\uD83D\uDCC8 View trends \u2192</a></div>';
+  return '<div class="pt" style="color:'+col+'">'+esc(r.name)+'</div><div><small>#'+esc(r.salonNum)+' \u00b7 '+esc(r.do)+(us?' (you)':'')+'</small></div>'+header+sel+grid+link;
+}
 function fmtWeek(iso){ const [y,mo,da]=iso.split('-'); return mo+'/'+da+'/'+y; }
 function haversine(a,b,c,d){ const R=3958.8,t=Math.PI/180; const dLat=(c-a)*t,dLng=(d-b)*t; const x=Math.sin(dLat/2)**2+Math.cos(a*t)*Math.cos(c*t)*Math.sin(dLng/2)**2; return 2*R*Math.asin(Math.sqrt(x)); }
 function fade(hex,al){ const n=hex.replace('#',''); const r=parseInt(n.slice(0,2),16),g=parseInt(n.slice(2,4),16),b=parseInt(n.slice(4,6),16); return 'rgba('+r+','+g+','+b+','+al+')'; }
@@ -364,9 +407,7 @@ function renderMap(){
     const lat=num(r.lat),lng=num(r.lng); if(lat===null||lng===null) return;
     const us=r.do===US,col=OPCOLOR[r.do]||'#888';
     const mk=L.circleMarker([lat,lng],{radius:us?9:7,weight:us?3:1.4,color:us?US_RING:'#fff',fillColor:col,fillOpacity:.9}).addTo(MAP);
-    const v=hasVal(r,CUR_METRIC)?d.fmt(num(r[CUR_METRIC])):'—';
-    const rankTxt=rm.has(r.salonNum)?' · rank <b>#'+rm.get(r.salonNum)+'</b> of '+total:'';
-    mk.bindPopup('<div class="pt" style="color:'+col+'">'+esc(r.name)+'</div><div><small>#'+esc(r.salonNum)+' · '+esc(r.do)+(us?' (you)':'')+'</small></div><div style="margin-top:5px;">'+d.label+': <b>'+v+'</b>'+rankTxt+'</div><div style="color:#6b7a74;font-size:11.5px;margin-top:3px;">CC '+(hasVal(r,'cc')?Math.round(num(r.cc)).toLocaleString():'—')+' · CPH '+(hasVal(r,'cph')?num(r.cph).toFixed(2):'—')+' · Sales $'+(hasVal(r,'sales')?Math.round(num(r.sales)).toLocaleString():'—')+'</div>'+_pricePop(r)+_gpop(r)+'<div style="margin-top:7px;"><a href="#" onclick="viewSalonTrend(\''+r.salonNum+'\');return false;" style="color:#03654e;font-weight:700;text-decoration:none;font-size:12px;">📈 View '+esc(r.name)+' trends →</a></div>');
+    mk.bindPopup(buildPopup(r,rm,total),{maxWidth:340,minWidth:270});
     MARKERS[r.salonNum]=mk; pts.push([lat,lng]);
   });
   const counts=opCounts(), order=Object.keys(OPCOLOR).filter(o=>counts[o]), leg=document.getElementById('map-legend');
