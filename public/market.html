@@ -34,7 +34,7 @@
     .summary{flex:0 0 auto;}
     #root{flex:1 1 auto;min-height:0;display:flex;}
     .wrap{flex:1 1 auto;min-height:0;display:flex;}
-    #map{flex:1 1 auto;min-height:0;}
+    #map{flex:1 1 auto;min-height:0;height:auto;}
     .rail{flex:0 0 460px;min-height:0;overflow-y:auto;padding-right:4px;}
   }
   /* Mobile: normal page scroll, fixed-height map */
@@ -365,7 +365,7 @@ function renderMap(){
   const counts=opCounts(); const order=Object.keys(OPCOLOR).filter(o=>counts[o]);
   const leg=document.getElementById('map-legend');
   if(leg) leg.innerHTML='<div class="legend">'+order.map(o=>'<div class="li"><span class="dot" style="background:'+OPCOLOR[o]+'"></span>'+o+(o===US?' (you)':'')+' <span style="color:#6b7a74;">'+counts[o]+'</span></div>').join('')+'</div>';
-  if(pts.length && !MAP._fitted){ MAP.invalidateSize(); MAP.fitBounds(pts,{padding:[30,30]}); MAP._fitted=true; }
+  if(pts.length && !MAP._fitted){ MAP.invalidateSize(); MAP.fitBounds(pts,{padding:[30,30]}); MAP.setZoom(MAP.getZoom()+1); MAP._fitted=true; }
 }
 function emphasize(sn,on){
   const mk=MARKERS[sn]; if(!mk) return; const r=ROWS.find(x=>x.salonNum===sn); const us=r&&r.do===US;
