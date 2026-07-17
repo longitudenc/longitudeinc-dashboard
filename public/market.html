@@ -111,9 +111,11 @@
       <option value="week">Single week</option><option value="month">Month</option>
       <option value="ytd">Year to date</option><option value="range">Custom range</option>
     </select></span>
-    <span class="map-ctrl" id="wrap-week"><label id="lbl-week">Week</label><select id="sel-week"></select></span>
+    <span class="map-ctrl" id="wrap-week"><label>Week</label><select id="sel-week"></select></span>
+    <span class="map-ctrl" id="wrap-month" style="display:none;"><label>Month</label><select id="sel-month"></select></span>
+    <span class="map-ctrl" id="wrap-ytd" style="display:none;"><label>Year</label><select id="sel-ytd"></select></span>
     <span class="map-ctrl" id="wrap-range" style="display:none;"><label>From</label><select id="sel-from"></select><label style="margin-left:8px;">To</label><select id="sel-to"></select></span>
-    <span class="map-ctrl"><label>Year</label><select id="sel-year"><option value="cur">This year</option><option value="prior">Prior year</option></select></span>
+    <span class="map-ctrl"><label>Compare</label><select id="sel-year"><option value="cur">This year</option><option value="prior">Prior year</option></select></span>
     <span class="map-ctrl"><label>Metric</label><select id="sel-metric"></select></span>
   </div>
   <div class="spacer"></div>
@@ -148,7 +150,7 @@ const MARKET_COLOR='#7a8a83';
 
 // ── State ─────────────────────────────────────────────────────
 let ALLROWS=[], WEEKS=[], WEEKSET=new Set(), BYWEEK={};
-let ANCHOR=null, TF='week', RANGE={from:null,to:null}, PRIOR=false, CUR_METRIC='cc', STORE_OP_FILTER=US;
+let ANCHOR=null, TF='week', RANGE={from:null,to:null}, PRIOR=false, CUR_METRIC='cc', STORE_OP_FILTER=US, MONTHSMAP={}, FYMAP={};
 let MAP=null, MARKERS={}, ROWS=[], SCOPE=[];
 let MODE='map';
 // trends
@@ -226,7 +228,7 @@ function setMode(m){
   const mw=document.getElementById('mapwrap'), tw=document.getElementById('trendwrap');
   if(mw) mw.style.display=(m==='map')?'':'none';
   if(tw) tw.style.display=(m==='trends')?'':'none';
-  if(m==='map'){ renderAll(); if(MAP) setTimeout(()=>MAP.invalidateSize(),60); document.getElementById('summary').style.display=''; }
+  if(m==='map'){ renderAll(); syncControls(); if(MAP) setTimeout(()=>MAP.invalidateSize(),60); document.getElementById('summary').style.display=''; }
   else { document.getElementById('summary').style.display='none'; renderTrends(); }
 }
 
@@ -250,26 +252,45 @@ function buildShell(){
 }
 function buildSelectors(){
   const w=document.getElementById('sel-week');
-  if(!w.dataset.built){
-    const opts=WEEKS.slice().reverse().map(x=>'<option value="'+x+'">'+fmtWeek(x)+'</option>').join('');
-    w.innerHTML=opts; w.value=ANCHOR;
-    document.getElementById('sel-from').innerHTML=opts; document.getElementById('sel-to').innerHTML=opts;
-    document.getElementById('sel-from').value=RANGE.from; document.getElementById('sel-to').value=RANGE.to;
-    const m=document.getElementById('sel-metric'); m.innerHTML=METRICS.map(x=>'<option value="'+x.k+'">'+x.label+'</option>').join(''); m.value=CUR_METRIC;
-    w.onchange=()=>{ ANCHOR=w.value; applyScope(); };
-    document.getElementById('sel-from').onchange=e=>{ RANGE.from=e.target.value; applyScope(); };
-    document.getElementById('sel-to').onchange=e=>{ RANGE.to=e.target.value; applyScope(); };
-    document.getElementById('sel-tf').onchange=e=>{ TF=e.target.value; syncControls(); applyScope(); };
-    document.getElementById('sel-year').onchange=e=>{ PRIOR=(e.target.value==='prior'); applyScope(); };
-    m.onchange=()=>{ CUR_METRIC=m.value; renderMetricDependent(); };
-    w.dataset.built='1'; syncControls();
-  }
+  if(w.dataset.built) return;
+  const weekOpts=WEEKS.slice().reverse().map(x=>'<option value="'+x+'">'+fmtWeek(x)+'</option>').join('');
+  w.innerHTML=weekOpts; w.value=ANCHOR;
+  document.getElementById('sel-from').innerHTML=weekOpts; document.getElementById('sel-to').innerHTML=weekOpts;
+  document.getElementById('sel-from').value=RANGE.from; document.getElementById('sel-to').value=RANGE.to;
+  // Month picker: one option per calendar month present (value = that month's last week)
+  const MN=['January','February','March','April','May','June','July','August','September','October','November','December'];
+  MONTHSMAP={}; WEEKS.forEach(x=>{ const key=x.slice(0,7); if(!MONTHSMAP[key]||x>MONTHSMAP[key]) MONTHSMAP[key]=x; });
+  const monthOpts=Object.keys(MONTHSMAP).sort().reverse().map(key=>'<option value="'+MONTHSMAP[key]+'">'+MN[parseInt(key.slice(5,7),10)-1]+' '+key.slice(0,4)+'</option>').join('');
+  const sm=document.getElementById('sel-month'); sm.innerHTML=monthOpts; sm.value=MONTHSMAP[ANCHOR.slice(0,7)]||sm.options[0].value;
+  // Year picker (YTD): one option per fiscal year present (value = that year's last week)
+  FYMAP={}; WEEKS.forEach(x=>{ const fy=fiscalYearOf(x); if(!FYMAP[fy]||x>FYMAP[fy]) FYMAP[fy]=x; });
+  const ytdOpts=Object.keys(FYMAP).map(Number).sort((a,b)=>b-a).map(fy=>'<option value="'+FYMAP[fy]+'">'+fy+' YTD</option>').join('');
+  const sy=document.getElementById('sel-ytd'); sy.innerHTML=ytdOpts; sy.value=FYMAP[fiscalYearOf(ANCHOR)]||sy.options[0].value;
+  const m=document.getElementById('sel-metric'); m.innerHTML=METRICS.map(x=>'<option value="'+x.k+'">'+x.label+'</option>').join(''); m.value=CUR_METRIC;
+  w.onchange=()=>{ ANCHOR=w.value; applyScope(); };
+  sm.onchange=()=>{ ANCHOR=sm.value; applyScope(); };
+  sy.onchange=()=>{ ANCHOR=sy.value; applyScope(); };
+  document.getElementById('sel-from').onchange=e=>{ RANGE.from=e.target.value; applyScope(); };
+  document.getElementById('sel-to').onchange=e=>{ RANGE.to=e.target.value; applyScope(); };
+  document.getElementById('sel-tf').onchange=e=>{ setTimeframe(e.target.value); };
+  document.getElementById('sel-year').onchange=e=>{ PRIOR=(e.target.value==='prior'); applyScope(); };
+  m.onchange=()=>{ CUR_METRIC=m.value; renderMetricDependent(); };
+  w.dataset.built='1'; syncControls();
+}
+function setTimeframe(tf){
+  TF=tf;
+  if(tf==='week'){ document.getElementById('sel-week').value=ANCHOR; }
+  else if(tf==='month'){ const sel=document.getElementById('sel-month'); if(MONTHSMAP[ANCHOR.slice(0,7)]) sel.value=MONTHSMAP[ANCHOR.slice(0,7)]; ANCHOR=sel.value; }
+  else if(tf==='ytd'){ const sel=document.getElementById('sel-ytd'); if(FYMAP[fiscalYearOf(ANCHOR)]) sel.value=FYMAP[fiscalYearOf(ANCHOR)]; ANCHOR=sel.value; }
+  syncControls(); applyScope();
 }
 function syncControls(){
-  const isRange=TF==='range';
-  document.getElementById('wrap-range').style.display=isRange?(MODE==='map'?'inline-flex':'none'):'none';
-  document.getElementById('wrap-week').style.display=isRange?'none':(MODE==='map'?'inline-flex':'none');
-  document.getElementById('lbl-week').textContent=TF==='week'?'Week':(TF==='month'?'In month of':'As of');
+  const inMap=MODE==='map';
+  const show=(id,on)=>{ const el=document.getElementById(id); if(el) el.style.display=(on&&inMap)?'inline-flex':'none'; };
+  show('wrap-week', TF==='week');
+  show('wrap-month', TF==='month');
+  show('wrap-ytd', TF==='ytd');
+  show('wrap-range', TF==='range');
 }
 function renderMetricDependent(){ renderSummary(); const empty=ROWS.length===0; renderVsMarket(empty); renderScorecard(empty); renderAvgRank(empty); renderStoreRanks(empty); renderOutliers(empty); renderProximity(empty); renderMap(); }
 function scopeLabel(){
