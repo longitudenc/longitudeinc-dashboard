@@ -20,9 +20,10 @@ const HIST_TAB = 'RatingHistory'
 const CACHE_TTL = 5 * 60 * 1000
 
 const NUM_COLS = [
-  'lat', 'lng', 'cc', 'ccLY', 'sales', 'salesLY', 'ccChg', 'salesChg',
-  'nr', 'rr', 'invoice', 'product', 'payroll', 'waits', 'ssWaits',
-  'cph', 'mbc', 'oci', 'newCust',
+  'lat', 'lng', 'cc', 'ccLY', 'sales', 'serviceSales', 'ccChg',
+  'nr', 'rr', 'invoice', 'serviceDisc', 'product', 'payroll',
+  'waits', 'ssWaits', 'nonOciWaits', 'cph', 'mbc', 'hcTime', 'oci', 'newCust',
+  'regPrice', 'csPrice', 'avgEffWage', 'voidPct',
 ]
 
 let cache: { rows: Record<string, any>[]; weeks: string[]; ratingHistory: any[]; timestamp: number } | null = null

@@ -14,7 +14,7 @@
 //          week overwrites that week's rows rather than duplicating.
 
 import { NextResponse } from 'next/server'
-import { upsertSheet } from '@/lib/sheets'
+import { readSheet, rowsToObjects, upsertSheet } from '@/lib/sheets'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -25,9 +25,11 @@ const MARKET_TAB = 'MarketWeekly'
 // Canonical column order for the MarketWeekly tab (matches the laptop HEADER).
 const MARKET_COLUMNS = [
   'weekEnding', 'salonNum', 'name', 'do', 'lat', 'lng',
-  'cc', 'ccLY', 'sales', 'salesLY', 'ccChg', 'salesChg',
-  'nr', 'rr', 'invoice', 'product', 'payroll',
-  'waits', 'ssWaits', 'cph', 'mbc', 'oci', 'newCust',
+  'cc', 'ccLY', 'sales', 'serviceSales', 'ccChg',
+  'nr', 'rr', 'invoice', 'serviceDisc', 'product',
+  'payroll', 'waits', 'ssWaits', 'nonOciWaits', 'cph',
+  'mbc', 'hcTime', 'oci', 'newCust',
+  'regPrice', 'csPrice', 'avgEffWage', 'voidPct',
 ]
 
 function isAuthorized(request: Request): boolean {
@@ -85,6 +87,18 @@ export async function POST(request: Request) {
   // Zip each value-array into an object keyed by column name, then project onto
   // the canonical schema. weekEnding is stamped authoritatively from the top
   // level so every row lands under the same week regardless of row content.
+  // Preserve good full names: a truncated export (e.g. "North Point ...") must
+  // not overwrite the complete name already stored for a salon.
+  const priorNames: Record<string, string> = {}
+  try {
+    const prior = rowsToObjects((await readSheet(MARKET_TAB)) || [])
+    for (const p of prior) {
+      const psn = String(p.salonNum ?? '').trim()
+      const pnm = String(p.name ?? '').trim()
+      if (psn && pnm && !pnm.endsWith('...')) priorNames[psn] = pnm
+    }
+  } catch { /* first run / empty tab */ }
+
   const objects: Record<string, any>[] = []
   let skipped = 0
   for (const r of rows) {
@@ -99,6 +113,8 @@ export async function POST(request: Request) {
     for (const col of MARKET_COLUMNS) o[col] = src[col] ?? ''
     o.weekEnding = weekEnding
     o.salonNum = salonNum
+    const nm = String(o.name ?? '').trim()
+    if ((!nm || nm.endsWith('...')) && priorNames[salonNum]) o.name = priorNames[salonNum]
     objects.push(o)
   }
 

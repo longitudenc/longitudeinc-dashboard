@@ -143,10 +143,17 @@ const METRICS = [
   { k:'payroll', label:'Payroll %',         hi:false, agg:'wt',  fmt:v=>v.toFixed(1)+'%' },
   { k:'waits',   label:'Waits >15m %',      hi:false, agg:'wt',  fmt:v=>v.toFixed(1)+'%' },
   { k:'mbc',     label:'MBC (min)',         hi:false, agg:'wt',  fmt:v=>v.toFixed(2) },
+  { k:'serviceSales', label:'Service Sales', hi:true,  agg:'sum', fmt:v=>'$'+Math.round(v).toLocaleString() },
+  { k:'serviceDisc',  label:'Service Disc %',hi:false, agg:'wt',  fmt:v=>v.toFixed(1)+'%' },
+  { k:'ssWaits',      label:'S/S Waits %',   hi:false, agg:'wt',  fmt:v=>v.toFixed(1)+'%' },
+  { k:'nonOciWaits',  label:'Non-OCI Waits %',hi:false,agg:'wt',  fmt:v=>v.toFixed(1)+'%' },
+  { k:'hcTime',       label:'HC Time (min)', hi:false, agg:'wt',  fmt:v=>v.toFixed(1) },
+  { k:'avgEffWage',   label:'Avg Eff Wage',  hi:true,  agg:'wt',  fmt:v=>'$'+v.toFixed(2) },
+  { k:'voidPct',      label:'Void %',        hi:false, agg:'wt',  fmt:v=>v.toFixed(2)+'%' },
   { k:'rating',  label:'Google Rating',     hi:true,  agg:'const', monthly:true, fmt:v=>v.toFixed(1)+'\u2605' },
   { k:'reviews', label:'Google Reviews',    hi:true,  agg:'const', monthly:true, fmt:v=>Math.round(v).toLocaleString() },
 ];
-const SUM_COLS=['cc','sales','ccLY','salesLY'], WT_COLS=['cph','product','payroll','waits','ssWaits','mbc','oci','newCust'], WEEK_ONLY=['nr','rr'];
+const SUM_COLS=['cc','sales','serviceSales','ccLY'], WT_COLS=['cph','product','payroll','waits','ssWaits','nonOciWaits','mbc','oci','newCust','serviceDisc','hcTime','avgEffWage','voidPct','regPrice','csPrice'], WEEK_ONLY=['nr','rr'];
 const PROX_RADIUS_MI=3, PROX_MAX=3;
 const MARKET_COLOR='#7a8a83';
 
@@ -168,6 +175,10 @@ function _gpop(r){
   const status=(r.googleStatus==='CLOSED_TEMPORARILY')?' <span style="color:#c0392b;font-weight:700;">\u00b7 temporarily closed</span>':(r.googleStatus==='CLOSED_PERMANENTLY')?' <span style="color:#c0392b;font-weight:700;">\u00b7 permanently closed</span>':'';
   const body=hasVal(r,'rating')?('\u2B50 '+num(r.rating).toFixed(1)+(hasVal(r,'reviews')?' <span style="color:#6b7a74;">\u00b7 '+Math.round(num(r.reviews)).toLocaleString()+' reviews</span>':'')):'<span style="color:#6b7a74;">No Google rating yet</span>';
   return '<div style="margin-top:5px;font-size:12px;">'+body+status+'</div>';
+}
+function _pricePop(r){
+  if(!hasVal(r,'regPrice')&&!hasVal(r,'csPrice')) return '';
+  return '<div style="margin-top:3px;font-size:11.5px;color:#6b7a74;">\u2702 Reg $'+(hasVal(r,'regPrice')?num(r.regPrice).toFixed(0):'\u2014')+' \u00b7 Child/Sr $'+(hasVal(r,'csPrice')?num(r.csPrice).toFixed(0):'\u2014')+'</div>';
 }
 function fmtWeek(iso){ const [y,mo,da]=iso.split('-'); return mo+'/'+da+'/'+y; }
 function haversine(a,b,c,d){ const R=3958.8,t=Math.PI/180; const dLat=(c-a)*t,dLng=(d-b)*t; const x=Math.sin(dLat/2)**2+Math.cos(a*t)*Math.cos(c*t)*Math.sin(dLng/2)**2; return 2*R*Math.asin(Math.sqrt(x)); }
@@ -198,10 +209,9 @@ function aggregate(weeks){
     const last=rs[rs.length-1], a={ weekEnding:weeks[weeks.length-1], salonNum:sn, name:last.name, do:last.do, lat:last.lat, lng:last.lng, __agg:true };
     const sum={}; SUM_COLS.forEach(k=>{ let s=0,any=false; rs.forEach(r=>{const v=num(r[k]);if(v!==null){s+=v;any=true;}}); sum[k]=any?s:null; });
     const N=weeks.length;
-    a.cc=sum.cc==null?null:sum.cc/N; a.sales=sum.sales==null?null:sum.sales/N; a.ccLY=sum.ccLY==null?null:sum.ccLY/N; a.salesLY=sum.salesLY==null?null:sum.salesLY/N;
+    a.cc=sum.cc==null?null:sum.cc/N; a.sales=sum.sales==null?null:sum.sales/N; a.serviceSales=sum.serviceSales==null?null:sum.serviceSales/N; a.ccLY=sum.ccLY==null?null:sum.ccLY/N;
     a.invoice=(sum.cc&&sum.sales!=null)?sum.sales/sum.cc:null;
     a.ccChg=(sum.ccLY&&sum.cc!=null)?(sum.cc/sum.ccLY-1)*100:null;
-    a.salesChg=(sum.salesLY&&sum.sales!=null)?(sum.sales/sum.salesLY-1)*100:null;
     WT_COLS.forEach(k=>{ let wsum=0,vsum=0; rs.forEach(r=>{const v=num(r[k]),c=num(r.cc);if(v!==null&&c!==null){vsum+=v*c;wsum+=c;}}); a[k]=wsum>0?vsum/wsum:null; });
     WEEK_ONLY.forEach(k=>a[k]=null);
     a.rating=num(last.rating); a.reviews=num(last.reviews); a.googleStatus=last.googleStatus||'';
@@ -356,7 +366,7 @@ function renderMap(){
     const mk=L.circleMarker([lat,lng],{radius:us?9:7,weight:us?3:1.4,color:us?US_RING:'#fff',fillColor:col,fillOpacity:.9}).addTo(MAP);
     const v=hasVal(r,CUR_METRIC)?d.fmt(num(r[CUR_METRIC])):'—';
     const rankTxt=rm.has(r.salonNum)?' · rank <b>#'+rm.get(r.salonNum)+'</b> of '+total:'';
-    mk.bindPopup('<div class="pt" style="color:'+col+'">'+esc(r.name)+'</div><div><small>#'+esc(r.salonNum)+' · '+esc(r.do)+(us?' (you)':'')+'</small></div><div style="margin-top:5px;">'+d.label+': <b>'+v+'</b>'+rankTxt+'</div><div style="color:#6b7a74;font-size:11.5px;margin-top:3px;">CC '+(hasVal(r,'cc')?Math.round(num(r.cc)).toLocaleString():'—')+' · CPH '+(hasVal(r,'cph')?num(r.cph).toFixed(2):'—')+' · Sales $'+(hasVal(r,'sales')?Math.round(num(r.sales)).toLocaleString():'—')+'</div>'+_gpop(r)+'<div style="margin-top:7px;"><a href="#" onclick="viewSalonTrend(\''+r.salonNum+'\');return false;" style="color:#03654e;font-weight:700;text-decoration:none;font-size:12px;">📈 View '+esc(r.name)+' trends →</a></div>');
+    mk.bindPopup('<div class="pt" style="color:'+col+'">'+esc(r.name)+'</div><div><small>#'+esc(r.salonNum)+' · '+esc(r.do)+(us?' (you)':'')+'</small></div><div style="margin-top:5px;">'+d.label+': <b>'+v+'</b>'+rankTxt+'</div><div style="color:#6b7a74;font-size:11.5px;margin-top:3px;">CC '+(hasVal(r,'cc')?Math.round(num(r.cc)).toLocaleString():'—')+' · CPH '+(hasVal(r,'cph')?num(r.cph).toFixed(2):'—')+' · Sales $'+(hasVal(r,'sales')?Math.round(num(r.sales)).toLocaleString():'—')+'</div>'+_pricePop(r)+_gpop(r)+'<div style="margin-top:7px;"><a href="#" onclick="viewSalonTrend(\''+r.salonNum+'\');return false;" style="color:#03654e;font-weight:700;text-decoration:none;font-size:12px;">📈 View '+esc(r.name)+' trends →</a></div>');
     MARKERS[r.salonNum]=mk; pts.push([lat,lng]);
   });
   const counts=opCounts(), order=Object.keys(OPCOLOR).filter(o=>counts[o]), leg=document.getElementById('map-legend');
