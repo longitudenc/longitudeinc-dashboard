@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/run",
       "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/market/ratings",
+      "schedule": "0 9 1 * *"
     }
   ],
   "functions": {
@@ -11,6 +15,8 @@
     "app/api/scrape/monthly/route.ts": { "maxDuration": 60 },
     "app/api/scrape/employee-daily/route.ts": { "maxDuration": 60 },
     "app/api/scrape/manual/route.ts":  { "maxDuration": 60 },
-    "app/api/cron/run/route.ts":       { "maxDuration": 60 }
+    "app/api/cron/run/route.ts":       { "maxDuration": 60 },
+    "app/api/market/ratings/route.ts": { "maxDuration": 60 },
+    "app/api/market/resolve-places/route.ts": { "maxDuration": 60 }
   }
 }

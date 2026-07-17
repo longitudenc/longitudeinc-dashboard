@@ -143,6 +143,8 @@ const METRICS = [
   { k:'payroll', label:'Payroll %',         hi:false, agg:'wt',  fmt:v=>v.toFixed(1)+'%' },
   { k:'waits',   label:'Waits >15m %',      hi:false, agg:'wt',  fmt:v=>v.toFixed(1)+'%' },
   { k:'mbc',     label:'MBC (min)',         hi:false, agg:'wt',  fmt:v=>v.toFixed(2) },
+  { k:'rating',  label:'Google Rating',     hi:true,  agg:'const', noTrend:true, fmt:v=>v.toFixed(1)+'\u2605' },
+  { k:'reviews', label:'Google Reviews',    hi:true,  agg:'const', noTrend:true, fmt:v=>Math.round(v).toLocaleString() },
 ];
 const SUM_COLS=['cc','sales','ccLY','salesLY'], WT_COLS=['cph','product','payroll','waits','ssWaits','mbc','oci','newCust'], WEEK_ONLY=['nr','rr'];
 const PROX_RADIUS_MI=3, PROX_MAX=3;
@@ -162,6 +164,11 @@ const num = v => (v===null||v===undefined||v==='') ? null : (typeof v==='number'
 const hasVal = (r,k) => { const n=num(r[k]); return n!==null && Number.isFinite(n); };
 const mean = a => a.length ? a.reduce((x,y)=>x+y,0)/a.length : null;
 function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function _gpop(r){
+  const status=(r.googleStatus==='CLOSED_TEMPORARILY')?' <span style="color:#c0392b;font-weight:700;">\u00b7 temporarily closed</span>':(r.googleStatus==='CLOSED_PERMANENTLY')?' <span style="color:#c0392b;font-weight:700;">\u00b7 permanently closed</span>':'';
+  const body=hasVal(r,'rating')?('\u2B50 '+num(r.rating).toFixed(1)+(hasVal(r,'reviews')?' <span style="color:#6b7a74;">\u00b7 '+Math.round(num(r.reviews)).toLocaleString()+' reviews</span>':'')):'<span style="color:#6b7a74;">No Google rating yet</span>';
+  return '<div style="margin-top:5px;font-size:12px;">'+body+status+'</div>';
+}
 function fmtWeek(iso){ const [y,mo,da]=iso.split('-'); return mo+'/'+da+'/'+y; }
 function haversine(a,b,c,d){ const R=3958.8,t=Math.PI/180; const dLat=(c-a)*t,dLng=(d-b)*t; const x=Math.sin(dLat/2)**2+Math.cos(a*t)*Math.cos(c*t)*Math.sin(dLng/2)**2; return 2*R*Math.asin(Math.sqrt(x)); }
 function fade(hex,al){ const n=hex.replace('#',''); const r=parseInt(n.slice(0,2),16),g=parseInt(n.slice(2,4),16),b=parseInt(n.slice(4,6),16); return 'rgba('+r+','+g+','+b+','+al+')'; }
@@ -197,6 +204,7 @@ function aggregate(weeks){
     a.salesChg=(sum.salesLY&&sum.sales!=null)?(sum.sales/sum.salesLY-1)*100:null;
     WT_COLS.forEach(k=>{ let wsum=0,vsum=0; rs.forEach(r=>{const v=num(r[k]),c=num(r.cc);if(v!==null&&c!==null){vsum+=v*c;wsum+=c;}}); a[k]=wsum>0?vsum/wsum:null; });
     WEEK_ONLY.forEach(k=>a[k]=null);
+    a.rating=num(last.rating); a.reviews=num(last.reviews); a.googleStatus=last.googleStatus||'';
     out.push(a);
   }
   return out;
@@ -248,7 +256,7 @@ function buildShell(){
     '</div></div>'+
     '<div class="trend-wrap" id="trendwrap" style="display:none;"><div class="trend-sidebar" id="trend-sidebar"></div><div class="trend-main" id="trend-main"></div></div>';
   const sb=document.getElementById('trend-sidebar');
-  sb.innerHTML='<div class="trend-sidebar-label">Metric</div>'+METRICS.map(m=>'<button class="tmetric-btn'+(m.k===T_METRIC?' active':'')+'" data-k="'+m.k+'" onclick="selectTMetric(\''+m.k+'\')">'+m.label+'</button>').join('');
+  sb.innerHTML='<div class="trend-sidebar-label">Metric</div>'+METRICS.filter(m=>!m.noTrend).map(m=>'<button class="tmetric-btn'+(m.k===T_METRIC?' active':'')+'" data-k="'+m.k+'" onclick="selectTMetric(\''+m.k+'\')">'+m.label+'</button>').join('');
 }
 function buildSelectors(){
   const w=document.getElementById('sel-week');
@@ -345,7 +353,7 @@ function renderMap(){
     const mk=L.circleMarker([lat,lng],{radius:us?9:7,weight:us?3:1.4,color:us?US_RING:'#fff',fillColor:col,fillOpacity:.9}).addTo(MAP);
     const v=hasVal(r,CUR_METRIC)?d.fmt(num(r[CUR_METRIC])):'—';
     const rankTxt=rm.has(r.salonNum)?' · rank <b>#'+rm.get(r.salonNum)+'</b> of '+total:'';
-    mk.bindPopup('<div class="pt" style="color:'+col+'">'+esc(r.name)+'</div><div><small>#'+esc(r.salonNum)+' · '+esc(r.do)+(us?' (you)':'')+'</small></div><div style="margin-top:5px;">'+d.label+': <b>'+v+'</b>'+rankTxt+'</div><div style="color:#6b7a74;font-size:11.5px;margin-top:3px;">CC '+(hasVal(r,'cc')?Math.round(num(r.cc)).toLocaleString():'—')+' · CPH '+(hasVal(r,'cph')?num(r.cph).toFixed(2):'—')+' · Sales $'+(hasVal(r,'sales')?Math.round(num(r.sales)).toLocaleString():'—')+'</div><div style="margin-top:7px;"><a href="#" onclick="viewSalonTrend(\''+r.salonNum+'\');return false;" style="color:#03654e;font-weight:700;text-decoration:none;font-size:12px;">📈 View '+esc(r.name)+' trends →</a></div>');
+    mk.bindPopup('<div class="pt" style="color:'+col+'">'+esc(r.name)+'</div><div><small>#'+esc(r.salonNum)+' · '+esc(r.do)+(us?' (you)':'')+'</small></div><div style="margin-top:5px;">'+d.label+': <b>'+v+'</b>'+rankTxt+'</div><div style="color:#6b7a74;font-size:11.5px;margin-top:3px;">CC '+(hasVal(r,'cc')?Math.round(num(r.cc)).toLocaleString():'—')+' · CPH '+(hasVal(r,'cph')?num(r.cph).toFixed(2):'—')+' · Sales $'+(hasVal(r,'sales')?Math.round(num(r.sales)).toLocaleString():'—')+'</div>'+_gpop(r)+'<div style="margin-top:7px;"><a href="#" onclick="viewSalonTrend(\''+r.salonNum+'\');return false;" style="color:#03654e;font-weight:700;text-decoration:none;font-size:12px;">📈 View '+esc(r.name)+' trends →</a></div>');
     MARKERS[r.salonNum]=mk; pts.push([lat,lng]);
   });
   const counts=opCounts(), order=Object.keys(OPCOLOR).filter(o=>counts[o]), leg=document.getElementById('map-legend');
@@ -463,6 +471,7 @@ function pointSVG(style,color){
 
 function renderTrends(){
   const main=document.getElementById('trend-main'); if(!main) return;
+  if(metricDef(T_METRIC).noTrend){ T_METRIC='cc'; syncMetricSidebar(); }
   const d=metricDef(T_METRIC), weeks=trendWeeks(), labels=weeks.map(fmtWeek);
   if(T_CHART){ try{T_CHART.destroy();}catch(e){} T_CHART=null; }
 
