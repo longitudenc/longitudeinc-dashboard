@@ -32,9 +32,10 @@
     body{height:100vh;display:flex;flex-direction:column;overflow:hidden;}
     header{flex:0 0 auto;}
     .summary{flex:0 0 auto;}
+    #root{flex:1 1 auto;min-height:0;display:flex;}
     .wrap{flex:1 1 auto;min-height:0;display:flex;}
-    #map{flex:1 1 auto;height:100%;min-height:0;}
-    .rail{flex:0 0 460px;height:100%;min-height:0;overflow-y:auto;padding-right:4px;}
+    #map{flex:1 1 auto;min-height:0;}
+    .rail{flex:0 0 460px;min-height:0;overflow-y:auto;padding-right:4px;}
   }
   /* Mobile: normal page scroll, fixed-height map */
   @media (max-width:900px){ .wrap{grid-template-columns:1fr;} #map{height:380px;} }
@@ -344,6 +345,7 @@ function renderMap(){
     MAP._legend.onAdd=function(){ const div=L.DomUtil.create('div'); div.id='map-legend'; div.style.cssText='background:#fff;padding:8px 10px;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.25);'; return div; };
     MAP._legend.addTo(MAP);
     window.addEventListener('resize',()=>{ if(MAP) MAP.invalidateSize(); });
+    setTimeout(()=>{ if(MAP) MAP.invalidateSize(); }, 80);
   }
   Object.values(MARKERS).forEach(m=>MAP.removeLayer(m)); MARKERS={};
   const d=metricDef(CUR_METRIC); const pts=[];
