@@ -128,6 +128,7 @@
 const OPCOLOR = { Bullard:'#e8792b', Bloodworth:'#d12f2f', Brooker:'#2f6fd1', Naylor:'#e8c020', Shepherd:'#2e9e5b', Tapia:'#7d3fb3', Lamba:'#8a5a2b' };
 const US = 'Bullard';
 const US_RING = '#a1490f';
+const OP_STYLE = { Bullard:'circle', Bloodworth:'triangle', Brooker:'rect', Naylor:'rectRot', Shepherd:'star', Tapia:'crossRot', Lamba:'rectRounded' };
 const METRICS = [
   { k:'cc',      label:'Customer Count',    hi:true,  agg:'sum', fmt:v=>Math.round(v).toLocaleString() },
   { k:'sales',   label:'Total Sales',       hi:true,  agg:'sum', fmt:v=>'$'+Math.round(v).toLocaleString() },
@@ -316,13 +317,14 @@ function renderMap(){
     setTimeout(()=>{ if(MAP) MAP.invalidateSize(); },80);
   }
   Object.values(MARKERS).forEach(m=>MAP.removeLayer(m)); MARKERS={};
-  const d=metricDef(CUR_METRIC), pts=[];
+  const d=metricDef(CUR_METRIC), pts=[], rm=rankMap(CUR_METRIC), total=rm.size;
   ROWS.forEach(r=>{
     const lat=num(r.lat),lng=num(r.lng); if(lat===null||lng===null) return;
     const us=r.do===US,col=OPCOLOR[r.do]||'#888';
     const mk=L.circleMarker([lat,lng],{radius:us?9:7,weight:us?3:1.4,color:us?US_RING:'#fff',fillColor:col,fillOpacity:.9}).addTo(MAP);
     const v=hasVal(r,CUR_METRIC)?d.fmt(num(r[CUR_METRIC])):'—';
-    mk.bindPopup('<div class="pt" style="color:'+col+'">'+esc(r.name)+'</div><div><small>#'+esc(r.salonNum)+' · '+esc(r.do)+(us?' (you)':'')+'</small></div><div style="margin-top:5px;">'+d.label+': <b>'+v+'</b></div><div style="color:#6b7a74;font-size:11.5px;margin-top:3px;">CC '+(hasVal(r,'cc')?Math.round(num(r.cc)).toLocaleString():'—')+' · CPH '+(hasVal(r,'cph')?num(r.cph).toFixed(2):'—')+' · Sales $'+(hasVal(r,'sales')?Math.round(num(r.sales)).toLocaleString():'—')+'</div>');
+    const rankTxt=rm.has(r.salonNum)?' · rank <b>#'+rm.get(r.salonNum)+'</b> of '+total:'';
+    mk.bindPopup('<div class="pt" style="color:'+col+'">'+esc(r.name)+'</div><div><small>#'+esc(r.salonNum)+' · '+esc(r.do)+(us?' (you)':'')+'</small></div><div style="margin-top:5px;">'+d.label+': <b>'+v+'</b>'+rankTxt+'</div><div style="color:#6b7a74;font-size:11.5px;margin-top:3px;">CC '+(hasVal(r,'cc')?Math.round(num(r.cc)).toLocaleString():'—')+' · CPH '+(hasVal(r,'cph')?num(r.cph).toFixed(2):'—')+' · Sales $'+(hasVal(r,'sales')?Math.round(num(r.sales)).toLocaleString():'—')+'</div><div style="margin-top:7px;"><a href="#" onclick="viewSalonTrend(\''+r.salonNum+'\');return false;" style="color:#03654e;font-weight:700;text-decoration:none;font-size:12px;">📈 View '+esc(r.name)+' trends →</a></div>');
     MARKERS[r.salonNum]=mk; pts.push([lat,lng]);
   });
   const counts=opCounts(), order=Object.keys(OPCOLOR).filter(o=>counts[o]), leg=document.getElementById('map-legend');
@@ -396,7 +398,10 @@ function seriesMkt(weeks,k){ return weeks.map(w=>mktAvgAt(w,k)); }
 function seriesSalon(sn,weeks,k){ return weeks.map(w=>salonAt(sn,w,k)); }
 function seriesPY(weeks,fn){ return weeks.map(w=>{ const pw=pyWeekOf(w); return pw?fn(pw):null; }); }
 
-function selectTMetric(k){ if(T_CHART) snapTrendVis(); T_METRIC=k; document.querySelectorAll('.tmetric-btn').forEach(b=>b.classList.toggle('active',b.dataset.k===k)); renderTrends(); }
+function selectTMetric(k){ if(T_CHART) snapTrendVis(); T_METRIC=k; syncMetricSidebar(); renderTrends(); }
+function syncMetricSidebar(){ document.querySelectorAll('.tmetric-btn').forEach(b=>b.classList.toggle('active',b.dataset.k===T_METRIC)); }
+function viewSalonTrend(sn){ T_SALON=String(sn); T_VIEW='salon'; T_METRIC=CUR_METRIC; T_VISSNAP=null; syncMetricSidebar(); setMode('trends'); }
+window.viewSalonTrend=viewSalonTrend;
 function setTView(v){ T_VIEW=v; T_VISSNAP=null; renderTrends(); }
 function setTSalon(sn){ T_SALON=sn; T_VISSNAP=null; renderTrends(); }
 function setTWin(w){ if(T_CHART) snapTrendVis(); T_WIN=(w==='ytd'||w==='all')?w:parseInt(w,10); renderTrends(); }
@@ -405,21 +410,34 @@ function snapTrendVis(){ try{ const s={}; T_CHART.data.datasets.forEach((ds,i)=>
 
 function buildTrendDatasets(weeks,k){
   const ds=[];
-  const mk=(label,color,data,opt)=>{ opt=opt||{}; ds.push({ label, data, borderColor:color, backgroundColor:color, borderWidth:opt.w||2, borderDash:opt.dash||[], pointRadius:opt.pts===false?0:2.5, pointHoverRadius:opt.pts===false?0:5, pointStyle:opt.pstyle||'circle', tension:0.25, spanGaps:true, __ref:!!opt.ref }); if(T_PY){ ds.push({ label:label+' (PY)', data:seriesPY(weeks,(pw)=>opt.at?opt.at(pw):null), borderColor:fade(color.startsWith('#')?color:'#888',0.55), backgroundColor:fade(color.startsWith('#')?color:'#888',0.55), borderWidth:1.5, borderDash:[3,3], pointRadius:0, pointHoverRadius:0, tension:0.25, spanGaps:true, __py:true }); } };
+  const mk=(label,color,data,opt)=>{ opt=opt||{}; ds.push({ label, data, borderColor:color, backgroundColor:color, borderWidth:opt.w||2, borderDash:opt.dash||[], pointRadius:opt.pts===false?0:3, pointHoverRadius:opt.pts===false?0:6, pointStyle:opt.pstyle||'circle', tension:0.25, spanGaps:true, __ref:!!opt.ref }); if(T_PY){ ds.push({ label:label+' (PY)', data:seriesPY(weeks,(pw)=>opt.at?opt.at(pw):null), borderColor:fade(color.startsWith('#')?color:'#888',0.55), backgroundColor:fade(color.startsWith('#')?color:'#888',0.55), borderWidth:1.5, borderDash:[3,3], pointRadius:0, pointHoverRadius:0, tension:0.25, spanGaps:true, __py:true }); } };
   if(T_VIEW==='lvm'){
-    mk('Longitude',OPCOLOR[US],seriesOp(US,weeks,k),{w:2.6,at:pw=>opAvgAt(US,pw,k)});
+    mk('Longitude (you)',OPCOLOR[US],seriesOp(US,weeks,k),{w:2.8,pstyle:'circle',at:pw=>opAvgAt(US,pw,k)});
     mk('Market Avg',MARKET_COLOR,seriesMkt(weeks,k),{dash:[6,4],pts:false,ref:true,at:pw=>mktAvgAt(pw,k)});
   } else if(T_VIEW==='ops'){
     const ops=[US].concat(Object.keys(OPCOLOR).filter(o=>o!==US));
-    ops.forEach(op=>{ if((BYWEEK[weeks[weeks.length-1]]||[]).some(r=>r.do===op)) mk(op,OPCOLOR[op],seriesOp(op,weeks,k),{w:op===US?3:2,at:pw=>opAvgAt(op,pw,k)}); });
+    ops.forEach(op=>{ if((BYWEEK[weeks[weeks.length-1]]||[]).some(r=>r.do===op)) mk(op+(op===US?' (you)':''),OPCOLOR[op],seriesOp(op,weeks,k),{w:op===US?3:2,pstyle:OP_STYLE[op]||'circle',at:pw=>opAvgAt(op,pw,k)}); });
     mk('Market Avg',MARKET_COLOR,seriesMkt(weeks,k),{dash:[6,4],pts:false,ref:true,at:pw=>mktAvgAt(pw,k)});
   } else {
     const sn=T_SALON, sr=ALLROWS.find(x=>x.salonNum===sn), op=sr?sr.do:US, col=OPCOLOR[op]||'#888', nm=sr?sr.name:sn;
-    mk(nm+' #'+sn,col,seriesSalon(sn,weeks,k),{w:2.8,at:pw=>salonAt(sn,pw,k)});
+    mk(nm+' #'+sn+(op===US?' (you)':''),col,seriesSalon(sn,weeks,k),{w:2.8,pstyle:OP_STYLE[op]||'circle',at:pw=>salonAt(sn,pw,k)});
     mk(op+' Avg',col,seriesOp(op,weeks,k),{dash:[2,2],pts:false,ref:true,at:pw=>opAvgAt(op,pw,k)});
     mk('Market Avg',MARKET_COLOR,seriesMkt(weeks,k),{dash:[6,4],pts:false,ref:true,at:pw=>mktAvgAt(pw,k)});
   }
   return ds;
+}
+function pointSVG(style,color){
+  const s=11;
+  const shapes={
+    circle:'<svg width="'+s+'" height="'+s+'"><circle cx="'+(s/2)+'" cy="'+(s/2)+'" r="'+(s/2-1)+'" fill="'+color+'"/></svg>',
+    rect:'<svg width="'+s+'" height="'+s+'"><rect x="1" y="1" width="'+(s-2)+'" height="'+(s-2)+'" fill="'+color+'"/></svg>',
+    triangle:'<svg width="'+s+'" height="'+s+'"><polygon points="'+(s/2)+',1 '+(s-1)+','+(s-1)+' 1,'+(s-1)+'" fill="'+color+'"/></svg>',
+    star:'<svg width="'+s+'" height="'+s+'"><polygon points="'+(s/2)+',1 '+(s*0.63)+','+(s*0.35)+' '+(s-1)+','+(s*0.35)+' '+(s*0.72)+','+(s*0.57)+' '+(s*0.82)+','+(s-1)+' '+(s/2)+','+(s*0.73)+' '+(s*0.18)+','+(s-1)+' '+(s*0.28)+','+(s*0.57)+' 1,'+(s*0.35)+' '+(s*0.37)+','+(s*0.35)+'" fill="'+color+'"/></svg>',
+    rectRot:'<svg width="'+s+'" height="'+s+'"><rect x="2" y="2" width="'+(s-4)+'" height="'+(s-4)+'" fill="'+color+'" transform="rotate(45 '+(s/2)+' '+(s/2)+')"/></svg>',
+    crossRot:'<svg width="'+s+'" height="'+s+'"><line x1="1" y1="1" x2="'+(s-1)+'" y2="'+(s-1)+'" stroke="'+color+'" stroke-width="2.5"/><line x1="'+(s-1)+'" y1="1" x2="1" y2="'+(s-1)+'" stroke="'+color+'" stroke-width="2.5"/></svg>',
+    rectRounded:'<svg width="'+s+'" height="'+s+'"><rect x="1" y="1" width="'+(s-2)+'" height="'+(s-2)+'" rx="3" fill="'+color+'"/></svg>'
+  };
+  return shapes[style]||shapes.circle;
 }
 
 function renderTrends(){
@@ -466,7 +484,7 @@ function buildTrendLegend(){
     const chip=document.createElement('div'); chip.className='lg';
     const sw=document.createElement('span');
     if(ds.__ref) sw.innerHTML='<svg width="20" height="10"><line x1="0" y1="5" x2="20" y2="5" stroke="'+ds.borderColor+'" stroke-width="2" stroke-dasharray="5,3"/></svg>';
-    else sw.innerHTML='<span class="dot" style="background:'+ds.borderColor+'"></span>';
+    else sw.innerHTML=pointSVG(ds.pointStyle||'circle',ds.borderColor);
     const lb=document.createElement('span'); lb.textContent=ds.label;
     chip.appendChild(sw); chip.appendChild(lb);
     let hidden=!T_CHART.isDatasetVisible(idx);              // init from ACTUAL visibility (no flip-back bug)
