@@ -1,4 +1,4 @@
-// app/api/ingest/address-quality/route.ts
+// app/api/market/ingest/address-quality/route.ts
 //
 // Ingest per-salon Customer Address Quality (% Good) pulled from the Great Clips
 // Power BI report by the browser-console snippet, and upsert it into a dedicated
@@ -9,9 +9,9 @@
 // periodKey uses the same "Mon YY" format as lib/salon-month.ts (e.g. "Jun 26"),
 // so this joins to SalonSummaryData / BonusData on (periodKey, salonNum).
 //
-// Auth: ?secret=<CRON_SECRET> or  Authorization: Bearer <CRON_SECRET>  (same as
-// the scrape routes). CORS is opened so the snippet can POST cross-origin from
-// app.powerbi.com; the secret is what actually gates writes.
+// Auth: ?secret=<secret> or Authorization: Bearer <secret>. Accepts a dedicated
+// CAQ_INGEST_SECRET (preferred) or CRON_SECRET. CORS is opened so the snippet
+// can POST cross-origin from app.powerbi.com; the secret is what gates writes.
 //
 // POST body: { "rows": [ { periodKey, periodLabel, salonNum, salonName,
 //                          caqGood, caqImprove, caqBad } , ... ] }
