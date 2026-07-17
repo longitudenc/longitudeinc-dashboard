@@ -3094,6 +3094,9 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
         </div>
       </div>
 
+      <!-- Company Team (all employees) -->
+      <div class="table-card" id="section-company-team" style="display:none;"></div>
+
       <!-- All Salons Detail -->
       <div class="table-card" id="section-all-salons">
         <div class="table-card-header" style="cursor:pointer;" onclick="toggleSection('all-salons')">
@@ -4167,6 +4170,7 @@ function setupSidebar(){
     html += `<div id="company-subnav" style="display:none;padding-left:10px;border-left:2px solid var(--border);margin:2px 0 2px 14px;">
       <button class="am-btn company-subnav-btn active" data-ctab="allsalons" onclick="showCompanyTab('allsalons')" style="font-size:13px;padding:7px 10px;">All Salons</button>
       <button class="am-btn company-subnav-btn" data-ctab="ams" onclick="showCompanyTab('ams')" style="font-size:13px;padding:7px 10px;">Area Managers</button>
+      <button class="am-btn company-subnav-btn" data-ctab="team" onclick="showCompanyTab('team')" style="font-size:13px;padding:7px 10px;">Team 👥</button>
       <button class="am-btn company-subnav-btn" data-ctab="bonus" onclick="showCompanyTab('bonus')" style="font-size:13px;padding:7px 10px;">Bonus 💰</button>
       <button class="am-btn company-subnav-btn" data-ctab="standouts" onclick="showCompanyTab('standouts')" style="font-size:13px;padding:7px 10px;">Standouts 🏆</button>
       <button class="am-btn company-subnav-btn" data-ctab="reviews" onclick="showCompanyTab('reviews')" style="font-size:13px;padding:7px 10px;">Reviews 📋</button>
@@ -4246,6 +4250,7 @@ let S_companyTab = 'allsalons';
 const COMPANY_TAB_SECTIONS = {
   allsalons: ['company-summary','section-all-salons','co-salon-drill'],
   ams:       ['section-scorecard','section-am-perf'],
+  team:      ['section-company-team'],
   bonus:     ['section-bonus'],
   standouts: ['section-standouts'],
   dayreview: ['section-day-review'],
@@ -4255,10 +4260,10 @@ const COMPANY_TAB_SECTIONS = {
 function applyCompanyTabVisibility(){
   const full = canSeeAllSalons();
   // Sections only owner/admin/viewer may see.
-  const gated = new Set(['section-scorecard','section-am-perf','section-bonus']);
+  const gated = new Set(['section-scorecard','section-am-perf','section-bonus','section-company-team']);
   const roleOk = id => id==='section-day-review' ? canSeeDayReview() : id==='section-dayofweek' ? canSeeDayOfWeek() : (gated.has(id) ? full : true);
   const active = new Set(COMPANY_TAB_SECTIONS[S_companyTab] || COMPANY_TAB_SECTIONS.allsalons);
-  ['company-summary','section-scorecard','section-am-perf','section-all-salons','co-salon-drill','section-bonus','section-standouts','section-day-review','section-dayofweek','section-reviews'].forEach(id=>{
+  ['company-summary','section-scorecard','section-am-perf','section-company-team','section-all-salons','co-salon-drill','section-bonus','section-standouts','section-day-review','section-dayofweek','section-reviews'].forEach(id=>{
     const el = document.getElementById(id); if(!el) return;
     el.style.display = (active.has(id) && roleOk(id)) ? '' : 'none';
   });
@@ -4276,8 +4281,106 @@ function showCompanyTab(name){
   S_companyTab = name;
   applyCompanyTabVisibility();
   if(name==='dayreview') renderDayReview();
+  if(name==='team') renderCompanyTeam();
   if(name==='dayofweek') renderDayOfWeek();
   if(name==='reviews') renderReviewsTab('section-reviews','company');
+}
+
+// ── Company Team — all employees, flat + sortable, with a group-by toggle ──
+let S_teamRange='13', S_teamGroup='none', S_teamSearch='', S_teamSort={col:3,dir:-1};
+const TEAM_COLS=[
+  {k:'salon',lbl:'Salon',sv:r=>r.salonName||r.salonNum,align:'left',txt:true},
+  {k:'name', lbl:'Stylist',sv:r=>fmtName(r.name||''),align:'left',txt:true},
+  {k:'pos',  lbl:'Pos',sv:r=>r.position||'',align:'center',txt:true},
+  {k:'hours',lbl:'Floor Hrs/wk',sv:r=>r.hours,align:'center'},
+  {k:'cc',   lbl:'CC',sv:r=>r.cc,align:'center'},
+  {k:'hc',   lbl:'HC',sv:r=>r.hc,align:'center',tier:tierHC},
+  {k:'mbc',  lbl:'MBC',sv:r=>r.mbc,align:'center',tier:tierMBC},
+  {k:'prod', lbl:'Prod%',sv:r=>r.prod,align:'center',tier:tierProd,pct:true},
+  {k:'nr',   lbl:'NR%',sv:r=>r.nr,align:'center',tier:tierNR,pct:true},
+  {k:'rr',   lbl:'RR%',sv:r=>r.rr,align:'center',tier:tierRR,pct:true},
+  {k:'wks',  lbl:'Wks',sv:r=>r.wks,align:'center',muted:true},
+];
+function _teamPeople(){
+  if(!S.weekHistory||!S.weekHistory.length) return [];
+  const today=_sdTodayIso();
+  const completed=[...S.weekHistory].filter(w=>String(w.weekEnding)<today).sort((a,b)=>new Date(a.weekEnding)-new Date(b.weekEnding));
+  if(!completed.length) return [];
+  let weeks;
+  if(S_teamRange==='all') weeks=completed;
+  else if(S_teamRange==='ytd'){ const anchor=fiscalYearStartIso(completed[completed.length-1].weekEnding); weeks=completed.filter(w=>w.weekEnding>=anchor); }
+  else weeks=completed.slice(-parseInt(S_teamRange));
+  const byGid={};
+  weeks.forEach(w=>{ (w.emps||[]).forEach(e=>{
+    const gid=(e.globalId||'').trim()||('name:'+(e.empName||''));
+    const g=byGid[gid]||(byGid[gid]={gid:(e.globalId||'').trim(),name:e.empName,position:e.position,salons:{},rows:[]});
+    g.rows.push(e); if(e.salonNum){ const k=String(e.salonNum).trim(); g.salons[k]=(g.salons[k]||0)+1; }
+  }); });
+  const avgF=(rows,fn)=>{ const v=rows.map(fn).filter(x=>!isNaN(x)&&x!==0); return v.length?v.reduce((a,b)=>a+b,0)/v.length:NaN; };
+  return Object.values(byGid).map(g=>{
+    const homeRef=(S.homeDataMap&&g.gid&&S.homeDataMap[g.gid])?String(S.homeDataMap[g.gid].homeSalon||'').trim():'';
+    let salon=(homeRef&&g.salons[homeRef])?homeRef:'';
+    if(!salon) salon=Object.keys(g.salons).sort((a,b)=>g.salons[b]-g.salons[a])[0]||'';
+    const am=amOf(salon)||'';
+    return { gid:g.gid,name:g.name,position:g.position,salonNum:salon,salonName:salonDisplay(salon),
+      am, amName:(AMS[am]&&AMS[am].name)||'Unassigned',
+      hours:avgF(g.rows,r=>n(r.floorHours)),cc:avgF(g.rows,r=>n(r.custCount)),hc:avgF(g.rows,r=>n(r.hcTime)),
+      mbc:avgF(g.rows,r=>n(r.mbc)),prod:avgF(g.rows,r=>p(r.product)),nr:avgF(g.rows,r=>p(r.nr)),rr:avgF(g.rows,r=>p(r.rr)),
+      wks:g.rows.length };
+  });
+}
+function _teamCellHtml(c,r){
+  if(c.k==='name'){ const nm=fmtName(r.name||''),nmSafe=nm.replace(/'/g,''); return r.gid?('<span class="salon-link" onclick="openProfile(\''+r.gid+'\',\''+nmSafe+'\')" style="cursor:pointer;">'+nm+'</span>'):nm; }
+  if(c.txt) return c.sv(r)||'';
+  const v=c.sv(r);
+  if(isNaN(v)) return '<span style="color:var(--text-muted);">\u2014</span>';
+  return (c.k==='cc'?String(Math.round(v)):v.toFixed(1))+(c.pct?'%':'');
+}
+function _teamRowHtml(r){
+  return '<tr style="border-bottom:1px solid #eee;">'+TEAM_COLS.map(c=>{
+    const val=c.sv(r), cls=(c.tier&&!isNaN(val))?c.tier(val):'';
+    const style='padding:6px 8px;text-align:'+(c.align==='left'?'left':'center')+';'+((c.k==='name'||c.k==='salon')?'font-weight:600;white-space:nowrap;':'')+(c.muted?'color:var(--text-muted);':'');
+    return '<td class="'+cls+'" style="'+style+'">'+_teamCellHtml(c,r)+'</td>';
+  }).join('')+'</tr>';
+}
+function renderTeamBody(){
+  const tb=document.getElementById('team-tbody'); if(!tb) return;
+  let people=_teamPeople();
+  if(S_teamSearch) people=people.filter(r=>(fmtName(r.name||'')+' '+(r.salonName||'')+' '+(r.position||'')).toLowerCase().includes(S_teamSearch));
+  const col=TEAM_COLS[S_teamSort.col], dir=S_teamSort.dir;
+  const cmp=(a,b)=>{ const va=col.sv(a),vb=col.sv(b); if(col.txt) return String(va).localeCompare(String(vb))*dir; const na=isNaN(va),nb=isNaN(vb); if(na&&nb)return 0; if(na)return 1; if(nb)return -1; return (va-vb)*dir; };
+  let body='';
+  if(S_teamGroup==='none'){ people.sort(cmp); body=people.map(_teamRowHtml).join(''); }
+  else {
+    const keyOf=r=>S_teamGroup==='salon'?(r.salonName||r.salonNum||'\u2014'):(r.amName||'Unassigned');
+    const groups={}; people.forEach(r=>{ const k=keyOf(r); (groups[k]=groups[k]||[]).push(r); });
+    body=Object.keys(groups).sort().map(k=>{ const rows=groups[k].slice().sort(cmp);
+      return '<tr style="background:#eef1f8;"><td colspan="'+TEAM_COLS.length+'" style="padding:6px 10px;font-weight:700;color:#2E4D8A;">'+k+' <span style="font-weight:400;color:var(--text-muted);">· '+rows.length+'</span></td></tr>'+rows.map(_teamRowHtml).join('');
+    }).join('');
+  }
+  tb.innerHTML=body||'<tr><td colspan="'+TEAM_COLS.length+'" style="padding:20px;text-align:center;color:var(--text-muted);">No employee data in this range.</td></tr>';
+  const cnt=document.getElementById('team-count'); if(cnt) cnt.textContent=people.length+' stylists';
+}
+function sortTeam(i){ if(S_teamSort.col===i) S_teamSort.dir*=-1; else S_teamSort={col:i,dir:(TEAM_COLS[i].txt?1:-1)}; renderCompanyTeam(); }
+function setTeamRange(v){ S_teamRange=v; renderCompanyTeam(); }
+function setTeamGroup(v){ S_teamGroup=v; renderCompanyTeam(); }
+function teamSearch(v){ S_teamSearch=(v||'').toLowerCase(); renderTeamBody(); }
+function renderCompanyTeam(){
+  const host=document.getElementById('section-company-team'); if(!host) return;
+  host.style.display='';
+  const rangeOpts=[['8','Last 8 weeks'],['13','Last 13 weeks'],['26','Last 26 weeks'],['ytd','YTD'],['all','All']];
+  const grpOpts=[['none','No grouping'],['salon','Group by salon'],['am','Group by Area Manager']];
+  const thead='<tr style="background:#2E4D8A;color:#fff;">'+TEAM_COLS.map((c,i)=>{ const ar=S_teamSort.col===i?(S_teamSort.dir<0?' \u25BC':' \u25B2'):''; return '<th onclick="sortTeam('+i+')" style="padding:7px 8px;cursor:pointer;white-space:nowrap;text-align:'+(c.align==='left'?'left':'center')+';">'+c.lbl+ar+'</th>'; }).join('')+'</tr>';
+  host.innerHTML='<div class="table-card-header"><h3 style="margin:0;">Team — All Employees</h3></div>'
+    +'<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;padding:8px 4px 12px;">'
+    +'<span style="font-size:12px;">Range <select onchange="setTeamRange(this.value)" style="font-size:12px;padding:3px 6px;border-radius:6px;border:1px solid var(--border);cursor:pointer;">'+rangeOpts.map(o=>'<option value="'+o[0]+'"'+(S_teamRange===o[0]?' selected':'')+'>'+o[1]+'</option>').join('')+'</select></span>'
+    +'<span style="font-size:12px;">Layout <select onchange="setTeamGroup(this.value)" style="font-size:12px;padding:3px 6px;border-radius:6px;border:1px solid var(--border);cursor:pointer;">'+grpOpts.map(o=>'<option value="'+o[0]+'"'+(S_teamGroup===o[0]?' selected':'')+'>'+o[1]+'</option>').join('')+'</select></span>'
+    +'<input type="text" placeholder="Search name / salon\u2026" oninput="teamSearch(this.value)" value="'+S_teamSearch.replace(/"/g,'&quot;')+'" style="font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);flex:1;min-width:160px;max-width:280px;"/>'
+    +'<span id="team-count" style="font-size:11px;color:var(--text-muted);margin-left:auto;"></span>'
+    +'</div>'
+    +'<div style="font-size:11px;color:var(--text-muted);padding:0 4px 8px;">Per-stylist averages over the selected range · hours are <strong>floor hours</strong> · click a name for the full profile · click a column to sort.</div>'
+    +'<div style="background:#fff;border-radius:8px;overflow:auto;box-shadow:0 1px 4px rgba(0,0,0,.12);"><table style="width:100%;border-collapse:collapse;font-size:12.5px;"><thead>'+thead+'</thead><tbody id="team-tbody"></tbody></table></div>';
+  renderTeamBody();
 }
 
 function switchToCompany(){ 
