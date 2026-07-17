@@ -4313,8 +4313,8 @@ function _teamPeople(){
   const byGid={};
   weeks.forEach(w=>{ (w.emps||[]).forEach(e=>{
     const gid=(e.globalId||'').trim()||('name:'+(e.empName||''));
-    const g=byGid[gid]||(byGid[gid]={gid:(e.globalId||'').trim(),name:e.empName,position:e.position,salons:{},rows:[]});
-    g.rows.push(e); if(e.salonNum){ const k=String(e.salonNum).trim(); g.salons[k]=(g.salons[k]||0)+1; }
+    const g=byGid[gid]||(byGid[gid]={gid:(e.globalId||'').trim(),name:e.empName,position:e.position,salons:{},rows:[],weeks:new Set()});
+    g.rows.push(e); g.weeks.add(w.weekEnding); if(e.salonNum){ const k=String(e.salonNum).trim(); g.salons[k]=(g.salons[k]||0)+1; }
   }); });
   const avgF=(rows,fn)=>{ const v=rows.map(fn).filter(x=>!isNaN(x)&&x!==0); return v.length?v.reduce((a,b)=>a+b,0)/v.length:NaN; };
   return Object.values(byGid).map(g=>{
@@ -4326,7 +4326,7 @@ function _teamPeople(){
       am, amName:(AMS[am]&&AMS[am].name)||'Unassigned',
       hours:avgF(g.rows,r=>n(r.floorHours)),cc:avgF(g.rows,r=>n(r.custCount)),hc:avgF(g.rows,r=>n(r.hcTime)),
       mbc:avgF(g.rows,r=>n(r.mbc)),prod:avgF(g.rows,r=>p(r.product)),nr:avgF(g.rows,r=>p(r.nr)),rr:avgF(g.rows,r=>p(r.rr)),
-      wks:g.rows.length };
+      wks:g.weeks.size };
   });
 }
 function _teamCellHtml(c,r){
