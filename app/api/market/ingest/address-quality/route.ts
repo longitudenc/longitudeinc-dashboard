@@ -13,7 +13,7 @@
 // the scrape routes). CORS is opened so the snippet can POST cross-origin from
 // app.powerbi.com; the secret is what actually gates writes.
 //
-// POST body: { "rows": [ { periodKey, periodLabel, salonNum, salonName,
+// POST body: { "rsows": [ { periodKey, periodLabel, salonNum, salonName,
 //                          caqGood, caqImprove, caqBad } , ... ] }
 //   caq* are raw decimals (0.692 = 69.2%). scrapedAt is stamped server-side.
 
@@ -37,12 +37,21 @@ const CORS = {
 }
 
 function authed(request: Request): boolean {
-  const expected = process.env.CRON_SECRET
-  if (!expected) return false
+  // Accept a dedicated CAQ_INGEST_SECRET (preferred — this is what the monthly
+  // browser snippet carries, so a narrow key that can only append CAQ rows), and
+  // still honor CRON_SECRET as a fallback. Either secret may arrive as a Bearer
+  // header or a ?secret= query param.
+  const accepted = [process.env.CAQ_INGEST_SECRET, process.env.CRON_SECRET]
+    .filter((s): s is string => !!s)
+  if (accepted.length === 0) return false
   const auth = request.headers.get('authorization')
-  if (auth === `Bearer ${expected}`) return true
   const url = new URL(request.url)
-  return url.searchParams.get('secret') === expected
+  const provided = auth?.startsWith('Bearer ')
+    ? auth.slice('Bearer '.length)
+    : url.searchParams.get('secret')
+  if (!provided) return false
+  return accepted.includes(provided)
+}
 }
 
 export async function OPTIONS() {
