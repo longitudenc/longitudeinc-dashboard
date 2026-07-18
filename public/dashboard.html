@@ -5989,7 +5989,7 @@ const SALON_COLS=[
   {k:'cc',     lbl:'CC',           sv:r=>n(r.ccThis),              fv:r=>Math.round(n(r.ccThis)),  cl:r=>tierCC(Math.round(n(r.ccThis)))},
   {k:'lyDiff', lbl:'CC +/- LY',    sv:r=>{ const l=LY_AVG[r.salonNum]; return l?n(r.ccThis)-l:-9999; }, fv:r=>{ if(r._wtd)return WTD_DASH; const l=LY_AVG[r.salonNum]; if(!l)return'<span style="color:#aaa">—</span>'; const d=n(r.ccThis)-l; return `<span class="${tc(d)}">${sgn(d,0)}</span>`; }, cl:()=>''},
   {k:'ccG',    lbl:'CC Growth',    sv:r=>p(r.ccGrowth),            fv:r=>(r._wtd||(r._monthly&&!isFinite(Number(r.ccGrowth))))?WTD_DASH:(()=>{ const v=p(r.ccGrowth); return `<span class="${tc(v)}">${sgn(v)}%</span>`; })(), cl:r=>(r._wtd||(r._monthly&&!isFinite(Number(r.ccGrowth))))?'':tierCCG(p(r.ccGrowth))},
-  {k:'sgr',    lbl:'Sales Growth', sv:r=>p(r.salesGrowth),         fv:r=>(r._wtd||r._monthly)?WTD_DASH:(()=>{ const v=p(r.salesGrowth); return `<span class="${tc(v)}">${sgn(v)}%</span>`; })(), cl:()=>''},
+  {k:'sgr',    lbl:'Sales Growth', sv:r=>p(r.salesGrowth),         fv:r=>(r._wtd||(r._monthly&&!isFinite(Number(r.salesGrowth))))?WTD_DASH:(()=>{ const v=p(r.salesGrowth); return `<span class="${tc(v)}">${sgn(v)}%</span>`; })(), cl:()=>''},
   {k:'prod',   lbl:'Product %',    sv:r=>p(r.product),             fv:r=>`${p(r.product).toFixed(1)}%`,  cl:r=>tierProd(p(r.product))},
   {k:'nr',     lbl:'NR %',         sv:r=>p(r.nr),                  fv:r=>r._wtd?WTD_DASH:`${p(r.nr).toFixed(1)}%`,       cl:r=>r._wtd?'':tierNR(p(r.nr))},
   {k:'rr',     lbl:'RR %',         sv:r=>p(r.rr),                  fv:r=>r._wtd?WTD_DASH:`${p(r.rr).toFixed(1)}%`,       cl:r=>r._wtd?'':tierRR(p(r.rr))},
@@ -5997,7 +5997,7 @@ const SALON_COLS=[
   {k:'mbc',    lbl:'MBC',          sv:r=>n(r.mbc),                 fv:r=>`${n(r.mbc).toFixed(1)}`,       cl:r=>tierMBC(n(r.mbc))},
   {k:'ssW',    lbl:'S/S Waits',    sv:r=>p(r.ssWaits),             fv:r=>`${p(r.ssWaits).toFixed(1)}%`,  cl:r=>tierWaits(p(r.ssWaits))},
   {k:'wts',    lbl:'Waits',        sv:r=>p(r.waits),               fv:r=>`${p(r.waits).toFixed(1)}%`,    cl:r=>tierWaits(p(r.waits))},
-  {k:'noc',    lbl:'Non OCI Waits',sv:r=>p(r.nonOciWaits),         fv:r=>r._monthly?WTD_DASH:`${p(r.nonOciWaits).toFixed(1)}%`, cl:r=>r._monthly?'':tierWaits(p(r.nonOciWaits))},
+  {k:'noc',    lbl:'Non OCI Waits',sv:r=>p(r.nonOciWaits),         fv:r=>(r._monthly&&!isFinite(Number(r.nonOciWaits)))?WTD_DASH:`${p(r.nonOciWaits).toFixed(1)}%`, cl:r=>(r._monthly&&!isFinite(Number(r.nonOciWaits)))?'':tierWaits(p(r.nonOciWaits))},
   {k:'pay',    lbl:'Payroll %',    sv:r=>p(r.payroll),             fv:r=>{ const cc=Math.round(n(r.ccThis)),t=payrollTargets(cc); return `${p(r.payroll).toFixed(1)}%<span style="font-size:10px;opacity:.7;"> (≤${t.exc}%)</span>`; }, cl:r=>tierPayroll(p(r.payroll),Math.round(n(r.ccThis)))},
   {k:'cph',    lbl:'CPH',          sv:r=>n(r.cph),                 fv:r=>{ const cc=Math.round(n(r.ccThis)),t=payrollTargets(cc); return `${n(r.cph).toFixed(2)}<span style="font-size:10px;opacity:.7;"> (${t.cph})</span>`; }, cl:r=>tierCPH(n(r.cph),Math.round(n(r.ccThis)))},
   {k:'grating',lbl:'Google',      sv:r=>{ const g=GRATINGS[r.salonNum]; return g&&g.rating!=null?g.rating:-1; }, fv:r=>{ const g=GRATINGS[r.salonNum]; if(!g||g.rating==null)return '<span style="color:#bbb;">—</span>'; const cl=(g.status==='CLOSED_TEMPORARILY'||g.status==='CLOSED_PERMANENTLY')?' <span style="color:#c0392b;font-size:10px;">closed</span>':''; return `${g.rating.toFixed(1)}★<span style="font-size:10px;opacity:.65;"> · ${g.reviews!=null?g.reviews.toLocaleString():'—'}</span>${cl}`; }, cl:()=>''},
@@ -6608,13 +6608,18 @@ function _scopeSalonRows(includeFn){
     // complete and internally consistent. Everything else stays bonus-exact.
     const mw={};
     (S.weekHistory||[]).forEach(w=>{ if(periodKeyFromWeekEnd(w.weekEnding)!==key) return; (w.salons||[]).forEach(sr=>{ const sn=String(sr.salonNum||'').trim(); (mw[sn]=mw[sn]||[]).push(sr); }); });
-    const fill={}; Object.keys(mw).forEach(sn=>{ const a=calcAvgs(mw[sn]); if(a) fill[sn]={hc:a.hc, ccG:a.ccG}; });
+    const fill={}; Object.keys(mw).forEach(sn=>{ const a=calcAvgs(mw[sn]); if(a) fill[sn]={hc:a.hc, ccG:a.ccG, sgr:a.sgr, noc:a.noc}; });
     const rows = period ? (period.salons||[]).filter(sr=>inc(sr.salonNum)).map(sr=>{
       const mr=_mapMonthRow(sr); const f=fill[mr.salonNum];
-      if(f){ if(!isNaN(f.hc)&&f.hc>0) mr.hcTime=f.hc; if(f.ccG!==null&&f.ccG!==undefined&&!isNaN(f.ccG)) mr.ccGrowth=f.ccG; }
+      if(f){
+        if(!isNaN(f.hc)&&f.hc>0) mr.hcTime=f.hc;
+        if(f.ccG!==null&&f.ccG!==undefined&&!isNaN(f.ccG)) mr.ccGrowth=f.ccG;
+        if(f.sgr!==null&&f.sgr!==undefined&&!isNaN(f.sgr)) mr.salesGrowth=f.sgr;
+        if(f.noc!==null&&f.noc!==undefined&&!isNaN(f.noc)) mr.nonOciWaits=f.noc;
+      }
       return mr;
     }).sort((x,y)=>parseInt(x.salonNum,10)-parseInt(y.salonNum,10)) : [];
-    const note = period ? ('Monthly salon summary — the same Σ/Σ figures that drive manager bonuses · '+(period.weeksN!=null?period.weeksN+' weeks':'')+' · HC Time &amp; CC Growth derived from this month&#39;s weekly rows') : ('No monthly summary on record for '+key+'.');
+    const note = period ? ('Monthly salon summary — the same Σ/Σ figures that drive manager bonuses · '+(period.weeksN!=null?period.weeksN+' weeks':'')+' · HC Time, CC Growth, Sales Growth &amp; Non-OCI Waits derived from this month&#39;s weekly rows') : ('No monthly summary on record for '+key+'.');
     return { rows, footer:_ccWeightedAvg(rows), footerLabel:'▸ '+(prior?'PY ':'')+'Month Avg', note };
   }
   // ytd / custom / trailing — pool completed weeks per salon via calcAvgs
