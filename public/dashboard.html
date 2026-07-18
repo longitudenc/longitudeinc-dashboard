@@ -3945,8 +3945,9 @@ function startDashboard(){
 
     Promise.all([
       fetch('/api/gs/getAllData').then(r=>r.json()),
-      fetch('/api/market/ratings-data').then(r=>r.json()).catch(()=>({ratings:{}}))
-    ]).then(([data,rd])=>{ GRATINGS=(rd&&rd.ratings)||{}; onDataLoaded(data); })
+      fetch('/api/market/ratings-data').then(r=>r.json()).catch(()=>({ratings:{}})),
+      fetch('/api/market/caq').then(r=>r.json()).catch(()=>({caq:{}}))
+    ]).then(([data,rd,cq])=>{ GRATINGS=(rd&&rd.ratings)||{}; CAQ=(cq&&cq.caq)||{}; onDataLoaded(data); })
       .catch(err=>{console.error('getAllData failed:',err);onDataLoaded({success:true,weeks:[],trackerData:{},weekCount:0})})
 
   } catch(err) {
@@ -5992,6 +5993,8 @@ function renderScorecard(){
 // ── Salon columns ─────────────────────────────────────────────
 const WTD_DASH='<span style="color:#aaa">—</span>';   // WTD: metric not in daily feed
 let GRATINGS={};
+let CAQ={};        // per-salon { mtd, ytd } address-quality % Good (see /api/market/caq)
+let _caqView='week'; // 'week' | 'ytd' | 'mtd' — which CAQ figure the salon tables show (dash on week)
 const SALON_COLS=[
   {k:'salon',  lbl:'Salon',        sv:r=>r.salonName||r.salonNum,  fv:r=>`<strong><span class="salon-full">${r.salonName||r.salonNum}</span><span class="salon-num">${r.salonNum}</span></strong>`, cl:()=>''},
   {k:'cc',     lbl:'CC',           sv:r=>n(r.ccThis),              fv:r=>Math.round(n(r.ccThis)),  cl:r=>tierCC(Math.round(n(r.ccThis)))},
@@ -6008,6 +6011,7 @@ const SALON_COLS=[
   {k:'noc',    lbl:'Non OCI Waits',sv:r=>p(r.nonOciWaits),         fv:r=>r._monthly?WTD_DASH:`${p(r.nonOciWaits).toFixed(1)}%`, cl:r=>r._monthly?'':tierWaits(p(r.nonOciWaits))},
   {k:'pay',    lbl:'Payroll %',    sv:r=>p(r.payroll),             fv:r=>{ const cc=Math.round(n(r.ccThis)),t=payrollTargets(cc); return `${p(r.payroll).toFixed(1)}%<span style="font-size:10px;opacity:.7;"> (≤${t.exc}%)</span>`; }, cl:r=>tierPayroll(p(r.payroll),Math.round(n(r.ccThis)))},
   {k:'cph',    lbl:'CPH',          sv:r=>n(r.cph),                 fv:r=>{ const cc=Math.round(n(r.ccThis)),t=payrollTargets(cc); return `${n(r.cph).toFixed(2)}<span style="font-size:10px;opacity:.7;"> (${t.cph})</span>`; }, cl:r=>tierCPH(n(r.cph),Math.round(n(r.ccThis)))},
+  {k:'caq',    lbl:'% Good',       sv:r=>{ const c=CAQ[r.salonNum]; if(!c)return -1; const v=(_caqView==='ytd')?c.ytd:c.mtd; return (v==null)?-1:v; }, fv:r=>{ if(_caqView!=='ytd'&&_caqView!=='mtd')return WTD_DASH; const c=CAQ[r.salonNum]; if(!c)return '<span style="color:#bbb;">—</span>'; const v=(_caqView==='ytd')?c.ytd:c.mtd; return (v==null)?'<span style="color:#bbb;">—</span>':`${(v*100).toFixed(1)}%`; }, cl:()=>''},
   {k:'grating',lbl:'Google',      sv:r=>{ const g=GRATINGS[r.salonNum]; return g&&g.rating!=null?g.rating:-1; }, fv:r=>{ const g=GRATINGS[r.salonNum]; if(!g||g.rating==null)return '<span style="color:#bbb;">—</span>'; const cl=(g.status==='CLOSED_TEMPORARILY'||g.status==='CLOSED_PERMANENTLY')?' <span style="color:#c0392b;font-size:10px;">closed</span>':''; return `${g.rating.toFixed(1)}★<span style="font-size:10px;opacity:.65;"> · ${g.reviews!=null?g.reviews.toLocaleString():'—'}</span>${cl}`; }, cl:()=>''},
 ];
 
@@ -6517,7 +6521,7 @@ function buildAvgRow(a,label,showAM=false){
   const lyCell = (a.lyDiff===null || a.lyDiff===undefined)
     ? '—'
     : `<span class="${tc(a.lyDiff)}">${sgn(a.lyDiff,0)}</span>`;
-  const vals=[label,avCC,lyCell,`<span class="${tc(a.ccG)}">${sgn(a.ccG)}%</span>`,`<span class="${tc(a.sgr)}">${sgn(a.sgr)}%</span>`,a.prod.toFixed(1)+'%',a.nr.toFixed(1)+'%',a.rr.toFixed(1)+'%',a.hc.toFixed(1),a.mbc.toFixed(1),a.ssW.toFixed(1)+'%',a.wts.toFixed(1)+'%',a.noc.toFixed(1)+'%',a.pay.toFixed(1)+'%',a.cph.toFixed(2),''];
+  const vals=[label,avCC,lyCell,`<span class="${tc(a.ccG)}">${sgn(a.ccG)}%</span>`,`<span class="${tc(a.sgr)}">${sgn(a.sgr)}%</span>`,a.prod.toFixed(1)+'%',a.nr.toFixed(1)+'%',a.rr.toFixed(1)+'%',a.hc.toFixed(1),a.mbc.toFixed(1),a.ssW.toFixed(1)+'%',a.wts.toFixed(1)+'%',a.noc.toFixed(1)+'%',a.pay.toFixed(1)+'%',a.cph.toFixed(2),'',''];
   if(showAM) vals.splice(1,0,'');
   return `<tr class="avg-row">${vals.map(v=>`<td>${v}</td>`).join('')}</tr>`;
 }
@@ -6694,7 +6698,7 @@ function _salonYtdRow(a){
     <td class="${tierWaits(a.wts)}">${a.wts.toFixed(1)}%</td>
     <td class="${tierWaits(a.noc)}">${a.noc.toFixed(1)}%</td>
     <td class="${tierPayroll(a.pay,avCC)}">${a.pay.toFixed(1)}%</td>
-    <td>${a.cph.toFixed(2)}</td></tr>`;
+    <td>${a.cph.toFixed(2)}</td><td></td></tr>`;
 }
 
 function renderSalonTab(){
@@ -6712,6 +6716,7 @@ function _renderSalonTabBody(){
   const R=_salonScopeRows(S.currentAM);
   const rows=R.rows, a=R.footer, ytdA=calcYTDAvgs(S.currentAM);
   const inProg=(S_scope.tf==='wtd'||S_scope.tf==='mtd');
+  _caqView = (S_scope.tf==='ytd')?'ytd':(S_scope.tf==='month'||S_scope.tf==='mtd')?'mtd':'week';
   const hideCcChg=inProg, hideSales=inProg||S_scope.tf==='month';
   const N=rows.length;
   const ccT=r=>tierCC(Math.round(n(r.ccThis))), payT=r=>tierPayroll(p(r.payroll),Math.round(n(r.ccThis))), prodT=r=>tierProd(p(r.product));
@@ -6735,6 +6740,7 @@ function _renderSalonTabBody(){
 }
 
 function sortSalon(ci){
+  _caqView = (S_scope.tf==='ytd')?'ytd':(S_scope.tf==='month'||S_scope.tf==='mtd')?'mtd':'week';
   const cur=S.sortState['salon']; const asc=!(cur&&cur.col===ci&&cur.asc); S.sortState['salon']={col:ci,asc};
   updateHeadSort(document.getElementById('salon-thead'),ci,asc);
   const R=_salonScopeRows(S.currentAM); const sorted=sortRows(R.rows,SALON_COLS,ci,asc); const ytdA=calcYTDAvgs(S.currentAM);
@@ -7661,6 +7667,7 @@ function renderCompany(){
     // in renderCompanyBonus via the role check).
     const isYTD = S_globalMode === 'ytd';
     const isMTD = S_globalMode === 'mtd';
+    _caqView = isYTD?'ytd':isMTD?'mtd':'week';
     const snap = isMTD ? S_mtdSnap : getSnap();
     // Company view = current organization only (matches the SD3 report scope):
     // exclude salons sold/closed as of today (e.g. 8725) from every roll-up.
@@ -7795,6 +7802,7 @@ function renderCompany(){
         <td class="${tierWaits(a.noc)}">${a.noc.toFixed(1)}%</td>
         <td class="${tierPayroll(a.pay,avCC)}">${a.pay.toFixed(1)}%</td>
         <td>${a.cph.toFixed(2)}</td>
+        <td></td>
       </tr>`;
     }
     if(isYTD){
