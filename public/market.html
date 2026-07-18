@@ -403,18 +403,22 @@ function renderMap(){
   }
   Object.values(MARKERS).forEach(m=>MAP.removeLayer(m)); MARKERS={};
   const d=metricDef(CUR_METRIC), pts=[], rm=rankMap(CUR_METRIC), total=rm.size;
+  const svals=ROWS.filter(r=>hasVal(r,CUR_METRIC)).map(r=>num(r[CUR_METRIC]));
+  const vmin=svals.length?Math.min(...svals):0, vmax=svals.length?Math.max(...svals):1, RMIN=5, RMAX=18;
+  const radiusFor=r=>{ if(!hasVal(r,CUR_METRIC)) return 4; const t=(vmax>vmin)?(num(r[CUR_METRIC])-vmin)/(vmax-vmin):0.5; return RMIN+t*(RMAX-RMIN); };
   ROWS.forEach(r=>{
     const lat=num(r.lat),lng=num(r.lng); if(lat===null||lng===null) return;
-    const us=r.do===US,col=OPCOLOR[r.do]||'#888';
-    const mk=L.circleMarker([lat,lng],{radius:us?9:7,weight:us?3:1.4,color:us?US_RING:'#fff',fillColor:col,fillOpacity:.9}).addTo(MAP);
+    const us=r.do===US,col=OPCOLOR[r.do]||'#888',baseR=radiusFor(r);
+    const mk=L.circleMarker([lat,lng],{radius:baseR,weight:us?3:1.4,color:us?US_RING:'#fff',fillColor:col,fillOpacity:.85}).addTo(MAP);
+    mk._baseR=baseR;
     mk.bindPopup(buildPopup(r,rm,total),{maxWidth:340,minWidth:270});
     MARKERS[r.salonNum]=mk; pts.push([lat,lng]);
   });
   const counts=opCounts(), order=Object.keys(OPCOLOR).filter(o=>counts[o]), leg=document.getElementById('map-legend');
-  if(leg) leg.innerHTML='<div class="legend">'+order.map(o=>'<div class="li"><span class="dot" style="background:'+OPCOLOR[o]+'"></span>'+o+(o===US?' (you)':'')+' <span style="color:#6b7a74;">'+counts[o]+'</span></div>').join('')+'</div>';
+  if(leg) leg.innerHTML='<div class="legend">'+order.map(o=>'<div class="li"><span class="dot" style="background:'+OPCOLOR[o]+'"></span>'+o+(o===US?' (you)':'')+' <span style="color:#6b7a74;">'+counts[o]+'</span></div>').join('')+'<div style="margin-top:5px;border-top:1px solid #eee;padding-top:4px;font-size:10.5px;color:#6b7a74;">◉ dot size = '+esc(d.label)+'</div></div>';
   if(pts.length&&!MAP._fitted){ MAP.invalidateSize(); MAP.fitBounds(pts,{padding:[30,30]}); MAP.setZoom(MAP.getZoom()+1); MAP._fitted=true; }
 }
-function emphasize(sn,on){ const mk=MARKERS[sn]; if(!mk) return; const r=ROWS.find(x=>x.salonNum===sn),us=r&&r.do===US; mk.setStyle({radius:on?(us?13:12):(us?9:7),weight:on?4:(us?3:1.4)}); if(on) mk.bringToFront(); }
+function emphasize(sn,on){ const mk=MARKERS[sn]; if(!mk) return; const r=ROWS.find(x=>x.salonNum===sn),us=r&&r.do===US; const base=mk._baseR||(us?9:7); mk.setRadius(on?base+5:base); mk.setStyle({weight:on?4:(us?3:1.4)}); if(on) mk.bringToFront(); }
 function hoverRow(el,sn){ el.addEventListener('mouseenter',()=>emphasize(sn,true)); el.addEventListener('mouseleave',()=>emphasize(sn,false)); el.addEventListener('click',()=>{ const mk=MARKERS[sn]; if(mk){ MAP.panTo(mk.getLatLng()); mk.openPopup(); } }); el.style.cursor='pointer'; }
 function renderScorecard(empty){
   const el=document.getElementById('c-score'), d=metricDef(CUR_METRIC);
