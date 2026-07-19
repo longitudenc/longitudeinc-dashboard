@@ -105,7 +105,7 @@
 <body>
 <header>
   <h1>🗺 CLT Market Compare</h1>
-  <span class="modetog"><button id="mode-map" class="active" onclick="setMode('map')">🗺 Map</button><button id="mode-trends" onclick="setMode('trends')">📈 Trends</button></span>
+  <span class="modetog"><button id="mode-map" class="active" onclick="setMode('map')">🗺 Map</button><button id="mode-trends" onclick="setMode('trends')">📈 Trends</button><button id="mode-score" onclick="setMode('score')">🏆 Scoreboard</button></span>
   <div class="controls" id="map-controls">
     <span class="map-ctrl"><label>Timeframe</label><select id="sel-tf">
       <option value="week">Single week</option><option value="month">Month</option>
@@ -288,11 +288,14 @@ function setMode(m){
   MODE=m;
   document.getElementById('mode-map').classList.toggle('active',m==='map');
   document.getElementById('mode-trends').classList.toggle('active',m==='trends');
+  document.getElementById('mode-score').classList.toggle('active',m==='score');
   document.querySelectorAll('.map-ctrl').forEach(e=>e.style.display=(m==='map')?'':'none');
-  const mw=document.getElementById('mapwrap'), tw=document.getElementById('trendwrap');
+  const mw=document.getElementById('mapwrap'), tw=document.getElementById('trendwrap'), sw=document.getElementById('scorewrap');
   if(mw) mw.style.display=(m==='map')?'':'none';
   if(tw) tw.style.display=(m==='trends')?'':'none';
+  if(sw) sw.style.display=(m==='score')?'':'none';
   if(m==='map'){ renderAll(); syncControls(); if(MAP) setTimeout(()=>MAP.invalidateSize(),60); document.getElementById('summary').style.display=''; }
+  else if(m==='score'){ document.getElementById('summary').style.display=''; renderScoreboard(); }
   else { document.getElementById('summary').style.display='none'; renderTrends(); }
 }
 
@@ -310,7 +313,8 @@ function buildShell(){
       '<div class="card" id="c-vsmkt"></div><div class="card" id="c-score"></div><div class="card" id="c-avgrank"></div>'+
       '<div class="card" id="c-ranks"></div><div class="card" id="c-outliers"></div><div class="card" id="c-prox"></div>'+
     '</div></div>'+
-    '<div class="trend-wrap" id="trendwrap" style="display:none;"><div class="trend-sidebar" id="trend-sidebar"></div><div class="trend-main" id="trend-main"></div></div>';
+    '<div class="trend-wrap" id="trendwrap" style="display:none;"><div class="trend-sidebar" id="trend-sidebar"></div><div class="trend-main" id="trend-main"></div></div>'+
+    '<div id="scorewrap" style="display:none;padding:14px;overflow:auto;"></div>';
   const sb=document.getElementById('trend-sidebar');
   sb.innerHTML='<div class="trend-sidebar-label">Metric</div>'+METRICS.filter(m=>!m.noTrend).map(m=>'<button class="tmetric-btn'+(m.k===T_METRIC?' active':'')+'" data-k="'+m.k+'" onclick="selectTMetric(\''+m.k+'\')">'+m.label+'</button>').join('');
 }
@@ -536,6 +540,95 @@ function pointSVG(style,color){
     rectRounded:'<svg width="'+s+'" height="'+s+'"><rect x="1" y="1" width="'+(s-2)+'" height="'+(s-2)+'" rx="3" fill="'+color+'"/></svg>'
   };
   return shapes[style]||shapes.circle;
+}
+
+// ══ SCOREBOARD MODE ═══════════════════════════════════════════
+// Composite score: every scored metric is converted to a 0–100 percentile
+// across all salons (flipped so 100 = best), then averaged. Percentiles keep
+// one outlier from dominating and let metrics on different scales weigh equally.
+const SCORE_METRICS=[
+  {k:'cc',          lbl:'CC',        hi:true},
+  {k:'ccChg',       lbl:'Growth',    hi:true},
+  {k:'cph',         lbl:'CPH',       hi:true},
+  {k:'invoice',     lbl:'Invoice',   hi:true},
+  {k:'product',     lbl:'Product',   hi:true},
+  {k:'nr',          lbl:'NR',        hi:true},
+  {k:'rr',          lbl:'RR',        hi:true},
+  {k:'newCust',     lbl:'New Cust',  hi:true},
+  {k:'oci',         lbl:'% OCI',     hi:true},
+  {k:'rating',      lbl:'Rating',    hi:true},
+  {k:'reviews',     lbl:'Reviews',   hi:true},
+  {k:'payroll',     lbl:'Payroll',   hi:false},
+  {k:'waits',       lbl:'Waits',     hi:false},
+  {k:'ssWaits',     lbl:'S/S Wait',  hi:false},
+  {k:'nonOciWaits', lbl:'Non-OCI',   hi:false},
+  {k:'mbc',         lbl:'MBC',       hi:false},
+  {k:'hcTime',      lbl:'HC Time',   hi:false},
+  {k:'serviceDisc', lbl:'Svc Disc',  hi:false},
+  {k:'voidPct',     lbl:'Void',      hi:false},
+];
+let SC_OP='__ALL__', SC_SORT={k:'__score',dir:-1};
+function computeScores(){
+  const pcts={};   // metric -> {salonNum: percentile}
+  SCORE_METRICS.forEach(m=>{
+    const vals=ROWS.filter(r=>hasVal(r,m.k)).map(r=>({sn:r.salonNum,v:num(r[m.k])}));
+    const n=vals.length, map={};
+    if(n>1){
+      const sorted=vals.map(x=>x.v).sort((a,b)=>a-b);
+      vals.forEach(x=>{
+        let lo=0,eq=0;
+        for(const s of sorted){ if(s<x.v) lo++; else if(s===x.v) eq++; }
+        let p=((lo+0.5*eq)/n)*100;
+        map[x.sn]=m.hi?p:100-p;
+      });
+    } else if(n===1){ map[vals[0].sn]=50; }
+    pcts[m.k]=map;
+  });
+  return ROWS.map(r=>{
+    const per={}; let sum=0,cnt=0;
+    SCORE_METRICS.forEach(m=>{ const p=pcts[m.k][r.salonNum]; if(p!==undefined){ per[m.k]=p; sum+=p; cnt++; } });
+    return { r, per, score:cnt?sum/cnt:null, n:cnt };
+  }).filter(x=>x.score!==null).sort((a,b)=>b.score-a.score);
+}
+function scColor(p){
+  if(p===undefined) return 'background:#f7f9f8;color:#c3ccc8;';
+  const t=p/100, r=Math.round(250-t*(250-225)), g=Math.round(232+t*(244-232)), b=Math.round(230-t*(230-233));
+  const strong=p>=75||p<=25;
+  return 'background:'+(p>=50?('rgba(28,138,78,'+(0.07+ (t-0.5)*0.5)+')'):('rgba(192,57,43,'+(0.07+(0.5-t)*0.5)+')'))+';'+(strong?'font-weight:700;':'');
+}
+function setScOp(v){ SC_OP=v; renderScoreboard(); }
+function sortSc(k){ if(SC_SORT.k===k) SC_SORT.dir*=-1; else SC_SORT={k,dir:-1}; renderScoreboard(); }
+function renderScoreboard(){
+  const host=document.getElementById('scorewrap'); if(!host) return;
+  let scored=computeScores();
+  const ranks={}; scored.forEach((x,i)=>ranks[x.r.salonNum]=i+1);   // rank across ALL salons
+  if(SC_OP!=='__ALL__') scored=scored.filter(x=>x.r.do===SC_OP);
+  if(SC_SORT.k!=='__score'){ const k=SC_SORT.k,d=SC_SORT.dir; scored.sort((a,b)=>{ const va=a.per[k],vb=b.per[k]; if(va===undefined&&vb===undefined)return 0; if(va===undefined)return 1; if(vb===undefined)return -1; return (va-vb)*d; }); }
+  else scored.sort((a,b)=>(a.score-b.score)*SC_SORT.dir);
+  const ops=Object.keys(opCounts()).sort(), opOpts=['__ALL__',US].concat(ops.filter(o=>o!==US)).filter((v,i,a)=>a.indexOf(v)===i);
+  const arrow=k=>SC_SORT.k===k?(SC_SORT.dir<0?' \u25BC':' \u25B2'):'';
+  const head='<tr style="background:var(--primary);color:#fff;">'
+    +'<th style="padding:7px 6px;text-align:right;">#</th>'
+    +'<th style="padding:7px 8px;text-align:left;">Salon</th>'
+    +'<th onclick="sortSc(\'__score\')" style="padding:7px 8px;cursor:pointer;white-space:nowrap;">Score'+arrow('__score')+'</th>'
+    +SCORE_METRICS.map(m=>'<th onclick="sortSc(\''+m.k+'\')" title="'+(m.hi?'higher is better':'lower is better')+'" style="padding:7px 5px;cursor:pointer;white-space:nowrap;font-size:10.5px;">'+m.lbl+arrow(m.k)+'</th>').join('')
+    +'</tr>';
+  const body=scored.map(x=>{
+    const us=x.r.do===US, col=OPCOLOR[x.r.do]||'#888';
+    return '<tr style="border-bottom:1px solid #eef2f0;'+(us?'background:#fff6ef;':'')+'">'
+      +'<td style="padding:5px 6px;text-align:right;color:#6b7a74;font-variant-numeric:tabular-nums;">'+ranks[x.r.salonNum]+'</td>'
+      +'<td style="padding:5px 8px;white-space:nowrap;"><span class="dot" style="background:'+col+';display:inline-block;margin-right:6px;"></span><a href="#" onclick="viewSalonTrend(\''+x.r.salonNum+'\');return false;" style="color:inherit;text-decoration:none;font-weight:600;">'+esc(x.r.name)+'</a> <small style="color:#6b7a74;">#'+esc(x.r.salonNum)+(SC_OP==='__ALL__'?' \u00b7 '+esc(x.r.do):'')+'</small></td>'
+      +'<td style="padding:5px 8px;text-align:center;font-weight:800;font-size:13.5px;color:'+(x.score>=50?'#1c8a4e':'#c0392b')+';">'+x.score.toFixed(1)+'</td>'
+      +SCORE_METRICS.map(m=>{ const p=x.per[m.k]; return '<td style="padding:5px 4px;text-align:center;font-size:11px;'+scColor(p)+'">'+(p===undefined?'\u2014':Math.round(p))+'</td>'; }).join('')
+      +'</tr>';
+  }).join('');
+  host.innerHTML='<div class="card" style="overflow:visible;">'
+    +'<h2>Overall Scoreboard<span class="sub">composite of '+SCORE_METRICS.length+' metrics \u00b7 100 = best in market</span></h2>'
+    +'<div style="padding:9px 13px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--muted);">'
+    +'<span>Operator <select onchange="setScOp(this.value)" style="font-size:12px;padding:3px 7px;border-radius:7px;border:1px solid var(--line);background:#fff;color:var(--ink);cursor:pointer;">'
+    +opOpts.map(o=>'<option value="'+o+'"'+(o===SC_OP?' selected':'')+'>'+(o==='__ALL__'?'All operators':(o===US?o+' (you)':o))+'</option>').join('')+'</select></span>'
+    +'<span>Each cell is that salon\u2019s percentile on the metric (100 = best). Click a header to sort, a salon to see its trends.</span></div>'
+    +'<div style="overflow:auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;"><thead>'+head+'</thead><tbody>'+body+'</tbody></table></div></div>';
 }
 
 function renderTrends(){
