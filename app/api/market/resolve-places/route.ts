@@ -13,6 +13,11 @@
 //          into MarketWeekly so the salon appears on the map. Use for new stores.
 //   GET ...&only=4138&placeId=ChIJ....
 //        → pin ONE salon to an exact place ID (also backfills coords if missing).
+//   GET ...&only=4138&lat=34.97718598&lng=-81.02745031
+//        → resolve ONE salon by proximity to SUPPLIED coordinates, and force-write
+//          those coordinates into MarketWeekly (every week's row) so the salon
+//          appears on the market map. Use when a salon has no coords, or has the
+//          wrong ones. Combine with &query=... to also constrain the text search.
 //
 // Requires env GOOGLE_PLACES_KEY (Places API New enabled + billing on).
 
@@ -131,6 +136,15 @@ export async function GET(request: Request) {
     const query = params.get('query') || undefined
     const placeId = params.get('placeId') || undefined
 
+    // Optional explicit coordinates. Both must be present and finite.
+    const latRaw = params.get('lat'), lngRaw = params.get('lng')
+    const latOv = latRaw == null ? NaN : parseFloat(latRaw)
+    const lngOv = lngRaw == null ? NaN : parseFloat(lngRaw)
+    const hasCoordOverride = Number.isFinite(latOv) && Number.isFinite(lngOv)
+    if ((latRaw != null || lngRaw != null) && !hasCoordOverride) {
+      return NextResponse.json({ ok: false, error: 'lat and lng must BOTH be supplied as finite numbers' }, { status: 400 })
+    }
+
     const raw = (await readSheet(SRC_TAB)) || []
     const header: string[] = (raw[0] || []).map((h: any) => String(h))
     const objs = rowsToObjects(raw)
@@ -145,9 +159,14 @@ export async function GET(request: Request) {
     else salons = salons.filter(hasCoords)   // bulk run: only salons that already have coords
     if (salons.length === 0) return NextResponse.json({ ok: false, error: 'no matching salons' }, { status: 400 })
 
-    if ((query || placeId) && salons.length !== 1) {
-      return NextResponse.json({ ok: false, error: 'query/placeId overrides require &only=<salonNum>' }, { status: 400 })
+    if ((query || placeId || hasCoordOverride) && salons.length !== 1) {
+      return NextResponse.json({ ok: false, error: 'query/placeId/lat+lng overrides require &only=<salonNum>' }, { status: 400 })
     }
+
+    // Remember whether the sheet already had coords BEFORE we apply any override,
+    // so the existing coord-backfill rule for coord-less salons still behaves.
+    const hadCoordsInSheet = salons.length === 1 ? hasCoords(salons[0]) : false
+    if (hasCoordOverride) salons[0] = { ...salons[0], lat: latOv, lng: lngOv }
 
     let results: any[]
     if (placeId) results = [await resolveByPlaceId(key, salons[0], placeId)]
@@ -156,9 +175,13 @@ export async function GET(request: Request) {
 
     // If a single coord-less salon was just resolved, write its coordinates into MarketWeekly.
     let coordsWritten = 0
-    if (only && results.length === 1 && results[0].placeId && !hasCoords(salons[0])) {
+    if (only && results.length === 1 && results[0].placeId) {
       const r0 = results[0]
-      if (typeof r0._lat === 'number' && typeof r0._lng === 'number') {
+      if (hasCoordOverride) {
+        // Explicit coords win: write exactly what was supplied (the salon's real
+        // location), not the matched listing's pin, so the map is authoritative.
+        coordsWritten = await backfillCoords(objs, header, salons[0].salonNum, latOv, lngOv)
+      } else if (!hadCoordsInSheet && typeof r0._lat === 'number' && typeof r0._lng === 'number') {
         coordsWritten = await backfillCoords(objs, header, salons[0].salonNum, r0._lat, r0._lng)
       }
     }
@@ -177,6 +200,7 @@ export async function GET(request: Request) {
       resolved: good.length,
       errored: errors.length,
       coordsWrittenToMarketWeekly: coordsWritten,
+      coordSource: hasCoordOverride ? `supplied ${latOv},${lngOv}` : (hadCoordsInSheet ? 'MarketWeekly' : 'discovered'),
       flaggedForReview: flagged.length,
       flagged: flagged.map((r: any) => ({ salonNum: r.salonNum, salonName: r.salonName, matchedName: r.matchedName, matchedAddress: r.matchedAddress, businessStatus: r.businessStatus, distanceM: r.distanceM })),
       errors: errors.map((r: any) => ({ salonNum: r.salonNum, salonName: r.salonName, error: r.error })),
