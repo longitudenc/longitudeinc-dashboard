@@ -96,6 +96,13 @@ export async function getEmployeeWeeklyConsolidated() {
 export async function getSalonSummaries() {
   return rowsToObjects(await readSheet('SalonSummaryData'))
 }
+// SalonCAQData — address-quality figures imported from Power BI (manual process),
+// one row per (periodKey, salonNum). Monthly only. Tolerant of a missing tab so
+// getAllData never hard-fails before the first import.
+export async function getSalonCAQ() {
+  try { return rowsToObjects(await readSheet('SalonCAQData')) }
+  catch { return [] }
+}
 export async function getPayrollConsolidated() {
   return rowsToObjects(await readSheet('PayrollConsolidatedData'))
 }
@@ -249,6 +256,7 @@ export async function getAllDashboardData() {
     trackerRows,
     payrollWeeklyRows,
     empWeeklyConsRows,
+    salonCaqRows,
   ] = await Promise.all([
     getSalonWeeks(),
     getEmployeeWeeks(),
@@ -262,6 +270,7 @@ export async function getAllDashboardData() {
     getTrackerData(),
     getPayrollWeekly(),
     getEmployeeWeeklyConsolidated(),
+    getSalonCAQ(),
   ])
 
   return {
@@ -277,6 +286,7 @@ export async function getAllDashboardData() {
     trackerRows,
     payrollWeeklyRows,
     empWeeklyConsRows,
+    salonCaqRows,
   }
 }
 

@@ -6000,6 +6000,7 @@ const SALON_COLS=[
   {k:'noc',    lbl:'Non OCI Waits',sv:r=>p(r.nonOciWaits),         fv:r=>(r._monthly&&!isFinite(Number(r.nonOciWaits)))?WTD_DASH:`${p(r.nonOciWaits).toFixed(1)}%`, cl:r=>(r._monthly&&!isFinite(Number(r.nonOciWaits)))?'':tierWaits(p(r.nonOciWaits))},
   {k:'pay',    lbl:'Payroll %',    sv:r=>p(r.payroll),             fv:r=>{ const cc=Math.round(n(r.ccThis)),t=payrollTargets(cc); return `${p(r.payroll).toFixed(1)}%<span style="font-size:10px;opacity:.7;"> (≤${t.exc}%)</span>`; }, cl:r=>tierPayroll(p(r.payroll),Math.round(n(r.ccThis)))},
   {k:'cph',    lbl:'CPH',          sv:r=>n(r.cph),                 fv:r=>{ const cc=Math.round(n(r.ccThis)),t=payrollTargets(cc); return `${n(r.cph).toFixed(2)}<span style="font-size:10px;opacity:.7;"> (${t.cph})</span>`; }, cl:r=>tierCPH(n(r.cph),Math.round(n(r.ccThis)))},
+  {k:'caq',    lbl:'Address Quality', sv:r=>{ const v=Number(r.caq); return isFinite(v)?v:-1; }, fv:r=>{ const v=Number(r.caq); return isFinite(v)?v.toFixed(1)+'%':WTD_DASH; }, cl:()=>''},
   {k:'grating',lbl:'Google',      sv:r=>{ const g=GRATINGS[r.salonNum]; return g&&g.rating!=null?g.rating:-1; }, fv:r=>{ const g=GRATINGS[r.salonNum]; if(!g||g.rating==null)return '<span style="color:#bbb;">—</span>'; const cl=(g.status==='CLOSED_TEMPORARILY'||g.status==='CLOSED_PERMANENTLY')?' <span style="color:#c0392b;font-size:10px;">closed</span>':''; return `${g.rating.toFixed(1)}★<span style="font-size:10px;opacity:.65;"> · ${g.reviews!=null?g.reviews.toLocaleString():'—'}</span>${cl}`; }, cl:()=>''},
 ];
 
@@ -6509,7 +6510,7 @@ function buildAvgRow(a,label,showAM=false){
   const lyCell = (a.lyDiff===null || a.lyDiff===undefined)
     ? '—'
     : `<span class="${tc(a.lyDiff)}">${sgn(a.lyDiff,0)}</span>`;
-  const vals=[label,avCC,lyCell,`<span class="${tc(a.ccG)}">${sgn(a.ccG)}%</span>`,`<span class="${tc(a.sgr)}">${sgn(a.sgr)}%</span>`,a.prod.toFixed(1)+'%',a.nr.toFixed(1)+'%',a.rr.toFixed(1)+'%',a.hc.toFixed(1),a.mbc.toFixed(1),a.ssW.toFixed(1)+'%',a.wts.toFixed(1)+'%',a.noc.toFixed(1)+'%',a.pay.toFixed(1)+'%',a.cph.toFixed(2),''];
+  const vals=[label,avCC,lyCell,`<span class="${tc(a.ccG)}">${sgn(a.ccG)}%</span>`,`<span class="${tc(a.sgr)}">${sgn(a.sgr)}%</span>`,a.prod.toFixed(1)+'%',a.nr.toFixed(1)+'%',a.rr.toFixed(1)+'%',a.hc.toFixed(1),a.mbc.toFixed(1),a.ssW.toFixed(1)+'%',a.wts.toFixed(1)+'%',a.noc.toFixed(1)+'%',a.pay.toFixed(1)+'%',a.cph.toFixed(2),(isFinite(Number(a.caq))?Number(a.caq).toFixed(1)+'%':''),''];
   if(showAM) vals.splice(1,0,'');
   return `<tr class="avg-row">${vals.map(v=>`<td>${v}</td>`).join('')}</tr>`;
 }
@@ -6551,13 +6552,26 @@ function _scopeInit(){
 // SalonSummaryData salon row → the field shape SALON_COLS reads. _monthly flags
 // the row so the SALON_COLS Sales-Growth / Non-OCI cells blank (no such figure in
 // the monthly summary) while payroll/product/NR/RR stay exact (bonus parity).
+// Address quality (CAQ) arrives from the SalonCAQData tab as a fraction (0.833),
+// but readSheet returns FORMATTED cell values, so a percent-formatted cell can
+// come through as "83.3%". Accept either, plus a bare 83.3, and normalise to a
+// percentage. Returns NaN when there's no usable value so the cell blanks.
+function _caqPct(v){
+  if(v===null||v===undefined||v==='') return NaN;
+  const str=String(v).trim(); const pct=str.indexOf('%')>=0;
+  const x=parseFloat(str.replace('%','').replace(/,/g,''));
+  if(isNaN(x)) return NaN;
+  if(pct) return x;
+  return x<=1 ? x*100 : x;
+}
 function _mapMonthRow(sr){
   const sn=String(sr.salonNum||'').trim();
   const payRaw = (sr.adjPayrollPct!=null && !isNaN(_pf(sr.adjPayrollPct))) ? sr.adjPayrollPct : sr.payrollPct;
   return { salonNum:sn, salonName:(SALON_NAMES[sn]||sn), _monthly:true,
     ccThis:_pf(sr.avgWeeklyCC), ccGrowth:NaN, salesGrowth:NaN,
     product:_pf(sr.productPct), nr:_pf(sr.nr), rr:_pf(sr.rr), hcTime:NaN, mbc:_pf(sr.mbc),
-    ssWaits:_pf(sr.ssWaits), waits:_pf(sr.waits), nonOciWaits:NaN, payroll:_pf(payRaw), cph:_pf(sr.cph) };
+    ssWaits:_pf(sr.ssWaits), waits:_pf(sr.waits), nonOciWaits:NaN, payroll:_pf(payRaw), cph:_pf(sr.cph),
+    caq:_caqPct(sr.caqGood) };
 }
 
 // CC-weighted roll-up for a set of already-aggregated salon rows (used for the
@@ -6567,17 +6581,20 @@ function _ccWeightedAvg(rows){
   if(!rows||!rows.length) return null;
   let wcc=0, ccSum=0, ccN=0, ccgSum=0, ccgN=0;
   const acc={product:0,nr:0,rr:0,ssWaits:0,waits:0,nonOciWaits:0,payroll:0,mbc:0,hcTime:0,cph:0};
+  let caqX=0, caqW=0;
   rows.forEach(r=>{
     const cc=n(r.ccThis); if(!isNaN(cc)){ ccSum+=cc; ccN++; }
     if(cc>0){ wcc+=cc;
       for(const k of ['product','nr','rr','ssWaits','waits','nonOciWaits','payroll']){ const v=p(r[k]); if(!isNaN(v)) acc[k]+=v*cc; }
-      acc.mbc+=n(r.mbc)*cc; acc.hcTime+=n(r.hcTime)*cc; acc.cph+=n(r.cph)*cc; }
+      acc.mbc+=n(r.mbc)*cc; acc.hcTime+=n(r.hcTime)*cc; acc.cph+=n(r.cph)*cc;
+      const q=Number(r.caq); if(isFinite(q)){ caqX+=q*cc; caqW+=cc; } }
     const g=p(r.ccGrowth); if(!isNaN(g) && r.ccGrowth!==undefined && r.ccGrowth!==null && r.ccGrowth!=='' ){ ccgSum+=g; ccgN++; }
   });
   const W=v=>wcc?v/wcc:0;
   return { cc:ccN?ccSum/ccN:0, ccG:ccgN?ccgSum/ccgN:0, sgr:0,
     prod:W(acc.product), nr:W(acc.nr), rr:W(acc.rr), ssW:W(acc.ssWaits), wts:W(acc.waits), noc:W(acc.nonOciWaits),
-    mbc:W(acc.mbc), hc:W(acc.hcTime), pay:W(acc.payroll), cph:W(acc.cph), lyDiff:null };
+    mbc:W(acc.mbc), hc:W(acc.hcTime), pay:W(acc.payroll), cph:W(acc.cph), lyDiff:null,
+    caq:(caqW?caqX/caqW:NaN) };
 }
 
 // Resolve S_scope → { rows (SALON_COLS shape), footer (buildAvgRow shape), footerLabel, note }
@@ -12965,4 +12982,4 @@ function submitFeedback(){
 }
 </script>
 </body>
-</htl>
+</html>

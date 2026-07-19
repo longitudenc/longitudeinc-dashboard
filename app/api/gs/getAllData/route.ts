@@ -201,6 +201,23 @@ function formatAllData(raw: any, scrapedWeeks: any[], rosterRows: any[]) {
     ssMap[pk].salons.push(row)
   })
 
+  // ── Address quality (CAQ) ──────────────────────────────────
+  // Power BI import, monthly only. Joined onto the salon-summary rows by
+  // (periodKey, salonNum) so the dashboard's Month view can show it without a
+  // second fetch. Only caqGood is surfaced; caqImprove/caqBad stay in the sheet.
+  const caqIdx: Record<string, any> = {}
+  ;((raw as any).salonCaqRows || []).forEach((row: any) => {
+    const pk = String(row.periodKey ?? '').trim()
+    const sn = String(row.salonNum ?? '').trim()
+    if (pk && sn) caqIdx[pk + '|' + sn] = row.caqGood
+  })
+  Object.values(ssMap).forEach((per: any) => {
+    per.salons.forEach((s: any) => {
+      const v = caqIdx[per.periodKey + '|' + String(s.salonNum ?? '').trim()]
+      if (v !== undefined && v !== '') s.caqGood = v
+    })
+  })
+
   // ── Payroll consolidated periods ───────────────────────────
   const pcMap: Record<string, any> = {}
   raw.payrollRows.forEach((row: any) => {
