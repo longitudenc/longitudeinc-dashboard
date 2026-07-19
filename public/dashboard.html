@@ -3025,6 +3025,7 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
               <button class="trend-metric-btn" onclick="selectTrendMetric('noc',this)">Non OCI Waits %</button>
               <button class="trend-metric-btn" onclick="selectTrendMetric('pay',this)">Payroll %</button>
               <button class="trend-metric-btn" onclick="selectTrendMetric('cph',this)">CPH</button>
+              <button class="trend-metric-btn" onclick="selectTrendMetric('caq',this)">Address Quality</button>
             </div>
             <div class="trend-chart-area" id="trend-chart-area">
               <div class="no-data"><div class="no-data-icon">📈</div>Select a metric to view trend</div>
@@ -6564,6 +6565,27 @@ function _caqPct(v){
   if(pct) return x;
   return x<=1 ? x*100 : x;
 }
+// Address-quality TREND support. CAQ is a MONTHLY metric, so its chart runs on a
+// month axis built from SalonSummaryData periods. Each period is shaped like a
+// week object ({weekEnding, salons:[{salonNum,...}]}) so every downstream dataset
+// builder in selectTrendMetric works unchanged.
+function _caqUnits(){
+  return (_completedMonths()||[]).map(p=>({
+    weekEnding: p.periodKey, periodKey: p.periodKey,
+    salons: (p.salons||[]).map(sr=>({ salonNum:String(sr.salonNum||'').trim(), caq:_caqPct(sr.caqGood), ccThis:_pf(sr.avgWeeklyCC) }))
+                          .filter(r=>r.salonNum && isFinite(r.caq))
+  })).filter(u=>u.salons.length);
+}
+// Roll several salons' good% into one figure. We have no address COUNTS, so the
+// true Σgood/Σaddresses can't be computed; weight by avg weekly CC as the closest
+// available proxy for address volume, falling back to a plain mean.
+function _caqAvg(rows){
+  let x=0,w=0,sum=0,n=0;
+  (rows||[]).forEach(r=>{ const v=Number(r.caq); if(!isFinite(v)) return; sum+=v; n++;
+    const cc=Number(r.ccThis); if(isFinite(cc)&&cc>0){ x+=v*cc; w+=cc; } });
+  if(w>0) return parseFloat((x/w).toFixed(2));
+  return n?parseFloat((sum/n).toFixed(2)):null;
+}
 function _mapMonthRow(sr){
   const sn=String(sr.salonNum||'').trim();
   const payRaw = (sr.adjPayrollPct!=null && !isNaN(_pf(sr.adjPayrollPct))) ? sr.adjPayrollPct : sr.payrollPct;
@@ -7189,6 +7211,9 @@ const TREND_METRICS = {
   pay: { label:'Payroll %', unit:'%', higher:false,
          targets:[{val:37,color:'#2d7a1a',label:'Excellence target (varies by CC)'}],
          chartType:'line', color:'#1a5c7a' },
+  caq: { label:'Address Quality', unit:'%', higher:true, monthly:true,
+         targets:[],
+         chartType:'line', color:'#3a7a6a' },
   cph: { label:'CPH', unit:'', higher:true,
          targets:[{val:2.6,color:'#2d7a1a',label:'Target (varies by CC)'}],
          chartType:'line', color:'#4a7a2a' },
@@ -7224,6 +7249,7 @@ function selectTrendMetric(key, btn, overrideSalon, hostId, storeView){
 
   const am = AMS[S.currentAM], metric = TREND_METRICS[key];
   if(!metric || !am) return;
+  const isMonthly = !!metric.monthly;   // month axis (Address Quality) vs weekly
 
   const allWeeksSorted = [...S.weekHistory].filter(w=>String(w.weekEnding) < _sdTodayIso()).sort((a,b)=>new Date(a.weekEnding)-new Date(b.weekEnding));
   let weeks;
@@ -7235,13 +7261,30 @@ function selectTrendMetric(key, btn, overrideSalon, hostId, storeView){
   } else {
     weeks = allWeeksSorted.slice(-S_trendWindow);
   }
+  // Monthly metric: swap the whole axis over to completed fiscal months. The
+  // week-count windows are reinterpreted in months (20wk ≈ 5mo, 52wk = 12mo).
+  let allUnits = allWeeksSorted;
+  if(isMonthly){
+    allUnits = _caqUnits();
+    if (S_trendWindow === 'all') weeks = allUnits;
+    else if (S_trendWindow === 'ytd'){
+      const lastPk = allUnits.length ? allUnits[allUnits.length-1].periodKey : '';
+      const fy = periodYear(lastPk);
+      weeks = allUnits.filter(u=>periodYear(u.periodKey)===fy);
+    } else {
+      weeks = allUnits.slice(-Math.max(3, Math.round(S_trendWindow/4.33)));
+    }
+  }
   if(!weeks.length){
     document.getElementById(hostId||'trend-chart-area').innerHTML='<div class="no-data"><div class="no-data-icon">📈</div>No data yet — upload weekly reports to see trends</div>';
     return;
   }
 
-  const labels = weeks.map(w=>{ const parts=String(w.weekEnding).split('-'); return parseInt(parts[1],10)+'/'+parseInt(parts[2],10); });
-  const keyMap = {cc:'cc',ccG:'ccG',sgr:'sgr',prod:'prod',nr:'nr',rr:'rr',hc:'hc',mbc:'mbc',ssW:'ssW',wts:'wts',noc:'noc',pay:'pay',cph:'cph',lyDiff:'lyDiff'};
+  const labels = isMonthly
+    ? weeks.map(u=>u.periodKey)
+    : weeks.map(w=>{ const parts=String(w.weekEnding).split('-'); return parseInt(parts[1],10)+'/'+parseInt(parts[2],10); });
+  const uWord = isMonthly ? 'months' : 'weeks', uShort = isMonthly ? 'mo' : 'wk';
+  const keyMap = {cc:'cc',ccG:'ccG',sgr:'sgr',prod:'prod',nr:'nr',rr:'rr',hc:'hc',mbc:'mbc',ssW:'ssW',wts:'wts',noc:'noc',pay:'pay',cph:'cph',lyDiff:'lyDiff',caq:'caq'};
   const getVal = (a) => {
     if(!a) return null;
     const v = a[keyMap[key]];
@@ -7283,7 +7326,7 @@ function selectTrendMetric(key, btn, overrideSalon, hostId, storeView){
   const rowFieldMap = {
     cc:'ccThis', ccG:'ccGrowth', sgr:'salesGrowth', prod:'product',
     nr:'nr', rr:'rr', hc:'hcTime', mbc:'mbc',
-    ssW:'ssWaits', wts:'waits', noc:'nonOciWaits', pay:'payroll', cph:'cph'
+    ssW:'ssWaits', wts:'waits', noc:'nonOciWaits', pay:'payroll', cph:'cph', caq:'caq'
   };
   const rowField = rowFieldMap[key];
 
@@ -7338,8 +7381,10 @@ function selectTrendMetric(key, btn, overrideSalon, hostId, storeView){
   if(S_trendPriorYear){
     // index weeks by date for fast −364d lookup
     const byDate = {};
-    S.weekHistory.forEach(w=>{ byDate[w.weekEnding] = w; });
+    if(isMonthly) allUnits.forEach(u=>{ byDate[u.periodKey] = u; });
+    else S.weekHistory.forEach(w=>{ byDate[w.weekEnding] = w; });
     const priorWeekOf = (iso)=>{
+      if(isMonthly) return byDate[_priorMonthKey(iso)] || null;   // same month, prior year
       const d = new Date(iso+'T00:00:00');
       d.setDate(d.getDate()-364);
       const pIso = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -7380,7 +7425,7 @@ function selectTrendMetric(key, btn, overrideSalon, hostId, storeView){
       });
     });
     // Company average — prior year (dashed gray)
-    const coPyData = weeks.map(w=>{ const pw=priorWeekOf(w.weekEnding); return pw?getVal(calcAvgs(pw.salons||[])):null; });
+    const coPyData = weeks.map(w=>{ const pw=priorWeekOf(w.weekEnding); if(!pw) return null; return isMonthly ? _caqAvg(pw.salons||[]) : getVal(calcAvgs(pw.salons||[])); });
     if(!coPyData.every(v=>v===null)){
       datasets.push({ label:'Company Avg (PY)', data:coPyData, borderColor:'#999', backgroundColor:'transparent', borderWidth:1.5, borderDash:[2,3], pointRadius:0, pointHoverRadius:5, tension:0.3, fill:false, type:'line', order:5 });
     }
@@ -7388,7 +7433,7 @@ function selectTrendMetric(key, btn, overrideSalon, hostId, storeView){
 
   // AM average — bold (hidden in drill mode)
   if(!drillSalon){
-    const amAvgData = weeks.map(w=>getVal(calcAvgs(salonsByAM(S.currentAM,w))));
+    const amAvgData = weeks.map(w=>{ const rows=salonsByAM(S.currentAM,w); return isMonthly ? _caqAvg(rows) : getVal(calcAvgs(rows)); });
     datasets.push({
       label: am.name+' Avg',
       data: amAvgData,
@@ -7405,7 +7450,7 @@ function selectTrendMetric(key, btn, overrideSalon, hostId, storeView){
   }
 
   // Company average — dashed gray
-  const coData = weeks.map(w=>getVal(calcAvgs(w.salons||[])));
+  const coData = weeks.map(w=>{ const rows=w.salons||[]; return isMonthly ? _caqAvg(rows) : getVal(calcAvgs(rows)); });
   datasets.push({
     label: 'Company Avg',
     data: coData,
@@ -7443,10 +7488,10 @@ function selectTrendMetric(key, btn, overrideSalon, hostId, storeView){
         ? `${metric.label} — ${am.name}<span id="trend-focus-label"></span>`
         : `${metric.label} — ${am.name}`);
   const chartSub = storeView
-    ? `Selected salon vs Company average · ${weeks.length} weeks`
+    ? `Selected salon vs Company average · ${weeks.length} ${uWord}`
     : (drillSalon
-        ? `Click the legend to add or remove salons · ${weeks.length} weeks`
-        : `Each salon · AM average (bold) · Company average (dashed) · ${weeks.length} weeks`);
+        ? `Click the legend to add or remove salons · ${weeks.length} ${uWord}`
+        : `Each salon · AM average (bold) · Company average (dashed) · ${weeks.length} ${uWord}`);
   const backBtn = (storeView || !drillSalon)
     ? ''
     : `<button class="back-btn" onclick="drillBack()">← Back</button>`;
@@ -7474,7 +7519,7 @@ function selectTrendMetric(key, btn, overrideSalon, hostId, storeView){
         <div style="font-size:20px;font-weight:700;color:#888;margin-top:2px;">—</div>
       </div>
       <div id="trend-stat-co" style="flex:1;min-width:170px;background:#f7f6f3;border:1px solid var(--border);border-radius:8px;padding:10px 14px;">
-        <div style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);">Company Avg (${weeks.length}wk)</div>
+        <div style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);">Company Avg (${weeks.length}${uShort})</div>
         <div style="font-size:20px;font-weight:700;color:#555;margin-top:2px;">—</div>
       </div>
     </div>`;
