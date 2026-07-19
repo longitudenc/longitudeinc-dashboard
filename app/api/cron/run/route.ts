@@ -22,6 +22,8 @@ import {
   runProfileScrape,
   runShiftsScrape,
   runChkInOutScrape,
+  runDemandScrape,
+  runHalfHourScrape,
 } from '@/lib/scrape-runner'
 
 export const runtime = 'nodejs'
@@ -49,7 +51,7 @@ export async function GET(request: Request) {
   const isSaturday = dayOfWeek(today) === 6
   const isMonthEnd = isLastFridayOfMonth(yesterday)
 
-  const fired: string[] = ['daily', 'employee-daily']
+  const fired: string[] = ['daily', 'employee-daily', 'demand', 'halfhour']
   if (isSaturday) fired.push('weekly')
   if (isMonthEnd) fired.push('monthly', 'bonus-period')
 
@@ -72,6 +74,22 @@ export async function GET(request: Request) {
   // Employee clock punches → SD_CHKINOUT (in/out, breakTime, asAdmin). Same
   // week-to-date default as shifts; this is the feed behind Break/Admin time.
   results.push({ name: 'chkinout', result: await runChkInOutScrape() })
+
+  // Real per-half-hour demand from invoices → SD_DEMAND, and half-hour
+  // optimal-vs-actual staffing → SD_HALFHOUR.
+  //
+  // CRITICAL: /rest/invoice is a ROLLING ~5-week window upstream. Any day not
+  // captured before it ages out is lost permanently. This is the only feed in
+  // the system with an expiring source, so it runs every night.
+  //
+  // Both are passed `yesterday` explicitly for BOTH bounds rather than using
+  // their week-to-date default. The default would re-pull Saturday→yesterday
+  // every night (up to 7x the work, 18 salon calls per day of range) and this
+  // function is capped at 60s on Vercel Hobby. Upsert key is
+  // (date, storeId, halfHour), so a single-day pull is idempotent and the week
+  // fills in place, one day at a time.
+  results.push({ name: 'demand',   result: await runDemandScrape(yesterday, yesterday) })
+  results.push({ name: 'halfhour', result: await runHalfHourScrape(yesterday, yesterday) })
 
   // 2. Weekly — only on Saturday. Salon weekly first, then the three
   //    weekly-cadence entity scrapers. Each runner catches its own errors
