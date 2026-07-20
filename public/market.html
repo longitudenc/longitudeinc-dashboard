@@ -800,11 +800,21 @@ function renderTrends(){
     '<div class="chart-wrap"><canvas id="trend-canvas"></canvas></div>'+
     '<div class="tlegend" id="trend-legend"></div>';
 
+  // Tooltip sits in the top corner AWAY from the cursor so it never covers the point you're reading.
+  if(window.Chart&&Chart.Tooltip&&Chart.Tooltip.positioners&&!Chart.Tooltip.positioners.away){
+    Chart.Tooltip.positioners.away=function(items,evt){
+      const ca=this.chart.chartArea; if(!ca||!evt) return {x:0,y:0};
+      const onRight=evt.x>(ca.left+ca.right)/2;
+      return { x:onRight?ca.left+8:ca.right-8, y:ca.top+8, xAlign:onRight?'left':'right', yAlign:'top' };
+    };
+  }
   const datasets=buildTrendDatasets(weeks,T_METRIC);
   const ctx=document.getElementById('trend-canvas');
   T_CHART=new Chart(ctx,{ type:'line', data:{labels,datasets}, options:{
     responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false}, animation:false,
-    plugins:{ legend:{display:false}, tooltip:{ position:'nearest',
+    plugins:{ legend:{display:false}, tooltip:{ position:'away',
+      backgroundColor:'rgba(24,38,33,.88)', padding:7, caretSize:0, boxWidth:8, boxHeight:8, boxPadding:3,
+      titleFont:{size:10.5}, bodyFont:{size:11}, bodySpacing:2, cornerRadius:6,
       callbacks:{ title:items=>'Week Ending '+(items[0]?.label||''),
         label:c=>{ if(c.parsed.y===null||c.parsed.y===undefined) return null; return ' '+c.dataset.label+': '+d.fmt(c.parsed.y); } } } },
     scales:{ x:{grid:{color:'#f0efec'},ticks:{font:{size:10},maxRotation:0,autoSkip:true,maxTicksLimit:12}},
@@ -837,20 +847,39 @@ function buildTrendLegend(){
   });
 }
 function updateTrendStats(){
-  const host=document.getElementById('trend-stats'); if(!host||!T_CHART) return;
-  const d=metricDef(T_METRIC), pts=arr=>arr.filter(v=>v!==null&&v!==undefined&&!isNaN(v));
-  const primary=[]; let mktData=null;
-  T_CHART.data.datasets.forEach((ds,i)=>{ const lbl=ds.label||''; if(lbl.endsWith(' (PY)')) return; if(!T_CHART.isDatasetVisible(i)) return; if(lbl==='Market Avg'){ mktData=ds.data; return; } if(ds.__ref) return; primary.push(...ds.data); });
-  const selAvg=pts(primary).length?mean(pts(primary)):null;
-  const mktAvg=mktData?(pts(mktData).length?mean(pts(mktData)):null):null;
-  let boxes='<div class="tstat"><div class="k">Selected avg ('+trendWeeks().length+'wk)</div><div class="v" style="color:'+OPCOLOR[US]+'">'+(selAvg!==null?d.fmt(selAvg):'—')+'</div></div>'+
-    '<div class="tstat"><div class="k">Market avg ('+trendWeeks().length+'wk)</div><div class="v" style="color:'+MARKET_COLOR+'">'+(mktAvg!==null?d.fmt(mktAvg):'—')+'</div></div>';
-  if(T_PY){
-    const py=[]; T_CHART.data.datasets.forEach((ds,i)=>{ if(!(ds.label||'').endsWith(' (PY)')) return; if(ds.label==='Market Avg (PY)') return; if(!T_CHART.isDatasetVisible(i)) return; py.push(...ds.data); });
-    const pyAvg=pts(py).length?mean(pts(py)):null;
-    boxes+='<div class="tstat py"><div class="k">Prior-year avg</div><div class="v" style="color:#999">'+(pyAvg!==null?d.fmt(pyAvg):'—')+'</div></div>';
+  const host=document.getElementById('trend-stats'); if(!host) return;
+  const d=metricDef(T_METRIC), k=T_METRIC, weeks=trendWeeks(), n=weeks.length;
+  const rat=isRatingMetric(k);
+  const avgOf=arr=>{ const v=arr.filter(x=>x!==null&&x!==undefined&&!isNaN(x)); return v.length?mean(v):null; };
+  const opAvg=op=>avgOf(rat?weeks.map(w=>rhOpAt(op,w.slice(0,7),k)):seriesOp(op,weeks,k));
+  const mktAvg=avgOf(rat?weeks.map(w=>rhMktAt(w.slice(0,7),k)):seriesMkt(weeks,k));
+  const box=(lbl,val,color,cls)=>'<div class="tstat'+(cls||'')+'"><div class="k">'+esc(lbl)+'</div><div class="v" style="color:'+color+'">'+(val!==null&&val!==undefined?d.fmt(val):'\u2014')+'</div></div>';
+  let boxes='';
+  if(T_VIEW==='salon'&&T_SALON){
+    const sr=ALLROWS.find(x=>x.salonNum===T_SALON), op=sr?sr.do:US, col=OPCOLOR[op]||'#888';
+    const sAvg=avgOf(rat?weeks.map(w=>rhSalonAt(T_SALON,w.slice(0,7),k)):seriesSalon(T_SALON,weeks,k));
+    boxes+=box((sr?sr.name:('#'+T_SALON))+' avg',sAvg,col);
+    boxes+=box(op+' avg',opAvg(op),col);
+    boxes+=box('Market avg',mktAvg,MARKET_COLOR);
+    if(op!==US) boxes+=box('Longitude avg',opAvg(US),OPCOLOR[US]);
+  } else {
+    boxes+=box('Longitude avg',opAvg(US),OPCOLOR[US]);
+    boxes+=box('Market avg',mktAvg,MARKET_COLOR);
+    if(T_VIEW==='ops'){
+      // best + worst operator on this metric over the window
+      const ops=Object.keys(OPCOLOR).filter(o=>(BYWEEK[weeks[weeks.length-1]]||[]).some(r=>r.do===o));
+      const list=ops.map(o=>({o,v:opAvg(o)})).filter(x=>x.v!==null).sort((a,b)=>d.hi?b.v-a.v:a.v-b.v);
+      if(list.length){ boxes+=box('Best: '+list[0].o,list[0].v,OPCOLOR[list[0].o]||'#888'); }
+    }
   }
-  host.innerHTML=boxes;
+  if(T_PY&&!rat){
+    const pyAvg=avgOf(seriesPY(weeks,pw=>{
+      if(T_VIEW==='salon'&&T_SALON) return salonAt(T_SALON,pw,k);
+      return opAvgAt(US,pw,k);
+    }));
+    boxes+=box('Prior-year avg',pyAvg,'#999',' py');
+  }
+  host.innerHTML='<div style="width:100%;font-size:10.5px;color:var(--muted);margin-bottom:-4px;">Averages across the displayed '+n+' weeks</div>'+boxes;
 }
 
 // ── Init ──────────────────────────────────────────────────────
