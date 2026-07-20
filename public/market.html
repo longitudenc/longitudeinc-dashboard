@@ -546,27 +546,33 @@ function pointSVG(style,color){
 // Composite score: every scored metric is converted to a 0–100 percentile
 // across all salons (flipped so 100 = best), then averaged. Percentiles keep
 // one outlier from dominating and let metrics on different scales weigh equally.
-const SCORE_METRICS=[
-  {k:'cc',          lbl:'CC',        hi:true},
-  {k:'ccChg',       lbl:'Growth',    hi:true},
-  {k:'cph',         lbl:'CPH',       hi:true},
-  {k:'invoice',     lbl:'Invoice',   hi:true},
-  {k:'product',     lbl:'Product',   hi:true},
-  {k:'nr',          lbl:'NR',        hi:true},
-  {k:'rr',          lbl:'RR',        hi:true},
-  {k:'newCust',     lbl:'New Cust',  hi:true},
-  {k:'oci',         lbl:'% OCI',     hi:true},
-  {k:'rating',      lbl:'Rating',    hi:true},
-  {k:'reviews',     lbl:'Reviews',   hi:true},
-  {k:'payroll',     lbl:'Payroll',   hi:false},
-  {k:'waits',       lbl:'Waits',     hi:false},
-  {k:'ssWaits',     lbl:'S/S Wait',  hi:false},
-  {k:'nonOciWaits', lbl:'Non-OCI',   hi:false},
-  {k:'mbc',         lbl:'MBC',       hi:false},
-  {k:'hcTime',      lbl:'HC Time',   hi:false},
-  {k:'serviceDisc', lbl:'Svc Disc',  hi:false},
-  {k:'voidPct',     lbl:'Void',      hi:false},
+// ── Weighted dimension model ───────────────────────────────────
+// Metrics are grouped so related columns can't silently triple-count (the three
+// wait metrics collapse to ONE sub-score). Each dimension is scored 0-100 as a
+// weighted blend of its parts' percentiles, then dimensions are weighted into
+// the composite. HC Time is scored as a BAND (ideal ~12-14 min) rather than
+// "lower is better", matching the Salon Key Results standard.
+const HC_IDEAL_LO=12, HC_IDEAL_HI=14, HC_FAST_PEN=35, HC_SLOW_PEN=20;
+function hcBandScore(t){
+  if(t>=HC_IDEAL_LO&&t<=HC_IDEAL_HI) return 100;
+  const raw = t<HC_IDEAL_LO ? 100-(HC_IDEAL_LO-t)*HC_FAST_PEN : 100-(t-HC_IDEAL_HI)*HC_SLOW_PEN;
+  return Math.max(0,Math.min(100,raw));
+}
+let DIMS=[
+  {id:'scale', lbl:'Scale',    w:15, tip:'Bigger books more profit',
+   parts:[{k:'cc',hi:true,w:1,lbl:'CC'}]},
+  {id:'growth',lbl:'Growth',   w:15, tip:'Is it building?',
+   parts:[{k:'ccChg',hi:true,w:.65,lbl:'CC Growth'},{k:'newCust',hi:true,w:.35,lbl:'New Cust %'}]},
+  {id:'cx',    lbl:'Customer', w:25, tip:'Retention + reputation',
+   parts:[{k:'rr',hi:true,w:.40,lbl:'RR'},{k:'nr',hi:true,w:.30,lbl:'NR'},{k:'rating',hi:true,w:.30,lbl:'Google rating'}]},
+  {id:'speed', lbl:'Speed',    w:22, tip:'Waits, flow, haircut time band',
+   parts:[{k:'__waits',hi:true,w:.50,lbl:'Waits (all 3 combined)'},{k:'mbc',hi:false,w:.25,lbl:'MBC'},{k:'__hcBand',hi:true,w:.25,lbl:'HC Time (band)'}]},
+  {id:'prod',  lbl:'Producty', w:15, tip:'Output vs labor cost',
+   parts:[{k:'cph',hi:true,w:.50,lbl:'CPH'},{k:'payroll',hi:false,w:.50,lbl:'Payroll %'}]},
+  {id:'rev',   lbl:'Rev Qual', w:8,  tip:'Add-on sales and leakage',
+   parts:[{k:'product',hi:true,w:.50,lbl:'Product %'},{k:'serviceDisc',hi:false,w:.25,lbl:'Svc Disc %'},{k:'voidPct',hi:false,w:.25,lbl:'Void %'}]},
 ];
+const WAIT_KEYS=['waits','ssWaits','nonOciWaits'];
 let SC_OP='__ALL__', SC_SORT={k:'__score',dir:-1}, SC_SHOW='values';
 // every metric shown in the scoreboard list (incl. ones excluded from scoring)
 const DATA_COLS=[
@@ -595,39 +601,87 @@ const DATA_COLS=[
   {k:'rating',      lbl:'Rating',   fmt:v=>v.toFixed(1)+'\u2605'},
   {k:'reviews',     lbl:'Reviews',  fmt:v=>Math.round(v).toLocaleString()},
 ];
-const SCORED_KEYS=new Set(SCORE_METRICS.map(m=>m.k));
+const SCORED_KEYS=new Set(['cc','ccChg','newCust','rr','nr','rating','waits','ssWaits','nonOciWaits','mbc','hcTime','cph','payroll','product','serviceDisc','voidPct']);
 function setScShow(v){ SC_SHOW=v; renderScoreboard(); }
+let SC_KEY=false;
+function toggleScKey(){ SC_KEY=!SC_KEY; renderScoreboard(); }
+function scoringKeyHtml(){
+  if(!SC_KEY) return '';
+  const dimRows=DIMS.map(d=>{
+    const parts=d.parts.map(p=>{
+      const dir=(p.k==='__hcBand')?'band':(p.hi?'\u2191':'\u2193');
+      return '<span style="white-space:nowrap;">'+esc(p.lbl)+' <small style="color:#93857a;">'+Math.round(p.w*100)+'% '+dir+'</small></span>';
+    }).join('<span style="color:#c3ccc8;"> \u00b7 </span>');
+    return '<tr style="border-bottom:1px solid #eef2f0;">'
+      +'<td style="padding:5px 10px 5px 0;font-weight:700;white-space:nowrap;">'+esc(d.lbl)+'</td>'
+      +'<td style="padding:5px 10px 5px 0;font-weight:800;color:var(--primary);white-space:nowrap;">'+Math.round(d.w)+'%</td>'
+      +'<td style="padding:5px 0;font-size:11.5px;color:#4a5a54;">'+parts+'</td></tr>';
+  }).join('');
+  return '<div style="margin:0 13px 12px;padding:11px 14px;background:#f7f9f8;border:1px solid var(--line);border-radius:8px;font-size:12px;line-height:1.55;">'
+    +'<div style="font-weight:800;margin-bottom:6px;">How the score works</div>'
+    +'<div style="color:#4a5a54;margin-bottom:9px;">Every metric becomes a <b>0\u2013100 percentile</b> against all salons in the market \u2014 <b>100 = best in market</b>, 50 = dead average \u2014 flipped where lower is better, so higher is always good. Related metrics are averaged into a <b>dimension</b> score, then dimensions are blended by the weights below. A salon missing a metric is scored on the ones it has.</div>'
+    +'<table style="border-collapse:collapse;margin-bottom:9px;"><tbody>'+dimRows+'</tbody></table>'
+    +'<div style="display:flex;gap:18px;flex-wrap:wrap;color:#4a5a54;font-size:11.5px;">'
+      +'<span><b>\u2191</b> higher is better &nbsp; <b>\u2193</b> lower is better</span>'
+      +'<span><b>Waits</b> \u2014 all three wait metrics combine into one sub-score, so waiting counts once, not three times.</span>'
+      +'<span><b>HC Time</b> \u2014 scored as a band: full credit at '+HC_IDEAL_LO+'\u2013'+HC_IDEAL_HI+' min, penalized for being too slow <i>or</i> too fast.</span>'
+    +'</div>'
+    +'<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line);color:#4a5a54;font-size:11.5px;">'
+      +'<b>Shown but not scored:</b> Total/Service Sales &amp; Eff Wage (cost and size already captured by CC), Avg Invoice (mostly customer mix and price, not execution), review count and haircut prices (reference only). '
+      +'<b>Reading a cell:</b> green = above market on that metric, red = below; deeper colour = further from average.'
+    +'</div></div>';
+}
 function _avgOf(rows,k){ const v=rows.filter(r=>hasVal(r,k)).map(r=>num(r[k])); return v.length?mean(v):null; }
-function _avgRowHtml(label,rows,scoreAvg,bg,accent){
-  const cells=DATA_COLS.map(c=>{ const a=_avgOf(rows,c.k); return '<td style="padding:5px 5px;text-align:center;font-size:11.5px;white-space:nowrap;font-variant-numeric:tabular-nums;font-weight:700;">'+(a===null?'\u2014':c.fmt(a))+'</td>'; }).join('');
+function _avgRowHtml(label,rows,scoreAvg,bg,accent,dimAvgs){
+  const cells=dimAvgs
+    ? DIMS.map(d=>'<td style="padding:5px 5px;text-align:center;font-size:11.5px;font-variant-numeric:tabular-nums;font-weight:700;">'+(dimAvgs[d.id]==null?'\u2014':dimAvgs[d.id].toFixed(0))+'</td>').join('')
+    : DATA_COLS.map(c=>{ const a=_avgOf(rows,c.k); return '<td style="padding:5px 5px;text-align:center;font-size:11.5px;white-space:nowrap;font-variant-numeric:tabular-nums;font-weight:700;">'+(a===null?'\u2014':c.fmt(a))+'</td>'; }).join('');
   return '<tr style="background:'+bg+';border-bottom:2px solid '+accent+';">'
     +'<td style="padding:6px;"></td>'
     +'<td style="padding:6px 8px;white-space:nowrap;position:sticky;left:0;background:'+bg+';z-index:1;font-weight:800;color:'+accent+';">'+label+' <small style="font-weight:400;color:#6b7a74;">'+rows.length+' salons</small></td>'
     +'<td style="padding:6px 8px;text-align:center;font-weight:800;color:'+accent+';">'+(scoreAvg===null?'\u2014':scoreAvg.toFixed(1))+'</td>'
     +cells+'</tr>';
 }
-function computeScores(){
-  const pcts={};   // metric -> {salonNum: percentile}
-  SCORE_METRICS.forEach(m=>{
-    const vals=ROWS.filter(r=>hasVal(r,m.k)).map(r=>({sn:r.salonNum,v:num(r[m.k])}));
-    const n=vals.length, map={};
-    if(n>1){
-      const sorted=vals.map(x=>x.v).sort((a,b)=>a-b);
-      vals.forEach(x=>{
-        let lo=0,eq=0;
-        for(const s of sorted){ if(s<x.v) lo++; else if(s===x.v) eq++; }
-        let p=((lo+0.5*eq)/n)*100;
-        map[x.sn]=m.hi?p:100-p;
-      });
-    } else if(n===1){ map[vals[0].sn]=50; }
-    pcts[m.k]=map;
+function _pctMap(pairs,hi){
+  const n=pairs.length, map={};
+  if(n===0) return map;
+  if(n===1){ map[pairs[0].sn]=50; return map; }
+  const sorted=pairs.map(x=>x.v).sort((a,b)=>a-b);
+  pairs.forEach(x=>{
+    let lo=0,eq=0;
+    for(const s of sorted){ if(s<x.v) lo++; else if(s===x.v) eq++; }
+    const p=((lo+0.5*eq)/n)*100;
+    map[x.sn]=hi?p:100-p;
   });
+  return map;
+}
+function computeScores(){
+  const pct={};
+  // raw metric percentiles
+  const need=new Set(); DIMS.forEach(d=>d.parts.forEach(p=>{ if(!p.k.startsWith('__')) need.add(p.k+'|'+p.hi); }));
+  need.forEach(sig=>{ const [k,hi]=sig.split('|'); pct[k]=_pctMap(ROWS.filter(r=>hasVal(r,k)).map(r=>({sn:r.salonNum,v:num(r[k])})),hi==='true'); });
+  // derived: waits combined (mean of the three flipped percentiles -> already 0-100 best-high)
+  WAIT_KEYS.forEach(k=>{ if(!pct[k]) pct[k]=_pctMap(ROWS.filter(r=>hasVal(r,k)).map(r=>({sn:r.salonNum,v:num(r[k])})),false); });
+  pct['__waits']={};
+  ROWS.forEach(r=>{ const vs=WAIT_KEYS.map(k=>pct[k][r.salonNum]).filter(v=>v!==undefined); if(vs.length) pct['__waits'][r.salonNum]=mean(vs); });
+  // derived: HC time band -> percentile of band score
+  pct['__hcBand']=_pctMap(ROWS.filter(r=>hasVal(r,'hcTime')).map(r=>({sn:r.salonNum,v:hcBandScore(num(r.hcTime))})),true);
+
   return ROWS.map(r=>{
-    const per={}; let sum=0,cnt=0;
-    SCORE_METRICS.forEach(m=>{ const p=pcts[m.k][r.salonNum]; if(p!==undefined){ per[m.k]=p; sum+=p; cnt++; } });
-    return { r, per, score:cnt?sum/cnt:null, n:cnt };
+    const per={}, dim={};
+    // keep per-metric percentiles for cell shading / scores view
+    Object.keys(pct).forEach(k=>{ const v=pct[k][r.salonNum]; if(v!==undefined) per[k]=v; });
+    let cw=0, cs=0;
+    DIMS.forEach(d=>{
+      let w=0,sum=0;
+      d.parts.forEach(p=>{ const v=pct[p.k]?pct[p.k][r.salonNum]:undefined; if(v!==undefined){ sum+=v*p.w; w+=p.w; } });
+      if(w>0){ const ds=sum/w; dim[d.id]=ds; cs+=ds*d.w; cw+=d.w; }
+    });
+    return { r, per, dim, score: cw>0 ? cs/cw : null };
   }).filter(x=>x.score!==null).sort((a,b)=>b.score-a.score);
 }
+function setDimW(id,v){ const d=DIMS.find(x=>x.id===id); if(d){ d.w=Math.max(0,parseFloat(v)||0); renderScoreboard(); } }
+function resetDimW(){ const def={scale:15,growth:15,cx:25,speed:22,prod:15,rev:8}; DIMS.forEach(d=>d.w=def[d.id]); renderScoreboard(); }
 function scColor(p){
   if(p===undefined) return 'background:#f7f9f8;color:#c3ccc8;';
   const t=p/100, r=Math.round(250-t*(250-225)), g=Math.round(232+t*(244-232)), b=Math.round(230-t*(230-233));
@@ -642,14 +696,17 @@ function renderScoreboard(){
   const ranks={}; scored.forEach((x,i)=>ranks[x.r.salonNum]=i+1);   // rank across ALL salons
   if(SC_OP!=='__ALL__') scored=scored.filter(x=>x.r.do===SC_OP);
   if(SC_SORT.k==='__score') scored.sort((a,b)=>(a.score-b.score)*SC_SORT.dir);
+  else if(SC_SORT.k.startsWith('__d_')){ const id=SC_SORT.k.slice(4),d=SC_SORT.dir; scored.sort((a,b)=>{ const va=a.dim[id],vb=b.dim[id]; if(va===undefined&&vb===undefined)return 0; if(va===undefined)return 1; if(vb===undefined)return -1; return (va-vb)*d; }); }
   else { const k=SC_SORT.k,d=SC_SORT.dir; scored.sort((a,b)=>{ const va=hasVal(a.r,k)?num(a.r[k]):null, vb=hasVal(b.r,k)?num(b.r[k]):null; if(va===null&&vb===null)return 0; if(va===null)return 1; if(vb===null)return -1; return (va-vb)*d; }); }
   const ops=Object.keys(opCounts()).sort(), opOpts=['__ALL__',US].concat(ops.filter(o=>o!==US)).filter((v,i,a)=>a.indexOf(v)===i);
   const arrow=k=>SC_SORT.k===k?(SC_SORT.dir<0?' \u25BC':' \u25B2'):'';
+  const DIMMODE=(SC_SHOW==='dims');
+  const cols=DIMMODE?DIMS.map(d=>({k:'__d_'+d.id,lbl:d.lbl+' '+Math.round(d.w)+'%',tip:d.tip+' \u2014 '+d.parts.map(p=>p.lbl).join(', ')})):DATA_COLS;
   const head='<tr style="background:var(--primary);color:#fff;">'
     +'<th style="padding:7px 6px;text-align:right;position:sticky;top:0;background:var(--primary);z-index:3;">#</th>'
     +'<th style="padding:7px 8px;text-align:left;position:sticky;left:0;top:0;background:var(--primary);z-index:4;">Salon</th>'
-    +'<th onclick="sortSc(\'__score\')" title="composite of '+SCORE_METRICS.length+' metrics" style="padding:7px 8px;cursor:pointer;white-space:nowrap;position:sticky;top:0;background:var(--primary);z-index:3;">Score'+arrow('__score')+'</th>'
-    +DATA_COLS.map(c=>{ const sm=SCORE_METRICS.find(m=>m.k===c.k); const tip=sm?(sm.hi?'higher is better \u00b7 scored':'lower is better \u00b7 scored'):'not scored'; return '<th onclick="sortSc(\''+c.k+'\')" title="'+tip+'" style="padding:7px 5px;cursor:pointer;white-space:nowrap;font-size:10.5px;position:sticky;top:0;background:var(--primary);z-index:3;'+(sm?'':'opacity:.72;')+'">'+c.lbl+arrow(c.k)+'</th>'; }).join('')
+    +'<th onclick="sortSc(\'__score\')" title="weighted composite" style="padding:7px 8px;cursor:pointer;white-space:nowrap;position:sticky;top:0;background:var(--primary);z-index:3;">Score'+arrow('__score')+'</th>'
+    +cols.map(c=>{ const sm=DIMMODE||SCORED_KEYS.has(c.k); const tip=c.tip||(sm?'scored':'shown only \u2014 not scored'); return '<th onclick="sortSc(\''+c.k+'\')" title="'+tip+'" style="padding:7px 5px;cursor:pointer;white-space:nowrap;font-size:10.5px;position:sticky;top:0;background:var(--primary);z-index:3;'+(sm?'':'opacity:.72;')+'">'+c.lbl+arrow(c.k)+'</th>'; }).join('')
     +'</tr>';
   const body=scored.map(x=>{
     const us=x.r.do===US, col=OPCOLOR[x.r.do]||'#888';
@@ -657,11 +714,13 @@ function renderScoreboard(){
       +'<td style="padding:5px 6px;text-align:right;color:#6b7a74;font-variant-numeric:tabular-nums;">'+ranks[x.r.salonNum]+'</td>'
       +'<td style="padding:5px 8px;white-space:nowrap;position:sticky;left:0;background:'+(us?'#fff6ef':'#fff')+';z-index:1;"><span class="dot" style="background:'+col+';display:inline-block;margin-right:6px;"></span><a href="#" onclick="viewSalonTrend(\''+x.r.salonNum+'\');return false;" style="color:inherit;text-decoration:none;font-weight:600;">'+esc(x.r.name)+'</a> <small style="color:#6b7a74;">#'+esc(x.r.salonNum)+(SC_OP==='__ALL__'?' \u00b7 '+esc(x.r.do):'')+'</small></td>'
       +'<td style="padding:5px 8px;text-align:center;font-weight:800;font-size:13px;color:'+(x.score>=50?'#1c8a4e':'#c0392b')+';">'+x.score.toFixed(1)+'</td>'
-      +DATA_COLS.map(c=>{
+      +(DIMMODE
+        ? DIMS.map(d=>{ const v=x.dim[d.id]; return '<td style="padding:5px 5px;text-align:center;font-size:11.5px;font-variant-numeric:tabular-nums;font-weight:600;'+scColor(v)+'">'+(v===undefined?'\u2014':v.toFixed(0))+'</td>'; }).join('')
+        : DATA_COLS.map(c=>{
           const p=x.per[c.k], has=hasVal(x.r,c.k);
           const txt=(SC_SHOW==='scores')?(p===undefined?'\u2014':Math.round(p)):(has?c.fmt(num(x.r[c.k])):'\u2014');
           return '<td style="padding:5px 5px;text-align:center;font-size:11.5px;white-space:nowrap;font-variant-numeric:tabular-nums;'+scColor(p)+'">'+txt+'</td>';
-        }).join('')
+        }).join(''))
       +'</tr>';
   }).join('');
   const allScored=computeScores();
@@ -669,16 +728,30 @@ function renderScoreboard(){
   const mktScore=allScored.length?mean(allScored.map(x=>x.score)):null;
   const liScoreArr=allScored.filter(x=>x.r.do===US).map(x=>x.score);
   const liScore=liScoreArr.length?mean(liScoreArr):null;
-  const avgRows=_avgRowHtml('MARKET AVG',mktRows,mktScore,'#eef2f0','#3d5c52')
-              +_avgRowHtml('LONGITUDE AVG',liRows,liScore,'#fff1e4',OPCOLOR[US]);
-  const tog=(v,l)=>'<button onclick="setScShow(\''+v+'\')" style="border:1px solid var(--line);background:'+(SC_SHOW===v?'var(--primary)':'#fff')+';color:'+(SC_SHOW===v?'#fff':'var(--ink)')+';font-size:11px;font-weight:600;padding:3px 11px;cursor:pointer;border-radius:'+(v==='values'?'14px 0 0 14px':'0 14px 14px 0')+';">'+l+'</button>';
+  const dimAvg=(list)=>{ const o={}; DIMS.forEach(d=>{ const v=list.map(x=>x.dim[d.id]).filter(v=>v!==undefined); o[d.id]=v.length?mean(v):null; }); return o; };
+  const liScoredRows=allScored.filter(x=>x.r.do===US);
+  const avgRows=_avgRowHtml('MARKET AVG',mktRows,mktScore,'#eef2f0','#3d5c52',DIMMODE?dimAvg(allScored):null)
+              +_avgRowHtml('LONGITUDE AVG',liRows,liScore,'#fff1e4',OPCOLOR[US],DIMMODE?dimAvg(liScoredRows):null);
+  const tog=(v,l,pos)=>'<button onclick="setScShow(\''+v+'\')" style="border:1px solid var(--line);background:'+(SC_SHOW===v?'var(--primary)':'#fff')+';color:'+(SC_SHOW===v?'#fff':'var(--ink)')+';font-size:11px;font-weight:600;padding:3px 11px;cursor:pointer;border-radius:'+(pos==='l'?'14px 0 0 14px':(pos==='r'?'0 14px 14px 0':'0'))+';">'+l+'</button>';
+  const totW=DIMS.reduce((a,d)=>a+d.w,0);
+  const wEditor='<div style="padding:0 13px 10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:11.5px;color:var(--muted);">'
+    +'<span style="font-weight:700;color:var(--ink);">Weights</span>'
+    +DIMS.map(d=>'<span title="'+d.tip+'" style="display:inline-flex;align-items:center;gap:4px;">'+d.lbl
+      +' <input type="number" min="0" max="100" step="1" value="'+d.w+'" onchange="setDimW(\''+d.id+'\',this.value)" style="width:48px;font-size:11.5px;padding:2px 4px;border:1px solid var(--line);border-radius:5px;text-align:center;"/></span>').join('')
+    +'<span style="color:#93857a;">= '+totW+' (normalized)</span>'
+    +'<button onclick="resetDimW()" style="border:1px solid var(--line);background:#fff;border-radius:12px;font-size:11px;padding:2px 10px;cursor:pointer;">Reset</button>'
+    +'</div>';
   host.innerHTML='<div class="card" style="overflow:visible;">'
-    +'<h2>All Salon Data<span class="sub">'+scored.length+' salons \u00b7 score = composite of '+SCORE_METRICS.length+' metrics</span></h2>'
+    +'<h2>All Salon Data<span class="sub">'+scored.length+' salons \u00b7 weighted composite score</span></h2>'
     +'<div style="padding:9px 13px;display:flex;gap:14px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--muted);">'
     +'<span>Operator <select onchange="setScOp(this.value)" style="font-size:12px;padding:3px 7px;border-radius:7px;border:1px solid var(--line);background:#fff;color:var(--ink);cursor:pointer;">'
     +opOpts.map(o=>'<option value="'+o+'"'+(o===SC_OP?' selected':'')+'>'+(o==='__ALL__'?'All operators':(o===US?o+' (you)':o))+'</option>').join('')+'</select></span>'
-    +'<span style="display:inline-flex;">Show&nbsp;&nbsp;'+tog('values','Values')+tog('scores','Scores')+'</span>'
-    +'<span>Cell shading = percentile vs market (green better). Click a header to sort, a salon for trends.</span></div>'
+    +'<span style="display:inline-flex;">Show&nbsp;&nbsp;'+tog('values','Values','l')+tog('scores','Scores','m')+tog('dims','Dimensions','r')+'</span>'
+    +'<span>Cell shading = percentile vs market (green better). Click a header to sort, a salon for trends.</span>'
+    +'<button onclick="toggleScKey()" style="margin-left:auto;border:1px solid var(--line);background:'+(SC_KEY?'var(--primary)':'#fff')+';color:'+(SC_KEY?'#fff':'var(--ink)')+';border-radius:14px;font-size:11px;font-weight:700;padding:3px 12px;cursor:pointer;white-space:nowrap;">'+(SC_KEY?'\u25B4 Hide':'\u24D8 How scoring works')+'</button>'
+    +'</div>'
+    +scoringKeyHtml()
+    +wEditor
     +'<div style="overflow:auto;max-height:calc(100vh - 230px);"><table style="width:100%;border-collapse:collapse;font-size:12px;"><thead>'+head+'</thead><tbody>'+avgRows+body+'</tbody></table></div></div>';
 }
 
