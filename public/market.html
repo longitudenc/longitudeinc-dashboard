@@ -281,7 +281,13 @@ async function loadAll(){
   const bul=ALLROWS.filter(x=>x.weekEnding===ANCHOR&&x.do===US); T_SALON=bul.length?bul[0].salonNum:null;
   applyScope();
 }
-function applyScope(){ SCOPE=weeksInScope(); ROWS=aggregate(SCOPE); if(MODE==='map') renderAll(); else buildShell(); }
+function applyScope(){
+  SCOPE=weeksInScope(); ROWS=aggregate(SCOPE);
+  buildShell(); renderSummary();
+  if(MODE==='map') renderAll();
+  else if(MODE==='score') renderScoreboard();
+  else renderTrends();
+}
 
 // ── Mode ──────────────────────────────────────────────────────
 function setMode(m){
@@ -289,14 +295,15 @@ function setMode(m){
   document.getElementById('mode-map').classList.toggle('active',m==='map');
   document.getElementById('mode-trends').classList.toggle('active',m==='trends');
   document.getElementById('mode-score').classList.toggle('active',m==='score');
-  document.querySelectorAll('.map-ctrl').forEach(e=>e.style.display=(m==='map')?'':'none');
   const mw=document.getElementById('mapwrap'), tw=document.getElementById('trendwrap'), sw=document.getElementById('scorewrap');
   if(mw) mw.style.display=(m==='map')?'':'none';
   if(tw) tw.style.display=(m==='trends')?'':'none';
   if(sw) sw.style.display=(m==='score')?'':'none';
-  if(m==='map'){ renderAll(); syncControls(); if(MAP) setTimeout(()=>MAP.invalidateSize(),60); document.getElementById('summary').style.display=''; }
-  else if(m==='score'){ document.getElementById('summary').style.display=''; renderScoreboard(); }
-  else { document.getElementById('summary').style.display='none'; renderTrends(); }
+  document.getElementById('summary').style.display='';
+  syncControls();
+  if(m==='map'){ renderAll(); if(MAP) setTimeout(()=>MAP.invalidateSize(),60); }
+  else if(m==='score'){ renderSummary(); renderScoreboard(); }
+  else { renderSummary(); renderTrends(); }
 }
 
 // ══ MAP MODE render ═══════════════════════════════════════════
@@ -342,7 +349,11 @@ function buildSelectors(){
   document.getElementById('sel-to').onchange=e=>{ RANGE.to=e.target.value; applyScope(); };
   document.getElementById('sel-tf').onchange=e=>{ setTimeframe(e.target.value); };
   document.getElementById('sel-year').onchange=e=>{ PRIOR=(e.target.value==='prior'); applyScope(); };
-  m.onchange=()=>{ CUR_METRIC=m.value; renderMetricDependent(); };
+  m.onchange=()=>{ CUR_METRIC=m.value;
+    if(MODE==='map') renderMetricDependent();
+    else if(MODE==='score'){ renderSummary(); renderScoreboard(); }
+    else { if(!metricDef(CUR_METRIC).noTrend){ if(T_CHART) snapTrendVis(); T_METRIC=CUR_METRIC; syncMetricSidebar(); } renderSummary(); renderTrends(); }
+  };
   w.dataset.built='1'; syncControls();
 }
 function setTimeframe(tf){
@@ -353,12 +364,14 @@ function setTimeframe(tf){
   syncControls(); applyScope();
 }
 function syncControls(){
-  const inMap=MODE==='map';
-  const show=(id,on)=>{ const el=document.getElementById(id); if(el) el.style.display=(on&&inMap)?'inline-flex':'none'; };
+  const show=(id,on)=>{ const el=document.getElementById(id); if(el) el.style.display=on?'inline-flex':'none'; };
   show('wrap-week', TF==='week');
   show('wrap-month', TF==='month');
   show('wrap-ytd', TF==='ytd');
   show('wrap-range', TF==='range');
+  // In Trends, a single week isn't a series - the window buttons drive it instead.
+  const wk=document.getElementById('wrap-week');
+  if(wk&&MODE==='trends'&&TF==='week') wk.style.opacity='.5'; else if(wk) wk.style.opacity='1';
 }
 function renderMetricDependent(){ renderSummary(); const empty=ROWS.length===0; renderVsMarket(empty); renderScorecard(empty); renderAvgRank(empty); renderStoreRanks(empty); renderOutliers(empty); renderProximity(empty); renderMap(); }
 function scopeLabel(){
@@ -377,7 +390,11 @@ function renderSummary(){
     else if(d.agg==='wt') note=' · <span class="note">'+d.label+' = customer-weighted across '+SCOPE.length+' weeks</span>';
     else note=' · <span class="note">'+d.label+' computed from '+SCOPE.length+'-week totals</span>';
   }
-  document.getElementById('summary').innerHTML=scopeLabel()+' · <b>'+ROWS.length+'</b> salons · metric: <b>'+d.label+'</b>'+(d.hi?' (higher better)':' (lower better)')+note;
+  let msg;
+  if(MODE==='trends') msg=scopeLabel()+' · trend of <b>'+metricDef(T_METRIC).label+'</b>'+(trendFollowsTF()?' · window follows this timeframe':' · pick Month/YTD/Range to set the window');
+  else if(MODE==='score') msg=scopeLabel()+' · <b>'+ROWS.length+'</b> salons scored on this period';
+  else msg=scopeLabel()+' · <b>'+ROWS.length+'</b> salons · metric: <b>'+d.label+'</b>'+(d.hi?' (higher better)':' (lower better)')+note;
+  document.getElementById('summary').innerHTML=msg;
 }
 function renderVsMarket(empty){
   const el=document.getElementById('c-vsmkt'), d=metricDef(CUR_METRIC);
@@ -476,7 +493,10 @@ function renderProximity(empty){
 }
 
 // ══ TRENDS MODE ═══════════════════════════════════════════════
+function trendFollowsTF(){ return TF==='month'||TF==='ytd'||TF==='range'; }
 function trendWeeks(){
+  // Month / YTD / Custom range from the header drive the charted window.
+  if(trendFollowsTF()){ const ws=baseWeeks(); if(ws.length) return ws.slice().sort(); }
   if(T_WIN==='all') return WEEKS.slice();
   if(T_WIN==='ytd'){ const start=firstFridayJan(fiscalYearOf(WEEKS[WEEKS.length-1])); return WEEKS.filter(w=>P(w)>=start); }
   return WEEKS.slice(-T_WIN);
@@ -493,7 +513,9 @@ function rhOpAt(op,month,k){ const a=(RH_BY_MONTH[month]||[]).filter(x=>SALON_OP
 function rhMktAt(month,k){ const a=(RH_BY_MONTH[month]||[]).filter(x=>x[k]!==null&&x[k]!==''&&Number.isFinite(+x[k])); return a.length?mean(a.map(x=>+x[k])):null; }
 function rhSalonAt(sn,month,k){ const x=(RH_BY_MONTH[month]||[]).find(y=>y.salonNum===sn); return x&&x[k]!==null&&x[k]!==''&&Number.isFinite(+x[k])?+x[k]:null; }
 
-function selectTMetric(k){ if(T_CHART) snapTrendVis(); T_METRIC=k; syncMetricSidebar(); renderTrends(); }
+function selectTMetric(k){ if(T_CHART) snapTrendVis(); T_METRIC=k; CUR_METRIC=k; syncMetricSidebar();
+  const hm=document.getElementById('sel-metric'); if(hm) hm.value=k;
+  renderSummary(); renderTrends(); }
 function syncMetricSidebar(){ document.querySelectorAll('.tmetric-btn').forEach(b=>b.classList.toggle('active',b.dataset.k===T_METRIC)); }
 function viewSalonTrend(sn){ T_SALON=String(sn); T_VIEW='salon'; T_METRIC=CUR_METRIC; T_VISSNAP=null; syncMetricSidebar(); setMode('trends'); }
 window.viewSalonTrend=viewSalonTrend;
