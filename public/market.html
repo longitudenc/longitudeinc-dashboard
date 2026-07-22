@@ -410,7 +410,7 @@ function renderVsMarket(empty){
     '<div class="big"><span class="ours" style="color:'+OPCOLOR[US]+'">'+d.fmt(oAvg)+'</span>'+
     '<span class="chip '+(good?'up':'dn')+'">'+(delta>=0?'+':'−')+d.fmt(Math.abs(delta))+' ('+(pct>=0?'+':'−')+Math.abs(pct).toFixed(1)+'%)</span>'+
     '<span class="mkt">vs market '+d.fmt(mAvg)+'</span></div>'+
-    '<div class="meta"><span>Operator rank <b>#'+opRank+'</b> of '+opN+'</span>'+(avgRank!==null?'<span>Avg store rank <b>'+avgRank.toFixed(1)+'</b></span>':'')+'<span>Your stores <b>'+ours.length+'</b></span></div></div>';
+    '<div class="meta"><span>Operator rank <b>#'+opRank+'</b> of '+opN+'</span>'+(avgRank!==null?'<span>Avg salon rank <b>'+avgRank.toFixed(1)+'</b></span>':'')+'<span>Your salons <b>'+ours.length+'</b></span></div></div>';
 }
 function renderMap(){
   if(!MAP){
@@ -446,24 +446,24 @@ function renderScorecard(empty){
   if(empty){ el.innerHTML='<h2>Franchisee Scorecard</h2><div class="metric-note">No data.</div>'; return; }
   const byOp={}; ROWS.forEach(r=>{ if(hasVal(r,CUR_METRIC)) (byOp[r.do]=byOp[r.do]||[]).push(num(r[CUR_METRIC])); });
   const list=Object.entries(byOp).map(([op,vs])=>({op,avg:mean(vs),n:vs.length})).sort((a,b)=>d.hi?b.avg-a.avg:a.avg-b.avg);
-  el.innerHTML='<h2>Franchisee Scorecard<span class="sub">avg '+d.label+'</span></h2><div class="body">'+(list.length?list.map((x,i)=>'<div class="row'+(x.op===US?' us':'')+'"><span class="rk">'+(i+1)+'</span><span class="dot" style="background:'+(OPCOLOR[x.op]||'#888')+'"></span><span class="nm">'+x.op+(x.op===US?' <small>(you)</small>':'')+' <small>· '+x.n+' stores</small></span><span class="val">'+d.fmt(x.avg)+'</span></div>').join(''):'<div class="metric-note">'+d.label+' not available for this timeframe.</div>')+'</div>';
+  el.innerHTML='<h2>Franchisee Scorecard<span class="sub">avg '+d.label+'</span></h2><div class="body">'+(list.length?list.map((x,i)=>'<div class="row'+(x.op===US?' us':'')+'"><span class="rk">'+(i+1)+'</span><span class="dot" style="background:'+(OPCOLOR[x.op]||'#888')+'"></span><span class="nm">'+x.op+(x.op===US?' <small>(you)</small>':'')+' <small>· '+x.n+' salons</small></span><span class="val">'+d.fmt(x.avg)+'</span></div>').join(''):'<div class="metric-note">'+d.label+' not available for this timeframe.</div>')+'</div>';
 }
 function renderAvgRank(empty){
   const el=document.getElementById('c-avgrank'), d=metricDef(CUR_METRIC);
-  if(empty){ el.innerHTML='<h2>Avg Store Rank</h2><div class="metric-note">No data.</div>'; return; }
+  if(empty){ el.innerHTML='<h2>Avg Salon Rank</h2><div class="metric-note">No data.</div>'; return; }
   const rm=rankMap(CUR_METRIC), byOp={}; ROWS.forEach(r=>{ if(rm.has(r.salonNum)) (byOp[r.do]=byOp[r.do]||[]).push(rm.get(r.salonNum)); });
   const list=Object.entries(byOp).map(([op,rs])=>({op,avg:mean(rs),n:rs.length})).sort((a,b)=>a.avg-b.avg);
-  el.innerHTML='<h2>Avg Store Rank<span class="sub">by position · lower = better</span></h2><div class="body"><div class="metric-note">Ranks all '+rm.size+' salons on '+d.label+', then averages each operator’s positions.</div>'+(list.length?list.map((x,i)=>'<div class="row'+(x.op===US?' us':'')+'"><span class="rk">'+(i+1)+'</span><span class="dot" style="background:'+(OPCOLOR[x.op]||'#888')+'"></span><span class="nm">'+x.op+(x.op===US?' <small>(you)</small>':'')+' <small>· '+x.n+' stores</small></span><span class="val">'+x.avg.toFixed(1)+'</span></div>').join(''):'<div class="metric-note">Not available.</div>')+'</div>';
+  el.innerHTML='<h2>Avg Salon Rank<span class="sub">by position · lower = better</span></h2><div class="body"><div class="metric-note">Ranks all '+rm.size+' salons on '+d.label+', then averages each operator’s positions.</div>'+(list.length?list.map((x,i)=>'<div class="row'+(x.op===US?' us':'')+'"><span class="rk">'+(i+1)+'</span><span class="dot" style="background:'+(OPCOLOR[x.op]||'#888')+'"></span><span class="nm">'+x.op+(x.op===US?' <small>(you)</small>':'')+' <small>· '+x.n+' salons</small></span><span class="val">'+x.avg.toFixed(1)+'</span></div>').join(''):'<div class="metric-note">Not available.</div>')+'</div>';
 }
 function renderStoreRanks(empty){
   const el=document.getElementById('c-ranks'), d=metricDef(CUR_METRIC);
-  if(empty){ el.innerHTML='<h2>Store Ranks</h2><div class="metric-note">No data.</div>'; return; }
+  if(empty){ el.innerHTML='<h2>Salon Ranks</h2><div class="metric-note">No data.</div>'; return; }
   const ops=Object.keys(opCounts()), opts=[US].concat(ops.filter(o=>o!==US).sort()).concat(['__ALL__']);
   const sel=opts.includes(STORE_OP_FILTER)?STORE_OP_FILTER:US; STORE_OP_FILTER=sel;
   let rows=ROWS.filter(r=>hasVal(r,CUR_METRIC)); if(sel!=='__ALL__') rows=rows.filter(r=>r.do===sel);
   rows.sort((a,b)=>d.hi?num(b[CUR_METRIC])-num(a[CUR_METRIC]):num(a[CUR_METRIC])-num(b[CUR_METRIC]));
   const optHtml=opts.map(o=>{ const lbl=o==='__ALL__'?'All operators (full board)':(o===US?o+' (you)':o); return '<option value="'+o+'"'+(o===sel?' selected':'')+'>'+lbl+'</option>'; }).join('');
-  el.innerHTML='<h2>Store Ranks<span class="sub"><select id="rank-op" style="font-size:11px;padding:2px 6px;">'+optHtml+'</select></span></h2><div class="body" id="rank-body">'+(rows.length?rows.map((r,i)=>'<div class="row'+(r.do===US?' us':'')+'" data-sn="'+r.salonNum+'"><span class="rk">'+(i+1)+'</span><span class="dot" style="background:'+(OPCOLOR[r.do]||'#888')+'"></span><span class="nm">'+esc(r.name)+' <small>#'+esc(r.salonNum)+'</small>'+(sel==='__ALL__'?'<span class="op-pill">'+esc(r.do)+'</span>':'')+'</span><span class="val">'+d.fmt(num(r[CUR_METRIC]))+'</span></div>').join(''):'<div class="metric-note">'+d.label+' not available.</div>')+'</div>';
+  el.innerHTML='<h2>Salon Ranks<span class="sub"><select id="rank-op" style="font-size:11px;padding:2px 6px;">'+optHtml+'</select></span></h2><div class="body" id="rank-body">'+(rows.length?rows.map((r,i)=>'<div class="row'+(r.do===US?' us':'')+'" data-sn="'+r.salonNum+'"><span class="rk">'+(i+1)+'</span><span class="dot" style="background:'+(OPCOLOR[r.do]||'#888')+'"></span><span class="nm">'+esc(r.name)+' <small>#'+esc(r.salonNum)+'</small>'+(sel==='__ALL__'?'<span class="op-pill">'+esc(r.do)+'</span>':'')+'</span><span class="val">'+d.fmt(num(r[CUR_METRIC]))+'</span></div>').join(''):'<div class="metric-note">'+d.label+' not available.</div>')+'</div>';
   const rop=document.getElementById('rank-op'); if(rop) rop.onchange=function(){ STORE_OP_FILTER=this.value; renderStoreRanks(false); };
   document.querySelectorAll('#rank-body .row').forEach(x=>hoverRow(x,x.dataset.sn));
 }
