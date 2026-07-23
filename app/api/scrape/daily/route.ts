@@ -61,6 +61,14 @@ const COLUMNS = [
   'serviceDiscounts',
   'productDiscounts',
   'scrapedAt',
+  // Cash handling — present in SD3's payload but never persisted, which is why
+  // these columns sat empty in SD_DAILY. Appended AFTER scrapedAt so the header
+  // order still matches the existing sheet (AD-AH).
+  'overShort',
+  'paidInAmount',
+  'paidInCount',
+  'paidOutAmount',
+  'paidOutCount',
 ] as const
 
 function rowFromSummary(s: SD3DailyStoreSummary): Record<string, any> {

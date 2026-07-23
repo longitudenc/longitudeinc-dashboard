@@ -3736,7 +3736,7 @@ function applyDailyLY(rows, lyRows){
   });
   return rows;
 }
-// ââ Unified period model (Day / Week / Month / MTD / YTD / Custom) âââââââââ
+// ï¿½ï¿½ Unified period model (Day / Week / Month / MTD / YTD / Custom) ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 // One period shared by the company All Salons table and the AM salon table,
 // mirroring the Market view's timeframe controls.
 //   day    -> daily rows for one date (+ -364d match for the LY columns)
@@ -3872,7 +3872,7 @@ function _periodSalonColsBase(){
   return out;
 }
 
-// ââ Period comparison (small delta under each value, no extra columns) ââââ
+// ï¿½ï¿½ Period comparison (small delta under each value, no extra columns) ï¿½ï¿½ï¿½ï¿½
 // Resolves from data already in memory for week / month / ytd / custom, so
 // turning Compare on costs zero extra API calls. Day + MTD are excluded: they
 // would need more SD_DAILY reads and that endpoint is already fragile.
@@ -3952,7 +3952,7 @@ function withCompare(cols){
 }
 function setCompareMode(v){ S_compareMode=v; refreshPeriodViews(); }
 
-// ââ Period selector UI (mirrors the Market view's timeframe controls) ââââââ
+// ï¿½ï¿½ Period selector UI (mirrors the Market view's timeframe controls) ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 function renderPeriodControls(){
   const hosts=document.querySelectorAll('.period-controls'); if(!hosts.length) return;
   const box='font-size:12px;padding:4px 8px;border-radius:8px;border:1px solid var(--border);background:#fff;color:var(--text);cursor:pointer;';
@@ -3976,7 +3976,7 @@ function renderPeriodControls(){
     ? lab('Compare')+'<select onchange="setCompareMode(this.value)" style="'+box+'">'
       +opts([['none','None'],['ly','Last year'],['prev','Previous period']],S_compareMode)+'</select>'
     : '';
-const busy=S_periodBusy?'<span style="font-size:11px;color:var(--text-muted);">loadingâ¦</span>':'';
+const busy=S_periodBusy?'<span style="font-size:11px;color:var(--text-muted);">loadingï¿½</span>':'';
   const err=S_periodErr?'<span style="font-size:11px;color:#c0392b;">'+S_periodErr+'</span>':'';
   const html=lab('Period')+'<select onchange="setPeriodType(this.value)" style="'+box+'">'+opts(types,S_periodType)+'</select>'+picker+cmpSel+busy+err;
   hosts.forEach(h=>{ h.innerHTML=html; });
