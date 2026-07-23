@@ -2983,7 +2983,7 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
         <div class="summary-grid" id="salon-summary"></div>
         <div class="table-card">
           <div class="table-card-header">
-            <div class="card-title" style="margin:0;">Salon Results — Week Ending <span id="salon-week-label">—</span> <span class="gmode-toggle" style="display:inline-flex;gap:2px;background:#e9e9e9;border:1px solid var(--border);border-radius:14px;padding:2px;vertical-align:middle;margin-left:6px;"><button class="gmode-btn" data-gmode="weekly" onclick="setGlobalMode('weekly')" style="padding:3px 11px;border-radius:12px;border:none;font-size:11px;font-weight:700;cursor:pointer;background:var(--primary);color:#fff;">This Week</button><button class="gmode-btn" data-gmode="ytd" onclick="setGlobalMode('ytd')" style="padding:3px 11px;border-radius:12px;border:none;font-size:11px;font-weight:700;cursor:pointer;background:transparent;color:var(--primary);">YTD</button><button class="gmode-btn" data-gmode="mtd" onclick="setGlobalMode('mtd')" style="padding:3px 11px;border-radius:12px;border:none;font-size:11px;font-weight:700;cursor:pointer;background:transparent;color:var(--primary);">MTD</button></span></div>
+            <div class="card-title" style="margin:0;">Salon Results — Week Ending <span id="salon-week-label">—</span> <span class="period-controls" style="display:inline-flex;align-items:center;gap:7px;flex-wrap:wrap;"></span></div>
             <div class="legend-bar">
               <span class="legend-item"><span class="legend-dot" style="background:#2d7a1a;"></span><span style="color:#1a5c0a;font-weight:600;">4 Excellence</span></span>
               <span class="legend-item"><span class="legend-dot" style="background:#c8a800;"></span><span style="color:#7a5a00;font-weight:600;">3 Growth</span></span>
@@ -3006,7 +3006,7 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
         <div class="table-card">
           <div class="table-card-header">
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-          <div class="card-title" style="margin:0;">Individual Measures — HC Time · MBC · Product % <span class="gmode-toggle" style="display:inline-flex;gap:2px;background:#e9e9e9;border:1px solid var(--border);border-radius:14px;padding:2px;vertical-align:middle;margin-left:6px;"><button class="gmode-btn" data-gmode="weekly" onclick="setGlobalMode('weekly')" style="padding:3px 11px;border-radius:12px;border:none;font-size:11px;font-weight:700;cursor:pointer;background:var(--primary);color:#fff;">This Week</button><button class="gmode-btn" data-gmode="ytd" onclick="setGlobalMode('ytd')" style="padding:3px 11px;border-radius:12px;border:none;font-size:11px;font-weight:700;cursor:pointer;background:transparent;color:var(--primary);">YTD</button><button class="gmode-btn" data-gmode="mtd" onclick="setGlobalMode('mtd')" style="padding:3px 11px;border-radius:12px;border:none;font-size:11px;font-weight:700;cursor:pointer;background:transparent;color:var(--primary);">MTD</button></span></div>
+          <div class="card-title" style="margin:0;">Individual Measures — HC Time · MBC · Product % <span class="period-controls" style="display:inline-flex;align-items:center;gap:7px;flex-wrap:wrap;"></span></div>
           <span id="indiv-count-note" style="font-size:11px;color:var(--text-muted);"></span>
         </div>
           </div>
@@ -3053,7 +3053,7 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
 
     <!-- Company Overview (admin only) -->
     <div class="page" id="page-company">
-      <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;"><div><h2>Company Overview</h2><div class="sub" id="company-sub">All Salons · —</div></div><span class="gmode-toggle" style="display:inline-flex;gap:2px;background:#e9e9e9;border:1px solid var(--border);border-radius:14px;padding:2px;"><button class="gmode-btn" data-gmode="weekly" onclick="setGlobalMode('weekly')" style="padding:4px 13px;border-radius:12px;border:none;font-size:11px;font-weight:700;cursor:pointer;background:var(--primary);color:#fff;">This Week</button><button class="gmode-btn" data-gmode="ytd" onclick="setGlobalMode('ytd')" style="padding:4px 13px;border-radius:12px;border:none;font-size:11px;font-weight:700;cursor:pointer;background:transparent;color:var(--primary);">YTD</button><button class="gmode-btn" data-gmode="mtd" onclick="setGlobalMode('mtd')" style="padding:4px 13px;border-radius:12px;border:none;font-size:11px;font-weight:700;cursor:pointer;background:transparent;color:var(--primary);">MTD</button></span></div>
+      <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;"><div><h2>Company Overview</h2><div class="sub" id="company-sub">All Salons · —</div></div><span class="period-controls" style="display:inline-flex;align-items:center;gap:7px;flex-wrap:wrap;"></span></div>
       <div class="summary-grid" id="company-summary"></div>
 
       <!-- AM Scorecards -->
@@ -3692,21 +3692,201 @@ function aggDailySalons(rows, s2s){
     const sn=(r.salonNum&&String(r.salonNum).trim())||s2s[String(r.storeId||'').trim()];
     if(!sn) return;
     const cc=n(r.customerCount); if(!(cc>0)) return;   // skip closed / no-business days
-    const a=agg[sn]||(agg[sn]={cc:0,fh:0,ss:0,ps:0,pay:0,hcMin:0,hcInv:0,ncwm:0,w15:0,nw15:0,nocc:0});
+    const a=agg[sn]||(agg[sn]={cc:0,fh:0,ss:0,ps:0,pay:0,hcMin:0,hcInv:0,ncwm:0,w15:0,nw15:0,nocc:0,
+                               pin:0,pout:0,wkCC:0,wkW15:0});
     a.cc+=cc; a.fh+=n(r.floorHours); a.ss+=n(r.serviceSales); a.ps+=n(r.productSales);
     a.pay+=n(r.approximatePayrollAmount); a.hcMin+=n(r.haircutOnlyServiceMinutes); a.hcInv+=n(r.haircutOnlyInvoiceCount);
     a.ncwm+=n(r.nonCutWithCustWaitingMinutes); a.w15+=n(r.waitOver15MinsCount);
     a.nw15+=n(r.nonOciWaitOver15MinsCount); a.nocc+=n(r.nonOciCustomerCount);
+    // cash handling (Day view shows these in place of NR/RR)
+    a.pin+=n(r.paidInAmount); a.pout+=n(r.paidOutAmount);
+    // Sat/Sun subset so S/S Waits works for day-derived periods
+    if(_isWeekendIso(String(r.date||'').slice(0,10))){ a.wkCC+=cc; a.wkW15+=n(r.waitOver15MinsCount); }
   });
   return Object.keys(agg).map(sn=>{
     const a=agg[sn], tot=a.ss+a.ps;
     return { salonNum:sn, salonName:(SALON_NAMES[sn]||sn), ccThis:a.cc,
       product: tot>0?a.ps/tot*100:0, hcTime:a.hcInv>0?a.hcMin/a.hcInv:0, mbc:a.cc>0?a.ncwm/a.cc:0,
       waits:a.cc>0?a.w15/a.cc*100:0, nonOciWaits:a.nocc>0?a.nw15/a.nocc*100:0,
+      ssWaits: a.wkCC>0 ? a.wkW15/a.wkCC*100 : null,
       payroll: tot>0?a.pay/tot*100:0, cph:a.fh>0?a.cc/a.fh:0,
-      nr:null, rr:null, ccGrowth:null, salesGrowth:null, _wtd:true };
+      paidIn:a.pin, paidOut:a.pout,
+      _sales: tot,
+      nr:null, rr:null, ccGrowth:null, salesGrowth:null, lyDiff:null, _wtd:true };
   });
 }
+function _isWeekendIso(iso){
+  if(!iso) return false;
+  const q=String(iso).split('-'); if(q.length!==3) return false;
+  const d=new Date(Date.UTC(+q[0],+q[1]-1,+q[2])).getUTCDay();
+  return d===0||d===6;
+}
+// Attach last-year comparisons to day-derived rows using the same -364d
+// (same-weekday, fiscal-aligned) match the weekly data already uses. Rows whose
+// LY date predates our daily history simply keep null - never a wrong number.
+function applyDailyLY(rows, lyRows){
+  const by={}; (lyRows||[]).forEach(r=>{ by[String(r.salonNum).trim()]=r; });
+  (rows||[]).forEach(r=>{
+    const ly=by[String(r.salonNum).trim()];
+    if(!ly){ return; }
+    if(ly.ccThis>0){ r.lyDiff = r.ccThis - ly.ccThis; r.ccGrowth = (r.ccThis/ly.ccThis - 1)*100; }
+    if(ly._sales>0 && r._sales>0){ r.salesGrowth = (r._sales/ly._sales - 1)*100; }
+  });
+  return rows;
+}
+// �� Unified period model (Day / Week / Month / MTD / YTD / Custom) ���������
+// One period shared by the company All Salons table and the AM salon table,
+// mirroring the Market view's timeframe controls.
+//   day    -> daily rows for one date (+ -364d match for the LY columns)
+//   week   -> existing week snapshot
+//   month  -> bonus salon-summary period (TRUE calendar month, keeps NR/RR)
+//   mtd    -> existing daily fiscal-month-to-date snapshot
+//   ytd    -> every fiscal-year week, collapsed
+//   custom -> weeks between two week-endings, collapsed
+let S_periodType='week';
+let S_periodDay=null, S_periodMonth=null, S_customFrom=null, S_customTo=null;
+let S_daySnap=null, S_periodBusy=false, S_periodErr='';
+
+function _isoAdd(iso,k){ const a=String(iso).split('-'); const d=new Date(Date.UTC(+a[0],+a[1]-1,+a[2])); d.setUTCDate(d.getUTCDate()+k); return d.toISOString().slice(0,10); }
+function periodIsMulti(){ return S_periodType==='ytd'||S_periodType==='custom'; }
+function periodMonthKeys(){ return [...(S_salonSummaryPeriods||[])].map(x=>x.periodKey).sort((a,b)=>periodSortKey(a)-periodSortKey(b)); }
+
+// bonus month-summary row -> the standard salon-row shape SALON_COLS reads
+function _monthRowToStd(r){
+  const sn=String(r.salonNum||'').trim();
+  const g=v=>{ const x=_pf(v); return isNaN(x)?null:x; };
+  return { salonNum:sn, salonName:(SALON_NAMES[sn]||r.salonName||sn),
+    ccThis:g(r.avgWeeklyCC), ccGrowth:g(r.ccGrowth), payroll:g(r.adjPayrollPct),
+    cph:g(r.cph), product:g(r.productPct), nr:g(r.nr), rr:g(r.rr),
+    hcTime:g(r.hcTime), mbc:g(r.mbc), ssWaits:g(r.ssWaits), waits:g(r.waits),
+    nonOciWaits:(r.nonOciWaits==null?null:g(r.nonOciWaits)),
+    salesGrowth:null, lyDiff:null, _month:true };
+}
+
+// Only 'day' needs a fetch; everything else is already in memory.
+async function loadPeriodSnap(){
+  S_periodErr='';
+  if(S_periodType!=='day') return;
+  if(!S_periodDay) S_periodDay=dowAnchor();
+  const d=S_periodDay, ly=_isoAdd(d,-364), s2s=dowStore2Salon();
+  S_periodBusy=true;
+  try{
+    const [rows,lyRows]=await Promise.all([ dowRows(d,d), dowRows(ly,ly).catch(()=>[]) ]);
+    const cur=aggDailySalons(rows,s2s);
+    applyDailyLY(cur, aggDailySalons(lyRows,s2s));
+    S_daySnap={ salons:cur, date:d, lyDate:ly, hasLY:!!(lyRows&&lyRows.length) };
+  }catch(e){ S_daySnap=null; S_periodErr=(e&&e.message)||'daily load failed'; }
+  S_periodBusy=false;
+}
+
+// All salon rows for the active period (company scope).
+function periodSalonRows(){
+  switch(S_periodType){
+    case 'day':    return S_daySnap?(S_daySnap.salons||[]):[];
+    case 'month':  { const pp=(S_salonSummaryPeriods||[]).find(x=>x.periodKey===S_periodMonth);
+                     return pp?(pp.salons||[]).map(_monthRowToStd):[]; }
+    case 'mtd':    return S_mtdSnap?(S_mtdSnap.salons||[]):[];
+    case 'ytd':    return ytdWeeks().flatMap(w=>w.salons||[]);
+    case 'custom': { if(!S_customFrom||!S_customTo) return [];
+                     const lo=S_customFrom<=S_customTo?S_customFrom:S_customTo, hi=S_customFrom<=S_customTo?S_customTo:S_customFrom;
+                     return (S.weekHistory||[]).filter(w=>w.weekEnding>=lo&&w.weekEnding<=hi).flatMap(w=>w.salons||[]); }
+    default:       { const sn=getSnap(); return sn?(sn.salons||[]):[]; }
+  }
+}
+// Same rows narrowed to one AM (mirrors salonsByAM's assignment rules).
+function periodRowsForAM(amId){
+  const rows=periodSalonRows();
+  if(amId==='kayla') return rows.filter(r=>!NAMED.has(String(r.salonNum||'').trim()));
+  const list=(AMS[amId]&&AMS[amId].salons)||[];
+  return rows.filter(r=>list.includes(String(r.salonNum||'').trim()));
+}
+function periodLabel(){
+  switch(S_periodType){
+    case 'day':    return S_periodDay?('Day \u00b7 '+fmtWeek(S_periodDay)):'Day';
+    case 'month':  return 'Month \u00b7 '+(S_periodMonth||'');
+    case 'mtd':    return 'Month to Date';
+    case 'ytd':    return 'Year to Date';
+    case 'custom': return (S_customFrom&&S_customTo)?('Custom \u00b7 '+fmtWeek(S_customFrom)+' \u2013 '+fmtWeek(S_customTo)):'Custom range';
+    default:       return 'Week Ending '+fmtWeek(S.currentWeek||'');
+  }
+}
+// Day swaps NR/RR for cash handling, and uses same-day-last-year for LY columns
+// (the standard CC +/- LY compares against last year's weekly AVERAGE, which is
+// meaningless for a single day).
+function periodSalonCols(){
+  if(S_periodType!=='day') return SALON_COLS;
+  const money=v=>{ const x=n(v); return (x<0?'-$':'$')+Math.abs(x).toFixed(0); };
+  const dash='<span style="color:#aaa">\u2014</span>';
+  return SALON_COLS.map(c=>{
+    if(c.k==='nr')  return {k:'pin',  lbl:'Paid In',  sv:r=>n(r.paidIn),  fv:r=>money(r.paidIn),  cl:()=>''};
+    if(c.k==='rr')  return {k:'pout', lbl:'Paid Out', sv:r=>n(r.paidOut), fv:r=>money(r.paidOut), cl:()=>''};
+    if(c.k==='lyDiff') return {k:'lyDiff', lbl:'CC +/- LY', sv:r=>(r.lyDiff==null?-9999:n(r.lyDiff)),
+      fv:r=>r.lyDiff==null?dash:('<span class="'+tc(n(r.lyDiff))+'">'+sgn(n(r.lyDiff),0)+'</span>'), cl:()=>''};
+    if(c.k==='ccG') return {k:'ccG', lbl:'CC Growth', sv:r=>(r.ccGrowth==null?-9999:p(r.ccGrowth)),
+      fv:r=>r.ccGrowth==null?dash:('<span class="'+tc(p(r.ccGrowth))+'">'+sgn(p(r.ccGrowth))+'%</span>'),
+      cl:r=>r.ccGrowth==null?'':tierCCG(p(r.ccGrowth))};
+    if(c.k==='sgr') return {k:'sgr', lbl:'Sales Growth', sv:r=>(r.salesGrowth==null?-9999:p(r.salesGrowth)),
+      fv:r=>r.salesGrowth==null?dash:('<span class="'+tc(p(r.salesGrowth))+'">'+sgn(p(r.salesGrowth))+'%</span>'), cl:()=>''};
+    return c;
+  });
+}
+
+// �� Period selector UI (mirrors the Market view's timeframe controls) ������
+function renderPeriodControls(){
+  const hosts=document.querySelectorAll('.period-controls'); if(!hosts.length) return;
+  const box='font-size:12px;padding:4px 8px;border-radius:8px;border:1px solid var(--border);background:#fff;color:var(--text);cursor:pointer;';
+  const lab=t=>'<span style="font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--text-muted);">'+t+'</span>';
+  const opts=(list,cur)=>list.map(o=>'<option value="'+o[0]+'"'+(String(o[0])===String(cur)?' selected':'')+'>'+o[1]+'</option>').join('');
+  const weeks=(S.weekHistory||[]).map(w=>w.weekEnding).sort().reverse().map(w=>[w,fmtWeek(w)]);
+  let picker='';
+  if(S_periodType==='day'){
+    picker=lab('Date')+'<input type="date" value="'+(S_periodDay||'')+'" max="'+dowAnchor()+'" onchange="setPeriodDay(this.value)" style="'+box+'"/>';
+  } else if(S_periodType==='week'){
+    picker=lab('Week')+'<select onchange="setPeriodWeek(this.value)" style="'+box+'">'+opts(weeks,S.currentWeek)+'</select>';
+  } else if(S_periodType==='month'){
+    const mk=periodMonthKeys().slice().reverse().map(k=>[k,k]);
+    picker=lab('Month')+'<select onchange="setPeriodMonth(this.value)" style="'+box+'">'+opts(mk,S_periodMonth)+'</select>';
+  } else if(S_periodType==='custom'){
+    picker=lab('From')+'<select onchange="setCustomFrom(this.value)" style="'+box+'">'+opts(weeks,S_customFrom)+'</select>'
+          +lab('To')+'<select onchange="setCustomTo(this.value)" style="'+box+'">'+opts(weeks,S_customTo)+'</select>';
+  }
+  const types=[['day','Day'],['week','Week'],['month','Month'],['mtd','MTD'],['ytd','YTD'],['custom','Custom']];
+  const busy=S_periodBusy?'<span style="font-size:11px;color:var(--text-muted);">loading�</span>':'';
+  const err=S_periodErr?'<span style="font-size:11px;color:#c0392b;">'+S_periodErr+'</span>':'';
+  const html=lab('Period')+'<select onchange="setPeriodType(this.value)" style="'+box+'">'+opts(types,S_periodType)+'</select>'+picker+busy+err;
+  hosts.forEach(h=>{ h.innerHTML=html; });
+}
+function refreshPeriodViews(){
+  renderPeriodControls();
+  const companyActive=document.getElementById('page-company')&&document.getElementById('page-company').classList.contains('active');
+  const amActive=document.getElementById('page-am')&&document.getElementById('page-am').classList.contains('active');
+  try{
+    if(companyActive) renderCompany();
+    else if(amActive){
+      const at=document.querySelector('.tab.active'); const tid=at?at.id:'tb-salon';
+      if(tid==='tb-salon') renderSalonTab();
+    }
+  }catch(e){ console.error('[period] render failed', e); }
+}
+async function setPeriodType(t){
+  S_periodType=t;
+  if(t==='day'&&!S_periodDay) S_periodDay=dowAnchor();
+  if(t==='month'&&!S_periodMonth){ const ks=periodMonthKeys(); S_periodMonth=ks.length?ks[ks.length-1]:null; }
+  if(t==='custom'&&(!S_customFrom||!S_customTo)){
+    const ws=(S.weekHistory||[]).map(w=>w.weekEnding).sort();
+    S_customTo=ws[ws.length-1]||null; S_customFrom=ws[Math.max(0,ws.length-13)]||S_customTo;
+  }
+  renderPeriodControls();
+  if(t==='mtd'&&!S_mtdSnap){ try{ await buildMtdSnap(); }catch(e){ console.error('[MTD]',e); } }
+  if(t==='day'){ await loadPeriodSnap(); }
+  refreshPeriodViews();
+}
+async function setPeriodDay(v){ S_periodDay=v; renderPeriodControls(); await loadPeriodSnap(); refreshPeriodViews(); }
+function setPeriodWeek(v){ S.currentWeek=v; refreshPeriodViews(); }
+function setPeriodMonth(v){ S_periodMonth=v; refreshPeriodViews(); }
+function setCustomFrom(v){ S_customFrom=v; refreshPeriodViews(); }
+function setCustomTo(v){ S_customTo=v; refreshPeriodViews(); }
+
 function _maxDate(rows){ return (rows||[]).reduce((m,r)=>{ const d=String(r.date||'').slice(0,10); return d>m?d:m; },''); }
 function _daysList(rows){ return [...new Set((rows||[]).filter(r=>n(r.customerCount)>0).map(r=>String(r.date||'').slice(0,10)))].sort(); }
 // Employee daily rows come from /api/gs/getDaily (returns empDaily); salon rows keep
@@ -6536,19 +6716,24 @@ function buildAvgRow(a,label,showAM=false){
 }
 
 function renderSalonTab(){
-  const isYTD = S_globalMode === 'ytd';
-  const isMTD = S_globalMode === 'mtd';
+  renderPeriodControls();
+  const isYTD = S_periodType === 'ytd';
+  const isMTD = (S_periodType==='mtd'||S_periodType==='day'||S_periodType==='month');
   // MTD: fiscal month-to-date from the daily snapshot (already one row per salon).
   // In YTD mode use all weeks' data; in weekly mode use current week only.
-  const rows = isMTD ? salonsByAM(S.currentAM, S_mtdSnap)
-             : isYTD ? ytdWeeks().flatMap(w=>salonsByAM(S.currentAM, w))
-             : salonsByAM(S.currentAM);
+  const isCustom = S_periodType==='custom';
+  // Unified period model: YTD keeps its bespoke path; everything else resolves
+  // through periodRowsForAM (day / week / month / mtd / custom).
+  const rows = isYTD ? ytdWeeks().flatMap(w=>salonsByAM(S.currentAM, w))
+             : periodRowsForAM(S.currentAM);
   const thead=document.getElementById('salon-thead'),tbody=document.getElementById('salon-tbody'),sumEl=document.getElementById('salon-summary');
   if(!S.weekHistory.length){ sumEl.innerHTML=''; thead.innerHTML=''; tbody.innerHTML='<tr><td colspan="15" class="no-data"><div class="no-data-icon">📊</div>No data yet — waiting for first upload</td></tr>'; return; }
-  const a = isMTD ? calcAvgs(rows) : isYTD ? calcYTDAvgs(S.currentAM) : calcAvgs(salonsByAM(S.currentAM));
+  const a = isYTD ? calcYTDAvgs(S.currentAM)
+          : isCustom ? calcAvgs(collapseSalonsAvg(rows))
+          : calcAvgs(rows);
   const ytdA = calcYTDAvgs(S.currentAM);
   // Collapse salon-weeks → distinct salons (averaged) for the cards.
-  const cards = isMTD ? rows : isYTD ? collapseSalonsAvg(rows) : rows;
+  const cards = (isYTD||isCustom) ? collapseSalonsAvg(rows) : rows;
   // Per-salon rating tier per metric, counted across this AM's salons.
   const ccT   = r => tierCC(Math.round(n(r.ccThis)));
   const payT  = r => tierPayroll(p(r.payroll), Math.round(n(r.ccThis)));
@@ -6567,7 +6752,7 @@ function renderSalonTab(){
     <div class="metric-card"><div class="metric-label">Avg Product %</div><div class="metric-value">${a?a.prod.toFixed(1)+'%':'—'}</div>${ratingSub(prodT)}</div>
     <div class="metric-card"><div class="metric-label">CC Change</div><div class="metric-value">${ccChgVal}</div>${chgSub(posCnt('ccGrowth'))}</div>
     <div class="metric-card"><div class="metric-label">Sales Change</div><div class="metric-value">${slChgVal}</div>${chgSub(posCnt('salesGrowth'))}</div>`;
-  thead.innerHTML=buildHead(SALON_COLS,'salon-table','sortSalon');
+  thead.innerHTML=buildHead(periodSalonCols(),'salon-table','sortSalon');
   // Update week label in salon tab header
   const swl = document.getElementById('salon-week-label');
   if(swl) swl.textContent = isMTD ? ('Month to Date — ' + dailyCoverageNote())
@@ -6619,12 +6804,12 @@ function renderSalonTab(){
         ssWaits:avg.ssW, waits:avg.wts, nonOciWaits:avg.noc,
         payroll:avg.pay, cph:avg.cph};
     }).filter(Boolean);
-    tbody.innerHTML=ytdSalonRows.map(r=>buildSalonRow(r,SALON_COLS)).join('')+buildAvgRow(ytdA,'▸ YTD Average');
+    tbody.innerHTML=ytdSalonRows.map(r=>buildSalonRow(r,periodSalonCols())).join('')+buildAvgRow(ytdA,'▸ YTD Average');
   } else {
-    tbody.innerHTML=rows.map(r=>buildSalonRow(r,SALON_COLS)).join('')+buildAvgRow(a,'▸ This Week Avg')+ytdRow(ytdA);
+    tbody.innerHTML=rows.map(r=>buildSalonRow(r,periodSalonCols())).join('')+buildAvgRow(a,'▸ This Week Avg')+ytdRow(ytdA);
   }
 }
-function sortSalon(ci){ const cur=S.sortState['salon']; const asc=!(cur&&cur.col===ci&&cur.asc); S.sortState['salon']={col:ci,asc}; updateHeadSort(document.getElementById('salon-thead'),ci,asc); const sorted=sortRows(salonsByAM(S.currentAM),SALON_COLS,ci,asc); const a=calcAvgs(sorted); document.getElementById('salon-tbody').innerHTML=sorted.map(r=>buildSalonRow(r,SALON_COLS)).join('')+buildAvgRow(a,'▸ AM Average'); }
+function sortSalon(ci){ const cur=S.sortState['salon']; const asc=!(cur&&cur.col===ci&&cur.asc); S.sortState['salon']={col:ci,asc}; updateHeadSort(document.getElementById('salon-thead'),ci,asc); const sorted=sortRows(periodRowsForAM(S.currentAM),periodSalonCols(),ci,asc); const a=calcAvgs(sorted); document.getElementById('salon-tbody').innerHTML=sorted.map(r=>buildSalonRow(r,periodSalonCols())).join('')+buildAvgRow(a,'▸ AM Average'); }
 
 // ── Individual tab ────────────────────────────────────────────
 // Salon cell that shows "1304 Northwoods" normally and just "1304" on mobile
@@ -7528,6 +7713,8 @@ function selectTrendMetric(key, btn, overrideSalon, hostId, storeView){
 
 // ── Company page ──────────────────────────────────────────────
 function renderCompany(){
+  try{ renderPeriodControls(); }catch(e){}
+
   try {
     // Role-gate the Company page sections. Owner/admin/viewer see everything.
     // AMs (and later managers/stylists) see only the All Salons Detail + the
@@ -7543,8 +7730,9 @@ function renderCompany(){
     // Company summary cards (company-wide averages) are fine to show; the
     // bonus section we restrict to Standouts-only for limited roles (handled
     // in renderCompanyBonus via the role check).
-    const isYTD = S_globalMode === 'ytd';
-    const isMTD = S_globalMode === 'mtd';
+    const isYTD = S_periodType === 'ytd';
+    const isMTD = (S_periodType==='mtd'||S_periodType==='day'||S_periodType==='month');
+    const isCustom = S_periodType === 'custom';
     const snap = isMTD ? S_mtdSnap : getSnap();
     // Company view = current organization only (matches the SD3 report scope):
     // exclude salons sold/closed as of today (e.g. 8725) from every roll-up.
@@ -7552,7 +7740,7 @@ function renderCompany(){
     const _coFilt = arr => (arr||[]).filter(r=>_coActive.has(String(r.salonNum||'').trim()));
     const all = isYTD
       ? ytdWeeks().flatMap(w=>_coFilt(w.salons))
-      : _coFilt(snap?snap.salons:[]);
+      : _coFilt(periodSalonRows());
     // For AM table avg row — use same mode as toggle
     const allForAMAvg = S_coAMMode==='ytd'
       ? ytdWeeks().flatMap(w=>_coFilt(w.salons))
@@ -7647,7 +7835,7 @@ function renderCompany(){
     const allCols=[
       {k:'salon',lbl:'Salon',sv:r=>r.salonName||r.salonNum,fv:r=>salonLinkGated(r.salonNum, `<strong><span class="salon-full">${r.salonName||r.salonNum}</span><span class="salon-num">${r.salonNum}</span></strong>`, 'company'),cl:()=>''},
       {k:'am',lbl:'AM',sv:r=>amOf(r.salonNum),fv:r=>{ const a=AMS[amOf(r.salonNum)]||{color:'#999',name:'?'}; return amChipGated(a); },cl:()=>''}, 
-      ...SALON_COLS.slice(1)
+      ...periodSalonCols().slice(1)
     ];
     const coAllSort = S.sortState['co-all'];
     const coAmSort  = S.sortState['co-am'];
@@ -7694,10 +7882,11 @@ function renderCompany(){
           payroll:avg.pay, cph:avg.cph};
       }).filter(Boolean);
       if(coAllSort) ytdSalonRows = sortRows(ytdSalonRows, allCols, coAllSort.col, coAllSort.asc);
-      document.getElementById('co-all-tbody').innerHTML=ytdSalonRows.map(r=>buildSalonRow(r,SALON_COLS,true)).join('')+buildAvgRow(coYtdA,'▸ Company YTD Average',true);
+      document.getElementById('co-all-tbody').innerHTML=ytdSalonRows.map(r=>buildSalonRow(r,periodSalonCols(),true)).join('')+buildAvgRow(coYtdA,'▸ Company YTD Average',true);
     } else {
-      let sortedAll = coAllSort ? sortRows(all, allCols, coAllSort.col, coAllSort.asc) : all;
-      document.getElementById('co-all-tbody').innerHTML=sortedAll.map(r=>buildSalonRow(r,SALON_COLS,true)).join('')+buildAvgRow(allA,'▸ This Week Avg',true)+coYtdRow(coYtdA);
+      const allBase = isCustom ? collapseSalonsAvg(all) : all;
+      let sortedAll = coAllSort ? sortRows(allBase, allCols, coAllSort.col, coAllSort.asc) : allBase;
+      document.getElementById('co-all-tbody').innerHTML=sortedAll.map(r=>buildSalonRow(r,periodSalonCols(),true)).join('')+buildAvgRow(allA,'▸ This Week Avg',true)+coYtdRow(coYtdA);
     }
     renderCompanyBonus();
     renderCompanyStandouts();
