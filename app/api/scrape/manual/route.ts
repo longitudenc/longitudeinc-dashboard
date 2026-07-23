@@ -64,6 +64,13 @@ const DAILY_COLUMNS = [
   'serviceDiscounts',
   'productDiscounts',
   'scrapedAt',
+  // Cash handling — MUST stay in sync with app/api/scrape/daily/route.ts.
+  // These trail scrapedAt so the SD_DAILY header order is unchanged (AD-AH).
+  'overShort',
+  'paidInAmount',
+  'paidInCount',
+  'paidOutAmount',
+  'paidOutCount',
 ] as const
 
 const PERIOD_COLUMNS = [
