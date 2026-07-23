@@ -3815,20 +3815,32 @@ function periodLabel(){
 // meaningless for a single day).
 function periodSalonCols(){
   if(S_periodType!=='day') return SALON_COLS;
-  const money=v=>{ const x=n(v); return (x<0?'-$':'$')+Math.abs(x).toFixed(0); };
   const dash='<span style="color:#aaa">\u2014</span>';
-  return SALON_COLS.map(c=>{
-    if(c.k==='nr')  return {k:'pin',  lbl:'Paid In',  sv:r=>n(r.paidIn),  fv:r=>money(r.paidIn),  cl:()=>''};
-    if(c.k==='rr')  return {k:'pout', lbl:'Paid Out', sv:r=>n(r.paidOut), fv:r=>money(r.paidOut), cl:()=>''};
-    if(c.k==='lyDiff') return {k:'lyDiff', lbl:'CC +/- LY', sv:r=>(r.lyDiff==null?-9999:n(r.lyDiff)),
-      fv:r=>r.lyDiff==null?dash:('<span class="'+tc(n(r.lyDiff))+'">'+sgn(n(r.lyDiff),0)+'</span>'), cl:()=>''};
-    if(c.k==='ccG') return {k:'ccG', lbl:'CC Growth', sv:r=>(r.ccGrowth==null?-9999:p(r.ccGrowth)),
-      fv:r=>r.ccGrowth==null?dash:('<span class="'+tc(p(r.ccGrowth))+'">'+sgn(p(r.ccGrowth))+'%</span>'),
-      cl:r=>r.ccGrowth==null?'':tierCCG(p(r.ccGrowth))};
-    if(c.k==='sgr') return {k:'sgr', lbl:'Sales Growth', sv:r=>(r.salesGrowth==null?-9999:p(r.salesGrowth)),
-      fv:r=>r.salesGrowth==null?dash:('<span class="'+tc(p(r.salesGrowth))+'">'+sgn(p(r.salesGrowth))+'%</span>'), cl:()=>''};
-    return c;
+  const dayLy={k:'lyDiff', lbl:'CC +/- LY', sv:r=>(r.lyDiff==null?-9999:n(r.lyDiff)),
+    fv:r=>r.lyDiff==null?dash:('<span class="'+tc(n(r.lyDiff))+'">'+sgn(n(r.lyDiff),0)+'</span>'), cl:()=>''};
+  const dayCcG={k:'ccG', lbl:'CC Growth', sv:r=>(r.ccGrowth==null?-9999:p(r.ccGrowth)),
+    fv:r=>r.ccGrowth==null?dash:('<span class="'+tc(p(r.ccGrowth))+'">'+sgn(p(r.ccGrowth))+'%</span>'),
+    cl:r=>r.ccGrowth==null?'':tierCCG(p(r.ccGrowth))};
+  const daySgr={k:'sgr', lbl:'Sales Growth', sv:r=>(r.salesGrowth==null?-9999:p(r.salesGrowth)),
+    fv:r=>r.salesGrowth==null?dash:('<span class="'+tc(p(r.salesGrowth))+'">'+sgn(p(r.salesGrowth))+'%</span>'), cl:()=>''};
+  // Total sales for the day sits between CC Growth and Sales Growth.
+  const daySales={k:'tsales', lbl:'Total Sales', sv:r=>n(r._sales),
+    fv:r=>'$'+Math.round(n(r._sales)).toLocaleString(), cl:()=>''};
+  // Paid In and Paid Out collapse to one signed column: + = net in, - = net out.
+  const dayCash={k:'cash', lbl:'Paid In/Out', sv:r=>(n(r.paidIn)-n(r.paidOut)),
+    fv:r=>{ const v=n(r.paidIn)-n(r.paidOut); if(!v) return dash;
+            return '<span class="'+tc(v)+'">'+(v<0?'-$':'+$')+Math.abs(v).toFixed(0)+'</span>'; }, cl:()=>''};
+  const out=[];
+  SALON_COLS.forEach(c=>{
+    if(c.k==='rr') return;        // folded into the single Paid In/Out column
+    if(c.k==='grating') return;   // a static Google rating tells you nothing about one day
+    if(c.k==='lyDiff'){ out.push(dayLy); return; }
+    if(c.k==='ccG'){ out.push(dayCcG); out.push(daySales); return; }
+    if(c.k==='sgr'){ out.push(daySgr); return; }
+    if(c.k==='nr'){ out.push(dayCash); return; }
+    out.push(c);
   });
+  return out;
 }
 
 // �� Period selector UI (mirrors the Market view's timeframe controls) ������
@@ -6710,7 +6722,13 @@ function buildAvgRow(a,label,showAM=false){
   const lyCell = (a.lyDiff===null || a.lyDiff===undefined)
     ? '—'
     : `<span class="${tc(a.lyDiff)}">${sgn(a.lyDiff,0)}</span>`;
-  const vals=[label,avCC,lyCell,`<span class="${tc(a.ccG)}">${sgn(a.ccG)}%</span>`,`<span class="${tc(a.sgr)}">${sgn(a.sgr)}%</span>`,a.prod.toFixed(1)+'%',a.nr.toFixed(1)+'%',a.rr.toFixed(1)+'%',a.hc.toFixed(1),a.mbc.toFixed(1),a.ssW.toFixed(1)+'%',a.wts.toFixed(1)+'%',a.noc.toFixed(1)+'%',a.pay.toFixed(1)+'%',a.cph.toFixed(2),''];
+  const _ccG=`<span class="${tc(a.ccG)}">${sgn(a.ccG)}%</span>`, _sgr=`<span class="${tc(a.sgr)}">${sgn(a.sgr)}%</span>`;
+  // Day drops RR + Google and adds Total Sales, so its average row is built to
+  // match periodSalonCols() cell-for-cell (Total Sales / Paid In-Out are sums,
+  // not averages, so they stay blank here rather than showing a wrong number).
+  const vals = (S_periodType==='day')
+    ? [label,avCC,lyCell,_ccG,'',_sgr,a.prod.toFixed(1)+'%','',a.hc.toFixed(1),a.mbc.toFixed(1),a.ssW.toFixed(1)+'%',a.wts.toFixed(1)+'%',a.noc.toFixed(1)+'%',a.pay.toFixed(1)+'%',a.cph.toFixed(2)]
+    : [label,avCC,lyCell,_ccG,_sgr,a.prod.toFixed(1)+'%',a.nr.toFixed(1)+'%',a.rr.toFixed(1)+'%',a.hc.toFixed(1),a.mbc.toFixed(1),a.ssW.toFixed(1)+'%',a.wts.toFixed(1)+'%',a.noc.toFixed(1)+'%',a.pay.toFixed(1)+'%',a.cph.toFixed(2),''];
   if(showAM) vals.splice(1,0,'');
   return `<tr class="avg-row">${vals.map(v=>`<td>${v}</td>`).join('')}</tr>`;
 }
@@ -6806,7 +6824,8 @@ function renderSalonTab(){
     }).filter(Boolean);
     tbody.innerHTML=ytdSalonRows.map(r=>buildSalonRow(r,periodSalonCols())).join('')+buildAvgRow(ytdA,'▸ YTD Average');
   } else {
-    tbody.innerHTML=rows.map(r=>buildSalonRow(r,periodSalonCols())).join('')+buildAvgRow(a,'▸ This Week Avg')+ytdRow(ytdA);
+    const bodyRows = isCustom ? collapseSalonsAvg(rows) : rows;
+    tbody.innerHTML=bodyRows.map(r=>buildSalonRow(r,periodSalonCols())).join('')+buildAvgRow(a,'▸ '+periodLabel()+' Avg')+(S_periodType==='day'?'':ytdRow(ytdA));
   }
 }
 function sortSalon(ci){ const cur=S.sortState['salon']; const asc=!(cur&&cur.col===ci&&cur.asc); S.sortState['salon']={col:ci,asc}; updateHeadSort(document.getElementById('salon-thead'),ci,asc); const sorted=sortRows(periodRowsForAM(S.currentAM),periodSalonCols(),ci,asc); const a=calcAvgs(sorted); document.getElementById('salon-tbody').innerHTML=sorted.map(r=>buildSalonRow(r,periodSalonCols())).join('')+buildAvgRow(a,'▸ AM Average'); }
@@ -7886,7 +7905,7 @@ function renderCompany(){
     } else {
       const allBase = isCustom ? collapseSalonsAvg(all) : all;
       let sortedAll = coAllSort ? sortRows(allBase, allCols, coAllSort.col, coAllSort.asc) : allBase;
-      document.getElementById('co-all-tbody').innerHTML=sortedAll.map(r=>buildSalonRow(r,periodSalonCols(),true)).join('')+buildAvgRow(allA,'▸ This Week Avg',true)+coYtdRow(coYtdA);
+      document.getElementById('co-all-tbody').innerHTML=sortedAll.map(r=>buildSalonRow(r,periodSalonCols(),true)).join('')+buildAvgRow(allA,'▸ '+periodLabel()+' Avg',true)+(S_periodType==='day'?'':coYtdRow(coYtdA));
     }
     renderCompanyBonus();
     renderCompanyStandouts();
