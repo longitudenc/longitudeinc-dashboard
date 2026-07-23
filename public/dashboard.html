@@ -3879,6 +3879,11 @@ function _periodSalonColsBase(){
 let S_compareMode='none';   // none | ly | prev
 let S_cmpDisplay='delta';   // delta = difference vs compare period | value = the compare period's own number
 const CMP_LOWER_BETTER=new Set(['pay','wts','ssW','noc','mbc']);
+// column key -> the field it actually reads, so we can tell "genuinely 0" from
+// "not recorded" before drawing any comparison.
+const CMP_FIELD={cc:'ccThis',lyDiff:'ccThis',ccG:'ccGrowth',sgr:'salesGrowth',prod:'product',
+  nr:'nr',rr:'rr',hc:'hcTime',mbc:'mbc',ssW:'ssWaits',wts:'waits',noc:'nonOciWaits',
+  pay:'payroll',cph:'cph',tsales:'_sales'};
 function compareSupported(){ return ['week','month','ytd','custom'].indexOf(S_periodType)>=0; }
 function _weekList(){ return (S.weekHistory||[]).map(w=>w.weekEnding).sort(); }
 function _monthKeyShift(k,yrs){ const m=String(k||'').match(/^([A-Za-z]{3})\s+(\d{2})$/); return m?(m[1]+' '+String(+m[2]+yrs).padStart(2,'0')):null; }
@@ -3913,7 +3918,7 @@ function compareRows(){
     rows = list.length?_rowsForWeeks(list):null;
   }
   if(!rows||!rows.length) return null;
-  return collapseSalonsAvg(rows);
+  return collapseSalonsFull(rows);
 }
 function compareLabel(){
   if(S_compareMode==='none') return '';
@@ -3940,6 +3945,8 @@ function withCompare(cols){
       const html=baseFv(r);
       const o=map[String(r.salonNum||'').trim()];
       if(!o) return html;
+      const fld=CMP_FIELD[c.k];
+      if(fld){ const raw=o[fld]; if(raw===null||raw===undefined||raw==='') return html; }
       let a,b;
       try{ a=sv(r); b=sv(o); }catch(e){ return html; }
       if(typeof a!=='number'||typeof b!=='number'||!isFinite(a)||!isFinite(b)) return html;
@@ -6220,6 +6227,46 @@ function collapseSalonsAvg(rows){
   });
 }
 
+// Full multi-week collapse: one row per salon carrying EVERY metric, not just
+// the six the card summary needed. Rate metrics are customer-weighted (a 700-CC
+// week should outweigh a 200-CC one). Anything with no underlying data returns
+// NULL rather than 0 - a missing metric must never render as a confident 0.0%.
+function collapseSalonsFull(rows){
+  const by={};
+  (rows||[]).forEach(r=>{
+    const k=String(r.salonNum||'').trim(); if(!k) return;
+    const b=by[k]||(by[k]={salonNum:k, salonName:r.salonName||SALON_NAMES[k]||k,
+      ccS:0,ccN:0, clS:0,clN:0, stS:0,stN:0, slS:0,slN:0, w:{}});
+    const cc=n(r.ccThis);
+    b.ccS+=cc; b.ccN++;
+    const cl=n(r.ccLast); if(cl>0){ b.clS+=cl; b.clN++; }
+    const st=n(r.salesThis); if(st>0){ b.stS+=st; b.stN++; }
+    const sl=n(r.salesLast); if(sl>0){ b.slS+=sl; b.slN++; }
+    const add=(key,val)=>{
+      if(val===null||val===undefined||val==='') return;
+      const v=parseFloat(String(val).replace('%','')); if(!isFinite(v)) return;
+      const o=b.w[key]||(b.w[key]={s:0,wt:0}), wt=cc>0?cc:1;
+      o.s+=v*wt; o.wt+=wt;
+    };
+    add('payroll',r.payroll); add('product',r.product); add('cph',r.cph);
+    add('hcTime',r.hcTime);   add('mbc',r.mbc);         add('waits',r.waits);
+    add('ssWaits',r.ssWaits); add('nonOciWaits',r.nonOciWaits);
+    add('nr',r.nr);           add('rr',r.rr);
+  });
+  const g=(b,k)=>{ const o=b.w[k]; return (o&&o.wt>0)?o.s/o.wt:null; };
+  return Object.values(by).map(b=>{
+    const avgT=b.ccN?b.ccS/b.ccN:0, avgL=b.clN?b.clS/b.clN:0;
+    const avgST=b.stN?b.stS/b.stN:0, avgSL=b.slN?b.slS/b.slN:0;
+    return { salonNum:b.salonNum, salonName:b.salonName, ccThis:avgT,
+      ccGrowth: avgL? (avgT-avgL)/avgL*100 : null,
+      salesGrowth: avgSL? (avgST-avgSL)/avgSL*100 : null,
+      payroll:g(b,'payroll'), product:g(b,'product'), cph:g(b,'cph'),
+      hcTime:g(b,'hcTime'), mbc:g(b,'mbc'), waits:g(b,'waits'),
+      ssWaits:g(b,'ssWaits'), nonOciWaits:g(b,'nonOciWaits'),
+      nr:g(b,'nr'), rr:g(b,'rr'), _collapsed:true };
+  });
+}
+
 function calcYTDAvgs(amId){
   // YTD roll-up: pool over EVERY salon-week in range (report method), not a
   // mean of per-salon averages. One calcAvgs() over all the rows does it.
@@ -6949,7 +6996,7 @@ function renderSalonTab(){
     }).filter(Boolean);
     tbody.innerHTML=ytdSalonRows.map(r=>buildSalonRow(r,periodSalonCols())).join('')+buildAvgRow(ytdA,'▸ YTD Average');
   } else {
-    const bodyRows = isCustom ? collapseSalonsAvg(rows) : rows;
+    const bodyRows = isCustom ? collapseSalonsFull(rows) : rows;
     tbody.innerHTML=bodyRows.map(r=>buildSalonRow(r,periodSalonCols())).join('')+buildAvgRow(a,'▸ '+periodLabel()+' Avg')+(S_periodType==='day'?'':ytdRow(ytdA));
   }
 }
@@ -8028,7 +8075,7 @@ function renderCompany(){
       if(coAllSort) ytdSalonRows = sortRows(ytdSalonRows, allCols, coAllSort.col, coAllSort.asc);
       document.getElementById('co-all-tbody').innerHTML=ytdSalonRows.map(r=>buildSalonRow(r,periodSalonCols(),true)).join('')+buildAvgRow(coYtdA,'▸ Company YTD Average',true);
     } else {
-      const allBase = isCustom ? collapseSalonsAvg(all) : all;
+      const allBase = isCustom ? collapseSalonsFull(all) : all;
       let sortedAll = coAllSort ? sortRows(allBase, allCols, coAllSort.col, coAllSort.asc) : allBase;
       document.getElementById('co-all-tbody').innerHTML=sortedAll.map(r=>buildSalonRow(r,periodSalonCols(),true)).join('')+buildAvgRow(allA,'▸ '+periodLabel()+' Avg',true)+(S_periodType==='day'?'':coYtdRow(coYtdA));
     }
