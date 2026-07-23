@@ -330,7 +330,7 @@
     .bonus-period-select{display:inline-block;}
   }
   .cmp-d{font-size:9.5px;line-height:1.15;margin-top:1px;font-weight:700;opacity:.92;}
-  .cmp-up{color:#1c8a4e;} .cmp-dn{color:#c0392b;} .cmp-flat{color:#bbb;font-weight:400;}
+  .cmp-up{color:#1c8a4e;} .cmp-dn{color:#c0392b;} .cmp-flat{color:#bbb;font-weight:400;} .cmp-val{color:#6b7a74;font-weight:600;}
 </style>
 </head>
 <body>
@@ -3877,6 +3877,7 @@ function _periodSalonColsBase(){
 // turning Compare on costs zero extra API calls. Day + MTD are excluded: they
 // would need more SD_DAILY reads and that endpoint is already fragile.
 let S_compareMode='none';   // none | ly | prev
+let S_cmpDisplay='delta';   // delta = difference vs compare period | value = the compare period's own number
 const CMP_LOWER_BETTER=new Set(['pay','wts','ssW','noc','mbc']);
 function compareSupported(){ return ['week','month','ytd','custom'].indexOf(S_periodType)>=0; }
 function _weekList(){ return (S.weekHistory||[]).map(w=>w.weekEnding).sort(); }
@@ -3943,6 +3944,12 @@ function withCompare(cols){
       try{ a=sv(r); b=sv(o); }catch(e){ return html; }
       if(typeof a!=='number'||typeof b!=='number'||!isFinite(a)||!isFinite(b)) return html;
       if(a<=-9999||b<=-9999) return html;
+      if(S_cmpDisplay==='value'){
+        // the comparison period's own figure, stripped of its colour markup so
+        // it reads as a quiet reference line rather than a second data point
+        const plain=String(baseFv(o)).replace(/<[^>]*>/g,'').trim();
+        return html+'<div class="cmp-d cmp-val">'+(plain||'\u2014')+'</div>';
+      }
       const d=a-b;
       if(!d) return html+'<div class="cmp-d cmp-flat">\u2014</div>';
       const good = CMP_LOWER_BETTER.has(c.k) ? d<0 : d>0;
@@ -3951,6 +3958,7 @@ function withCompare(cols){
   });
 }
 function setCompareMode(v){ S_compareMode=v; refreshPeriodViews(); }
+function setCmpDisplay(v){ S_cmpDisplay=v; refreshPeriodViews(); }
 
 // �� Period selector UI (mirrors the Market view's timeframe controls) ������
 function renderPeriodControls(){
@@ -3975,6 +3983,10 @@ function renderPeriodControls(){
     const cmpSel = compareSupported()
     ? lab('Compare')+'<select onchange="setCompareMode(this.value)" style="'+box+'">'
       +opts([['none','None'],['ly','Last year'],['prev','Previous period']],S_compareMode)+'</select>'
+      +(S_compareMode!=='none'
+        ? lab('Show')+'<select onchange="setCmpDisplay(this.value)" style="'+box+'">'
+          +opts([['delta','Difference'],['value','Actual']],S_cmpDisplay)+'</select>'
+        : '')
     : '';
 const busy=S_periodBusy?'<span style="font-size:11px;color:var(--text-muted);">loading�</span>':'';
   const err=S_periodErr?'<span style="font-size:11px;color:#c0392b;">'+S_periodErr+'</span>':'';
