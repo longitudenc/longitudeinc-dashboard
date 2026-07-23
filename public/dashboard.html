@@ -329,6 +329,8 @@
     .bonus-period-bar{display:none;}
     .bonus-period-select{display:inline-block;}
   }
+  .cmp-d{font-size:9.5px;line-height:1.15;margin-top:1px;font-weight:700;opacity:.92;}
+  .cmp-up{color:#1c8a4e;} .cmp-dn{color:#c0392b;} .cmp-flat{color:#bbb;font-weight:400;}
 </style>
 </head>
 <body>
@@ -3734,7 +3736,7 @@ function applyDailyLY(rows, lyRows){
   });
   return rows;
 }
-// ÔøΩÔøΩ Unified period model (Day / Week / Month / MTD / YTD / Custom) ÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩ
+// ‚‚ Unified period model (Day / Week / Month / MTD / YTD / Custom) ‚‚‚‚‚‚‚‚‚
 // One period shared by the company All Salons table and the AM salon table,
 // mirroring the Market view's timeframe controls.
 //   day    -> daily rows for one date (+ -364d match for the LY columns)
@@ -3764,19 +3766,45 @@ function _monthRowToStd(r){
 }
 
 // Only 'day' needs a fetch; everything else is already in memory.
+// getDailyRange reads the whole SD_DAILY tab per call, so the day and its
+// -364d match are fetched SEQUENTIALLY - two concurrent full-tab reads were
+// enough to crash the function. LY is strictly a bonus: it loads after the day
+// is already on screen and can never block or break it.
+async function _safeDowRows(a,b){
+  const res=await fetch('/api/gs/getDailyRange?start='+a+'&end='+b);
+  const txt=await res.text();
+  let j=null;
+  try{ j=JSON.parse(txt); }
+  catch(e){ throw new Error('daily API '+res.status+' \u2014 '+String(txt).replace(/<[^>]*>/g,'').trim().slice(0,90)); }
+  if(!j.ok) throw new Error(j.error||'getDailyRange failed');
+  return j.rows||[];
+}
 async function loadPeriodSnap(){
   S_periodErr='';
   if(S_periodType!=='day') return;
   if(!S_periodDay) S_periodDay=dowAnchor();
-  const d=S_periodDay, ly=_isoAdd(d,-364), s2s=dowStore2Salon();
-  S_periodBusy=true;
+  const d=S_periodDay, s2s=dowStore2Salon();
+  S_periodBusy=true; renderPeriodControls();
   try{
-    const [rows,lyRows]=await Promise.all([ dowRows(d,d), dowRows(ly,ly).catch(()=>[]) ]);
+    const rows=await _safeDowRows(d,d);
     const cur=aggDailySalons(rows,s2s);
-    applyDailyLY(cur, aggDailySalons(lyRows,s2s));
-    S_daySnap={ salons:cur, date:d, lyDate:ly, hasLY:!!(lyRows&&lyRows.length) };
-  }catch(e){ S_daySnap=null; S_periodErr=(e&&e.message)||'daily load failed'; }
+    S_daySnap={ salons:cur, date:d, lyDate:null, hasLY:false };
+    if(!cur.length) S_periodErr='No daily data recorded for '+fmtWeek(d)+' yet.';
+  }catch(e){
+    S_daySnap=null; S_periodErr=(e&&e.message)||'daily load failed';
+    S_periodBusy=false; renderPeriodControls(); return;
+  }
   S_periodBusy=false;
+  // Last-year match, loaded separately so a miss just leaves the LY columns blank.
+  const ly=_isoAdd(d,-364);
+  try{
+    const lyRows=await _safeDowRows(ly,ly);
+    if(lyRows.length && S_daySnap && S_daySnap.date===d){
+      applyDailyLY(S_daySnap.salons, aggDailySalons(lyRows,s2s));
+      S_daySnap.lyDate=ly; S_daySnap.hasLY=true;
+      refreshPeriodViews();
+    }
+  }catch(e){ /* LY is optional - never surface it as a failure */ }
 }
 
 // All salon rows for the active period (company scope).
@@ -3813,7 +3841,8 @@ function periodLabel(){
 // Day swaps NR/RR for cash handling, and uses same-day-last-year for LY columns
 // (the standard CC +/- LY compares against last year's weekly AVERAGE, which is
 // meaningless for a single day).
-function periodSalonCols(){
+function periodSalonCols(){ return withCompare(_periodSalonColsBase()); }
+function _periodSalonColsBase(){
   if(S_periodType!=='day') return SALON_COLS;
   const dash='<span style="color:#aaa">\u2014</span>';
   const dayLy={k:'lyDiff', lbl:'CC +/- LY', sv:r=>(r.lyDiff==null?-9999:n(r.lyDiff)),
@@ -3843,7 +3872,87 @@ function periodSalonCols(){
   return out;
 }
 
-// ÔøΩÔøΩ Period selector UI (mirrors the Market view's timeframe controls) ÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩ
+// ‚‚ Period comparison (small delta under each value, no extra columns) ‚‚‚‚
+// Resolves from data already in memory for week / month / ytd / custom, so
+// turning Compare on costs zero extra API calls. Day + MTD are excluded: they
+// would need more SD_DAILY reads and that endpoint is already fragile.
+let S_compareMode='none';   // none | ly | prev
+const CMP_LOWER_BETTER=new Set(['pay','wts','ssW','noc','mbc']);
+function compareSupported(){ return ['week','month','ytd','custom'].indexOf(S_periodType)>=0; }
+function _weekList(){ return (S.weekHistory||[]).map(w=>w.weekEnding).sort(); }
+function _monthKeyShift(k,yrs){ const m=String(k||'').match(/^([A-Za-z]{3})\s+(\d{2})$/); return m?(m[1]+' '+String(+m[2]+yrs).padStart(2,'0')):null; }
+function _rowsForWeeks(list){ const set=new Set(list); return (S.weekHistory||[]).filter(w=>set.has(w.weekEnding)).flatMap(w=>w.salons||[]); }
+function compareRows(){
+  if(S_compareMode==='none'||!compareSupported()) return null;
+  const WK=_weekList();
+  let rows=null;
+  if(S_periodType==='week'){
+    const cur=S.currentWeek, i=WK.indexOf(cur);
+    const tgt = S_compareMode==='ly' ? _isoAdd(cur,-364) : (i>0?WK[i-1]:null);
+    const w=(S.weekHistory||[]).find(x=>x.weekEnding===tgt);
+    rows = w?(w.salons||[]):null;
+  } else if(S_periodType==='month'){
+    const keys=periodMonthKeys(), i=keys.indexOf(S_periodMonth);
+    const tgt = S_compareMode==='ly' ? _monthKeyShift(S_periodMonth,-1) : (i>0?keys[i-1]:null);
+    const pp=(S_salonSummaryPeriods||[]).find(x=>x.periodKey===tgt);
+    rows = pp?(pp.salons||[]).map(_monthRowToStd):null;
+  } else if(S_periodType==='custom'){
+    if(!S_customFrom||!S_customTo) return null;
+    const lo=S_customFrom<=S_customTo?S_customFrom:S_customTo, hi=S_customFrom<=S_customTo?S_customTo:S_customFrom;
+    const inR=WK.filter(w=>w>=lo&&w<=hi), len=inR.length;
+    if(!len) return null;
+    let list;
+    if(S_compareMode==='ly') list=inR.map(w=>_isoAdd(w,-364)).filter(w=>WK.indexOf(w)>=0);
+    else { const st=WK.indexOf(inR[0]); list=st>0?WK.slice(Math.max(0,st-len),st):[]; }
+    rows = list.length?_rowsForWeeks(list):null;
+  } else if(S_periodType==='ytd'){
+    const cur=ytdWeeks().map(w=>w.weekEnding);
+    if(!cur.length) return null;
+    const list=cur.map(w=>_isoAdd(w,-364)).filter(w=>WK.indexOf(w)>=0);
+    rows = list.length?_rowsForWeeks(list):null;
+  }
+  if(!rows||!rows.length) return null;
+  return collapseSalonsAvg(rows);
+}
+function compareLabel(){
+  if(S_compareMode==='none') return '';
+  if(S_compareMode==='ly') return 'vs same period last year';
+  if(S_periodType==='ytd') return 'vs prior year';
+  return 'vs previous period';
+}
+function _cmpDelta(k,v){
+  const a=Math.abs(v), sg=v>=0?'+':'\u2212';
+  if(k==='cc') return sg+Math.round(a);
+  if(k==='tsales') return sg+'$'+Math.round(a).toLocaleString();
+  if(k==='cph') return sg+a.toFixed(2);
+  if(k==='hc'||k==='mbc') return sg+a.toFixed(1);
+  return sg+a.toFixed(1)+'%';
+}
+function withCompare(cols){
+  const cmp=compareRows();
+  if(!cmp) return cols;
+  const map={}; cmp.forEach(r=>{ map[String(r.salonNum||'').trim()]=r; });
+  return cols.map(c=>{
+    if(c.k==='salon'||c.k==='grating') return c;
+    const baseFv=c.fv, sv=c.sv;
+    return Object.assign({},c,{ fv:r=>{
+      const html=baseFv(r);
+      const o=map[String(r.salonNum||'').trim()];
+      if(!o) return html;
+      let a,b;
+      try{ a=sv(r); b=sv(o); }catch(e){ return html; }
+      if(typeof a!=='number'||typeof b!=='number'||!isFinite(a)||!isFinite(b)) return html;
+      if(a<=-9999||b<=-9999) return html;
+      const d=a-b;
+      if(!d) return html+'<div class="cmp-d cmp-flat">\u2014</div>';
+      const good = CMP_LOWER_BETTER.has(c.k) ? d<0 : d>0;
+      return html+'<div class="cmp-d '+(good?'cmp-up':'cmp-dn')+'">'+_cmpDelta(c.k,d)+'</div>';
+    }});
+  });
+}
+function setCompareMode(v){ S_compareMode=v; refreshPeriodViews(); }
+
+// ‚‚ Period selector UI (mirrors the Market view's timeframe controls) ‚‚‚‚‚‚
 function renderPeriodControls(){
   const hosts=document.querySelectorAll('.period-controls'); if(!hosts.length) return;
   const box='font-size:12px;padding:4px 8px;border-radius:8px;border:1px solid var(--border);background:#fff;color:var(--text);cursor:pointer;';
@@ -3863,9 +3972,13 @@ function renderPeriodControls(){
           +lab('To')+'<select onchange="setCustomTo(this.value)" style="'+box+'">'+opts(weeks,S_customTo)+'</select>';
   }
   const types=[['day','Day'],['week','Week'],['month','Month'],['mtd','MTD'],['ytd','YTD'],['custom','Custom']];
-  const busy=S_periodBusy?'<span style="font-size:11px;color:var(--text-muted);">loadingÔøΩ</span>':'';
+    const cmpSel = compareSupported()
+    ? lab('Compare')+'<select onchange="setCompareMode(this.value)" style="'+box+'">'
+      +opts([['none','None'],['ly','Last year'],['prev','Previous period']],S_compareMode)+'</select>'
+    : '';
+const busy=S_periodBusy?'<span style="font-size:11px;color:var(--text-muted);">loading‚¶</span>':'';
   const err=S_periodErr?'<span style="font-size:11px;color:#c0392b;">'+S_periodErr+'</span>':'';
-  const html=lab('Period')+'<select onchange="setPeriodType(this.value)" style="'+box+'">'+opts(types,S_periodType)+'</select>'+picker+busy+err;
+  const html=lab('Period')+'<select onchange="setPeriodType(this.value)" style="'+box+'">'+opts(types,S_periodType)+'</select>'+picker+cmpSel+busy+err;
   hosts.forEach(h=>{ h.innerHTML=html; });
 }
 function refreshPeriodViews(){
