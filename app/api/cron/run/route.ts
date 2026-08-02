@@ -110,39 +110,28 @@ export async function GET(request: Request) {
 
   const results: any[] = []
 
-  // 1. Daily — always. Includes the employee profile scrape so login emails
-  //    refresh every night: when SD3 drops a departed employee, their email
-  //    drops from EmployeeProfile within a day and their access is revoked.
-  results.push({ name: 'daily', result: await runDailyScrape() })
-  results.push({ name: 'profile', result: await runProfileScrape() })
-  // Per-stylist daily performance (single-day employee CSV → SD_EMP_DAILY).
-  results.push({ name: 'employee-daily', result: await runEmployeeDailyScrape() })
-  // Schedule variance (scheduled vs actual shift) → SD_SHIFTS. Defaults to the
-  // current fiscal week-to-date, so each day's run fills the week in place.
-  results.push({ name: 'shifts', result: await runShiftsScrape() })
-  // Employee clock punches → SD_CHKINOUT (in/out, breakTime, asAdmin). Same
-  // week-to-date default as shifts; this is the feed behind Break/Admin time.
-  results.push({ name: 'chkinout', result: await runChkInOutScrape() })
+  // Order is chosen for GRACEFUL DEGRADATION under Vercel Hobby's 60s cap. Each
+  // runner catches its own errors and returns {ok:false}, so one failure won't
+  // abort the rest — but a hard timeout kills whatever hasn't run yet. So the
+  // sequence is: unrecoverable first, critical next, recoverable last.
 
-  // Real per-half-hour demand from invoices → SD_DEMAND, and half-hour
-  // optimal-vs-actual staffing → SD_HALFHOUR.
-  //
-  // CRITICAL: /rest/invoice is a ROLLING ~5-week window upstream. Any day not
-  // captured before it ages out is lost permanently. This is the only feed in
-  // the system with an expiring source, so it runs every night.
-  //
-  // Both are passed `yesterday` explicitly for BOTH bounds rather than using
-  // their week-to-date default. The default would re-pull Saturday→yesterday
-  // every night (up to 7x the work, 18 salon calls per day of range) and this
-  // function is capped at 60s on Vercel Hobby. Upsert key is
-  // (date, storeId, halfHour), so a single-day pull is idempotent and the week
-  // fills in place, one day at a time.
+  // 1. EXPIRING SOURCE — must commit. /rest/invoice is a rolling ~5-week window
+  //    upstream; a day not captured before it ages out is lost forever. This is
+  //    the only feed that can't be re-run later, so it goes first. Single-day
+  //    pull, idempotent on (date, storeId, halfHour).
   results.push({ name: 'demand',   result: await runDemandScrape(yesterday, yesterday) })
   results.push({ name: 'halfhour', result: await runHalfHourScrape(yesterday, yesterday) })
 
-  // 2. Weekly — only on Saturday. Salon weekly first, then the three
-  //    weekly-cadence entity scrapers. Each runner catches its own errors
-  //    and returns {ok:false,...}, so one failure won't abort the rest.
+  // 2. CORE daily feed (SD_DAILY) — feeds every view. Recoverable via backfill,
+  //    but important enough to run before the weekly-cadence work.
+  results.push({ name: 'daily',   result: await runDailyScrape() })
+  // Access control: departed employees drop from EmployeeProfile within a day.
+  results.push({ name: 'profile', result: await runProfileScrape() })
+
+  // 3. WEEKLY finalizer — Saturday, or catch-up when a prior Saturday was missed
+  //    (see weeklyDataStale). Moved AHEAD of the recoverable detail scrapes: it
+  //    used to run 8th and get starved by the timeout, which is why a missed
+  //    week never finalized. Salon weekly first, then the weekly-cadence entities.
   if (needWeekly) {
     results.push({ name: 'weekly',   result: await runWeeklyScrape() })
     results.push({ name: 'roster',   result: await runRosterScrape() })
@@ -151,16 +140,22 @@ export async function GET(request: Request) {
     results.push({ name: 'payroll',  result: await runPayrollScrape() })
   }
 
-  // 3. Monthly — only when yesterday was a month-end Friday.
+  // 4. Month-end bonuses (only when yesterday was a month-end Friday).
   if (isMonthEnd) {
     results.push({ name: 'monthly', result: await runMonthlyScrape() })
-    // yesterday was the month-end Friday → scrape that just-closed fiscal month's
-    // bonuses (writes SalonSummaryData / BonusData / PayrollConsolidatedData, the
-    // tabs Bonus, Standouts and Reviews read). Disc eligibility is applied live at
-    // view time from dated points, so this only needs to pull the raw period.
+    // Writes SalonSummaryData / BonusData / PayrollConsolidatedData (the tabs
+    // Bonus, Standouts and Reviews read). Disc eligibility is applied live at
+    // view time, so this only pulls the raw period.
     const [by, bm] = yesterday.split('-').map(Number)
     results.push({ name: 'bonus-period', result: await runBonusPeriodForMonth(by, bm) })
   }
+
+  // 5. RECOVERABLE detail — runs last on purpose. These use a week-to-date
+  //    default and fill in place, so a late timeout just means they complete on
+  //    the next nightly run rather than losing anything.
+  results.push({ name: 'employee-daily', result: await runEmployeeDailyScrape() })
+  results.push({ name: 'shifts',   result: await runShiftsScrape() })
+  results.push({ name: 'chkinout', result: await runChkInOutScrape() })
 
   const allOk = results.every(r => r.result.ok)
   const durationMs = Date.now() - startedAt
