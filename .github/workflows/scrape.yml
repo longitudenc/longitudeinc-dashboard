@@ -1,0 +1,94 @@
+# .github/workflows/scrape.yml
+#
+# Nightly SD3 scrape orchestrator. Replaces the single Vercel cron that was
+# timing out: instead of doing everything in ONE 60s function invocation, this
+# hits each scrape endpoint as its OWN request, so each gets a fresh 60s budget.
+# A GitHub Actions job can run for hours, so total time no longer matters.
+#
+# Setup (one time):
+#   Repo → Settings → Secrets and variables → Actions → New repository secret
+#     CRON_SECRET        = local-dev-secret-not-for-production   (your CRON_SECRET)
+#     CRON_HEARTBEAT_URL = (optional) your Healthchecks.io ping URL
+#   Then remove the daily "/api/cron/run" entry from vercel.json so it doesn't
+#   double-run (leave the monthly market-ratings cron in place).
+#
+# GitHub emails you automatically whenever this workflow fails, so a broken
+# scrape notifies you with no extra wiring.
+
+name: SD3 Nightly Scrape
+
+on:
+  schedule:
+    - cron: '0 8 * * *'      # 08:00 UTC daily (~4 AM ET)
+  workflow_dispatch: {}       # manual "Run workflow" button in the Actions tab
+
+concurrency:                  # never let two runs overlap
+  group: sd3-scrape
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      BASE: https://longitudeinc-dashboard.vercel.app
+      SECRET: ${{ secrets.CRON_SECRET }}
+      HEARTBEAT: ${{ secrets.CRON_HEARTBEAT_URL }}
+    steps:
+      - name: Run scrapes
+        run: |
+          set -uo pipefail
+          FAIL=0
+          Y=$(date -u -d 'yesterday' +%F)     # yesterday, UTC (the completed day)
+          DOW=$(date -u +%u)                   # 1..7  (6 = Saturday)
+
+          hit () {
+            local name="$1"; local extra="${2:-}"
+            local url="$BASE/api/scrape/$name?secret=$SECRET$extra"
+            echo "::group::$name"
+            local code
+            code=$(curl -s -o /tmp/out.json -w '%{http_code}' --max-time 120 "$url" || echo 000)
+            echo "HTTP $code"; head -c 600 /tmp/out.json; echo
+            if [ "$code" != "200" ] || grep -q '"ok":false' /tmp/out.json; then
+              echo "::error title=$name failed::HTTP $code"; FAIL=1
+            fi
+            echo "::endgroup::"
+          }
+
+          # 1. EXPIRING SOURCE first — rolling ~5-week invoice window; a missed day
+          #    is lost forever. Own invocation, single-day pull.
+          hit demand   "&start=$Y&end=$Y"
+          hit halfhour "&start=$Y&end=$Y"
+
+          # 2. Core daily feed + access-control refresh.
+          hit daily
+          hit profile
+
+          # 3. Weekly finalizer — only on Saturday.
+          if [ "$DOW" = "6" ]; then
+            hit weekly
+            hit roster
+            hit employee
+            hit employee-weekly-cons
+            hit payroll
+          fi
+
+          # 4. Month-end: yesterday was the LAST Friday of its month
+          #    (yesterday is a Friday AND +7 days lands in a new month).
+          if [ "$(date -u -d "$Y" +%u)" = "5" ] && \
+             [ "$(date -u -d "$Y +7 days" +%m)" != "$(date -u -d "$Y" +%m)" ]; then
+            hit monthly
+            hit bonus-period "&year=$(date -u -d "$Y" +%Y)&month=$(date -u -d "$Y" +%-m)"
+          fi
+
+          # 5. Recoverable detail last — re-runs nightly / week-to-date, so a
+          #    hiccup here just fills in on the next run.
+          hit employee-daily
+          hit shifts
+          hit chkinout
+
+          # Dead-man's switch: ping only on a fully clean run.
+          if [ "$FAIL" = "0" ] && [ -n "${HEARTBEAT:-}" ]; then
+            curl -s -m 10 "$HEARTBEAT" > /dev/null || true
+          fi
+          exit $FAIL
