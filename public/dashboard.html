@@ -2911,7 +2911,7 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
     <img src="longitude-header.png?v=1" alt="Longitude Inc — A Great Clips Franchisee" style="height:46px;width:auto;display:block;" />
   </div>
   <div class="header-right">
-    <div style="position:relative;display:inline-flex;align-items:center;gap:6px;">
+    <div style="position:relative;display:none;align-items:center;gap:6px;">
       <button onclick="stepWeek(-1)" title="Previous (older) week" style="background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.25);border-radius:6px;width:26px;height:26px;cursor:pointer;font-size:11px;line-height:1;">&#9664;</button>
       <div class="week-badge" id="week-label" onclick="toggleWeekDropdown(event)">Week Ending — ▾</div>
       <button onclick="stepWeek(1)" title="Next (newer) week" style="background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.25);border-radius:6px;width:26px;height:26px;cursor:pointer;font-size:11px;line-height:1;">&#9654;</button>
@@ -7953,13 +7953,16 @@ function renderCompany(){
       ? ytdWeeks().flatMap(w=>_coFilt(w.salons))
       : _coFilt(snap?snap.salons:[]);
     const allAForAM = calcAvgs(allForAMAvg);
-    document.getElementById('company-sub').textContent = isMTD
-      ? ('All Salons · Month to Date — ' + dailyCoverageNote())
-      : isYTD
-      ? 'All Salons · YTD Average · ' + ytdWeeks().length + ' weeks'
-      : isWtdWeek(S.currentWeek)
-      ? ('All Salons · '+fmtWeek(S.currentWeek)+' · In Progress — '+dailyCoverageNote())
-      : 'All Salons · Week Ending '+(S.currentWeek?fmtWeek(S.currentWeek):'—');
+    document.getElementById('company-sub').textContent = (() => {
+      const D = '—';
+      if (S_periodType==='mtd')     return 'All Salons · Month to Date '+D+' ' + dailyCoverageNote();
+      if (S_periodType==='day')     return 'All Salons · ' + periodLabel() + ' '+D+' ' + dailyCoverageNote();
+      if (S_periodType==='month')   return 'All Salons · ' + periodLabel();
+      if (S_periodType==='custom')  return 'All Salons · ' + periodLabel();
+      if (isYTD)                    return 'All Salons · YTD Average · ' + ytdWeeks().length + ' weeks';
+      if (isWtdWeek(S.currentWeek)) return 'All Salons · '+fmtWeek(S.currentWeek)+' · In Progress '+D+' '+dailyCoverageNote();
+      return 'All Salons · Week Ending '+(S.currentWeek?fmtWeek(S.currentWeek):D);
+    })();
     const allA = S_periodType==='month' ? monthCardAvgs(all) : calcAvgs(all);
     // For the summary cards, collapse salon-weeks → distinct salons (averaged),
     // so counts reflect salons-that-did-X this period, not salon-weeks summed.
