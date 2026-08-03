@@ -4005,7 +4005,13 @@ function refreshPeriodViews(){
   const companyActive=document.getElementById('page-company')&&document.getElementById('page-company').classList.contains('active');
   const amActive=document.getElementById('page-am')&&document.getElementById('page-am').classList.contains('active');
   try{
-    if(companyActive) renderCompany();
+    if(companyActive){
+      renderCompany();
+      // renderCompany re-shows every role-permitted section; re-apply the active
+      // sidebar tab so a period change on "All Salons" doesn't resurrect the AM
+      // scorecard / performance sections that belong to the "Area Managers" tab.
+      try{ applyCompanyTabVisibility(); }catch(e){}
+    }
     else if(amActive){
       const at=document.querySelector('.tab.active'); const tid=at?at.id:'tb-salon';
       if(tid==='tb-salon') renderSalonTab();
