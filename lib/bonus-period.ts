@@ -52,7 +52,7 @@ const SALON_SUMMARY_COLUMNS = [
   'periodKey', 'periodLabel', 'weeksN', 'salonNum', 'storeId',
   'avgWeeklyCC', 'avgWeeklySales', 'payrollPct', 'adjPayrollPct',
   'productPct', 'productivity', 'cph', 'mbc', 'nr', 'rr',
-  'waits', 'ssWaits', 'weeksWithData', 'scrapedAt',
+  'waits', 'ssWaits', 'hcTime', 'nonOciWaits', 'weeksWithData', 'scrapedAt',
 ] as const
 
 const BONUS_COLUMNS = [
@@ -495,6 +495,10 @@ export async function runBonusPeriodScrape(
       //    the month's weekend daily rows.)
       let waitsVal = pctSum(rows, 'waitOver15Count', 'cc')
       let ssWaitsVal = (() => { const d = sum(rows, 'ssCustCount'); return d ? (sum(rows, 'ssWaitCount') / d) * 100 : 0 })()
+      // HC Time and Non-OCI Waits over the SD3 month window (null until computed
+      // below, so the Month view shows real values instead of a fake 0.0).
+      let hcTimeVal: number | null = null
+      let nonOciWaitsVal: number | null = null
       try {
         const [mg, md] = await Promise.all([
           fetchGroupedSummary(session, Number(sid), monthStart, monthEnd),
@@ -516,6 +520,12 @@ export async function runBonusPeriodScrape(
           // MBC — SD3's definition on SD3's month window: non-cut-with-customer-waiting minutes / customers.
           const mNCWM = g('nonCutWithCustWaitingMinutes'), mCC = g('customerCount')
           if (mCC > 0) mbcVal = mNCWM / mCC
+          // Avg HC time = haircut-only service minutes / haircut-only invoices.
+          const mHcMin = g('haircutOnlyServiceMinutes'), mHcInv = g('haircutOnlyInvoiceCount')
+          if (mHcInv > 0) hcTimeVal = mHcMin / mHcInv
+          // Non-OCI waits % over the month.
+          const mNocW = g('nonOciWaitOver15MinsCount'), mNocC = g('nonOciCustomerCount')
+          if (mNocC > 0) nonOciWaitsVal = (mNocW / mNocC) * 100
           // Receptionist pay — weekly rows under-report it (3685: $323 weekly-summed
           // vs ~$897 true); the month window carries the full figure.
           recPayVal = g('receptionistPay')
@@ -544,6 +554,8 @@ export async function runBonusPeriodScrape(
         rr: avgPresent(rows, 'rr').avg,
         waits: waitsVal,
         ssWaits: ssWaitsVal,
+        hcTime: hcTimeVal !== null ? Math.round(hcTimeVal * 100) / 100 : '',
+        nonOciWaits: nonOciWaitsVal !== null ? Math.round(nonOciWaitsVal * 100) / 100 : '',
         weeksWithData: rows.length,
         scrapedAt: new Date().toISOString(),
       })

@@ -4131,6 +4131,21 @@ function amOf(sn){
 }
 
 // ── Averages ──────────────────────────────────────────────────
+// Month rows are pre-computed AVERAGES (from SalonSummaryData), so the pooled
+// calcAvgs (which re-sums raw payroll $ / last-year parts) can't work on them.
+// Cards for a Month period use this cc-weighted roll-up instead. YoY growth
+// isn't carried in the month source, so ccG/sgr are null -> cards show a dash.
+function monthCardAvgs(rows){
+  if(!rows || !rows.length) return null;
+  let scc=0,ncc=0, payW=0,payC=0, prodW=0,prodC=0;
+  rows.forEach(r=>{
+    const cc=n(r.ccThis);
+    if(cc>0){ scc+=cc; ncc++; }
+    if(cc>0 && r.payroll!=null && r.payroll!==''){ payW+=p(r.payroll)*cc; payC+=cc; }
+    if(cc>0 && r.product!=null && r.product!==''){ prodW+=p(r.product)*cc; prodC+=cc; }
+  });
+  return { cc: ncc?scc/ncc:0, pay: payC?payW/payC:0, prod: prodC?prodW/prodC:0, ccG:null, sgr:null };
+}
 function calcAvgs(rows){
   // POOLED roll-up that matches the SD3 "Manager Bonus" report exactly:
   // sum the underlying parts across all salon-weeks, then divide — NOT a mean
@@ -6354,6 +6369,7 @@ function renderScorecard(){
 }
 
 // ── Salon columns ─────────────────────────────────────────────
+const PERIOD_NA='<span style="color:#bbb">—</span>';
 const WTD_DASH='<span style="color:#aaa">—</span>';   // WTD: metric not in daily feed
 let GRATINGS={};
 // Tooltip that parks in the top chart corner AWAY from the cursor, so it never
@@ -6372,8 +6388,8 @@ const SALON_COLS=[
   {k:'salon',  lbl:'Salon',        sv:r=>r.salonName||r.salonNum,  fv:r=>`<strong><span class="salon-full">${r.salonName||r.salonNum}</span><span class="salon-num">${r.salonNum}</span></strong>`, cl:()=>''},
   {k:'cc',     lbl:'CC',           sv:r=>n(r.ccThis),              fv:r=>Math.round(n(r.ccThis)),  cl:r=>tierCC(Math.round(n(r.ccThis)))},
   {k:'lyDiff', lbl:'CC +/- LY',    sv:r=>{ const l=LY_AVG[r.salonNum]; return l?n(r.ccThis)-l:-9999; }, fv:r=>{ if(r._wtd)return WTD_DASH; const l=LY_AVG[r.salonNum]; if(!l)return'<span style="color:#aaa">—</span>'; const d=n(r.ccThis)-l; return `<span class="${tc(d)}">${sgn(d,0)}</span>`; }, cl:()=>''},
-  {k:'ccG',    lbl:'CC Growth',    sv:r=>p(r.ccGrowth),            fv:r=>r._wtd?WTD_DASH:(()=>{ const v=p(r.ccGrowth); return `<span class="${tc(v)}">${sgn(v)}%</span>`; })(), cl:r=>r._wtd?'':tierCCG(p(r.ccGrowth))},
-  {k:'sgr',    lbl:'Sales Growth', sv:r=>p(r.salesGrowth),         fv:r=>r._wtd?WTD_DASH:(()=>{ const v=p(r.salesGrowth); return `<span class="${tc(v)}">${sgn(v)}%</span>`; })(), cl:()=>''},
+  {k:'ccG',    lbl:'CC Growth',    sv:r=>p(r.ccGrowth),            fv:r=>r._wtd?WTD_DASH:((r.ccGrowth==null||r.ccGrowth==='')?PERIOD_NA:(()=>{ const v=p(r.ccGrowth); return `<span class="${tc(v)}">${sgn(v)}%</span>`; })()), cl:r=>(r._wtd||r.ccGrowth==null||r.ccGrowth==='')?'':tierCCG(p(r.ccGrowth))},
+  {k:'sgr',    lbl:'Sales Growth', sv:r=>p(r.salesGrowth),         fv:r=>r._wtd?WTD_DASH:((r.salesGrowth==null||r.salesGrowth==='')?PERIOD_NA:(()=>{ const v=p(r.salesGrowth); return `<span class="${tc(v)}">${sgn(v)}%</span>`; })()), cl:()=>''},
   {k:'prod',   lbl:'Product %',    sv:r=>p(r.product),             fv:r=>`${p(r.product).toFixed(1)}%`,  cl:r=>tierProd(p(r.product))},
   {k:'nr',     lbl:'NR %',         sv:r=>p(r.nr),                  fv:r=>r._wtd?WTD_DASH:`${p(r.nr).toFixed(1)}%`,       cl:r=>r._wtd?'':tierNR(p(r.nr))},
   {k:'rr',     lbl:'RR %',         sv:r=>p(r.rr),                  fv:r=>r._wtd?WTD_DASH:`${p(r.rr).toFixed(1)}%`,       cl:r=>r._wtd?'':tierRR(p(r.rr))},
@@ -7944,7 +7960,7 @@ function renderCompany(){
       : isWtdWeek(S.currentWeek)
       ? ('All Salons · '+fmtWeek(S.currentWeek)+' · In Progress — '+dailyCoverageNote())
       : 'All Salons · Week Ending '+(S.currentWeek?fmtWeek(S.currentWeek):'—');
-    const allA=calcAvgs(all);
+    const allA = S_periodType==='month' ? monthCardAvgs(all) : calcAvgs(all);
     // For the summary cards, collapse salon-weeks → distinct salons (averaged),
     // so counts reflect salons-that-did-X this period, not salon-weeks summed.
     const cards = isYTD ? collapseSalonsAvg(all) : all;
@@ -7959,8 +7975,8 @@ function renderCompany(){
     const N = cards.length;
     const posCnt = key => cards.filter(r=>{ const v=p(r[key]); return Number.isFinite(v)&&v>0; }).length;
     const chgSub = posN => `<div class="metric-sub"><span style="color:var(--exc-text);font-weight:700;">${posN}</span> of ${N} salons positive</div>`;
-    const ccChgVal = allA ? `${allA.ccG>=0?'+':''}${allA.ccG.toFixed(1)}%` : '—';
-    const slChgVal = allA ? `${allA.sgr>=0?'+':''}${allA.sgr.toFixed(1)}%` : '—';
+    const ccChgVal = (allA && allA.ccG!=null) ? `${allA.ccG>=0?'+':''}${allA.ccG.toFixed(1)}%` : '—';
+    const slChgVal = (allA && allA.sgr!=null) ? `${allA.sgr>=0?'+':''}${allA.sgr.toFixed(1)}%` : '—';
     sumEl.innerHTML=`
       <div class="metric-card"><div class="metric-label">Company Avg CC</div><div class="metric-value">${allA?Math.round(allA.cc):'—'}</div>${ratingSub(ccT)}</div>
       <div class="metric-card"><div class="metric-label">Company Avg Payroll</div><div class="metric-value">${allA?allA.pay.toFixed(1)+'%':'—'}</div>${ratingSub(payT)}</div>
