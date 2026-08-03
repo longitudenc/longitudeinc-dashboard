@@ -73,6 +73,19 @@ jobs:
             hit payroll
           fi
 
+          # 3b. TUESDAY SETTLE — payroll finalizes the Tuesday after a week closes.
+          #     Re-scrape the week that ended last Friday (Tue -> Fri = 4 days back)
+          #     so SD3's now-settled payroll overwrites Saturday's first-pass figures,
+          #     then recompute that week's month so month-end bonuses reflect the
+          #     finalized payroll. All idempotent upserts.
+          if [ "$DOW" = "2" ]; then
+            FRI=$(date -u -d '4 days ago' +%F)
+            SAT=$(date -u -d "$FRI -6 days" +%F)
+            hit weekly       "&start=$SAT&end=$FRI"
+            hit payroll      "&start=$SAT&end=$FRI"
+            hit bonus-period "&year=$(date -u -d "$FRI" +%Y)&month=$(date -u -d "$FRI" +%-m)"
+          fi
+
           # 4. Month-end: yesterday was the LAST Friday of its month
           #    (yesterday is a Friday AND +7 days lands in a new month).
           if [ "$(date -u -d "$Y" +%u)" = "5" ] && \
