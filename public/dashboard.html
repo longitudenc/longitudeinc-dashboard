@@ -3762,7 +3762,7 @@ function _monthRowToStd(r){
     cph:g(r.cph), product:g(r.productPct), nr:g(r.nr), rr:g(r.rr),
     hcTime:g(r.hcTime), mbc:g(r.mbc), ssWaits:g(r.ssWaits), waits:g(r.waits),
     nonOciWaits:(r.nonOciWaits==null?null:g(r.nonOciWaits)),
-    salesGrowth:null, lyDiff:null, _month:true };
+    salesGrowth:null, lyDiff:null, _sales:n(r.avgWeeklySales), _month:true };
 }
 
 // Month-over-year growth for the Month view. SalonSummaryData carries no YoY, so
@@ -4178,25 +4178,32 @@ function amOf(sn){
 // as a dash, never a fake 0. lyDiff is averaged (the Avg row is an average).
 function periodAggregate(rows){
   if(!rows || !rows.length) return null;
+  // Weighting reverse-engineered from SD3's "Report Totals/Avgs": dollar metrics
+  // are sales-weighted, customer/service metrics CC-weighted, and NR/RR/Non-OCI
+  // are simple averages (their denominators don't scale with volume, matching
+  // SD3's pooled-count result). Reproduces SD3's company totals within ~0.2.
+  const WT={pay:'sales',prod:'sales', hc:'cc',mbc:'cc',ssW:'cc',wts:'cc',cph:'cc',ccG:'cc',sgr:'cc', nr:'simple',rr:'simple',noc:'simple'};
   let scc=0,ncc=0, ly=0,lyN=0; const w={};
-  const add=(k,val,cc)=>{
+  const add=(k,val,cc,sales)=>{
     if(val==null||val==='') return;
     const v=parseFloat(String(val).replace('%','')); if(!isFinite(v)) return;
-    const o=w[k]||(w[k]={s:0,wt:0}), wt=cc>0?cc:1; o.s+=v*wt; o.wt+=wt;
+    const mode=WT[k]||'cc';
+    const wt = mode==='simple' ? 1 : mode==='sales' ? (sales>0?sales:(cc>0?cc:1)) : (cc>0?cc:1);
+    const o=w[k]||(w[k]={s:0,wt:0}); o.s+=v*wt; o.wt+=wt;
   };
   rows.forEach(r=>{
-    const cc=n(r.ccThis);
+    const cc=n(r.ccThis), sales=n(r._sales)||n(r.salesThis)||n(r.avgWeeklySales);
     if(cc>0){ scc+=cc; ncc++; }
     if(r.lyDiff!=null && r.lyDiff!==''){ ly+=n(r.lyDiff); lyN++; }
-    add('ccG',r.ccGrowth,cc);  add('sgr',r.salesGrowth,cc);
-    add('prod',r.product,cc);  add('nr',r.nr,cc); add('rr',r.rr,cc);
-    add('hc',r.hcTime,cc);     add('mbc',r.mbc,cc);
-    add('ssW',r.ssWaits,cc);   add('wts',r.waits,cc); add('noc',r.nonOciWaits,cc);
-    add('pay',r.payroll,cc);   add('cph',r.cph,cc);
+    add('ccG',r.ccGrowth,cc,sales);  add('sgr',r.salesGrowth,cc,sales);
+    add('prod',r.product,cc,sales);  add('nr',r.nr,cc,sales); add('rr',r.rr,cc,sales);
+    add('hc',r.hcTime,cc,sales);     add('mbc',r.mbc,cc,sales);
+    add('ssW',r.ssWaits,cc,sales);   add('wts',r.waits,cc,sales); add('noc',r.nonOciWaits,cc,sales);
+    add('pay',r.payroll,cc,sales);   add('cph',r.cph,cc,sales);
   });
   const has=k=>w[k]&&w[k].wt>0;
-  const g=k=>has(k)?w[k].s/w[k].wt:0;          // numeric cols default 0
-  const gn=k=>has(k)?w[k].s/w[k].wt:null;      // growth cols -> null when absent
+  const g=k=>has(k)?w[k].s/w[k].wt:0;
+  const gn=k=>has(k)?w[k].s/w[k].wt:null;
   return {
     cc: ncc?scc/ncc:0,
     lyDiff: lyN? ly/lyN : null,
@@ -6345,7 +6352,7 @@ function collapseSalonsFull(rows){
     return { salonNum:b.salonNum, salonName:b.salonName, ccThis:avgT,
       ccGrowth: avgL? (avgT-avgL)/avgL*100 : null,
       salesGrowth: avgSL? (avgST-avgSL)/avgSL*100 : null,
-      payroll:g(b,'payroll'), product:g(b,'product'), cph:g(b,'cph'),
+      payroll:g(b,'payroll'), product:g(b,'product'), cph:g(b,'cph'), _sales:avgST,
       hcTime:g(b,'hcTime'), mbc:g(b,'mbc'), waits:g(b,'waits'),
       ssWaits:g(b,'ssWaits'), nonOciWaits:g(b,'nonOciWaits'),
       nr:g(b,'nr'), rr:g(b,'rr'), _collapsed:true };
