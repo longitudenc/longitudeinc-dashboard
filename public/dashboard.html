@@ -3765,6 +3765,35 @@ function _monthRowToStd(r){
     salesGrowth:null, lyDiff:null, _month:true };
 }
 
+// Month-over-year growth for the Month view. SalonSummaryData carries no YoY, so
+// we derive it from weekHistory, where each week already holds its -364d match
+// (ccLast / salesLast). Prior-year baseline = average of the month's weeks' LY
+// values; growth compares it to the displayed month average. Salons with no LY
+// coverage stay null -> the column shows a dash, never a fake 0.
+const _MON3={Jan:'01',Feb:'02',Mar:'03',Apr:'04',May:'05',Jun:'06',Jul:'07',Aug:'08',Sep:'09',Oct:'10',Nov:'11',Dec:'12'};
+function monthKeyToYM(k){ const m=String(k||'').match(/^([A-Za-z]{3})\s+(\d{2})$/); return (m&&_MON3[m[1]])?('20'+m[2]+'-'+_MON3[m[1]]):null; }
+function applyMonthLY(rows, monthKey){
+  const ym=monthKeyToYM(monthKey); if(!ym) return rows;
+  const weeks=(S.weekHistory||[]).filter(w=>String(w.weekEnding||'').slice(0,7)===ym);
+  if(!weeks.length) return rows;
+  const acc={};
+  weeks.forEach(w=>(w.salons||[]).forEach(sr=>{
+    const sn=String(sr.salonNum||'').trim(); if(!sn) return;
+    const a=acc[sn]||(acc[sn]={clS:0,clN:0, stS:0,stN:0, slS:0,slN:0});
+    const cl=n(sr.ccLast);    if(cl>0){ a.clS+=cl; a.clN++; }
+    const st=n(sr.salesThis); if(st>0){ a.stS+=st; a.stN++; }
+    const sl=n(sr.salesLast); if(sl>0){ a.slS+=sl; a.slN++; }
+  }));
+  rows.forEach(r=>{
+    const a=acc[String(r.salonNum||'').trim()]; if(!a) return;
+    const thisCC=n(r.ccThis), lastCC=a.clN?a.clS/a.clN:0;
+    if(lastCC>0){ r.lyDiff=Math.round(thisCC-lastCC); r.ccGrowth=(thisCC-lastCC)/lastCC*100; }
+    const thisS=a.stN?a.stS/a.stN:0, lastS=a.slN?a.slS/a.slN:0;
+    if(lastS>0 && thisS>0){ r.salesGrowth=(thisS-lastS)/lastS*100; }
+  });
+  return rows;
+}
+
 // Only 'day' needs a fetch; everything else is already in memory.
 // getDailyRange reads the whole SD_DAILY tab per call, so the day and its
 // -364d match are fetched SEQUENTIALLY - two concurrent full-tab reads were
@@ -3812,7 +3841,7 @@ function periodSalonRows(){
   switch(S_periodType){
     case 'day':    return S_daySnap?(S_daySnap.salons||[]):[];
     case 'month':  { const pp=(S_salonSummaryPeriods||[]).find(x=>x.periodKey===S_periodMonth);
-                     return pp?(pp.salons||[]).map(_monthRowToStd):[]; }
+                     return pp?applyMonthLY((pp.salons||[]).map(_monthRowToStd), S_periodMonth):[]; }
     case 'mtd':    return S_mtdSnap?(S_mtdSnap.salons||[]):[];
     case 'ytd':    return ytdWeeks().flatMap(w=>w.salons||[]);
     case 'custom': { if(!S_customFrom||!S_customTo) return [];
@@ -3863,6 +3892,7 @@ function _periodSalonColsBase(){
   SALON_COLS.forEach(c=>{
     if(c.k==='rr') return;        // folded into the single Paid In/Out column
     if(c.k==='grating') return;   // a static Google rating tells you nothing about one day
+    if(c.k==='ssW') return;       // one day IS the day's waits; S/S subset is meaningless -> drop
     if(c.k==='lyDiff'){ out.push(dayLy); return; }
     if(c.k==='ccG'){ out.push(dayCcG); out.push(daySales); return; }
     if(c.k==='sgr'){ out.push(daySgr); return; }
@@ -6955,7 +6985,7 @@ function buildAvgRow(a,label,showAM=false){
   // match periodSalonCols() cell-for-cell (Total Sales / Paid In-Out are sums,
   // not averages, so they stay blank here rather than showing a wrong number).
   const vals = (S_periodType==='day')
-    ? [label,avCC,lyCell,_ccG,'',_sgr,a.prod.toFixed(1)+'%','',a.hc.toFixed(1),a.mbc.toFixed(1),a.ssW.toFixed(1)+'%',a.wts.toFixed(1)+'%',a.noc.toFixed(1)+'%',a.pay.toFixed(1)+'%',a.cph.toFixed(2)]
+    ? [label,avCC,lyCell,_ccG,'',_sgr,a.prod.toFixed(1)+'%','',a.hc.toFixed(1),a.mbc.toFixed(1),a.wts.toFixed(1)+'%',a.noc.toFixed(1)+'%',a.pay.toFixed(1)+'%',a.cph.toFixed(2)]
     : [label,avCC,lyCell,_ccG,_sgr,a.prod.toFixed(1)+'%',a.nr.toFixed(1)+'%',a.rr.toFixed(1)+'%',a.hc.toFixed(1),a.mbc.toFixed(1),a.ssW.toFixed(1)+'%',a.wts.toFixed(1)+'%',a.noc.toFixed(1)+'%',a.pay.toFixed(1)+'%',a.cph.toFixed(2),''];
   if(showAM) vals.splice(1,0,'');
   return `<tr class="avg-row">${vals.map(v=>`<td>${v}</td>`).join('')}</tr>`;
