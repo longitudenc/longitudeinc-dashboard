@@ -3639,13 +3639,18 @@ async function setGlobalMode(mode){
   if(companyActive){
     renderCompany();
   } else if(amActive){
-    // Re-render whichever AM tab is active
-    const activeTab = document.querySelector('.tab.active');
-    const tabId = activeTab ? activeTab.id : 'tb-salon';
-    if(tabId==='tb-salon') renderSalonTab();
-    else if(tabId==='tb-individual') renderIndividual();
-    else if(tabId==='tb-score') renderScorecard();
-    else if(tabId==='tb-trends') renderTrends();
+    // The AM view is driven by the SIDEBAR (the top .tab bar is display:none), so
+    // .tab.active goes stale and a period change would re-render the wrong tab.
+    // Detect the active sub-view from the sidebar button switchTab keeps in sync
+    // (.am-subnav-btn.active / data-atab), falling back to the visible panel.
+    const _vis = id => { const el=document.getElementById('tab-'+id); return el && el.style.display!=='none'; };
+    const sub = document.querySelector('.am-subnav-btn.active');
+    const atab = (sub && sub.dataset.atab) ||
+      (_vis('individual')?'individual':_vis('score')?'score':_vis('trends')?'trends':_vis('bonus')?'bonus':_vis('reviews')?'reviews':'salon');
+    if(atab==='salon') renderSalonTab();
+    else if(atab==='individual') renderIndividual();
+    else if(atab==='score') renderScorecard();
+    else if(atab==='trends') renderTrends();
   }
 }
 
