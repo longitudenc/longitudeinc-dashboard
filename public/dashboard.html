@@ -3004,6 +3004,7 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
           <input class="search-input" placeholder="Search employee..." id="emp-search" oninput="renderIndividual()" style="max-width:220px;">
           <select class="fsel" id="emp-salon-filter" onchange="renderIndividual()"><option value="">All Salons</option></select>
           <label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--text-muted);cursor:pointer;user-select:none;"><input type="checkbox" id="emp-hide-termed" onchange="S_hideTermed=this.checked;renderIndividual();" style="cursor:pointer;">Hide termed</label>
+          <span id="indiv-hours-toggle" style="margin-left:auto;"></span>
         </div>
         <div class="table-card">
           <div class="table-card-header">
@@ -4713,14 +4714,27 @@ function showCompanyTab(name){
 // ── Company Team — all employees, flat + sortable, with a group-by toggle ──
 let S_teamRange='13', S_teamGroup='none', S_teamSearch='', S_teamSort={col:3,dir:-1};
 let S_teamMode='range', S_teamWeek=null, S_teamMonth=null;   // shared by Company Team + AM My Team
+let S_teamHoursMode='avg';   // 'avg' = per-week average, 'total' = period total
+function setTeamHoursMode(v){ S_teamHoursMode=v; refreshTeamViews(); }
+// Floor/Vac/Hol headers reflect avg-per-week vs period-total.
+function teamColLabel(c){
+  if(c.k==='hours') return S_teamHoursMode==='total'?'Floor Hrs':'Floor Hrs/wk';
+  if(c.k==='vac')   return S_teamHoursMode==='total'?'Vac Hrs':'Vac Hrs/wk';
+  if(c.k==='hol')   return S_teamHoursMode==='total'?'Hol Hrs':'Hol Hrs/wk';
+  return c.lbl;
+}
+function teamHoursToggleHtml(){
+  const b=(v,lbl)=>'<button onclick="setTeamHoursMode(\''+v+'\')" style="font-size:11px;padding:3px 9px;border:1px solid var(--border);background:'+(S_teamHoursMode===v?'var(--primary)':'#fff')+';color:'+(S_teamHoursMode===v?'#fff':'var(--text)')+';cursor:pointer;'+(v==='avg'?'border-radius:6px 0 0 6px;':'border-radius:0 6px 6px 0;border-left:none;')+'">'+lbl+'</button>';
+  return '<span style="font-size:12px;">Hours <span style="display:inline-flex;vertical-align:middle;">'+b('avg','Avg/wk')+b('total','Total')+'</span></span>';
+}
 const _MONTH_ABBR=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const TEAM_COLS=[
   {k:'salon',lbl:'Salon',sv:r=>r.salonName||r.salonNum,align:'left',txt:true},
   {k:'name', lbl:'Stylist',sv:r=>fmtName(r.name||''),align:'left',txt:true},
   {k:'pos',  lbl:'Pos',sv:r=>r.position||'',align:'center',txt:true},
-  {k:'hours',lbl:'Floor Hrs/wk',sv:r=>r.hours,align:'center'},
-  {k:'vac',  lbl:'Vac Hrs',sv:r=>r.vac,align:'center'},
-  {k:'hol',  lbl:'Hol Hrs',sv:r=>r.hol,align:'center'},
+  {k:'hours',lbl:'Floor Hrs/wk',sv:r=>S_teamHoursMode==='total'?r.hoursTotal:r.hours,align:'center'},
+  {k:'vac',  lbl:'Vac Hrs',sv:r=>S_teamHoursMode==='total'?r.vacTotal:r.vac,align:'center'},
+  {k:'hol',  lbl:'Hol Hrs',sv:r=>S_teamHoursMode==='total'?r.holTotal:r.hol,align:'center'},
   {k:'cc',   lbl:'CC',sv:r=>r.cc,align:'center'},
   {k:'hc',   lbl:'HC',sv:r=>r.hc,align:'center',tier:tierHC},
   {k:'mbc',  lbl:'MBC',sv:r=>r.mbc,align:'center',tier:tierMBC},
@@ -4790,11 +4804,13 @@ function _teamPeople(amId){
       hours:avgF(g.rows,r=>n(r.floorHours)),cc:avgF(g.rows,r=>n(r.custCount)),hc:avgF(g.rows,r=>n(r.hcTime)),
       mbc:avgF(g.rows,r=>n(r.mbc)),prod:avgF(g.rows,r=>p(r.product)),nr:avgF(g.rows,r=>p(r.nr)),rr:avgF(g.rows,r=>p(r.rr)),
       vac:_vhN>0?((_vhMap[g.gid]?_vhMap[g.gid].v:0)/_vhN):NaN, hol:_vhN>0?((_vhMap[g.gid]?_vhMap[g.gid].h:0)/_vhN):NaN,
+      hoursTotal:g.rows.reduce((a,r)=>a+n(r.floorHours),0),
+      vacTotal:_vhN>0?(_vhMap[g.gid]?_vhMap[g.gid].v:0):NaN, holTotal:_vhN>0?(_vhMap[g.gid]?_vhMap[g.gid].h:0):NaN,
       wks:g.weeks.size };
   }).filter(pp => !amId || pp.am===amId);
 }
 function _teamCellHtml(c,r){
-  if(c.k==='name'){ const nm=fmtName(r.name||''),nmSafe=nm.replace(/'/g,''); return r.gid?('<span class="salon-link" onclick="openProfile(\''+r.gid+'\',\''+nmSafe+'\')" style="cursor:pointer;">'+nm+'</span>'):nm; }
+  if(c.k==='name'){ const nm=fmtName(r.name||''),nmSafe=nm.replace(/'/g,''); return (r.gid?('<span class="salon-link" onclick="openProfile(\''+r.gid+'\',\''+nmSafe+'\')" style="cursor:pointer;">'+nm+'</span>'):nm)+termedTag(r.gid); }
   if(c.txt) return c.sv(r)||'';
   const v=c.sv(r);
   if(isNaN(v)) return '<span style="color:var(--text-muted);">\u2014</span>';
@@ -4847,6 +4863,7 @@ function _teamEmptyMsg(){
 function renderTeamBody(){
   const tb=document.getElementById('team-tbody'); if(!tb) return;
   let people=_teamPeople();
+  if(S_hideTermed) people=people.filter(r=>!isInactive(r.gid));
   if(S_teamSearch) people=people.filter(r=>(fmtName(r.name||'')+' '+(r.salonName||'')+' '+(r.position||'')).toLowerCase().includes(S_teamSearch));
   const col=TEAM_COLS[S_teamSort.col], dir=S_teamSort.dir;
   const cmp=(a,b)=>{ const va=col.sv(a),vb=col.sv(b); if(col.txt) return String(va).localeCompare(String(vb))*dir; const na=isNaN(va),nb=isNaN(vb); if(na&&nb)return 0; if(na)return 1; if(nb)return -1; return (va-vb)*dir; };
@@ -4871,9 +4888,9 @@ function renderCompanyTeam(){
   host.style.display='';
   const rangeOpts=[['8','Last 8 weeks'],['13','Last 13 weeks'],['26','Last 26 weeks'],['ytd','YTD'],['all','All']];
   const grpOpts=[['none','No grouping'],['salon','Group by salon'],['am','Group by Area Manager']];
-  const thead='<tr style="background:#2E4D8A;color:#fff;">'+TEAM_COLS.map((c,i)=>{ const ar=S_teamSort.col===i?(S_teamSort.dir<0?' \u25BC':' \u25B2'):''; return '<th onclick="sortTeam('+i+')" style="padding:7px 8px;cursor:pointer;white-space:nowrap;text-align:'+(c.align==='left'?'left':'center')+';">'+c.lbl+ar+'</th>'; }).join('')+'</tr>';
+  const thead='<tr style="background:#2E4D8A;color:#fff;">'+TEAM_COLS.map((c,i)=>{ const ar=S_teamSort.col===i?(S_teamSort.dir<0?' \u25BC':' \u25B2'):''; return '<th onclick="sortTeam('+i+')" style="padding:7px 8px;cursor:pointer;white-space:nowrap;text-align:'+(c.align==='left'?'left':'center')+';">'+teamColLabel(c)+ar+'</th>'; }).join('')+'</tr>';
   host.innerHTML='<div class="table-card-header"><h3 style="margin:0;">Team — All Employees</h3></div>'
-    +'<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;padding:8px 4px 12px;">'
+    +'<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;padding:8px 4px 12px;">'+teamHoursToggleHtml()+'<label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--text-muted);cursor:pointer;user-select:none;"><input type="checkbox" '+(S_hideTermed?'checked':'')+' onchange="S_hideTermed=this.checked;refreshTeamViews();" style="cursor:pointer;">Hide termed</label>'
     
     +'<span style="font-size:12px;">Layout <select onchange="setTeamGroup(this.value)" style="font-size:12px;padding:3px 6px;border-radius:6px;border:1px solid var(--border);cursor:pointer;">'+grpOpts.map(o=>'<option value="'+o[0]+'"'+(S_teamGroup===o[0]?' selected':'')+'>'+o[1]+'</option>').join('')+'</select></span>'
     +'<input type="text" placeholder="Search name / salon\u2026" oninput="teamSearch(this.value)" value="'+S_teamSearch.replace(/"/g,'&quot;')+'" style="font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);flex:1;min-width:160px;max-width:280px;"/>'
@@ -7268,6 +7285,7 @@ function renderIndividual(){
   // Same rolling engine as Company Team, scoped to this Area Manager. This
   // replaces the old single-week snapshot path that went blank when a week's
   // employee data hadn't been scraped.
+  const ht=document.getElementById('indiv-hours-toggle'); if(ht) ht.innerHTML=teamHoursToggleHtml();
   const people=_teamPeople(S.currentAM);
   // Salon filter = this AM's salons.
   const cur = sf ? sf.value : '';
@@ -7277,11 +7295,12 @@ function renderIndividual(){
   const se=document.getElementById('emp-search'); const q=(se?se.value:'').toLowerCase();
   const salF=sf?sf.value:'';
   let rows=people;
+  if(S_hideTermed) rows=rows.filter(r=>!isInactive(r.gid));
   if(salF) rows=rows.filter(r=>String(r.salonNum)===salF);
   if(q) rows=rows.filter(r=>(fmtName(r.name||'')+' '+(r.salonName||'')+' '+(r.position||'')).toLowerCase().includes(q));
   const col=TEAM_COLS[S_teamSort.col], dir=S_teamSort.dir;
   rows.sort((a,b)=>{ const va=col.sv(a),vb=col.sv(b); if(col.txt) return String(va).localeCompare(String(vb))*dir; const na=isNaN(va),nb=isNaN(vb); if(na&&nb)return 0; if(na)return 1; if(nb)return -1; return (va-vb)*dir; });
-  thead.innerHTML='<tr style="background:#2E4D8A;color:#fff;">'+TEAM_COLS.map((c,i)=>{ const ar=S_teamSort.col===i?(S_teamSort.dir<0?' \u25BC':' \u25B2'):''; return '<th onclick="sortTeam('+i+')" style="padding:7px 8px;cursor:pointer;white-space:nowrap;text-align:'+(c.align==='left'?'left':'center')+';">'+c.lbl+ar+'</th>'; }).join('')+'</tr>';
+  thead.innerHTML='<tr style="background:#2E4D8A;color:#fff;">'+TEAM_COLS.map((c,i)=>{ const ar=S_teamSort.col===i?(S_teamSort.dir<0?' \u25BC':' \u25B2'):''; return '<th onclick="sortTeam('+i+')" style="padding:7px 8px;cursor:pointer;white-space:nowrap;text-align:'+(c.align==='left'?'left':'center')+';">'+teamColLabel(c)+ar+'</th>'; }).join('')+'</tr>';
   tbody.innerHTML=rows.length?rows.map(_teamRowHtml).join(''):'<tr><td colspan="'+TEAM_COLS.length+'" class="no-data"><div class="no-data-icon">\ud83d\udc65</div>'+_teamEmptyMsg()+'</td></tr>';
   const note=document.getElementById('indiv-count-note'); if(note) note.textContent=rows.length+' stylists';
 }
