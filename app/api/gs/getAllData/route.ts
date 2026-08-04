@@ -146,6 +146,19 @@ function formatAllData(raw: any, scrapedWeeks: any[], rosterRows: any[]) {
     }
   })
 
+  // Per-week vac/hol from SD_PAYROLL, joined onto each emp row so the client can
+  // show TRUE WEEKLY vacation/holiday (not a monthly average). Both sheets are
+  // upserted on the same (weekEnd, storeId, payId) grain, so the join is 1:1.
+  const vhKey = (wk: any, sid: any, pid: any) =>
+    normalizeDateString(String(wk || '')) + '|' + String(sid || '').trim() + '|' + String(pid || '').trim()
+  const payHrs: Record<string, { vac: number; hol: number }> = {}
+  ;(raw.payrollWeeklyRows || []).forEach((r: any) => {
+    payHrs[vhKey(r.weekEnd, r.storeId, r.payId)] = {
+      vac: Number(r.vacationHours) || 0,
+      hol: Number(r.holidayHours) || 0,
+    }
+  })
+
   // Layer in employee rows — normalize their weekEnding to YYYY-MM-DD so they
   // merge correctly with scraped weeks (no more duplicate dropdown entries).
   // SD_EMP_WEEKLY uses weekEnd / productPct / employeeName; the dashboard reads
@@ -155,12 +168,15 @@ function formatAllData(raw: any, scrapedWeeks: any[], rosterRows: any[]) {
     if (!rawWk) return
     const wk = normalizeDateString(rawWk)
     if (!weekMap[wk]) weekMap[wk] = { weekEnding: wk, salons: [], emps: [] }
+    const _vh = payHrs[vhKey(rawWk, row.storeId, row.payId)]
     weekMap[wk].emps.push({
       ...row,
       weekEnding: wk,
       product: row.product ?? row.productPct ?? '',
       empName: row.empName ?? row.employeeName ?? '',
       payroll: row.payroll ?? row.payrollPct ?? '',
+      vacationHours: _vh ? _vh.vac : 0,
+      holidayHours: _vh ? _vh.hol : 0,
     })
   })
 

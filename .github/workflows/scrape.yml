@@ -83,6 +83,7 @@ jobs:
             SAT=$(date -u -d "$FRI -6 days" +%F)
             hit weekly       "&start=$SAT&end=$FRI"
             hit payroll      "&start=$SAT&end=$FRI"
+            hit employee     "&start=$SAT&end=$FRI"
             hit bonus-period "&year=$(date -u -d "$FRI" +%Y)&month=$(date -u -d "$FRI" +%-m)"
           fi
 

@@ -4739,14 +4739,20 @@ function _teamMonthKeys(){
   out.sort((a,b)=>b[1].localeCompare(a[1]));   // newest first
   return out;
 }
-// The single month a team period maps to, for joining monthly payroll (vac/hol).
-// Null for multi-month periods (rolling range / YTD / custom).
-function _teamMonthLabel(){
-  const lab=d=>d?(_MONTH_ABBR[+String(d).slice(5,7)-1]+' '+String(d).slice(2,4)):null;
-  if(S_periodType==='month') return S_periodMonth||null;
-  if(S_periodType==='mtd'||S_periodType==='wtd') return lab(typeof wtdWeekEnding==='function'?wtdWeekEnding():null);
-  if(S_periodType==='week') return lab(S.currentWeek);
-  return null;
+// Settled weeks whose per-week SD_PAYROLL vac/hol apply to this team period.
+// Empty for WTD (in-progress week has no finalized payroll yet).
+function _vacHolWeeks(){
+  const today=_sdTodayIso();
+  const completed=(S.weekHistory||[]).filter(w=>String(w.weekEnding)<today);
+  switch(S_periodType){
+    case 'week':  return completed.filter(w=>w.weekEnding===S.currentWeek);
+    case 'wtd':   return [];
+    case 'month': { const ym=monthKeyToYM(S_periodMonth); return ym?completed.filter(w=>String(w.weekEnding).slice(0,7)===ym):[]; }
+    case 'mtd':   { const f=(typeof wtdWeekEnding==='function')?wtdWeekEnding():null; if(!f) return []; const key=periodKeyFromWeekEnd(f); return completed.filter(w=>periodKeyFromWeekEnd(w.weekEnding)===key); }
+    case 'ytd':   { if(!completed.length) return []; const anchor=fiscalYearStartIso(completed[completed.length-1].weekEnding); return completed.filter(w=>w.weekEnding>=anchor); }
+    case 'custom':{ if(!S_customFrom||!S_customTo) return []; const lo=S_customFrom<S_customTo?S_customFrom:S_customTo, hi=S_customFrom<S_customTo?S_customTo:S_customFrom; return completed.filter(w=>w.weekEnding>=lo&&w.weekEnding<=hi); }
+    default:      return completed.slice(-13);
+  }
 }
 function _teamWeeks(){
   const today=_sdTodayIso();
@@ -4765,8 +4771,8 @@ function _teamWeeks(){
 function _teamPeople(amId){
   const weeks=_teamWeeks();
   if(!weeks.length) return [];
-  const _monLab=_teamMonthLabel();
-  const _vh=(gid,field)=>{ if(!_monLab||!gid) return NaN; const ph=getPayrollHours(gid,_monLab); return ph? (Number(ph[field])||0) : NaN; };
+  const _vhWeeks=_vacHolWeeks(), _vhN=_vhWeeks.length, _vhMap={};
+  _vhWeeks.forEach(w=>(w.emps||[]).forEach(e=>{ const gid=(e.globalId||'').trim(); if(!gid) return; const o=_vhMap[gid]||(_vhMap[gid]={v:0,h:0}); o.v+=n(e.vacationHours); o.h+=n(e.holidayHours); }));
   const byGid={};
   weeks.forEach(w=>{ (w.emps||[]).forEach(e=>{
     const gid=(e.globalId||'').trim()||('name:'+(e.empName||''));
@@ -4783,7 +4789,7 @@ function _teamPeople(amId){
       am, amName:(AMS[am]&&AMS[am].name)||'Unassigned',
       hours:avgF(g.rows,r=>n(r.floorHours)),cc:avgF(g.rows,r=>n(r.custCount)),hc:avgF(g.rows,r=>n(r.hcTime)),
       mbc:avgF(g.rows,r=>n(r.mbc)),prod:avgF(g.rows,r=>p(r.product)),nr:avgF(g.rows,r=>p(r.nr)),rr:avgF(g.rows,r=>p(r.rr)),
-      vac:_vh(g.gid,'avgWeeklyVacation'), hol:_vh(g.gid,'avgWeeklyHoliday'),
+      vac:_vhN>0?((_vhMap[g.gid]?_vhMap[g.gid].v:0)/_vhN):NaN, hol:_vhN>0?((_vhMap[g.gid]?_vhMap[g.gid].h:0)/_vhN):NaN,
       wks:g.weeks.size };
   }).filter(pp => !amId || pp.am===amId);
 }
