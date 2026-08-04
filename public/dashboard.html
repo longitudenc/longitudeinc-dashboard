@@ -4719,6 +4719,8 @@ const TEAM_COLS=[
   {k:'name', lbl:'Stylist',sv:r=>fmtName(r.name||''),align:'left',txt:true},
   {k:'pos',  lbl:'Pos',sv:r=>r.position||'',align:'center',txt:true},
   {k:'hours',lbl:'Floor Hrs/wk',sv:r=>r.hours,align:'center'},
+  {k:'vac',  lbl:'Vac Hrs',sv:r=>r.vac,align:'center'},
+  {k:'hol',  lbl:'Hol Hrs',sv:r=>r.hol,align:'center'},
   {k:'cc',   lbl:'CC',sv:r=>r.cc,align:'center'},
   {k:'hc',   lbl:'HC',sv:r=>r.hc,align:'center',tier:tierHC},
   {k:'mbc',  lbl:'MBC',sv:r=>r.mbc,align:'center',tier:tierMBC},
@@ -4737,6 +4739,15 @@ function _teamMonthKeys(){
   out.sort((a,b)=>b[1].localeCompare(a[1]));   // newest first
   return out;
 }
+// The single month a team period maps to, for joining monthly payroll (vac/hol).
+// Null for multi-month periods (rolling range / YTD / custom).
+function _teamMonthLabel(){
+  const lab=d=>d?(_MONTH_ABBR[+String(d).slice(5,7)-1]+' '+String(d).slice(2,4)):null;
+  if(S_periodType==='month') return S_periodMonth||null;
+  if(S_periodType==='mtd'||S_periodType==='wtd') return lab(typeof wtdWeekEnding==='function'?wtdWeekEnding():null);
+  if(S_periodType==='week') return lab(S.currentWeek);
+  return null;
+}
 function _teamWeeks(){
   const today=_sdTodayIso();
   const completed=[...(S.weekHistory||[])].filter(w=>String(w.weekEnding)<today).sort((a,b)=>new Date(a.weekEnding)-new Date(b.weekEnding));
@@ -4754,6 +4765,8 @@ function _teamWeeks(){
 function _teamPeople(amId){
   const weeks=_teamWeeks();
   if(!weeks.length) return [];
+  const _monLab=_teamMonthLabel();
+  const _vh=(gid,field)=>{ if(!_monLab||!gid) return NaN; const ph=getPayrollHours(gid,_monLab); return ph? (Number(ph[field])||0) : NaN; };
   const byGid={};
   weeks.forEach(w=>{ (w.emps||[]).forEach(e=>{
     const gid=(e.globalId||'').trim()||('name:'+(e.empName||''));
@@ -4770,6 +4783,7 @@ function _teamPeople(amId){
       am, amName:(AMS[am]&&AMS[am].name)||'Unassigned',
       hours:avgF(g.rows,r=>n(r.floorHours)),cc:avgF(g.rows,r=>n(r.custCount)),hc:avgF(g.rows,r=>n(r.hcTime)),
       mbc:avgF(g.rows,r=>n(r.mbc)),prod:avgF(g.rows,r=>p(r.product)),nr:avgF(g.rows,r=>p(r.nr)),rr:avgF(g.rows,r=>p(r.rr)),
+      vac:_vh(g.gid,'avgWeeklyVacation'), hol:_vh(g.gid,'avgWeeklyHoliday'),
       wks:g.weeks.size };
   }).filter(pp => !amId || pp.am===amId);
 }
