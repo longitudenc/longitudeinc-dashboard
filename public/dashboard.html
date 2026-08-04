@@ -3001,14 +3001,14 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
       <!-- INDIVIDUAL TAB -->
       <div id="tab-individual" style="display:none;">
         <div class="toggle-row">
-          <input class="search-input" placeholder="Search employee..." id="emp-search" oninput="filterEmps()" style="max-width:220px;">
-          <select class="fsel" id="emp-salon-filter" onchange="filterEmps()"><option value="">All Salons</option></select>
-          <label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--text-muted);cursor:pointer;user-select:none;"><input type="checkbox" id="emp-hide-termed" onchange="S_hideTermed=this.checked;filterEmps();" style="cursor:pointer;">Hide termed</label>
+          <input class="search-input" placeholder="Search employee..." id="emp-search" oninput="renderIndividual()" style="max-width:220px;">
+          <select class="fsel" id="emp-salon-filter" onchange="renderIndividual()"><option value="">All Salons</option></select>
+          <label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--text-muted);cursor:pointer;user-select:none;"><input type="checkbox" id="emp-hide-termed" onchange="S_hideTermed=this.checked;renderIndividual();" style="cursor:pointer;">Hide termed</label>
         </div>
         <div class="table-card">
           <div class="table-card-header">
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-          <div class="card-title" style="margin:0;">Individual Measures — HC Time · MBC · Product % <span class="period-controls" style="display:inline-flex;align-items:center;gap:7px;flex-wrap:wrap;"></span></div>
+          <div class="card-title" style="margin:0;">Individual Measures — HC Time · MBC · Product % <span id="indiv-team-selector" style="display:inline-flex;align-items:center;gap:7px;flex-wrap:wrap;"></span></div>
           <span id="indiv-count-note" style="font-size:11px;color:var(--text-muted);"></span>
         </div>
           </div>
@@ -4708,6 +4708,8 @@ function showCompanyTab(name){
 
 // ── Company Team — all employees, flat + sortable, with a group-by toggle ──
 let S_teamRange='13', S_teamGroup='none', S_teamSearch='', S_teamSort={col:3,dir:-1};
+let S_teamMode='range', S_teamWeek=null, S_teamMonth=null;   // shared by Company Team + AM My Team
+const _MONTH_ABBR=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const TEAM_COLS=[
   {k:'salon',lbl:'Salon',sv:r=>r.salonName||r.salonNum,align:'left',txt:true},
   {k:'name', lbl:'Stylist',sv:r=>fmtName(r.name||''),align:'left',txt:true},
@@ -4721,15 +4723,29 @@ const TEAM_COLS=[
   {k:'rr',   lbl:'RR%',sv:r=>r.rr,align:'center',tier:tierRR,pct:true},
   {k:'wks',  lbl:'Wks',sv:r=>r.wks,align:'center',muted:true},
 ];
-function _teamPeople(){
-  if(!S.weekHistory||!S.weekHistory.length) return [];
+// Weeks selected by the shared team selector: rolling range, a single week, or
+// a calendar month. One engine feeds both the Company and AM team tables.
+function _teamMonthKeys(){
+  const seen={}, out=[];
+  [...(S.weekHistory||[])].forEach(w=>{ const d=String(w.weekEnding||''); if(d.length<7) return;
+    const key=_MONTH_ABBR[+d.slice(5,7)-1]+' '+d.slice(2,4);
+    if(!seen[key]){ seen[key]=d.slice(0,7); out.push([key,d.slice(0,7)]); } });
+  out.sort((a,b)=>b[1].localeCompare(a[1]));   // newest first
+  return out;
+}
+function _teamWeeks(){
   const today=_sdTodayIso();
-  const completed=[...S.weekHistory].filter(w=>String(w.weekEnding)<today).sort((a,b)=>new Date(a.weekEnding)-new Date(b.weekEnding));
+  const completed=[...(S.weekHistory||[])].filter(w=>String(w.weekEnding)<today).sort((a,b)=>new Date(a.weekEnding)-new Date(b.weekEnding));
   if(!completed.length) return [];
-  let weeks;
-  if(S_teamRange==='all') weeks=completed;
-  else if(S_teamRange==='ytd'){ const anchor=fiscalYearStartIso(completed[completed.length-1].weekEnding); weeks=completed.filter(w=>w.weekEnding>=anchor); }
-  else weeks=completed.slice(-parseInt(S_teamRange));
+  if(S_teamMode==='week'){ const wk=S_teamWeek||completed[completed.length-1].weekEnding; const w=completed.find(x=>x.weekEnding===wk); return w?[w]:[]; }
+  if(S_teamMode==='month'){ const ym=monthKeyToYM(S_teamMonth); if(!ym) return []; return completed.filter(w=>String(w.weekEnding).slice(0,7)===ym); }
+  if(S_teamRange==='all') return completed;
+  if(S_teamRange==='ytd'){ const anchor=fiscalYearStartIso(completed[completed.length-1].weekEnding); return completed.filter(w=>w.weekEnding>=anchor); }
+  return completed.slice(-parseInt(S_teamRange));
+}
+function _teamPeople(amId){
+  const weeks=_teamWeeks();
+  if(!weeks.length) return [];
   const byGid={};
   weeks.forEach(w=>{ (w.emps||[]).forEach(e=>{
     const gid=(e.globalId||'').trim()||('name:'+(e.empName||''));
@@ -4747,7 +4763,7 @@ function _teamPeople(){
       hours:avgF(g.rows,r=>n(r.floorHours)),cc:avgF(g.rows,r=>n(r.custCount)),hc:avgF(g.rows,r=>n(r.hcTime)),
       mbc:avgF(g.rows,r=>n(r.mbc)),prod:avgF(g.rows,r=>p(r.product)),nr:avgF(g.rows,r=>p(r.nr)),rr:avgF(g.rows,r=>p(r.rr)),
       wks:g.weeks.size };
-  });
+  }).filter(pp => !amId || pp.am===amId);
 }
 function _teamCellHtml(c,r){
   if(c.k==='name'){ const nm=fmtName(r.name||''),nmSafe=nm.replace(/'/g,''); return r.gid?('<span class="salon-link" onclick="openProfile(\''+r.gid+'\',\''+nmSafe+'\')" style="cursor:pointer;">'+nm+'</span>'):nm; }
@@ -4763,6 +4779,36 @@ function _teamRowHtml(r){
     return '<td class="'+cls+'" style="'+style+'">'+_teamCellHtml(c,r)+'</td>';
   }).join('')+'</tr>';
 }
+// Shared team selector (Range / Week / Month) used by both team tables.
+function teamSelectorHtml(){
+  const box='font-size:12px;padding:3px 6px;border-radius:6px;border:1px solid var(--border);cursor:pointer;';
+  const opt=(list,cur)=>list.map(o=>'<option value="'+o[0]+'"'+(String(o[0])===String(cur)?' selected':'')+'>'+o[1]+'</option>').join('');
+  const modes=[['range','Rolling range'],['week','Week'],['month','Month']];
+  let sub='';
+  if(S_teamMode==='week'){
+    const weeks=[...(S.weekHistory||[])].map(w=>w.weekEnding).sort().reverse().map(w=>[w,fmtWeek(w)]);
+    sub='<select onchange="setTeamWeek(this.value)" style="'+box+'">'+opt(weeks,S_teamWeek||(weeks[0]&&weeks[0][0]))+'</select>';
+  } else if(S_teamMode==='month'){
+    sub='<select onchange="setTeamMonth(this.value)" style="'+box+'">'+opt(_teamMonthKeys(),S_teamMonth)+'</select>';
+  } else {
+    sub='<select onchange="setTeamRange(this.value)" style="'+box+'">'+opt([['8','Last 8 weeks'],['13','Last 13 weeks'],['26','Last 26 weeks'],['ytd','YTD'],['all','All']],S_teamRange)+'</select>';
+  }
+  return '<span style="font-size:12px;">Show <select onchange="setTeamMode(this.value)" style="'+box+'">'+opt(modes,S_teamMode)+'</select></span> '+sub;
+}
+function refreshTeamViews(){
+  const amActive=document.getElementById('page-am')&&document.getElementById('page-am').classList.contains('active');
+  if(amActive){ try{ renderIndividual(); }catch(e){ console.error('[team]',e); } }
+  else { try{ renderCompanyTeam(); }catch(e){ console.error('[team]',e); } }
+}
+function setTeamMode(v){
+  S_teamMode=v;
+  if(v==='week'&&!S_teamWeek){ const ws=[...(S.weekHistory||[])].map(w=>w.weekEnding).sort(); S_teamWeek=ws[ws.length-1]||null; }
+  if(v==='month'&&!S_teamMonth){ const mk=_teamMonthKeys(); S_teamMonth=mk.length?mk[0][0]:null; }
+  refreshTeamViews();
+}
+function setTeamWeek(v){ S_teamWeek=v; refreshTeamViews(); }
+function setTeamMonth(v){ S_teamMonth=v; refreshTeamViews(); }
+
 function renderTeamBody(){
   const tb=document.getElementById('team-tbody'); if(!tb) return;
   let people=_teamPeople();
@@ -4781,8 +4827,8 @@ function renderTeamBody(){
   tb.innerHTML=body||'<tr><td colspan="'+TEAM_COLS.length+'" style="padding:20px;text-align:center;color:var(--text-muted);">No employee data in this range.</td></tr>';
   const cnt=document.getElementById('team-count'); if(cnt) cnt.textContent=people.length+' stylists';
 }
-function sortTeam(i){ if(S_teamSort.col===i) S_teamSort.dir*=-1; else S_teamSort={col:i,dir:(TEAM_COLS[i].txt?1:-1)}; renderCompanyTeam(); }
-function setTeamRange(v){ S_teamRange=v; renderCompanyTeam(); }
+function sortTeam(i){ if(S_teamSort.col===i) S_teamSort.dir*=-1; else S_teamSort={col:i,dir:(TEAM_COLS[i].txt?1:-1)}; refreshTeamViews(); }
+function setTeamRange(v){ S_teamRange=v; refreshTeamViews(); }
 function setTeamGroup(v){ S_teamGroup=v; renderCompanyTeam(); }
 function teamSearch(v){ S_teamSearch=(v||'').toLowerCase(); renderTeamBody(); }
 function renderCompanyTeam(){
@@ -4793,7 +4839,7 @@ function renderCompanyTeam(){
   const thead='<tr style="background:#2E4D8A;color:#fff;">'+TEAM_COLS.map((c,i)=>{ const ar=S_teamSort.col===i?(S_teamSort.dir<0?' \u25BC':' \u25B2'):''; return '<th onclick="sortTeam('+i+')" style="padding:7px 8px;cursor:pointer;white-space:nowrap;text-align:'+(c.align==='left'?'left':'center')+';">'+c.lbl+ar+'</th>'; }).join('')+'</tr>';
   host.innerHTML='<div class="table-card-header"><h3 style="margin:0;">Team — All Employees</h3></div>'
     +'<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;padding:8px 4px 12px;">'
-    +'<span style="font-size:12px;">Range <select onchange="setTeamRange(this.value)" style="font-size:12px;padding:3px 6px;border-radius:6px;border:1px solid var(--border);cursor:pointer;">'+rangeOpts.map(o=>'<option value="'+o[0]+'"'+(S_teamRange===o[0]?' selected':'')+'>'+o[1]+'</option>').join('')+'</select></span>'
+    +teamSelectorHtml()
     +'<span style="font-size:12px;">Layout <select onchange="setTeamGroup(this.value)" style="font-size:12px;padding:3px 6px;border-radius:6px;border:1px solid var(--border);cursor:pointer;">'+grpOpts.map(o=>'<option value="'+o[0]+'"'+(S_teamGroup===o[0]?' selected':'')+'>'+o[1]+'</option>').join('')+'</select></span>'
     +'<input type="text" placeholder="Search name / salon\u2026" oninput="teamSearch(this.value)" value="'+S_teamSearch.replace(/"/g,'&quot;')+'" style="font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);flex:1;min-width:160px;max-width:280px;"/>'
     +'<span id="team-count" style="font-size:11px;color:var(--text-muted);margin-left:auto;"></span>'
@@ -7182,66 +7228,30 @@ function setIndivMode(mode){
 }
 
 function renderIndividual(){
-  const thead=document.getElementById('emp-thead'),tbody=document.getElementById('emp-tbody'),sf=document.getElementById('emp-salon-filter');
-  // Use global mode toggle
-  const badge = document.getElementById('indiv-mode-badge');
-  if(badge) badge.textContent = S_globalMode==='ytd' ? 'YTD Average' : S_globalMode==='mtd' ? 'Month to Date' : (isWtdWeek(S.currentWeek)?'Week to Date':'This Week');
-
-  if(S_globalMode === 'ytd'){
-    // YTD: aggregate all weeks per employee name+salon
-    const allEmps = ytdEmpsByAM(S.currentAM);
-    if(!allEmps.length){ tbody.innerHTML='<tr><td colspan="11" class="no-data"><div class="no-data-icon">👥</div>No employee data yet</td></tr>'; thead.innerHTML=''; return; }
-
-    // Consolidate by PERSON (globalId) across all their salons — multi-salon
-    // employees get ONE row, shown at their home salon, with all weeks combined.
-    const grouped = {};
-    allEmps.forEach(e=>{
-      const gid = (e.globalId||'').trim() || ('name:'+(e.empName||''));
-      if(!grouped[gid]) grouped[gid] = {globalId:(e.globalId||'').trim(), empName:e.empName, position:e.position, salons:new Set(), rows:[]};
-      grouped[gid].rows.push(e);
-      if(e.salonNum) grouped[gid].salons.add(String(e.salonNum));
-    });
-
-    const ytdEmps = Object.values(grouped).map(g=>{
-      const rows = g.rows;
-      const avgField = (fn) => avg(rows.map(fn).filter(v=>!isNaN(v)&&v!==0));
-      // Home salon: the SD3 home store if the person actually has data here, else
-      // the salon they logged the most weeks at (keeps the label and data aligned).
-      const homeRef = (S.homeDataMap && g.globalId && S.homeDataMap[g.globalId]) ? String(S.homeDataMap[g.globalId].homeSalon||'').trim() : '';
-      let homeSalon = (homeRef && g.salons.has(homeRef)) ? homeRef : '';
-      if(!homeSalon){ const cnt={}; rows.forEach(r=>{ if(r.salonNum){ const k=String(r.salonNum); cnt[k]=(cnt[k]||0)+1; } }); homeSalon = Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a])[0] || (rows[0]&&String(rows[0].salonNum)) || ''; }
-      return {
-        globalId: g.globalId, empName: g.empName, position: g.position,
-        salonNum: homeSalon, salonCount: g.salons.size,
-        hcTime: avgField(r=>n(r.hcTime)).toFixed(1),
-        mbc: avgField(r=>n(r.mbc)).toFixed(1),
-        product: avgField(r=>p(r.product)).toFixed(1),
-        floorHours: avgField(r=>n(r.floorHours)).toFixed(1),
-        custCount: Math.round(avgField(r=>n(r.custCount))),
-        nr: avgField(r=>p(r.nr)).toFixed(1),
-        rr: avgField(r=>p(r.rr)).toFixed(1),
-        payroll: avgField(r=>p(r.payroll)).toFixed(1),
-        weekCount: rows.length
-      };
-    });
-
-    _ytdEmpsCache = ytdEmps;
-    const salons=[...new Set(ytdEmps.map(e=>e.salonNum))].sort();
-    sf.innerHTML='<option value="">All Salons</option>'+salons.map(s=>`<option value="${s}">${salonDisplay(s)}</option>`).join('');
-    thead.innerHTML=`<tr>${YTD_EMP_COLS.map((c,i)=>`<th onclick="sortEmp(${i})" data-col="${i}"><span>${c.lbl}</span><span class="si"></span></th>`).join('')}</tr>`;
-    filterEmps();
-
-  } else {
-    // Weekly / WTD / MTD mode — WTD flows through getSnap(); MTD reads S_mtdSnap.
-    const emps=consolidateEmpsByPerson(empsByAM(S.currentAM, S_globalMode==='mtd'?S_mtdSnap:undefined));
-    const noteEl = document.getElementById('indiv-count-note');
-    if(noteEl) noteEl.textContent = emps.length ? (emps.length + ' employees · ' + (S_globalMode==='mtd' ? ('month to date — '+dailyCoverageNote()) : isWtdWeek(S.currentWeek) ? ('week to date — '+dailyCoverageNote()) : ('week ending '+(S.currentWeek||'—')+' · Switch to YTD for full roster'))) : '';
-    if(!emps.length){ tbody.innerHTML='<tr><td colspan="9" class="no-data"><div class="no-data-icon">👥</div>No employee data for this week</td></tr>'; thead.innerHTML=''; return; }
-    const salons=[...new Set(emps.map(e=>e.salonNum))].sort();
-    sf.innerHTML='<option value="">All Salons</option>'+salons.map(s=>`<option value="${s}">${salonDisplay(s)}</option>`).join('');
-    thead.innerHTML=`<tr>${EMP_COLS.map((c,i)=>`<th onclick="sortEmp(${i})" data-col="${i}"><span>${c.lbl}</span><span class="si"></span></th>`).join('')}</tr>`;
-    filterEmps();
-  }
+  const thead=document.getElementById('emp-thead'), tbody=document.getElementById('emp-tbody'), sf=document.getElementById('emp-salon-filter');
+  if(!thead||!tbody) return;
+  // Shared team selector (Range / Week / Month) in the card title.
+  const selHost=document.getElementById('indiv-team-selector');
+  if(selHost) selHost.innerHTML=teamSelectorHtml();
+  // Same rolling engine as Company Team, scoped to this Area Manager. This
+  // replaces the old single-week snapshot path that went blank when a week's
+  // employee data hadn't been scraped.
+  const people=_teamPeople(S.currentAM);
+  // Salon filter = this AM's salons.
+  const cur = sf ? sf.value : '';
+  const salons=[...new Set(people.map(e=>e.salonNum))].filter(Boolean).sort();
+  if(sf) sf.innerHTML='<option value="">All Salons</option>'+salons.map(x=>'<option value="'+x+'"'+(cur===x?' selected':'')+'>'+salonDisplay(x)+'</option>').join('');
+  // Search + salon filter, then sort with the shared TEAM_COLS sort state.
+  const se=document.getElementById('emp-search'); const q=(se?se.value:'').toLowerCase();
+  const salF=sf?sf.value:'';
+  let rows=people;
+  if(salF) rows=rows.filter(r=>String(r.salonNum)===salF);
+  if(q) rows=rows.filter(r=>(fmtName(r.name||'')+' '+(r.salonName||'')+' '+(r.position||'')).toLowerCase().includes(q));
+  const col=TEAM_COLS[S_teamSort.col], dir=S_teamSort.dir;
+  rows.sort((a,b)=>{ const va=col.sv(a),vb=col.sv(b); if(col.txt) return String(va).localeCompare(String(vb))*dir; const na=isNaN(va),nb=isNaN(vb); if(na&&nb)return 0; if(na)return 1; if(nb)return -1; return (va-vb)*dir; });
+  thead.innerHTML='<tr style="background:#2E4D8A;color:#fff;">'+TEAM_COLS.map((c,i)=>{ const ar=S_teamSort.col===i?(S_teamSort.dir<0?' \u25BC':' \u25B2'):''; return '<th onclick="sortTeam('+i+')" style="padding:7px 8px;cursor:pointer;white-space:nowrap;text-align:'+(c.align==='left'?'left':'center')+';">'+c.lbl+ar+'</th>'; }).join('')+'</tr>';
+  tbody.innerHTML=rows.length?rows.map(_teamRowHtml).join(''):'<tr><td colspan="'+TEAM_COLS.length+'" class="no-data"><div class="no-data-icon">\ud83d\udc65</div>No stylists for this selection</td></tr>';
+  const note=document.getElementById('indiv-count-note'); if(note) note.textContent=rows.length+' stylists';
 }
 
 function filterEmps(){
