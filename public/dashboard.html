@@ -3008,7 +3008,7 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
         <div class="table-card">
           <div class="table-card-header">
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-          <div class="card-title" style="margin:0;">Individual Measures — HC Time · MBC · Product % <span id="indiv-team-selector" style="display:inline-flex;align-items:center;gap:7px;flex-wrap:wrap;"></span></div>
+          <div class="card-title" style="margin:0;">Individual Measures — HC Time · MBC · Product % <span class="period-controls" style="display:inline-flex;align-items:center;gap:7px;flex-wrap:wrap;"></span></div>
           <span id="indiv-count-note" style="font-size:11px;color:var(--text-muted);"></span>
         </div>
           </div>
@@ -3842,6 +3842,7 @@ function periodSalonRows(){
     case 'day':    return S_daySnap?(S_daySnap.salons||[]):[];
     case 'month':  { const pp=(S_salonSummaryPeriods||[]).find(x=>x.periodKey===S_periodMonth);
                      return pp?applyMonthLY((pp.salons||[]).map(_monthRowToStd), S_periodMonth):[]; }
+    case 'wtd':    return S_wtdSnap?(S_wtdSnap.salons||[]):[];
     case 'mtd':    return S_mtdSnap?(S_mtdSnap.salons||[]):[];
     case 'ytd':    return ytdWeeks().flatMap(w=>w.salons||[]);
     case 'custom': { if(!S_customFrom||!S_customTo) return [];
@@ -3861,6 +3862,7 @@ function periodLabel(){
   switch(S_periodType){
     case 'day':    return S_periodDay?('Day \u00b7 '+fmtWeek(S_periodDay)):'Day';
     case 'month':  return 'Month \u00b7 '+(S_periodMonth||'');
+    case 'wtd':    return 'Week to Date';
     case 'mtd':    return 'Month to Date';
     case 'ytd':    return 'Year to Date';
     case 'custom': return (S_customFrom&&S_customTo)?('Custom \u00b7 '+fmtWeek(S_customFrom)+' \u2013 '+fmtWeek(S_customTo)):'Custom range';
@@ -4016,7 +4018,7 @@ function renderPeriodControls(){
     picker=lab('From')+'<select onchange="setCustomFrom(this.value)" style="'+box+'">'+opts(weeks,S_customFrom)+'</select>'
           +lab('To')+'<select onchange="setCustomTo(this.value)" style="'+box+'">'+opts(weeks,S_customTo)+'</select>';
   }
-  const types=[['day','Day'],['week','Week'],['month','Month'],['mtd','MTD'],['ytd','YTD'],['custom','Custom']];
+  const types=[['day','Day'],['week','Week'],['wtd','WTD'],['month','Month'],['mtd','MTD'],['ytd','YTD'],['custom','Custom']];
     const cmpSel = compareSupported()
     ? lab('Compare')+'<select onchange="setCompareMode(this.value)" style="'+box+'">'
       +opts([['none','None'],['ly','Last year'],['prev','Previous period']],S_compareMode)+'</select>'
@@ -4041,6 +4043,7 @@ function refreshPeriodViews(){
       // sidebar tab so a period change on "All Salons" doesn't resurrect the AM
       // scorecard / performance sections that belong to the "Area Managers" tab.
       try{ applyCompanyTabVisibility(); }catch(e){}
+      if(S_companyTab==='team'){ try{ renderCompanyTeam(); }catch(e){ console.error('[team]',e); } }
     }
     else if(amActive){
       const at=document.querySelector('.tab.active'); const tid=at?at.id:'tb-salon';
@@ -4057,6 +4060,7 @@ async function setPeriodType(t){
     S_customTo=ws[ws.length-1]||null; S_customFrom=ws[Math.max(0,ws.length-13)]||S_customTo;
   }
   renderPeriodControls();
+  if(t==='wtd'&&!S_wtdSnap){ try{ await buildWtdSnap(); }catch(e){ console.error('[WTD]',e); } }
   if(t==='mtd'&&!S_mtdSnap){ try{ await buildMtdSnap(); }catch(e){ console.error('[MTD]',e); } }
   if(t==='day'){ await loadPeriodSnap(); }
   refreshPeriodViews();
@@ -4736,12 +4740,16 @@ function _teamMonthKeys(){
 function _teamWeeks(){
   const today=_sdTodayIso();
   const completed=[...(S.weekHistory||[])].filter(w=>String(w.weekEnding)<today).sort((a,b)=>new Date(a.weekEnding)-new Date(b.weekEnding));
-  if(!completed.length) return [];
-  if(S_teamMode==='week'){ const wk=S_teamWeek||completed[completed.length-1].weekEnding; const w=completed.find(x=>x.weekEnding===wk); return w?[w]:[]; }
-  if(S_teamMode==='month'){ const ym=monthKeyToYM(S_teamMonth); if(!ym) return []; return completed.filter(w=>String(w.weekEnding).slice(0,7)===ym); }
-  if(S_teamRange==='all') return completed;
-  if(S_teamRange==='ytd'){ const anchor=fiscalYearStartIso(completed[completed.length-1].weekEnding); return completed.filter(w=>w.weekEnding>=anchor); }
-  return completed.slice(-parseInt(S_teamRange));
+  switch(S_periodType){
+    case 'wtd':   return S_wtdSnap?[S_wtdSnap]:[];
+    case 'mtd':   return S_mtdSnap?[S_mtdSnap]:[];
+    case 'week':  { const w=completed.find(x=>x.weekEnding===S.currentWeek)||(typeof getSnap==='function'?getSnap():null); return w?[w]:[]; }
+    case 'day':   return [];   // team is period-averaged; single day handled with a note
+    case 'month': { const ym=monthKeyToYM(S_periodMonth); return (ym&&completed.length)?completed.filter(w=>String(w.weekEnding).slice(0,7)===ym):[]; }
+    case 'ytd':   { if(!completed.length) return []; const anchor=fiscalYearStartIso(completed[completed.length-1].weekEnding); return completed.filter(w=>w.weekEnding>=anchor); }
+    case 'custom':{ if(!S_customFrom||!S_customTo||!completed.length) return []; const lo=S_customFrom<S_customTo?S_customFrom:S_customTo, hi=S_customFrom<S_customTo?S_customTo:S_customFrom; return completed.filter(w=>w.weekEnding>=lo&&w.weekEnding<=hi); }
+    default:      return completed.slice(-13);
+  }
 }
 function _teamPeople(amId){
   const weeks=_teamWeeks();
@@ -4783,7 +4791,7 @@ function _teamRowHtml(r){
 function teamSelectorHtml(){
   const box='font-size:12px;padding:3px 6px;border-radius:6px;border:1px solid var(--border);cursor:pointer;';
   const opt=(list,cur)=>list.map(o=>'<option value="'+o[0]+'"'+(String(o[0])===String(cur)?' selected':'')+'>'+o[1]+'</option>').join('');
-  const modes=[['range','Rolling range'],['week','Week'],['month','Month']];
+  const modes=[['range','Rolling range'],['wtd','WTD'],['week','Week'],['mtd','MTD'],['month','Month']];
   let sub='';
   if(S_teamMode==='week'){
     const weeks=[...(S.weekHistory||[])].map(w=>w.weekEnding).sort().reverse().map(w=>[w,fmtWeek(w)]);
@@ -4800,15 +4808,22 @@ function refreshTeamViews(){
   if(amActive){ try{ renderIndividual(); }catch(e){ console.error('[team]',e); } }
   else { try{ renderCompanyTeam(); }catch(e){ console.error('[team]',e); } }
 }
-function setTeamMode(v){
+async function setTeamMode(v){
   S_teamMode=v;
   if(v==='week'&&!S_teamWeek){ const ws=[...(S.weekHistory||[])].map(w=>w.weekEnding).sort(); S_teamWeek=ws[ws.length-1]||null; }
   if(v==='month'&&!S_teamMonth){ const mk=_teamMonthKeys(); S_teamMonth=mk.length?mk[0][0]:null; }
+  if(v==='wtd'&&!S_wtdSnap){ try{ await buildWtdSnap(); }catch(e){ console.error('[WTD]',e); } }
+  if(v==='mtd'&&!S_mtdSnap){ try{ await buildMtdSnap(); }catch(e){ console.error('[MTD]',e); } }
   refreshTeamViews();
 }
 function setTeamWeek(v){ S_teamWeek=v; refreshTeamViews(); }
 function setTeamMonth(v){ S_teamMonth=v; refreshTeamViews(); }
 
+function _teamEmptyMsg(){
+  if(S_periodType==='day') return 'Day view isn\'t available for the team \u2014 choose Week, WTD, Month, MTD, YTD, or Custom.';
+  if(S_periodType==='week') return 'No stylist data for this week (it may not be scraped yet). Try a longer period.';
+  return 'No stylist data for this period.';
+}
 function renderTeamBody(){
   const tb=document.getElementById('team-tbody'); if(!tb) return;
   let people=_teamPeople();
@@ -4824,7 +4839,7 @@ function renderTeamBody(){
       return '<tr style="background:#eef1f8;"><td colspan="'+TEAM_COLS.length+'" style="padding:6px 10px;font-weight:700;color:#2E4D8A;">'+k+' <span style="font-weight:400;color:var(--text-muted);">· '+rows.length+'</span></td></tr>'+rows.map(_teamRowHtml).join('');
     }).join('');
   }
-  tb.innerHTML=body||'<tr><td colspan="'+TEAM_COLS.length+'" style="padding:20px;text-align:center;color:var(--text-muted);">No employee data in this range.</td></tr>';
+  tb.innerHTML=body||'<tr><td colspan="'+TEAM_COLS.length+'" style="padding:20px;text-align:center;color:var(--text-muted);">'+_teamEmptyMsg()+'</td></tr>';
   const cnt=document.getElementById('team-count'); if(cnt) cnt.textContent=people.length+' stylists';
 }
 function sortTeam(i){ if(S_teamSort.col===i) S_teamSort.dir*=-1; else S_teamSort={col:i,dir:(TEAM_COLS[i].txt?1:-1)}; refreshTeamViews(); }
@@ -4839,7 +4854,7 @@ function renderCompanyTeam(){
   const thead='<tr style="background:#2E4D8A;color:#fff;">'+TEAM_COLS.map((c,i)=>{ const ar=S_teamSort.col===i?(S_teamSort.dir<0?' \u25BC':' \u25B2'):''; return '<th onclick="sortTeam('+i+')" style="padding:7px 8px;cursor:pointer;white-space:nowrap;text-align:'+(c.align==='left'?'left':'center')+';">'+c.lbl+ar+'</th>'; }).join('')+'</tr>';
   host.innerHTML='<div class="table-card-header"><h3 style="margin:0;">Team — All Employees</h3></div>'
     +'<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;padding:8px 4px 12px;">'
-    +teamSelectorHtml()
+    
     +'<span style="font-size:12px;">Layout <select onchange="setTeamGroup(this.value)" style="font-size:12px;padding:3px 6px;border-radius:6px;border:1px solid var(--border);cursor:pointer;">'+grpOpts.map(o=>'<option value="'+o[0]+'"'+(S_teamGroup===o[0]?' selected':'')+'>'+o[1]+'</option>').join('')+'</select></span>'
     +'<input type="text" placeholder="Search name / salon\u2026" oninput="teamSearch(this.value)" value="'+S_teamSearch.replace(/"/g,'&quot;')+'" style="font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);flex:1;min-width:160px;max-width:280px;"/>'
     +'<span id="team-count" style="font-size:11px;color:var(--text-muted);margin-left:auto;"></span>'
@@ -7047,7 +7062,7 @@ function buildAvgRow(a,label,showAM=false){
 function renderSalonTab(){
   renderPeriodControls();
   const isYTD = S_periodType === 'ytd';
-  const isMTD = (S_periodType==='mtd'||S_periodType==='day'||S_periodType==='month');
+  const isMTD = (S_periodType==='mtd'||S_periodType==='wtd'||S_periodType==='day'||S_periodType==='month');
   // MTD: fiscal month-to-date from the daily snapshot (already one row per salon).
   // In YTD mode use all weeks' data; in weekly mode use current week only.
   const isCustom = S_periodType==='custom';
@@ -7230,9 +7245,6 @@ function setIndivMode(mode){
 function renderIndividual(){
   const thead=document.getElementById('emp-thead'), tbody=document.getElementById('emp-tbody'), sf=document.getElementById('emp-salon-filter');
   if(!thead||!tbody) return;
-  // Shared team selector (Range / Week / Month) in the card title.
-  const selHost=document.getElementById('indiv-team-selector');
-  if(selHost) selHost.innerHTML=teamSelectorHtml();
   // Same rolling engine as Company Team, scoped to this Area Manager. This
   // replaces the old single-week snapshot path that went blank when a week's
   // employee data hadn't been scraped.
@@ -7250,7 +7262,7 @@ function renderIndividual(){
   const col=TEAM_COLS[S_teamSort.col], dir=S_teamSort.dir;
   rows.sort((a,b)=>{ const va=col.sv(a),vb=col.sv(b); if(col.txt) return String(va).localeCompare(String(vb))*dir; const na=isNaN(va),nb=isNaN(vb); if(na&&nb)return 0; if(na)return 1; if(nb)return -1; return (va-vb)*dir; });
   thead.innerHTML='<tr style="background:#2E4D8A;color:#fff;">'+TEAM_COLS.map((c,i)=>{ const ar=S_teamSort.col===i?(S_teamSort.dir<0?' \u25BC':' \u25B2'):''; return '<th onclick="sortTeam('+i+')" style="padding:7px 8px;cursor:pointer;white-space:nowrap;text-align:'+(c.align==='left'?'left':'center')+';">'+c.lbl+ar+'</th>'; }).join('')+'</tr>';
-  tbody.innerHTML=rows.length?rows.map(_teamRowHtml).join(''):'<tr><td colspan="'+TEAM_COLS.length+'" class="no-data"><div class="no-data-icon">\ud83d\udc65</div>No stylists for this selection</td></tr>';
+  tbody.innerHTML=rows.length?rows.map(_teamRowHtml).join(''):'<tr><td colspan="'+TEAM_COLS.length+'" class="no-data"><div class="no-data-icon">\ud83d\udc65</div>'+_teamEmptyMsg()+'</td></tr>';
   const note=document.getElementById('indiv-count-note'); if(note) note.textContent=rows.length+' stylists';
 }
 
@@ -8025,9 +8037,9 @@ function renderCompany(){
     // bonus section we restrict to Standouts-only for limited roles (handled
     // in renderCompanyBonus via the role check).
     const isYTD = S_periodType === 'ytd';
-    const isMTD = (S_periodType==='mtd'||S_periodType==='day'||S_periodType==='month');
+    const isMTD = (S_periodType==='mtd'||S_periodType==='wtd'||S_periodType==='day'||S_periodType==='month');
     const isCustom = S_periodType === 'custom';
-    const snap = isMTD ? S_mtdSnap : getSnap();
+    const snap = S_periodType==='wtd' ? S_wtdSnap : isMTD ? S_mtdSnap : getSnap();
     // Company view = current organization only (matches the SD3 report scope):
     // exclude salons sold/closed as of today (e.g. 8725) from every roll-up.
     const _coActive = new Set(activeSalons(new Date().toISOString().slice(0,10)));
@@ -8042,6 +8054,7 @@ function renderCompany(){
     const allAForAM = calcAvgs(allForAMAvg);
     document.getElementById('company-sub').textContent = (() => {
       const D = '—';
+      if (S_periodType==='wtd')     return 'All Salons · Week to Date '+D+' ' + dailyCoverageNote();
       if (S_periodType==='mtd')     return 'All Salons · Month to Date '+D+' ' + dailyCoverageNote();
       if (S_periodType==='day')     return 'All Salons · ' + periodLabel() + ' '+D+' ' + dailyCoverageNote();
       if (S_periodType==='month')   return 'All Salons · ' + periodLabel();
@@ -8051,7 +8064,7 @@ function renderCompany(){
       return 'All Salons · Week Ending '+(S.currentWeek?fmtWeek(S.currentWeek):D);
     })();
     const _avgSrc = isCustom ? collapseSalonsFull(all) : all;
-    const allA = (S_periodType==='month'||S_periodType==='day'||isCustom)
+    const allA = (S_periodType==='month'||S_periodType==='day'||S_periodType==='wtd'||isCustom)
       ? periodAggregate(_avgSrc)
       : calcAvgs(all);
     // For the summary cards, collapse salon-weeks → distinct salons (averaged),
