@@ -4052,8 +4052,18 @@ function refreshPeriodViews(){
       if(S_companyTab==='team'){ try{ renderCompanyTeam(); }catch(e){ console.error('[team]',e); } }
     }
     else if(amActive){
-      const at=document.querySelector('.tab.active'); const tid=at?at.id:'tb-salon';
-      if(tid==='tb-salon') renderSalonTab();
+      // AM view is sidebar-driven (top .tab bar is display:none), so detect the
+      // active sub-view from the sidebar button switchTab keeps in sync, and
+      // actually re-render My Team / Scorecard / Trends on a period change — the
+      // old branch only handled Salon Performance, so nothing else ever updated.
+      const _vis = id => { const el=document.getElementById('tab-'+id); return el && el.style.display!=='none'; };
+      const sub = document.querySelector('.am-subnav-btn.active');
+      const atab = (sub && sub.dataset.atab) ||
+        (_vis('individual')?'individual':_vis('score')?'score':_vis('trends')?'trends':'salon');
+      if(atab==='salon') renderSalonTab();
+      else if(atab==='individual') renderIndividual();
+      else if(atab==='score') renderScorecard();
+      else if(atab==='trends') renderTrends();
     }
   }catch(e){ console.error('[period] render failed', e); }
 }
