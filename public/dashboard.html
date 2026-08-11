@@ -7463,30 +7463,37 @@ function printManagerBonuses(){
   if(!el || !el.innerHTML.trim()){ alert('Open the Manager Bonus tab for a period first, then Print.'); return; }
   const ssP = (S_salonSummaryPeriods||[]).find(x=>x.periodKey===S_mgrBonusPeriod);
   const periodLbl = ssP ? normPeriodLabel(ssP.periodLabel) : '';
-  const w = window.open('about:blank','_blank','width=1100,height=850');
-  if(!w){ alert('Please allow pop-ups for this site, then click Print again.'); return; }
-  w.document.write(`<!DOCTYPE html><html><head><title>Manager Bonuses \u2014 ${periodLbl}</title>
+  // Same reliable approach as printAllSalons: a hidden print div on THIS page
+  // (keeps the dashboard's own CSS) + @media print to hide everything else.
+  // No pop-up window, so no blocker and no lost styling.
+  const old = document.getElementById('mgr-bonus-print'); if(old) old.remove();
+  const w = document.createElement('div');
+  w.id = 'mgr-bonus-print';
+  w.innerHTML = `
     <style>
-      *{-webkit-print-color-adjust:exact;print-color-adjust:exact;box-sizing:border-box;}
-      body{font-family:Arial,Helvetica,sans-serif;margin:24px;color:#1a1a1a;font-size:12px;}
-      h1{font-size:18px;color:#03654e;margin:0 0 2px;}
-      .sub{font-size:12px;color:#666;margin:0 0 16px;}
-      table{border-collapse:collapse;width:100%;}
-      th,td{border:1px solid #dcdcdc;padding:5px 8px;}
-      .bonus-stat-grid{display:flex;gap:14px;flex-wrap:wrap;margin:0 0 14px;}
-      .bonus-stat{border:1px solid #dcdcdc;border-radius:8px;padding:8px 14px;text-align:center;}
-      .bonus-stat-n{font-size:18px;font-weight:700;color:#03654e;}
-      .bonus-stat-l{font-size:10px;color:#666;text-transform:uppercase;}
-      button,select,input,.no-print{display:none!important;}
-      @media print{ body{margin:0;} }
-    </style></head>
-    <body>
-      <h1>Manager Bonuses</h1>
-      <div class="sub">Longitude Inc \u00b7 ${periodLbl} \u00b7 printed ${new Date().toLocaleDateString()}</div>
-      ${el.innerHTML}
-    </body></html>`);
-  w.document.close();
-  setTimeout(()=>{ try{ w.focus(); w.print(); }catch(e){} }, 350);
+      @media screen{ #mgr-bonus-print{ display:none; } }
+      @page{ size:letter portrait; margin:0.4in; }
+      @media print{
+        *{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+        body > *:not(#mgr-bonus-print){ display:none !important; }
+        #mgr-bonus-print{ display:block !important; }
+        #mgr-bonus-print [style*="overflow"], #mgr-bonus-print .sticky-head-scroll{ overflow:visible !important; max-height:none !important; }
+        #mgr-bonus-print table{ width:100% !important; border-collapse:collapse !important; font-size:10px !important; }
+        #mgr-bonus-print th, #mgr-bonus-print td{ padding:3px 5px !important; }
+        #mgr-bonus-print thead{ display:table-header-group; }
+        #mgr-bonus-print button, #mgr-bonus-print select, #mgr-bonus-print input{ display:none !important; }
+      }
+      #mgr-bonus-print h1{ font-size:16px; margin:0 0 2px; color:#03654e; }
+      #mgr-bonus-print .meta{ font-size:11px; color:#666; margin-bottom:12px; }
+    </style>
+    <h1>Longitude Inc \u2014 Manager Bonuses</h1>
+    <div class="meta">${periodLbl} \u00b7 printed ${new Date().toLocaleDateString()}</div>
+    ${el.innerHTML}`;
+  document.body.appendChild(w);
+  const cleanup = ()=>{ const e=document.getElementById('mgr-bonus-print'); if(e) e.remove(); window.removeEventListener('afterprint', cleanup); };
+  window.addEventListener('afterprint', cleanup);
+  window.print();
+  setTimeout(cleanup, 1500);
 }
 
 // Print just the All Salons summary table — clean, landscape, no sidebar/nav.
