@@ -3128,7 +3128,8 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
               <button id="co-bonus-type-am" onclick="setCoBonusType('am')"
                 style="padding:5px 14px;border-radius:8px;border:none;font-size:12px;font-weight:600;cursor:pointer;background:none;color:var(--text-muted);transition:all .15s;">AM 🏆</button>
             </div>
-            <button onclick="event.stopPropagation();printManagerBonuses('co-bonus-container','Company Bonus Summary')" class="btn btn-secondary btn-sm" style="font-size:11px;padding:5px 12px;margin-left:4px;">🖨 Print</button>
+            <button onclick="event.stopPropagation();printManagerCards()" class="btn btn-secondary btn-sm" style="font-size:11px;padding:5px 12px;margin-left:4px;" title="One card per manager, each on its own page">🖨 Print Cards</button>
+            <button onclick="event.stopPropagation();printManagerBonuses('co-bonus-container','Company Bonus Summary')" class="btn btn-secondary btn-sm" style="font-size:11px;padding:5px 10px;margin-left:2px;" title="The summary table above">🖨 Summary</button>
           </div>
           <span id="section-bonus-icon" style="font-size:16px;color:var(--text-muted);">▾</span>
         </div>
@@ -7459,6 +7460,55 @@ function setTrendWindow(w){
 // rendered content (so printed numbers can never diverge from the screen) in a
 // clean, sidebar-free print window. This same content is what the email pipeline
 // will send, so it stays the single source of truth for a manager statement.
+function printManagerCards(){
+  // One full card per manager (renderMgrSalonCard) for the selected period, each
+  // on its own page — the sheet you hand each manager showing exactly how they did.
+  const pk = S_coMgrPeriod || ((ssPeriodsInRange().slice(-1)[0]||{}).periodKey);
+  const ssP = (S_salonSummaryPeriods||[]).find(x=>x.periodKey===pk);
+  if(!ssP){ alert('Open the Manager Bonus view and pick a period first.'); return; }
+  const periodLbl = normPeriodLabel(ssP.periodLabel);
+  const salons = (ssP.salons||[]).map(s=>s.salonNum).filter(Boolean)
+    .sort((a,b)=>parseInt(a)-parseInt(b));
+  if(!salons.length){ alert('No salons in this period.'); return; }
+  const pages = salons.map(snum=>{
+    let inner='';
+    try{
+      const entry = getMgrBonusForSalon(snum, pk);
+      const mgrInfo = S_managerTable[snum];
+      const am = AMS[amOfPeriod(snum, pk)] || {name:'?',color:'#999'};
+      if(!entry){ inner = '<div style="padding:1rem;color:#888;">No bonus data for '+salonDisplay(snum)+' \u00b7 '+periodLbl+'</div>'; }
+      else {
+        const mgrName = (!mgrInfo||!mgrInfo.name) ? (am.name+' (AM)') : mgrInfo.name;
+        const cardHtml = renderMgrSalonCard(snum, entry.salonRow, entry.result, mgrInfo, entry.bonusMgrRow, entry.isAMFallback, am);
+        inner = `<div style="font-size:18px;font-weight:700;color:#03654e;">${salonDisplay(snum)}</div>
+          <div style="font-size:13px;color:#555;margin:2px 0 14px;">Manager: <strong>${shortName(mgrName)}</strong> \u00b7 AM: ${am.name} \u00b7 ${periodLbl}</div>
+          ${cardHtml}`;
+      }
+    }catch(e){ inner='<div style="padding:1rem;color:#888;">Could not render '+salonDisplay(snum)+'</div>'; }
+    return `<div class="mgr-card-page">${inner}</div>`;
+  }).join('');
+  const old=document.getElementById('mgr-cards-print'); if(old) old.remove();
+  const w=document.createElement('div'); w.id='mgr-cards-print';
+  w.innerHTML=`<style>
+    @media screen{ #mgr-cards-print{ display:none; } }
+    @page{ size:letter portrait; margin:0.45in; }
+    @media print{
+      *{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+      body > *:not(#mgr-cards-print){ display:none !important; }
+      #mgr-cards-print{ display:block !important; }
+      #mgr-cards-print .mgr-card-page{ page-break-after:always; }
+      #mgr-cards-print .mgr-card-page:last-child{ page-break-after:auto; }
+      #mgr-cards-print button, #mgr-cards-print select, #mgr-cards-print input, #mgr-cards-print .back-btn{ display:none !important; }
+      #mgr-cards-print [style*="overflow"]{ overflow:visible !important; max-height:none !important; }
+    }
+  </style>${pages}`;
+  document.body.appendChild(w);
+  const cleanup=()=>{ const e=document.getElementById('mgr-cards-print'); if(e) e.remove(); window.removeEventListener('afterprint',cleanup); };
+  window.addEventListener('afterprint',cleanup);
+  window.print();
+  setTimeout(cleanup, 2500);
+}
+
 function printManagerBonuses(containerId, titleOverride){
   const cid = containerId || 'bonus-content';
   const el = document.getElementById(cid);
