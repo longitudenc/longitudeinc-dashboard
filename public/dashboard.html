@@ -3128,6 +3128,7 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
               <button id="co-bonus-type-am" onclick="setCoBonusType('am')"
                 style="padding:5px 14px;border-radius:8px;border:none;font-size:12px;font-weight:600;cursor:pointer;background:none;color:var(--text-muted);transition:all .15s;">AM 🏆</button>
             </div>
+            <button onclick="event.stopPropagation();printManagerBonuses('co-bonus-container','Company Bonus Summary')" class="btn btn-secondary btn-sm" style="font-size:11px;padding:5px 12px;margin-left:4px;">🖨 Print</button>
           </div>
           <span id="section-bonus-icon" style="font-size:16px;color:var(--text-muted);">▾</span>
         </div>
@@ -7458,11 +7459,14 @@ function setTrendWindow(w){
 // rendered content (so printed numbers can never diverge from the screen) in a
 // clean, sidebar-free print window. This same content is what the email pipeline
 // will send, so it stays the single source of truth for a manager statement.
-function printManagerBonuses(){
-  const el = document.getElementById('bonus-content');
-  if(!el || !el.innerHTML.trim()){ alert('Open the Manager Bonus tab for a period first, then Print.'); return; }
-  const ssP = (S_salonSummaryPeriods||[]).find(x=>x.periodKey===S_mgrBonusPeriod);
-  const periodLbl = ssP ? normPeriodLabel(ssP.periodLabel) : '';
+function printManagerBonuses(containerId, titleOverride){
+  const cid = containerId || 'bonus-content';
+  const el = document.getElementById(cid);
+  if(!el || !el.innerHTML.trim()){ alert('Open a bonus view first, then Print.'); return; }
+  let periodLbl = '';
+  if(cid==='bonus-content'){ const ssP=(S_salonSummaryPeriods||[]).find(x=>x.periodKey===S_mgrBonusPeriod); periodLbl = ssP ? normPeriodLabel(ssP.periodLabel) : ''; }
+  else if(typeof S_coBonusYear!=='undefined' && S_coBonusYear){ periodLbl = String(S_coBonusYear); }
+  const title = titleOverride || 'Manager Bonuses';
   // Same reliable approach as printAllSalons: a hidden print div on THIS page
   // (keeps the dashboard's own CSS) + @media print to hide everything else.
   // No pop-up window, so no blocker and no lost styling.
@@ -7486,7 +7490,7 @@ function printManagerBonuses(){
       #mgr-bonus-print h1{ font-size:16px; margin:0 0 2px; color:#03654e; }
       #mgr-bonus-print .meta{ font-size:11px; color:#666; margin-bottom:12px; }
     </style>
-    <h1>Longitude Inc \u2014 Manager Bonuses</h1>
+    <h1>Longitude Inc \u2014 ${title}</h1>
     <div class="meta">${periodLbl} \u00b7 printed ${new Date().toLocaleDateString()}</div>
     ${el.innerHTML}`;
   document.body.appendChild(w);
