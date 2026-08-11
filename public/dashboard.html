@@ -7478,11 +7478,8 @@ function printManagerCards(){
       const am = AMS[amOfPeriod(snum, pk)] || {name:'?',color:'#999'};
       if(!entry){ inner = '<div style="padding:1rem;color:#888;">No bonus data for '+salonDisplay(snum)+' \u00b7 '+periodLbl+'</div>'; }
       else {
-        const mgrName = (!mgrInfo||!mgrInfo.name) ? (am.name+' (AM)') : mgrInfo.name;
         const cardHtml = renderMgrSalonCard(snum, entry.salonRow, entry.result, mgrInfo, entry.bonusMgrRow, entry.isAMFallback, am);
-        inner = `<div style="font-size:18px;font-weight:700;color:#03654e;">${salonDisplay(snum)}</div>
-          <div style="font-size:13px;color:#555;margin:2px 0 14px;">Manager: <strong>${shortName(mgrName)}</strong> \u00b7 AM: ${am.name} \u00b7 ${periodLbl}</div>
-          ${cardHtml}`;
+        inner = `<div style="font-size:11.5px;color:#777;text-transform:uppercase;letter-spacing:.06em;font-weight:700;margin-bottom:8px;">${periodLbl} Manager Bonus \u00b7 AM: ${am.name}</div>${cardHtml}`;
       }
     }catch(e){ inner='<div style="padding:1rem;color:#888;">Could not render '+salonDisplay(snum)+'</div>'; }
     return `<div class="mgr-card-page">${inner}</div>`;
@@ -7494,12 +7491,15 @@ function printManagerCards(){
     @page{ size:letter portrait; margin:0.45in; }
     @media print{
       *{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+      html, body{ background:#fff !important; }
       body > *:not(#mgr-cards-print){ display:none !important; }
-      #mgr-cards-print{ display:block !important; }
-      #mgr-cards-print .mgr-card-page{ page-break-after:always; }
+      #mgr-cards-print{ display:block !important; background:#fff !important; }
+      #mgr-cards-print .mgr-card-page{ page-break-after:always; page-break-inside:avoid; background:#fff !important; padding-top:2px; }
       #mgr-cards-print .mgr-card-page:last-child{ page-break-after:auto; }
       #mgr-cards-print button, #mgr-cards-print select, #mgr-cards-print input, #mgr-cards-print .back-btn{ display:none !important; }
       #mgr-cards-print [style*="overflow"]{ overflow:visible !important; max-height:none !important; }
+      /* one card fills the page cleanly — no gray, no stray section chrome */
+      #mgr-cards-print .table-card, #mgr-cards-print [class*="drill"]{ box-shadow:none !important; }
     }
   </style>${pages}`;
   document.body.appendChild(w);
