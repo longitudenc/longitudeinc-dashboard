@@ -7454,6 +7454,41 @@ function setTrendWindow(w){
   S_trendWindow = w; renderTrends();
 }
 
+// Print the manager-bonus statement for the selected period. Reuses the exact
+// rendered content (so printed numbers can never diverge from the screen) in a
+// clean, sidebar-free print window. This same content is what the email pipeline
+// will send, so it stays the single source of truth for a manager statement.
+function printManagerBonuses(){
+  const el = document.getElementById('bonus-content');
+  if(!el || !el.innerHTML.trim()){ alert('Open the Manager Bonus tab for a period first, then Print.'); return; }
+  const ssP = (S_salonSummaryPeriods||[]).find(x=>x.periodKey===S_mgrBonusPeriod);
+  const periodLbl = ssP ? normPeriodLabel(ssP.periodLabel) : '';
+  const w = window.open('about:blank','_blank','width=1100,height=850');
+  if(!w){ alert('Please allow pop-ups for this site, then click Print again.'); return; }
+  w.document.write(`<!DOCTYPE html><html><head><title>Manager Bonuses \u2014 ${periodLbl}</title>
+    <style>
+      *{-webkit-print-color-adjust:exact;print-color-adjust:exact;box-sizing:border-box;}
+      body{font-family:Arial,Helvetica,sans-serif;margin:24px;color:#1a1a1a;font-size:12px;}
+      h1{font-size:18px;color:#03654e;margin:0 0 2px;}
+      .sub{font-size:12px;color:#666;margin:0 0 16px;}
+      table{border-collapse:collapse;width:100%;}
+      th,td{border:1px solid #dcdcdc;padding:5px 8px;}
+      .bonus-stat-grid{display:flex;gap:14px;flex-wrap:wrap;margin:0 0 14px;}
+      .bonus-stat{border:1px solid #dcdcdc;border-radius:8px;padding:8px 14px;text-align:center;}
+      .bonus-stat-n{font-size:18px;font-weight:700;color:#03654e;}
+      .bonus-stat-l{font-size:10px;color:#666;text-transform:uppercase;}
+      button,select,input,.no-print{display:none!important;}
+      @media print{ body{margin:0;} }
+    </style></head>
+    <body>
+      <h1>Manager Bonuses</h1>
+      <div class="sub">Longitude Inc \u00b7 ${periodLbl} \u00b7 printed ${new Date().toLocaleDateString()}</div>
+      ${el.innerHTML}
+    </body></html>`);
+  w.document.close();
+  setTimeout(()=>{ try{ w.focus(); w.print(); }catch(e){} }, 350);
+}
+
 // Print just the All Salons summary table — clean, landscape, no sidebar/nav.
 function printAllSalons(){
   const body = document.getElementById('section-all-salons-body');
@@ -8486,7 +8521,8 @@ function renderBonus(){
       </div>
       <select class="bonus-period-select" onchange="selectMgrOrAMPeriod(this.value)" style="margin-top:.75rem;padding:6px 10px;border-radius:8px;border:1px solid var(--border);font-size:13px;font-weight:600;background:white;">
         ${ssPeriodsSel().map(p=>`<option value="${p.periodKey}" ${activePk===p.periodKey?'selected':''}>${normPeriodLabel(p.periodLabel)}</option>`).join('')}
-      </select>`;
+      </select>
+      <button class="btn btn-secondary btn-sm" onclick="printManagerBonuses()" style="margin-top:.75rem;margin-left:8px;font-size:12px;padding:6px 12px;">\u{1F5A8} Print Bonuses</button>`;
     }
   }
 
