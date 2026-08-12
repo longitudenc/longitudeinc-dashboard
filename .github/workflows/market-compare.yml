@@ -1,0 +1,45 @@
+# Headless MyReports "Market Compare CLT" scrape — the test that decides whether
+# this can leave the laptop and run in the cloud. Trigger it manually first
+# (Actions → this workflow → Run workflow), then read the logs + the uploaded
+# screenshots to see if the headless login is accepted.
+name: Market Compare (headless)
+
+on:
+  workflow_dispatch:            # manual — use this to TEST
+  schedule:
+    - cron: '0 12 * * 6'        # Saturdays 12:00 UTC (~7-8am ET), matching the laptop run
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Chrome
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: stable
+
+      - name: Install Python deps
+        run: pip install "selenium>=4.20"
+
+      - name: Run Market Compare scrape
+        env:
+          MYREPORTS_USERNAME: ${{ secrets.MYREPORTS_USERNAME }}
+          MYREPORTS_PASSWORD: ${{ secrets.MYREPORTS_PASSWORD }}
+        run: python scripts/market_compare_ci.py
+
+      - name: Upload CSV + debug screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: market-compare-output
+          path: |
+            downloads/*.csv
+            *.png
+          if-no-files-found: warn
