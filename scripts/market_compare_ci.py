@@ -70,16 +70,17 @@ try:
     print("  after-login title:", repr(driver.title), "| url:", driver.current_url)
     shot("02_after_login.png")
 
-    # If still on the login page, the cloud login was rejected — report clearly.
-    if "login" in driver.current_url.lower() or driver.find_elements(By.ID, "button-login"):
-        print("::error:: Still on the login page after submitting — MyReports likely blocked the headless/cloud login.")
-        # dump any visible error text
-        body = driver.find_element(By.TAG_NAME, "body").text[:600]
-        print("  page text sample:\n", body)
-        sys.exit(3)
-
+    # Confirm login by content, not URL — MyReports keeps the same URL and leaves a
+    # hidden login button in the DOM, so those are false signals. The real proof of a
+    # logged-in session is the "Welcome," greeting and the report table rows.
+    body_text = driver.find_element(By.TAG_NAME, "body").text
     rows = driver.find_elements(By.CSS_SELECTOR, "td.sorting_1")
-    print(f"Logged in. Report rows found: {len(rows)}")
+    logged_in = ("Welcome," in body_text) or (len(rows) > 0)
+    if not logged_in:
+        print("::error:: Login not confirmed — no 'Welcome,' greeting and no report rows.")
+        print("  page text sample:\n", body_text[:600])
+        sys.exit(3)
+    print(f"Logged in \u2713  Report rows found: {len(rows)}")
     names = [r.text for r in rows][:25]
     print("  report names:", names)
 
