@@ -34,6 +34,11 @@ jobs:
           MYREPORTS_PASSWORD: ${{ secrets.MYREPORTS_PASSWORD }}
         run: python scripts/market_compare_ci.py
 
+      - name: Ingest into dashboard (MarketWeekly)
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: python scripts/market_ingest_ci.py
+
       - name: Upload CSV + debug screenshots
         if: always()
         uses: actions/upload-artifact@v4
