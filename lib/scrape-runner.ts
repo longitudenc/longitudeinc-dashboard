@@ -1553,11 +1553,12 @@ function profileRow(e: any): Record<string, any> | null {
 
 export async function runProfileScrape(start?: string, end?: string): Promise<EntityScrapeResult> {
   const startedAt = Date.now()
-  // Default to the last completed fiscal month — a wide window so we catch
-  // part-timers. Upsert-by-globalId is non-destructive, so a too-narrow pull
-  // only ever leaves prior rows intact; the table self-heals over time.
+  // Default window: start of the last completed fiscal month THROUGH today, so
+  // the pull always includes the CURRENT month and a new hire is mapped the
+  // night they first appear. Upsert-by-globalId is non-destructive, so once a
+  // row has an employeepk it keeps it even if a later pull no longer returns them.
   let ms = start, me = end
-  if (!ms || !me) { const m = lastCompletedFiscalMonth(yesterdayET()); ms = m.start; me = m.end }
+  if (!ms || !me) { const m = lastCompletedFiscalMonth(yesterdayET()); ms = ms || m.start; me = me || yesterdayET() }
   const result: EntityScrapeResult = {
     ok: true, durationMs: 0, weekStart: ms, weekEnd: me,
     rowsUpserted: 0, updated: 0, inserted: 0, skipped: 0, processed: 0, error: null,
