@@ -704,7 +704,8 @@ export async function runEmployeeScrape(weekStart?: string, weekEnd?: string): P
 const SD_EMP_DAILY_TAB = 'SD_EMP_DAILY'
 const EMP_DAILY_COLUMNS = [
   'date', 'salonNum', 'storeId', 'globalId', 'payId', 'employeeName',
-  'position', 'floorHours', 'custCount', 'hcTime', 'cph', 'productPct', 'mbc',
+  'position', 'floorHours', 'custCount', 'requestCount', 'svcInvCount',
+  'hcTime', 'cph', 'productPct', 'mbc',
   'nonCutMph', 'productivity', 'payrollPct', 'scrapedAt',
 ] as const
 
@@ -733,6 +734,95 @@ function empDailyRowFromCsv(o: Record<string, string>, date: string, storeIdMap:
   }
 }
 
+// ── Requests: employeepk -> globalId map + per-store-day invoice counting ─────
+//
+// SD_EMP_DAILY is keyed by (date, storeId, payId) and carries globalId, but the
+// invoice feed identifies the stylist only by employeepk. EmployeeProfile now
+// holds employeepk<->globalId, so we translate through it. requestCount /
+// svcInvCount are counted from /rest/invoice (the same feed the demand scrape
+// uses) and written onto the matching daily row; rate = requestCount / custCount
+// is derived downstream so it always ties to SD3's Cust Count.
+//
+// svcInvCount is a RECONCILIATION column, not a metric: our own count of service
+// tickets for that stylist-day. If it drifts from SD3's custCount, that is a
+// visible signal the invoice filter is off -- never a silently wrong rate.
+// Counts are left BLANK ('') when the invoice fetch fails, so a transient error
+// shows as missing data, not a fake zero.
+
+async function loadPkToGid(): Promise<Map<string, string>> {
+  const raw = await readSheet(EMP_PROFILE_TAB)
+  const map = new Map<string, string>()
+  for (const r of rowsToObjects(raw)) {
+    const pk = String((r as any).employeepk ?? '').trim()
+    const gid = String((r as any).globalId ?? '').trim()
+    if (pk && gid) map.set(pk, gid)
+  }
+  return map
+}
+
+type ReqDiag = { storeDaysOk: number; storeDaysFailed: number; storeDaysNoData: number; invoicesCounted: number; invoicesUnmatched: number }
+
+// Count request/service invoices for every store present in `rows` on `date`,
+// then write requestCount + svcInvCount onto each row. Mutates `rows` in place.
+async function annotateRequestsForDate(
+  session: SD3Session,
+  date: string,
+  rows: Record<string, any>[],
+  pkToGid: Map<string, string>,
+  diag: ReqDiag,
+): Promise<void> {
+  const storeIds = [...new Set(rows.map(r => Number(r.storeId)).filter(Boolean))]
+  // storeId -> (globalId -> { svc, req }) ; a missing store entry = fetch failed
+  const byStore = new Map<number, Map<string, { svc: number; req: number }>>()
+  await batchMap(storeIds, 4, async (storeId) => {
+    try {
+      const invoices = await fetchInvoices(session, storeId, date, date)
+      const byGid = new Map<string, { svc: number; req: number }>()
+      for (const inv of invoices) {
+        if (!inv.serviceOnTicket) continue   // service tickets only (matches Cust Count intent)
+        if (inv.isRedo) continue             // exclude redos, mirroring the daily view's RR/Return exclusion
+        if (inv.employeepk == null) { diag.invoicesUnmatched++; continue }
+        const gid = pkToGid.get(String(inv.employeepk))
+        if (!gid) { diag.invoicesUnmatched++; continue }  // stylist not yet in EmployeeProfile
+        const cur = byGid.get(gid) ?? { svc: 0, req: 0 }
+        cur.svc++
+        if (inv.request) cur.req++
+        byGid.set(gid, cur)
+        diag.invoicesCounted++
+      }
+      byStore.set(storeId, byGid)
+      diag.storeDaysOk++
+    } catch (err) {
+      diag.storeDaysFailed++
+      console.error(`[scrape/employee-daily] invoice fetch failed store=${storeId} date=${date}: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  })
+  // Distinguish a genuine measured zero from aged-out data: /rest/invoice only
+  // retains a rolling window (~weeks), so an old store-day can return zero
+  // invoices even though the CSV shows customers. In that case blank the row
+  // (missing), never 0 -- a working salon-day always has service tickets.
+  const storeHasCust = new Map<number, boolean>()
+  const storeSvcTotal = new Map<number, number>()
+  for (const row of rows) {
+    if (Number(row.custCount) > 0) storeHasCust.set(Number(row.storeId), true)
+  }
+  for (const [sid, byGid] of byStore) {
+    let t = 0
+    for (const v of byGid.values()) t += v.svc
+    storeSvcTotal.set(sid, t)
+    if (t === 0 && storeHasCust.get(sid) === true) diag.storeDaysNoData++  // fetched ok but no retained invoices
+  }
+  for (const row of rows) {
+    const sid = Number(row.storeId)
+    const byGid = byStore.get(sid)
+    const agedOut = (storeSvcTotal.get(sid) ?? 0) === 0 && storeHasCust.get(sid) === true
+    if (!byGid || agedOut) { row.requestCount = ''; row.svcInvCount = ''; continue }  // fetch failed or aged out -> visible blank
+    const c = byGid.get(String(row.globalId).trim())
+    row.requestCount = c ? c.req : 0
+    row.svcInvCount = c ? c.svc : 0
+  }
+}
+
 export async function runEmployeeDailyScrape(dateOverride?: string): Promise<EntityScrapeResult> {
   const startedAt = Date.now()
   const date = dateOverride || yesterdayET()
@@ -756,12 +846,17 @@ export async function runEmployeeDailyScrape(dateOverride?: string): Promise<Ent
       if (row) dataRows.push(row); else result.skipped!++
     }
     result.processed = dataRows.length
+    const reqDiag: ReqDiag = { storeDaysOk: 0, storeDaysFailed: 0, storeDaysNoData: 0, invoicesCounted: 0, invoicesUnmatched: 0 }
     if (dataRows.length > 0) {
+      // Attribute requests to each stylist-day from the invoice feed, then upsert.
+      const pkToGid = await loadPkToGid()
+      await annotateRequestsForDate(session, date, dataRows, pkToGid, reqDiag)
       const up = await upsertSheet(SD_EMP_DAILY_TAB, [...EMP_DAILY_COLUMNS], ['date', 'storeId', 'payId'], dataRows)
       result.rowsUpserted = dataRows.length
       result.updated = up.updated
       result.inserted = up.inserted
     }
+    ;(result as any).requestDiag = reqDiag
   } catch (err) {
     result.ok = false
     result.error = err instanceof Error ? err.message : String(err)
@@ -790,6 +885,9 @@ export async function runEmployeeDailyRange(start: string, end: string): Promise
     for (const s of salons) storeIdMap[s.salonNum] = s.storeId
     const storeIds = salons.map(s => s.storeId)
 
+    const pkToGid = await loadPkToGid()
+    const reqDiag: ReqDiag = { storeDaysOk: 0, storeDaysFailed: 0, storeDaysNoData: 0, invoicesCounted: 0, invoicesUnmatched: 0 }
+
     const FLUSH_AT = 2000
     let buffer: Record<string, any>[] = []
     const flush = async () => {
@@ -805,16 +903,21 @@ export async function runEmployeeDailyRange(start: string, end: string): Promise
     for (let i = 0; i < 400 && cur <= end; i++) {
       const csvText = await fetchEmployeePerformanceCsv(session, storeIds, cur, cur)
       const objects = rowsToObjectsAt(parseCsv(csvText), EMP_HEADER_ROW_INDEX)
+      const dayRows: Record<string, any>[] = []
       for (const o of objects) {
         const row = empDailyRowFromCsv(o, cur, storeIdMap)
-        if (row) { buffer.push(row); result.processed!++ } else { result.skipped!++ }
+        if (row) { dayRows.push(row); result.processed!++ } else { result.skipped!++ }
       }
+      // Requests are per store-day, so attribute this day before buffering.
+      if (dayRows.length > 0) await annotateRequestsForDate(session, cur, dayRows, pkToGid, reqDiag)
+      buffer.push(...dayRows)
       result.days!++
       if (buffer.length >= FLUSH_AT) await flush()
       cur = addDays(cur, 1)
     }
     await flush()
-    console.log(`[scrape/employee-daily] range ${start}→${end}: ${result.days} days, ${result.processed} rows, ${result.inserted} inserted, ${result.updated} updated`)
+    ;(result as any).requestDiag = reqDiag
+    console.log(`[scrape/employee-daily] range ${start}→${end}: ${result.days} days, ${result.processed} rows, ${result.inserted} inserted, ${result.updated} updated; requests ok=${reqDiag.storeDaysOk} fail=${reqDiag.storeDaysFailed} nodata=${reqDiag.storeDaysNoData} counted=${reqDiag.invoicesCounted} unmatched=${reqDiag.invoicesUnmatched}`)
   } catch (err) {
     result.ok = false
     result.error = err instanceof Error ? err.message : String(err)

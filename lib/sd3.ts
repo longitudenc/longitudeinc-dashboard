@@ -340,9 +340,10 @@ export async function fetchHalfHourOptimal(
 /**
  * A deliberately minimal, PII-FREE projection of an invoice. We read the raw
  * /rest/invoice rows (which carry customer identifiers, names, OCI profile ids,
- * etc.) but keep ONLY the operational timestamps needed to count demand and
- * waits. Every identifying field is dropped here at the boundary, so no customer
- * data ever leaves this function.
+ * etc.) but keep ONLY operational fields: timestamps for demand/waits, plus the
+ * serving stylist's employeepk and the request flag for the requests report.
+ * Every CUSTOMER-identifying field is dropped here at the boundary, so no customer
+ * data ever leaves this function. (employeepk is an EMPLOYEE id, not customer PII.)
  */
 export interface SD3InvoiceLite {
   storeId: number
@@ -351,6 +352,11 @@ export interface SD3InvoiceLite {
   timeServed: string | null  // when service started (null = never served)
   timeOut: string | null     // when service ended / customer left the chair
   estWait: number | null     // posted estimated wait at arrival
+  employeepk: number | null  // stylist who served (employee.objectId.idSnapshot.employeepk).
+                             // An EMPLOYEE id, not customer PII; used to attribute requests.
+  request: boolean           // customer waited specifically for this stylist (request-rate numerator)
+  serviceOnTicket: boolean   // ticket includes a service (vs product-only)
+  isRedo: boolean            // redo/correction ticket (redoOriginalInvoicePk present) -> excluded from counts
 }
 
 function numOrNull(v: unknown): number | null {
@@ -391,6 +397,12 @@ export async function fetchInvoices(
     timeServed: r.timeServed ? String(r.timeServed) : null,
     timeOut: r.timeOut ? String(r.timeOut) : null,
     estWait: numOrNull(r.estimatedWaitMinutesAtArrival ?? r.originalEstWait),
+    // Stylist + request fields for the requests report. employeepk is the durable
+    // per-EMPLOYEE id (not the per-store employeeId surrogate, not customer PII).
+    employeepk: numOrNull((r.employee as any)?.objectId?.idSnapshot?.employeepk),
+    request: r.request === true,
+    serviceOnTicket: r.serviceOnTicket === true,
+    isRedo: r.redoOriginalInvoicePk != null,
   }))
 }
 
