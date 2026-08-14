@@ -1376,6 +1376,9 @@ const EMP_PROFILE_TAB = 'EmployeeProfile'
 
 const PROFILE_COLUMNS = [
   'globalId',       // join key — from globalEmployeeKey (e.g. "2023-0000-7354")
+  'employeepk',     // SD3 durable Employee pk (e.g. 1068970) — the id /rest/invoice
+                    // credits a haircut to. NOT PII, NOT the per-store employeeId
+                    // surrogate. Bridges an invoice's stylist to globalId -> SD_EMP_DAILY.
   'name',           // "Last, First" — already shown across the dashboard; used to
                     // resolve everyone (incl. non-cutting staff) for the disc picker
   'email',          // emailAddress, lowercased — AUTH USE ONLY (see PII note below)
@@ -1423,8 +1426,15 @@ function profileRow(e: any): Record<string, any> | null {
   const name = (lastN || firstN)
     ? [lastN, firstN].filter(Boolean).join(', ')
     : String(e?.employeeName ?? e?.name ?? e?.fullName ?? '').trim()
+  // SD3 durable Employee pk (objectId.idSnapshot.employeepk) — the join id
+  // /rest/invoice uses for the stylist. Deliberately NOT the top-level employeeId,
+  // which is a per-store surrogate. '' if absent (a visible blank, not a guess).
+  const employeepk = String(
+    e?.objectId?.idSnapshot?.employeepk ?? e?.employeepk ?? ''
+  ).trim()
   return {
     globalId,
+    employeepk,
     name,
     email: e?.emailAddress ? String(e.emailAddress).trim().toLowerCase() : '',
     inactive: e?.inactive === true ? 'true' : 'false',
