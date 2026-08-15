@@ -1,28 +1,27 @@
-// app/api/market/ingest/address-quality/route.ts
+// app/api/ingest/address-quality/route.ts
 //
-// Ingest per-salon Customer Address Quality (% Good) pulled from the Great Clips
-// Power BI report by the browser-console snippet, and upsert it into a dedicated
-// tab. Kept separate from SalonSummaryData because upsertSheet rewrites whole
-// rows keyed by (periodKey, salonNum) — a second writer on a shared tab would
-// blank the other writer's columns.
+// Ingest per-salon Customer Address Quality (% Good / Improve / Bad) and upsert
+// into the dedicated SalonCAQData tab, keyed on (periodKey, salonNum). Kept
+// separate from SalonSummaryData because upsertSheet rewrites whole rows — a
+// second writer on a shared tab would blank the other's columns.
 //
 // periodKey uses the same "Mon YY" format as lib/salon-month.ts (e.g. "Jun 26"),
-// so this joins to SalonSummaryData / BonusData on (periodKey, salonNum).
+// so it joins to SalonSummaryData / BonusData on (periodKey, salonNum). caq*
+// values are stored as raw decimals (0.692 = 69.2%); the dashboard formats at read.
 //
-// Auth: ?secret=<secret> or Authorization: Bearer <secret>. Accepts a dedicated
-// CAQ_INGEST_SECRET (preferred) or CRON_SECRET. CORS is opened so the snippet
-// can POST cross-origin from app.powerbi.com; the secret is what gates writes.
+// Auth: ?secret=<CRON_SECRET>  or  Authorization: Bearer <CRON_SECRET>.
+// The monthly GitHub Action posts here server-to-server. CORS is left open so
+// the manual browser-console fallback can still POST cross-origin if ever needed;
+// the secret is what actually gates writes.
 //
 // POST body: { "rows": [ { periodKey, periodLabel, salonNum, salonName,
 //                          caqGood, caqImprove, caqBad } , ... ] }
-//   caq* are raw decimals (0.692 = 69.2%). scrapedAt is stamped server-side.
 
 import { NextResponse } from 'next/server'
 import { upsertSheet } from '@/lib/sheets'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-export const maxDuration = 60
 
 const SALON_CAQ_TAB = 'SalonCAQData'
 const SALON_CAQ_COLUMNS = [
@@ -30,27 +29,18 @@ const SALON_CAQ_COLUMNS = [
   'caqGood', 'caqImprove', 'caqBad', 'scrapedAt',
 ] as const
 
-const CORS = {
+const CORS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'content-type, authorization',
+  'Access-Control-Allow-Headers': 'authorization, content-type',
 }
 
-function authed(request: Request): boolean {
-  // Accept a dedicated CAQ_INGEST_SECRET (preferred — this is what the monthly
-  // browser snippet carries, so a narrow key that can only append CAQ rows), and
-  // still honor CRON_SECRET as a fallback. Either secret may arrive as a Bearer
-  // header or a ?secret= query param.
-  const accepted = [process.env.CAQ_INGEST_SECRET, process.env.CRON_SECRET]
-    .filter((s): s is string => !!s)
-  if (accepted.length === 0) return false
+function authorized(request: Request): boolean {
+  const expected = process.env.CRON_SECRET
+  if (!expected) return false
   const auth = request.headers.get('authorization')
-  const url = new URL(request.url)
-  const provided = auth?.startsWith('Bearer ')
-    ? auth.slice('Bearer '.length)
-    : url.searchParams.get('secret')
-  if (!provided) return false
-  return accepted.includes(provided)
+  if (auth === `Bearer ${expected}`) return true
+  return new URL(request.url).searchParams.get('secret') === expected
 }
 
 export async function OPTIONS() {
@@ -58,20 +48,17 @@ export async function OPTIONS() {
 }
 
 export async function POST(request: Request) {
-  if (!authed(request)) {
+  if (!authorized(request)) {
     return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401, headers: CORS })
   }
 
   let body: any
-  try {
-    body = await request.json()
-  } catch {
-    return NextResponse.json({ ok: false, error: 'invalid JSON body' }, { status: 400, headers: CORS })
-  }
+  try { body = await request.json() }
+  catch { return NextResponse.json({ ok: false, error: 'invalid JSON' }, { status: 400, headers: CORS }) }
 
   const rowsIn = Array.isArray(body?.rows) ? body.rows : null
   if (!rowsIn) {
-    return NextResponse.json({ ok: false, error: 'expected { rows: [...] }' }, { status: 400, headers: CORS })
+    return NextResponse.json({ ok: false, error: 'body.rows[] required' }, { status: 400, headers: CORS })
   }
 
   const scrapedAt = new Date().toISOString()

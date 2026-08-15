@@ -1,0 +1,80 @@
+# .github/workflows/caq.yml
+#
+# Monthly Customer Address Quality (CAQ) pull. Runs a headless browser, logs
+# into the Great Clips Power BI report (username/password, no MFA), grabs the
+# short-lived query token, pulls last month's per-salon % Good, and POSTs it to
+# the dashboard's /api/ingest/address-quality route. If it fails (e.g. the
+# password expired), GitHub emails you automatically.
+#
+# ── ONE-TIME SETUP ──────────────────────────────────────────────────────────
+# Repo -> Settings -> Secrets and variables -> Actions. Add these SECRETS:
+#     PBI_USER        your Great Clips login email
+#     PBI_PASS        your Great Clips password
+#     PBI_REPORT_URL  the app.powerbi.com URL you open for the CAQ report
+#     CRON_SECRET     same value the SD3 scrape uses (likely already added)
+#   And this VARIABLE (Variables tab, not Secrets):
+#     INGEST_BASE     https://longitudenc.com
+#
+# ── WHEN YOUR PASSWORD CHANGES (every ~90 days) ─────────────────────────────
+#   Repo -> Settings -> Secrets and variables -> Actions -> Secrets tab ->
+#   click PBI_PASS -> "Update secret" -> paste the new password -> Update secret.
+#   That's the only recurring maintenance. Nothing else to touch.
+#
+# ── TO RUN IT MANUALLY (or backfill a few months) ───────────────────────────
+#   Repo -> Actions tab -> "CAQ Monthly Pull" in the left list ->
+#   "Run workflow" (top right) -> optionally set "months_back" (e.g. 3 to pull
+#   the last 3 completed months) -> "Run workflow". Watch the run log; the last
+#   lines show the per-month salon counts and the ingest response.
+
+name: CAQ Monthly Pull
+
+on:
+  schedule:
+    - cron: '0 9 5 * *'      # 5th of each month, 09:00 UTC — prior month is fully settled
+  workflow_dispatch:
+    inputs:
+      months_back:
+        description: 'How many completed months back to pull (1 = last month)'
+        required: false
+        default: '1'
+
+concurrency:
+  group: caq-pull
+  cancel-in-progress: false
+
+jobs:
+  pull:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PBI_USER: ${{ secrets.PBI_USER }}
+      PBI_PASS: ${{ secrets.PBI_PASS }}
+      PBI_REPORT_URL: ${{ secrets.PBI_REPORT_URL }}
+      INGEST_BASE: ${{ vars.INGEST_BASE }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+      MONTHS_BACK: ${{ github.event.inputs.months_back || '1' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Playwright + Chromium
+        run: |
+          npm install playwright@1.48.0
+          npx playwright install --with-deps chromium
+
+      - name: Run CAQ pull
+        run: node scripts/caq-pull.mjs
+
+      - name: Upload error screenshot (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: caq-error-screenshot
+          path: caq-error.png
+          if-no-files-found: ignore
+          retention-days: 7
