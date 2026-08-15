@@ -160,11 +160,14 @@ async function doLogin(page) {
   // because the login SPA renders client-side after the OAuth redirect chain.
   const nextSel = '#idSIButton9, input[type="submit"], button[type="submit"]'
 
-  await page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {})
+  await page.waitForLoadState('domcontentloaded').catch(() => {})
   await shot(page, 'landing')
 
-  // Already on the report (cached session)? Nothing to do.
-  if (/app\.powerbi\.com/i.test(page.url()) && !/login|signin/i.test(page.url())) { log('already on report'); return }
+  // A cached session would have fired a query already — if a token is in hand, we're in.
+  if (token) { log('token already captured — already signed in'); return }
+  // Otherwise Power BI's singleSignOn hand-off page auto-redirects to the Microsoft
+  // login; the email locator below auto-waits across that navigation. Do NOT bail on
+  // the app.powerbi.com URL here — the SSO landing page is not the report.
 
   // "Pick an account" only appears if a session cookie exists (won't in CI, but
   // handle it): choose "Use another account".
@@ -176,11 +179,13 @@ async function doLogin(page) {
   // Email — submit with Enter (posts the form directly; avoids clicking a hidden
   // or not-yet-enabled submit button).
   const email = page.locator('input[type="email"], input[name="loginfmt"], #i0116').first()
-  if (await email.isVisible({ timeout: 45000 }).catch(() => false)) {
+  if (await email.isVisible({ timeout: 60000 }).catch(() => false)) {
     log('entering username:', PBI_USER)
     await email.fill(PBI_USER)
     await email.press('Enter').catch(() => {})
     await page.waitForTimeout(2500)
+  } else if (token) {
+    log('signed in without an email prompt (token captured)'); return
   } else {
     log('WARNING: email field never appeared'); await shot(page, 'no-email')
   }
