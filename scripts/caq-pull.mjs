@@ -146,36 +146,71 @@ async function main() {
   log('done.')
 }
 
+async function shot(page, tag) {
+  try {
+    const url = page.url(); const title = await page.title().catch(() => '')
+    log(`step[${tag}] url=${url} title=${JSON.stringify(title)}`)
+    await page.screenshot({ path: `caq-${tag}.png`, fullPage: true }).catch(() => {})
+  } catch (_) {}
+}
+
 async function doLogin(page) {
-  // Standard Azure AD flow (no MFA). Robust to already-signed-in and to the
-  // "Stay signed in?" interstitial. If Great Clips uses a federated (ADFS) page,
-  // we still find the first visible password field.
-  const emailSel = 'input[type="email"], #i0116, input[name="loginfmt"]'
-  const passSel = 'input[type="password"]:visible, #i0118, input[name="passwd"]'
+  // Standard Azure AD (no MFA). Instrumented: screenshots + url/title at each
+  // step so a failed run shows exactly where it stalled. Patient timeouts,
+  // because the login SPA renders client-side after the OAuth redirect chain.
   const nextSel = '#idSIButton9, input[type="submit"], button[type="submit"]'
 
-  // If the report is already up (cached session), there's no login to do.
-  const email = page.locator(emailSel).first()
-  if (await email.isVisible({ timeout: 15000 }).catch(() => false)) {
-    log('entering username…')
+  await page.waitForLoadState('networkidle', { timeout: 60000 }).catch(() => {})
+  await shot(page, 'landing')
+
+  // Already on the report (cached session)? Nothing to do.
+  if (/app\.powerbi\.com/i.test(page.url()) && !/login|signin/i.test(page.url())) { log('already on report'); return }
+
+  // "Pick an account" only appears if a session cookie exists (won't in CI, but
+  // handle it): choose "Use another account".
+  const pick = page.getByText(/use another account/i).first()
+  if (await pick.isVisible({ timeout: 4000 }).catch(() => false)) {
+    log('pick-an-account -> use another'); await pick.click().catch(() => {}); await page.waitForTimeout(1500)
+  }
+
+  // Email — submit with Enter (posts the form directly; avoids clicking a hidden
+  // or not-yet-enabled submit button).
+  const email = page.locator('input[type="email"], input[name="loginfmt"], #i0116').first()
+  if (await email.isVisible({ timeout: 45000 }).catch(() => false)) {
+    log('entering username:', PBI_USER)
     await email.fill(PBI_USER)
-    await page.locator(nextSel).first().click().catch(() => {})
+    await email.press('Enter').catch(() => {})
+    await page.waitForTimeout(2500)
   } else {
-    log('no email field — assuming already signed in')
+    log('WARNING: email field never appeared'); await shot(page, 'no-email')
   }
 
-  const pass = page.locator(passSel).first()
-  if (await pass.isVisible({ timeout: 30000 }).catch(() => false)) {
-    log('entering password…')
+  // Password — submit with Enter; if still on the page, click the visible "Sign in".
+  const pass = page.locator('input[type="password"], input[name="passwd"], #i0118').first()
+  if (await pass.isVisible({ timeout: 45000 }).catch(() => false)) {
+    log('entering password')
     await pass.fill(PBI_PASS)
-    await page.locator(nextSel).first().click().catch(() => {})
+    await pass.press('Enter').catch(() => {})
+    await page.waitForTimeout(1800)
+    if (await pass.isVisible({ timeout: 2500 }).catch(() => false)) {
+      log('Enter did not submit — clicking Sign in')
+      await page.getByRole('button', { name: /sign in/i }).first().click().catch(() => {})
+    }
+    await page.waitForTimeout(2500)
+  } else {
+    log('WARNING: password field never appeared'); await shot(page, 'no-password')
   }
 
-  // "Stay signed in?" → Yes (keeps the session lighter; harmless if absent).
-  const stay = page.locator('#idSIButton9')
-  if (await stay.isVisible({ timeout: 12000 }).catch(() => false)) {
-    await stay.click().catch(() => {})
+  // "Stay signed in?" -> Yes (harmless if absent). Detect by heading so we don't
+  // collide with the password page's own Sign in button.
+  if (await page.getByText(/stay signed in/i).first().isVisible({ timeout: 12000 }).catch(() => false)) {
+    log('KMSI -> Yes')
+    await page.getByRole('button', { name: /^yes$/i }).first().click().catch(() => {})
+    await page.waitForTimeout(2000)
   }
+
+  await page.waitForTimeout(3000)
+  await shot(page, 'post-login')
 }
 
 async function waitForToken(page) {
