@@ -7331,6 +7331,10 @@ function setIndivMode(mode){
 function renderIndividual(){
   const thead=document.getElementById('emp-thead'), tbody=document.getElementById('emp-tbody'), sf=document.getElementById('emp-salon-filter');
   if(!thead||!tbody) return;
+  // Draw the shared Day/Week/Month/MTD/YTD/Custom control into this tab's
+  // .period-controls slot — switchTab('individual') reaches here without going
+  // through refreshPeriodViews, so otherwise the date control never appears.
+  try{ renderPeriodControls(); }catch(e){}
   // Same rolling engine as Company Team, scoped to this Area Manager. This
   // replaces the old single-week snapshot path that went blank when a week's
   // employee data hadn't been scraped.
