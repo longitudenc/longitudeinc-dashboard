@@ -4848,6 +4848,8 @@ function reqRateSalon(sn){ const o=S_reqRateBySalon[String(sn).trim()]; return (
 // Req % column; scope 'am' = current AM's salons, 'company' = all.
 let S_reqDrill={};
 function toggleReqDrill(scope,sn){ const k=scope+'|'+sn; S_reqDrill[k]=!S_reqDrill[k]; renderRequests(scope); }
+let S_reqSort={col:'rate',dir:-1};
+function sortRequests(scope,col){ if(S_reqSort.col===col){ S_reqSort.dir=-S_reqSort.dir; } else { S_reqSort.col=col; S_reqSort.dir=(col==='salon')?1:-1; } renderRequests(scope); }
 function renderRequests(scope){
   scope = scope || ((document.getElementById('page-company')&&document.getElementById('page-company').classList.contains('active'))?'company':'am');
   const host = scope==='company' ? document.getElementById('section-company-requests') : document.getElementById('requests-container');
@@ -4868,18 +4870,22 @@ function renderRequests(scope){
   }
   const rate=o=>(o&&o.cust>0)?o.req/o.cust*100:null;
   const fmtR=o=>{ const r=rate(o); return r==null?'\u2014':r.toFixed(1)+'%'; };
-  const byRate=(m)=>(a,b)=>{ const ra=rate(m[a]),rb=rate(m[b]); return (rb==null?-1:rb)-(ra==null?-1:ra); };
-  const salons=Object.keys(salonAgg).sort(byRate(salonAgg));
+  const sval=(sn,m)=>{ const o=m[sn]; if(S_reqSort.col==='salon') return salonDisplay(sn).toLowerCase(); if(S_reqSort.col==='req') return o.req; if(S_reqSort.col==='cust') return o.cust; const r=rate(o); return r==null?-Infinity:r; };
+  const gval=(gid,m)=>{ const o=m[gid]; if(S_reqSort.col==='salon') return String((S_reqData.names[gid]&&S_reqData.names[gid].n)||gid).toLowerCase(); if(S_reqSort.col==='req') return o.req; if(S_reqSort.col==='cust') return o.cust; const r=rate(o); return r==null?-Infinity:r; };
+  const cmpBy=(getv,m)=>(a,b)=>{ const va=getv(a,m),vb=getv(b,m); if(typeof va==='string'||typeof vb==='string') return String(va).localeCompare(String(vb))*S_reqSort.dir; return (va-vb)*S_reqSort.dir; };
+  const salons=Object.keys(salonAgg).sort(cmpBy(sval,salonAgg));
   let h='<div class="table-card-header"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><div class="card-title" style="margin:0;">Request Tracker \u2014 by Salon <span class="period-controls" style="display:inline-flex;align-items:center;gap:7px;flex-wrap:wrap;"></span></div><span style="font-size:11px;color:var(--text-muted);">Request % = requested customers \u00f7 total customers \u00b7 informational, not scored</span></div></div>';
   if(!S_reqData){ h+='<div class="no-data" style="padding:14px;">Loading request data\u2026</div>'; }
   else if(!salons.length){ h+='<div class="no-data" style="padding:14px;"><div class="no-data-icon">\ud83d\udcc7</div>No request data for this period.</div>'; }
   else {
-    h+='<div style="overflow-x:auto;"><table class="emp-table" style="width:100%;"><thead><tr style="background:#2E4D8A;color:#fff;"><th style="text-align:left;padding:7px 10px;">Salon</th><th style="padding:7px 10px;">Request %</th><th style="padding:7px 10px;">Requests</th><th style="padding:7px 10px;">Customers</th></tr></thead><tbody>';
+    const _cols=[['salon','Salon','left'],['rate','Request %','center'],['req','Requests','center'],['cust','Customers','center']];
+    const _th=_cols.map(function(c){ var ar=S_reqSort.col===c[0]?(S_reqSort.dir<0?' \u25BC':' \u25B2'):''; return '<th onclick="sortRequests(\''+scope+'\',\''+c[0]+'\')" style="cursor:pointer;text-align:'+(c[2]==='left'?'left':'center')+';padding:7px 10px;white-space:nowrap;">'+c[1]+ar+'</th>'; }).join('');
+    h+='<div style="overflow-x:auto;"><table class="emp-table" style="width:100%;"><thead><tr style="background:#2E4D8A;color:#fff;">'+_th+'</tr></thead><tbody>';
     for(const sn of salons){
       const o=salonAgg[sn], exp=!!S_reqDrill[scope+'|'+sn];
       h+='<tr onclick="toggleReqDrill(\''+scope+'\',\''+sn+'\')" style="border-bottom:1px solid #e5e9f2;cursor:pointer;background:#f4f6fb;font-weight:600;"><td style="text-align:left;padding:7px 10px;white-space:nowrap;">'+(exp?'\u25be ':'\u25b8 ')+salonDisplay(sn)+'</td><td style="text-align:center;padding:7px 10px;">'+fmtR(o)+'</td><td style="text-align:center;padding:7px 10px;">'+o.req+'</td><td style="text-align:center;padding:7px 10px;">'+o.cust+'</td></tr>';
       if(exp){
-        const sg=stylistAgg[sn]||{}, gids=Object.keys(sg).sort(byRate(sg));
+        const sg=stylistAgg[sn]||{}, gids=Object.keys(sg).sort(cmpBy(gval,sg));
         if(!gids.length){ h+='<tr><td colspan="4" style="padding:5px 10px 5px 30px;color:var(--text-muted);font-size:12px;">No stylist detail.</td></tr>'; }
         for(const gid of gids){
           const go=sg[gid], nm=(S_reqData.names[gid]&&S_reqData.names[gid].n)?fmtName(S_reqData.names[gid].n):gid;
