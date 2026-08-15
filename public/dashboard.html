@@ -3052,6 +3052,11 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
           <div class="no-data"><div class="no-data-icon">💰</div>No bonus data loaded yet.<br><span style="font-size:12px;color:var(--text-muted);">Drop a monthly employee CSV with "bonus" in the filename into your upload folder.</span></div>
         </div>
       </div>
+
+      <!-- REQUESTS TAB -->
+      <div id="tab-requests" style="display:none;">
+        <div class="table-card" id="requests-container"><div class="no-data" style="padding:14px;">Loading request data…</div></div>
+      </div>
     </div>
 
     <!-- Company Overview (admin only) -->
@@ -3099,6 +3104,9 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
 
       <!-- Company Team (all employees) -->
       <div class="table-card" id="section-company-team" style="display:none;"></div>
+
+      <!-- Company Requests (by salon, drill to stylist) -->
+      <div class="table-card" id="section-company-requests" style="display:none;"></div>
 
       <!-- All Salons Detail -->
       <div class="table-card" id="section-all-salons">
@@ -4052,6 +4060,7 @@ function refreshPeriodViews(){
       // scorecard / performance sections that belong to the "Area Managers" tab.
       try{ applyCompanyTabVisibility(); }catch(e){}
       if(S_companyTab==='team'){ try{ renderCompanyTeam(); }catch(e){ console.error('[team]',e); } }
+      if(S_companyTab==='requests'){ try{ renderRequests('company'); }catch(e){ console.error('[req]',e); } }
     }
     else if(amActive){
       // AM view is sidebar-driven (top .tab bar is display:none), so detect the
@@ -4061,9 +4070,10 @@ function refreshPeriodViews(){
       const _vis = id => { const el=document.getElementById('tab-'+id); return el && el.style.display!=='none'; };
       const sub = document.querySelector('.am-subnav-btn.active');
       const atab = (sub && sub.dataset.atab) ||
-        (_vis('individual')?'individual':_vis('score')?'score':_vis('trends')?'trends':'salon');
+        (_vis('individual')?'individual':_vis('requests')?'requests':_vis('score')?'score':_vis('trends')?'trends':'salon');
       if(atab==='salon') renderSalonTab();
       else if(atab==='individual') renderIndividual();
+      else if(atab==='requests') renderRequests('am');
       else if(atab==='score') renderScorecard();
       else if(atab==='trends') renderTrends();
     }
@@ -4578,6 +4588,7 @@ function amSubnavHtml(){
   const t=(atab,lbl)=>`<button class="am-btn am-subnav-btn${atab==='salon'?' active':''}" data-atab="${atab}" onclick="amSubTab('${atab}')" style="font-size:13px;padding:7px 10px;">${lbl}</button>`;
   return `<div id="am-subnav" style="display:none;padding-left:10px;border-left:2px solid var(--border);margin:2px 0 6px 14px;">`
     + t('score','Scorecard') + t('salon','Salon Performance') + t('individual',"My Team's Performance")
+    + t('requests','Requests 📇')
     + t('trends','Trends') + t('bonus','Bonus 💰') + t('reviews','Reviews 📋') + t('dayreview','Day Review 📅')
     + (canSeeDayOfWeek()?`<button class="am-btn am-subnav-btn" onclick="openDayOfWeek()" style="font-size:13px;padding:7px 10px;">Day of Week 📆</button>`:'')
     + `</div>`;
@@ -4613,6 +4624,7 @@ function setupSidebar(){
       <button class="am-btn company-subnav-btn active" data-ctab="allsalons" onclick="showCompanyTab('allsalons')" style="font-size:13px;padding:7px 10px;">All Salons</button>
       <button class="am-btn company-subnav-btn" data-ctab="ams" onclick="showCompanyTab('ams')" style="font-size:13px;padding:7px 10px;">Area Managers</button>
       <button class="am-btn company-subnav-btn" data-ctab="team" onclick="showCompanyTab('team')" style="font-size:13px;padding:7px 10px;">Team 👥</button>
+      <button class="am-btn company-subnav-btn" data-ctab="requests" onclick="showCompanyTab('requests')" style="font-size:13px;padding:7px 10px;">Requests 📇</button>
       <button class="am-btn company-subnav-btn" data-ctab="bonus" onclick="showCompanyTab('bonus')" style="font-size:13px;padding:7px 10px;">Bonus 💰</button>
       <button class="am-btn company-subnav-btn" data-ctab="standouts" onclick="showCompanyTab('standouts')" style="font-size:13px;padding:7px 10px;">Standouts 🏆</button>
       <button class="am-btn company-subnav-btn" data-ctab="reviews" onclick="showCompanyTab('reviews')" style="font-size:13px;padding:7px 10px;">Reviews 📋</button>
@@ -4693,6 +4705,7 @@ const COMPANY_TAB_SECTIONS = {
   allsalons: ['company-summary','section-all-salons','co-salon-drill'],
   ams:       ['section-scorecard','section-am-perf'],
   team:      ['section-company-team'],
+  requests:  ['section-company-requests'],
   bonus:     ['section-bonus'],
   standouts: ['section-standouts'],
   dayreview: ['section-day-review'],
@@ -4702,10 +4715,10 @@ const COMPANY_TAB_SECTIONS = {
 function applyCompanyTabVisibility(){
   const full = canSeeAllSalons();
   // Sections only owner/admin/viewer may see.
-  const gated = new Set(['section-scorecard','section-am-perf','section-bonus','section-company-team']);
+  const gated = new Set(['section-scorecard','section-am-perf','section-bonus','section-company-team','section-company-requests']);
   const roleOk = id => id==='section-day-review' ? canSeeDayReview() : id==='section-dayofweek' ? canSeeDayOfWeek() : (gated.has(id) ? full : true);
   const active = new Set(COMPANY_TAB_SECTIONS[S_companyTab] || COMPANY_TAB_SECTIONS.allsalons);
-  ['company-summary','section-scorecard','section-am-perf','section-company-team','section-all-salons','co-salon-drill','section-bonus','section-standouts','section-day-review','section-dayofweek','section-reviews'].forEach(id=>{
+  ['company-summary','section-scorecard','section-am-perf','section-company-team','section-company-requests','section-all-salons','co-salon-drill','section-bonus','section-standouts','section-day-review','section-dayofweek','section-reviews'].forEach(id=>{
     const el = document.getElementById(id); if(!el) return;
     el.style.display = (active.has(id) && roleOk(id)) ? '' : 'none';
   });
@@ -4724,6 +4737,7 @@ function showCompanyTab(name){
   applyCompanyTabVisibility();
   if(name==='dayreview') renderDayReview();
   if(name==='team') renderCompanyTeam();
+  if(name==='requests') renderRequests('company');
   if(name==='dayofweek') renderDayOfWeek();
   if(name==='reviews') renderReviewsTab('section-reviews','company');
 }
@@ -4828,6 +4842,56 @@ function _computeReqRates(weekEnds){
 }
 function reqRateGid(gid){ const o=S_reqRateByGid[gid]; return (o&&o.cust>0)?o.req/o.cust*100:NaN; }
 function reqRateSalon(sn){ const o=S_reqRateBySalon[String(sn).trim()]; return (o&&o.cust>0)?o.req/o.cust*100:NaN; }
+
+// Dedicated Request report: salon-level (ranked by request rate) with a drill
+// to the stylists at that salon. Same cached cells + period control as the
+// Req % column; scope 'am' = current AM's salons, 'company' = all.
+let S_reqDrill={};
+function toggleReqDrill(scope,sn){ const k=scope+'|'+sn; S_reqDrill[k]=!S_reqDrill[k]; renderRequests(scope); }
+function renderRequests(scope){
+  scope = scope || ((document.getElementById('page-company')&&document.getElementById('page-company').classList.contains('active'))?'company':'am');
+  const host = scope==='company' ? document.getElementById('section-company-requests') : document.getElementById('requests-container');
+  if(!host) return;
+  ensureReqDataThenRepaint();
+  const weekEnds=_teamWeeks().map(w=>w.weekEnding);
+  const set=new Set(weekEnds);
+  const wantSalon = sn => scope==='company' ? true : (amOf(sn)===S.currentAM);
+  const salonAgg={}, stylistAgg={};
+  if(S_reqData){
+    for(const c of S_reqData.cells){
+      if(!set.has(c.w)) continue;
+      if(!wantSalon(c.s)) continue;
+      const sa=salonAgg[c.s]||(salonAgg[c.s]={req:0,cust:0}); sa.req+=c.r; sa.cust+=c.c;
+      const sg=stylistAgg[c.s]||(stylistAgg[c.s]={});
+      const g=sg[c.g]||(sg[c.g]={req:0,cust:0}); g.req+=c.r; g.cust+=c.c;
+    }
+  }
+  const rate=o=>(o&&o.cust>0)?o.req/o.cust*100:null;
+  const fmtR=o=>{ const r=rate(o); return r==null?'\u2014':r.toFixed(1)+'%'; };
+  const byRate=(m)=>(a,b)=>{ const ra=rate(m[a]),rb=rate(m[b]); return (rb==null?-1:rb)-(ra==null?-1:ra); };
+  const salons=Object.keys(salonAgg).sort(byRate(salonAgg));
+  let h='<div class="table-card-header"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><div class="card-title" style="margin:0;">Request Tracker \u2014 by Salon <span class="period-controls" style="display:inline-flex;align-items:center;gap:7px;flex-wrap:wrap;"></span></div><span style="font-size:11px;color:var(--text-muted);">Request % = requested customers \u00f7 total customers \u00b7 informational, not scored</span></div></div>';
+  if(!S_reqData){ h+='<div class="no-data" style="padding:14px;">Loading request data\u2026</div>'; }
+  else if(!salons.length){ h+='<div class="no-data" style="padding:14px;"><div class="no-data-icon">\ud83d\udcc7</div>No request data for this period.</div>'; }
+  else {
+    h+='<div style="overflow-x:auto;"><table class="emp-table" style="width:100%;"><thead><tr style="background:#2E4D8A;color:#fff;"><th style="text-align:left;padding:7px 10px;">Salon</th><th style="padding:7px 10px;">Request %</th><th style="padding:7px 10px;">Requests</th><th style="padding:7px 10px;">Customers</th></tr></thead><tbody>';
+    for(const sn of salons){
+      const o=salonAgg[sn], exp=!!S_reqDrill[scope+'|'+sn];
+      h+='<tr onclick="toggleReqDrill(\''+scope+'\',\''+sn+'\')" style="border-bottom:1px solid #e5e9f2;cursor:pointer;background:#f4f6fb;font-weight:600;"><td style="text-align:left;padding:7px 10px;white-space:nowrap;">'+(exp?'\u25be ':'\u25b8 ')+salonDisplay(sn)+'</td><td style="text-align:center;padding:7px 10px;">'+fmtR(o)+'</td><td style="text-align:center;padding:7px 10px;">'+o.req+'</td><td style="text-align:center;padding:7px 10px;">'+o.cust+'</td></tr>';
+      if(exp){
+        const sg=stylistAgg[sn]||{}, gids=Object.keys(sg).sort(byRate(sg));
+        if(!gids.length){ h+='<tr><td colspan="4" style="padding:5px 10px 5px 30px;color:var(--text-muted);font-size:12px;">No stylist detail.</td></tr>'; }
+        for(const gid of gids){
+          const go=sg[gid], nm=(S_reqData.names[gid]&&S_reqData.names[gid].n)?fmtName(S_reqData.names[gid].n):gid;
+          h+='<tr style="border-bottom:1px solid #f2f2f2;"><td style="text-align:left;padding:5px 10px 5px 30px;">'+nm+'</td><td style="text-align:center;padding:5px 10px;">'+fmtR(go)+'</td><td style="text-align:center;padding:5px 10px;">'+go.req+'</td><td style="text-align:center;padding:5px 10px;">'+go.cust+'</td></tr>';
+        }
+      }
+    }
+    h+='</tbody></table></div>';
+  }
+  host.innerHTML=h;
+  try{ renderPeriodControls(); }catch(e){}
+}
 
 function _teamPeople(amId){
   const weeks=_teamWeeks();
@@ -5797,10 +5861,11 @@ function switchTab(tab,el){
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active')); 
   const _tb=el||document.getElementById('tb-'+tab); if(_tb) _tb.classList.add('active');
   document.querySelectorAll('.am-subnav-btn').forEach(b=>b.classList.toggle('active', b.dataset.atab===tab));
-  ['score','salon','individual','trends','bonus','reviews','dayreview'].forEach(t=>{ const el2=document.getElementById('tab-'+t); if(el2) el2.style.display=t===tab?'block':'none'; });
+  ['score','salon','individual','requests','trends','bonus','reviews','dayreview'].forEach(t=>{ const el2=document.getElementById('tab-'+t); if(el2) el2.style.display=t===tab?'block':'none'; });
   if(tab==='individual') renderIndividual();
   if(tab==='salon') renderSalonTab();
   if(tab==='score') renderScorecard();
+  if(tab==='requests') renderRequests('am');
   if(tab==='trends') renderTrends();
   if(tab==='bonus') renderBonus();
   if(tab==='reviews') renderReviewsTab('am-reviews-body','am');
