@@ -4758,6 +4758,7 @@ const TEAM_COLS=[
   {k:'prod', lbl:'Prod%',sv:r=>r.prod,align:'center',tier:tierProd,pct:true},
   {k:'nr',   lbl:'NR%',sv:r=>r.nr,align:'center',tier:tierNR,pct:true},
   {k:'rr',   lbl:'RR%',sv:r=>r.rr,align:'center',tier:tierRR,pct:true},
+  {k:'req',  lbl:'Req %',sv:r=>reqRateGid(r.gid),align:'center',pct:true},
   {k:'wks',  lbl:'Wks',sv:r=>r.wks,align:'center',muted:true},
 ];
 // Weeks selected by the shared team selector: rolling range, a single week, or
@@ -4799,9 +4800,40 @@ function _teamWeeks(){
     default:      return completed.slice(-13);
   }
 }
+// ── Request tracker (informational; single source = /api/gs/getRequests) ──────
+// Per-stylist / per-salon request rate = ΣrequestCount / ΣcustCount over the weeks
+// the team selector has chosen (cc-weighted, never an average of weekly rates).
+// Loaded once for the full span and cached; blank-requestCount days are already
+// dropped server-side. NOT scored — informational only.
+let S_reqData=null, S_reqBusy=false, S_reqRateByGid={}, S_reqRateBySalon={};
+function ensureReqDataThenRepaint(){
+  if(S_reqData||S_reqBusy) return;
+  S_reqBusy=true;
+  fetch('/api/gs/getRequests?start=2025-01-01&end='+dowAnchor()).then(x=>x.json()).then(r=>{
+    S_reqBusy=false;
+    if(r&&r.success){ S_reqData={cells:r.cells||[],names:r.names||{},weeks:r.weeks||[]}; refreshTeamViews(); }
+  }).catch(e=>{ S_reqBusy=false; console.error('[requests]',e); });
+}
+function _computeReqRates(weekEnds){
+  S_reqRateByGid={}; S_reqRateBySalon={};
+  if(!S_reqData) return;
+  const set=new Set(weekEnds||[]);
+  for(const c of S_reqData.cells){
+    if(!set.has(c.w)) continue;
+    let g=S_reqRateByGid[c.g]; if(!g){ g=S_reqRateByGid[c.g]={req:0,cust:0}; }
+    g.req+=c.r; g.cust+=c.c;
+    let sn=S_reqRateBySalon[c.s]; if(!sn){ sn=S_reqRateBySalon[c.s]={req:0,cust:0}; }
+    sn.req+=c.r; sn.cust+=c.c;
+  }
+}
+function reqRateGid(gid){ const o=S_reqRateByGid[gid]; return (o&&o.cust>0)?o.req/o.cust*100:NaN; }
+function reqRateSalon(sn){ const o=S_reqRateBySalon[String(sn).trim()]; return (o&&o.cust>0)?o.req/o.cust*100:NaN; }
+
 function _teamPeople(amId){
   const weeks=_teamWeeks();
   if(!weeks.length) return [];
+  ensureReqDataThenRepaint();
+  _computeReqRates(weeks.map(w=>w.weekEnding));
   const _vhWeeks=_vacHolWeeks(), _vhN=_vhWeeks.length, _vhMap={};
   _vhWeeks.forEach(w=>(w.emps||[]).forEach(e=>{ const gid=(e.globalId||'').trim(); if(!gid) return; const o=_vhMap[gid]||(_vhMap[gid]={v:0,h:0}); o.v+=n(e.vacationHours); o.h+=n(e.holidayHours); }));
   const byGid={};
