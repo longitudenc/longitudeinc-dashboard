@@ -10468,7 +10468,7 @@ function renderCompanyAMBonus(){
     return;
   }
 
-  if(!S_coAMBonusPeriod) S_coAMBonusPeriod = S_salonSummaryPeriods[S_salonSummaryPeriods.length-1].periodKey;
+  if(!S_coAMBonusPeriod){ const _d=S_salonSummaryPeriods.filter(p=>_monthDone(p.periodKey)); const _l=(_d.length?_d:S_salonSummaryPeriods); S_coAMBonusPeriod = _l[_l.length-1].periodKey; }
   if(!S_coAMView) S_coAMView = 'period';
 
   const viewBar = `<div style="display:flex;gap:2px;background:#eee;border-radius:10px;padding:3px;width:fit-content;">
@@ -10605,7 +10605,7 @@ function renderCompanyManagerBonus(){
   }
 
   // Default period
-  if(!S_coMgrPeriod) S_coMgrPeriod = S_salonSummaryPeriods[S_salonSummaryPeriods.length-1].periodKey;
+  if(!S_coMgrPeriod){ const _d=S_salonSummaryPeriods.filter(p=>_monthDone(p.periodKey)); const _l=(_d.length?_d:S_salonSummaryPeriods); S_coMgrPeriod = _l[_l.length-1].periodKey; }
 
   // If drilling into a salon, show that instead
   if(S_coMgrDrillSalon){
