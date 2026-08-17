@@ -4510,7 +4510,8 @@ function onDataLoaded(data){
     S.empWeeklyConsByGid = {};
     S.empWeeklyCons.forEach(r=>{ const g=String(r.globalId||'').trim(); if(!g) return; (S.empWeeklyConsByGid[g] || (S.empWeeklyConsByGid[g]=[])).push(r); });
     if(S_bonusPeriods.length > 0 && !S_bonusPeriod){
-      S_bonusPeriod = S_bonusPeriods[S_bonusPeriods.length-1].periodKey;
+      const _d = S_bonusPeriods.filter(p=>_monthDone(p.periodKey)); const _l = (_d.length?_d:S_bonusPeriods);
+      S_bonusPeriod = _l[_l.length-1].periodKey;
     }
     // Load salon summary periods
     S_salonSummaryPeriods = (data.salonSummaryPeriods || []).slice().sort((a,b)=>periodSortKey(a.periodKey)-periodSortKey(b.periodKey));
@@ -9208,7 +9209,7 @@ function calcMgrBonusFromSalonRow(salonRow, bonusMgrRow, waiver, periodLabel, is
 function buildManagerBonusPeriod(amSalonNums){
   if(!S_salonSummaryPeriods.length)
     return '<div class="no-data">No Salon Summary data loaded.<br><span style="font-size:12px;color:var(--text-muted);">Drop a "Salon Summary" CSV into the upload folder and click Check for New Files.</span></div>';
-  if(!S_mgrBonusPeriod) S_mgrBonusPeriod = S_salonSummaryPeriods[S_salonSummaryPeriods.length-1].periodKey;
+  if(!S_mgrBonusPeriod){ const _d=S_salonSummaryPeriods.filter(p=>_monthDone(p.periodKey)); const _l=(_d.length?_d:S_salonSummaryPeriods); S_mgrBonusPeriod = _l[_l.length-1].periodKey; }
   const ssPeriod = S_salonSummaryPeriods.find(p=>p.periodKey===S_mgrBonusPeriod);
   if(!ssPeriod) return '<div class="no-data">No salon summary data for this period.</div>';
 
@@ -10115,7 +10116,7 @@ function renderCompanyStandouts(){
     el.innerHTML='<div class="no-data" style="padding:2rem;">No data loaded yet.</div>';
     return;
   }
-  if(!S_bonusPeriod) S_bonusPeriod = S_bonusPeriods[S_bonusPeriods.length-1].periodKey;
+  if(!S_bonusPeriod){ const _d=S_bonusPeriods.filter(p=>_monthDone(p.periodKey)); const _l=(_d.length?_d:S_bonusPeriods); S_bonusPeriod = _l[_l.length-1].periodKey; }
   const _cpk = S_bonusPeriod || '';
   const _clbl = formatBonusPeriod(_cpk);
   const periodBar = `<div class="bonus-period-bar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
@@ -10539,7 +10540,9 @@ let S_bonusSelYear = null;  // null → follow the selected period / current FY
 function curBonusYear(){ return S_bonusPeriods.length ? Math.max(...S_bonusPeriods.map(p=>periodYear(p.periodKey))) : new Date().getFullYear(); }
 function bonusSelYear(){ if(S_bonusSelYear!=null) return S_bonusSelYear; if(S_bonusPeriod) return periodYear(S_bonusPeriod); return curBonusYear(); }
 function bonusYearsAvail(){ return [...new Set(S_bonusPeriods.map(p=>periodYear(p.periodKey)))].sort((a,b)=>b-a); }
-function bonusPeriodsSel(){ const y=bonusSelYear(); return S_bonusPeriods.filter(p=>periodYear(p.periodKey)===y); }
+function _bonusCurMonKey(){ return periodSortKey(periodKeyFromWeekEnd(new Date().toISOString().slice(0,10))||''); }
+function _monthDone(pk){ const c=_bonusCurMonKey(); return !c || periodSortKey(pk) < c; }   // completed months only (exclude the in-progress month)
+function bonusPeriodsSel(){ const y=bonusSelYear(); return S_bonusPeriods.filter(p=>periodYear(p.periodKey)===y && _monthDone(p.periodKey)); }
 function setBonusSelYear(y){ S_bonusSelYear=parseInt(y,10); const ps=bonusPeriodsSel(); if(ps.length && !ps.some(p=>p.periodKey===S_bonusPeriod)) S_bonusPeriod=ps[ps.length-1].periodKey; }
 function bonusYearDropdown(reRender){
   const years=bonusYearsAvail(); if(years.length<=1) return '';
@@ -10552,7 +10555,7 @@ function availableMgrYears(){ const ys=[...new Set(S_salonSummaryPeriods.map(p=>
 let S_mgrSelYear = null;  // null → current fiscal year, for manager/AM bonus selectors
 function curMgrYear(){ return S_salonSummaryPeriods.length ? Math.max(...S_salonSummaryPeriods.map(p=>periodYear(p.periodLabel||p.periodKey))) : new Date().getFullYear(); }
 function ssSelYear(){ return S_mgrSelYear!=null ? S_mgrSelYear : curMgrYear(); }
-function ssPeriodsSel(){ const y=ssSelYear(); return S_salonSummaryPeriods.filter(p=>periodYear(p.periodLabel||p.periodKey)===y); }
+function ssPeriodsSel(){ const y=ssSelYear(); return S_salonSummaryPeriods.filter(p=>periodYear(p.periodLabel||p.periodKey)===y && _monthDone(p.periodKey)); }
 function setSsYear(y, which){
   S_mgrSelYear=parseInt(y,10);
   const ps=ssPeriodsSel(), last=ps.length?ps[ps.length-1].periodKey:null;
@@ -10578,7 +10581,7 @@ function bonusRangeFilter(items, keyFn, range){
   return items; // 'all'
 }
 function bonusPeriodsInRange(){ return bonusRangeFilter(S_bonusPeriods, p=>p.periodKey); }
-function ssPeriodsInRange(){ return bonusRangeFilter(S_salonSummaryPeriods, p=>p.periodLabel||p.periodKey); }
+function ssPeriodsInRange(){ return bonusRangeFilter(S_salonSummaryPeriods.filter(p=>_monthDone(p.periodKey)), p=>p.periodLabel||p.periodKey); }
 function bonusRangeBar(reRender){
   const opts=[['ytd','YTD'],['prior','Prior Year'],['r12','Rolling 12'],['all','All']];
   return `<div style="display:flex;gap:6px;align-items:center;margin:0 0 10px 2px;flex-wrap:wrap;">
