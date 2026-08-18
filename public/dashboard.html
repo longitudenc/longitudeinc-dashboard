@@ -13143,25 +13143,68 @@ function printReview(globalId){
   setTimeout(()=>w.print(), 300);
 }
 
-// Clean single-page print of a Salon / Manager review (the data-rich card), in a
-// pop-up window so no app chrome (sidebar/nav) ends up on the page.
+// Build a compact ONE-PAGE month-by-month manager review: metrics down the side,
+// each completed month across the top, every cell colored by that month's score,
+// plus the 12-mo average and points. Landscape so it fits on a single sheet.
+function buildSalonReviewPrint(salonNum){
+  const d = computeSalonReview(salonNum, _reviewYear);
+  if(!d || !d.hasData) return '<div style="padding:20px;">No '+_reviewYear+' data for '+salonDisplay(salonNum)+'.</div>';
+  const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const allRows=[...d.salonRows, ...d.mgrRows];
+  const months=[]; for(let m=1;m<=12;m++){ if(allRows.some(r=>r.monthly && r.monthly[m-1]!=null && !isNaN(r.monthly[m-1]))) months.push(m); }
+  const nCols = months.length+3;
+  const cell=(r,m)=>{ const val=r.monthly?r.monthly[m-1]:null; const has=(val!==null&&val!==undefined&&!isNaN(val)); const ss=has?r.scoreFn(val):null;
+    return `<td style="text-align:center;${has?('background:'+srColor(ss)+';color:#fff;font-weight:600;'):'color:#ccc;'}">${has?r.fmt(val):'\u2014'}</td>`; };
+  const rowHtml=(r)=>{ const hasV=!(r.v===null||r.v===undefined||isNaN(r.v));
+    return `<tr><td class="mtc"><div class="ml">${r.lbl}</div><div class="mb">${r.band||''}</div></td>`
+      + months.map(m=>cell(r,m)).join('')
+      + `<td style="text-align:center;font-weight:700;background:#f3f5f4;">${hasV?r.fmt(r.v):'\u2014'}</td>`
+      + `<td style="text-align:center;font-weight:800;${r.s==null?'':'background:'+srColor(r.s)+';color:#fff;'}">${r.s==null?'\u2014':r.s}</td></tr>`; };
+  const section=(title,pts,max)=>`<tr class="sec"><td colspan="${nCols}">${title} <span style="float:right;">${pts} / ${max} pts</span></td></tr>`;
+  const raiseTxt = d.eligible ? '$'+d.raise.toFixed(2) : '\u2014';
+  const heldTxt = 'in seat all '+_reviewYear+' '+(d.heldAllYear?'\u2713':'\u2717');
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;margin:0 0 8px;">
+      <div>
+        <div style="font-size:16px;font-weight:800;color:#03654e;">${salonDisplay(salonNum)} \u2014 Manager Review \u00b7 ${_reviewYear}</div>
+        <div style="font-size:11px;color:#555;">Manager: <b>${d.managerName?fmtName(d.managerName):'\u2014'}</b> \u00b7 ${heldTxt}${d.discPts>0?' \u00b7 '+d.discPts+' disc pt(s)':''}</div>
+      </div>
+      <div style="text-align:right;font-size:11px;color:#555;">
+        Total <b style="font-size:17px;color:#1a1a1a;">${d.totalPts}</b> <span style="color:#999;">(Salon ${d.salonPts} + Mgr ${d.mgrPts})</span>
+        &nbsp;\u00b7&nbsp; Raise <b style="font-size:17px;color:#1f8a4c;">${raiseTxt}</b>
+      </div>
+    </div>
+    <table class="srp">
+      <thead><tr><th style="text-align:left;">Metric</th>${months.map(m=>`<th>${MON[m-1]}</th>`).join('')}<th>Avg</th><th>Pts</th></tr></thead>
+      <tbody>
+        ${section('Salon Key Results', d.salonPts, 41)}
+        ${d.salonRows.map(rowHtml).join('')}
+        ${section('Manager Key Results', d.mgrPts, 20)}
+        ${d.mgrRows.map(rowHtml).join('')}
+      </tbody>
+    </table>
+    <div style="margin-top:6px;font-size:9px;color:#888;">Each cell is that month's value, colored by its score (green=Excellence \u00b7 light-green=Growth \u00b7 amber=Minimum \u00b7 red=Warning). Avg = 12-month average that drives the points. Completed months only.</div>`;
+}
+
+// Clean single-page print of a Salon / Manager review, in a pop-up window (no app chrome).
 function printSalonReview(salonNum){
-  const el = document.getElementById('salon-review-printable');
-  if(!el){ alert('Open a manager review first, then click Print Review.'); return; }
-  const w = window.open('about:blank','_blank','width=1100,height=850');
+  const html = buildSalonReviewPrint(salonNum);
+  const w = window.open('about:blank','_blank','width=1200,height=850');
   if(!w){ alert('Please allow pop-ups for this site, then click Print Review again.'); return; }
   w.document.write(`<!DOCTYPE html><html><head><title>Manager Review \u2014 ${salonDisplay(salonNum)} ${_reviewYear}</title>
     <style>
       *{-webkit-print-color-adjust:exact;print-color-adjust:exact;box-sizing:border-box;}
-      body{font-family:Arial,sans-serif;margin:20px;font-size:11px;color:#1a1a1a;}
-      table{border-collapse:collapse;width:100%;}
-      th,td{font-size:10px;}
-      #salon-review-printable{page-break-inside:avoid;}
-      @page{size:letter portrait;margin:0.45in;}
-      @media print{ body{margin:0;} button{display:none !important;} }
-    </style></head><body>`);
-  w.document.write(el.outerHTML);
-  w.document.write('</body></html>');
+      body{font-family:Arial,sans-serif;margin:16px;font-size:10px;color:#1a1a1a;}
+      table.srp{border-collapse:collapse;width:100%;table-layout:fixed;}
+      table.srp th,table.srp td{border:1px solid #cfcfcf;padding:2px 3px;font-size:8.5px;}
+      table.srp th{background:#03654e;color:#fff;font-size:9px;}
+      table.srp td.mtc{text-align:left;}
+      table.srp td.mtc .ml{font-weight:600;font-size:9px;}
+      table.srp td.mtc .mb{font-size:7px;color:#999;}
+      table.srp tr.sec td{background:#eef2f0;font-weight:700;color:#03654e;font-size:9.5px;}
+      @page{size:letter landscape;margin:0.35in;}
+      @media print{ body{margin:0;} }
+    </style></head><body>${html}</body></html>`);
   w.document.close();
   setTimeout(()=>w.print(), 300);
 }
