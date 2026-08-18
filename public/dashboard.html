@@ -6369,6 +6369,11 @@ function renderSalonReviewBody(salonNum){
     : `<div style="text-align:center;"><div style="font-size:12px;text-transform:uppercase;color:var(--text-muted);">Raise</div><div style="font-weight:800;font-size:26px;color:#999;line-height:1.1;">—</div></div>`;
 
   return `
+    <div style="display:flex;justify-content:flex-end;margin:0 0 6px;">
+      <button class="btn btn-secondary btn-sm" onclick="printSalonReview('${salonNum}')" style="font-size:11px;padding:5px 12px;">\u{1F5A8} Print Review</button>
+    </div>
+    <div id="salon-review-printable">
+    <div style="font-size:16px;font-weight:800;color:#03654e;margin:0 0 2px;">${salonDisplay(salonNum)} \u2014 Manager Review \u00b7 ${_reviewYear}</div>
     <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin:6px 0 12px;">
       <div><div style="font-size:10px;text-transform:uppercase;color:var(--text-muted);">Manager</div><div style="font-weight:700;font-size:15px;">${d.managerName?fmtName(d.managerName):'—'}</div></div>
     </div>
@@ -6395,6 +6400,7 @@ function renderSalonReviewBody(salonNum){
         </div>
         ${srRaiseScaleHtml(d.totalPts)}
       </div>
+    </div>
     </div>`;
 }
 
@@ -13128,6 +13134,29 @@ function printReview(globalId){
       #review-printable{page-break-inside:avoid;}
       @page{size:letter portrait;margin:0.45in;}
       @media print{body{margin:0;font-size:10px;} button{display:none;} table{font-size:9.5px;} th,td{padding:3px 5px;}}
+    </style></head><body>`);
+  w.document.write(el.outerHTML);
+  w.document.write('</body></html>');
+  w.document.close();
+  setTimeout(()=>w.print(), 300);
+}
+
+// Clean single-page print of a Salon / Manager review (the data-rich card), in a
+// pop-up window so no app chrome (sidebar/nav) ends up on the page.
+function printSalonReview(salonNum){
+  const el = document.getElementById('salon-review-printable');
+  if(!el){ alert('Open a manager review first, then click Print Review.'); return; }
+  const w = window.open('about:blank','_blank','width=1100,height=850');
+  if(!w){ alert('Please allow pop-ups for this site, then click Print Review again.'); return; }
+  w.document.write(`<!DOCTYPE html><html><head><title>Manager Review \u2014 ${salonDisplay(salonNum)} ${_reviewYear}</title>
+    <style>
+      *{-webkit-print-color-adjust:exact;print-color-adjust:exact;box-sizing:border-box;}
+      body{font-family:Arial,sans-serif;margin:20px;font-size:11px;color:#1a1a1a;}
+      table{border-collapse:collapse;width:100%;}
+      th,td{font-size:10px;}
+      #salon-review-printable{page-break-inside:avoid;}
+      @page{size:letter portrait;margin:0.45in;}
+      @media print{ body{margin:0;} button{display:none !important;} }
     </style></head><body>`);
   w.document.write(el.outerHTML);
   w.document.write('</body></html>');
