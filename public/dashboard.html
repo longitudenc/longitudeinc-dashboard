@@ -6140,7 +6140,8 @@ function srCCG(v){ return v>=4.95?4:v>=2.95?3:v>=0.95?2:1; }
 const SR_RAISE=[[63,.70],[61,.65],[59,.60],[56,.55],[53,.50],[51,.45],[49,.40],[46.5,.35],[45,.30],[44,.25],[41.5,.20]];
 function srRaise(pts){ for(const t of SR_RAISE){ if(pts>=t[0]) return t[1]; } return 0; }
 function srColor(s){ return s===4?'#1f8a4c':s===3?'#7cb342':s===2?'#e8a33d':s===1?'#d64545':'#bbb'; }
-function srPastel(s){ return s===4?'#C6EFCE':s===3?'#D8EAB2':s===2?'#FCE4D6':s===1?'#FFC7CE':'#f4f4f4'; }
+function srPastel(s){ return s===4?'#e6f4e0':s===3?'#fdf6e0':s===2?'#fdeede':s===1?'#fbe8e8':'#f4f4f4'; }
+function srPastelTx(s){ return s===4?'#1a5c0a':s===3?'#7a5a00':s===2?'#8a3a10':s===1?'#8a1a1a':'#999'; }
 
 function computeSalonReview(salonNum, year){
   salonNum=String(salonNum).trim();
@@ -13156,12 +13157,12 @@ function buildSalonReviewPrint(salonNum){
   const months=[]; for(let m=1;m<=12;m++){ if(allRows.some(r=>r.monthly && r.monthly[m-1]!=null && !isNaN(r.monthly[m-1]))) months.push(m); }
   const nCols = months.length+3;
   const cell=(r,m)=>{ const val=r.monthly?r.monthly[m-1]:null; const has=(val!==null&&val!==undefined&&!isNaN(val)); const ss=has?r.scoreFn(val):null;
-    return `<td style="text-align:center;${has?('background:'+srPastel(ss)+';color:#1a1a1a;font-weight:600;'):'color:#ccc;'}">${has?r.fmt(val):'\u2014'}</td>`; };
+    return `<td style="text-align:center;${has?('background:'+srPastel(ss)+';color:'+srPastelTx(ss)+';font-weight:700;'):'color:#ccc;'}">${has?r.fmt(val):'\u2014'}</td>`; };
   const rowHtml=(r)=>{ const hasV=!(r.v===null||r.v===undefined||isNaN(r.v));
     return `<tr><td class="mtc"><div class="ml">${r.lbl}</div><div class="mb">${r.band||''}</div></td>`
       + months.map(m=>cell(r,m)).join('')
       + `<td style="text-align:center;font-weight:700;background:#f3f5f4;">${hasV?r.fmt(r.v):'\u2014'}</td>`
-      + `<td style="text-align:center;font-weight:800;${r.s==null?'':'background:'+srPastel(r.s)+';color:#1a1a1a;'}">${r.s==null?'\u2014':r.s}</td></tr>`; };
+      + `<td style="text-align:center;font-weight:800;${r.s==null?'':'background:'+srPastel(r.s)+';color:'+srPastelTx(r.s)+';'}">${r.s==null?'\u2014':r.s}</td></tr>`; };
   const section=(title,pts,max)=>`<tr class="sec"><td colspan="${nCols}">${title} <span style="float:right;">${pts} / ${max} pts</span></td></tr>`;
   const raiseTxt = d.eligible ? '$'+d.raise.toFixed(2) : '\u2014';
   const heldTxt = 'in seat all '+_reviewYear+' '+(d.heldAllYear?'\u2713':'\u2717');
