@@ -2972,7 +2972,7 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
               <div class="score-tier-row" id="tier-row-min"><span class="score-tier-name" style="color:var(--min-text);">Performance Minimum</span><span class="score-tier-range">12–17 pts</span></div>
               <div class="score-tier-row" id="tier-row-wrn"><span class="score-tier-name" style="color:var(--wrn-text);">Performance Warning</span><span class="score-tier-range">0–11 pts</span></div>
             </div>
-            <div style="font-size:11px;color:var(--text-muted);padding:2px 4px;line-height:1.5;">Salon metrics averaged across all assigned salons. Individual metrics averaged across all stylists.<br><strong style="color:var(--text);">2 pts</strong> = Excellence &nbsp;·&nbsp; <strong style="color:var(--text);">1 pt</strong> = Growth &nbsp;·&nbsp; <strong style="color:var(--text);">0 pts</strong> = Below growth</div>
+            <div style="font-size:11px;color:var(--text-muted);padding:2px 4px;line-height:1.5;">Salon metrics averaged across all assigned salons. Individual metrics are the AM&rsquo;s own personal numbers.<br><strong style="color:var(--text);">2 pts</strong> = Excellence &nbsp;·&nbsp; <strong style="color:var(--text);">1 pt</strong> = Growth &nbsp;·&nbsp; <strong style="color:var(--text);">0 pts</strong> = Below growth</div>
           </div>
           <div class="table-card" style="margin:0;">
             <div id="score-breakdown"><div class="no-data"><div class="no-data-icon">📊</div>Loading scorecard...</div></div>
@@ -6609,7 +6609,7 @@ function calcYTDEmpAvgs(amId){
 // ── SCORECARD (YTD) ───────────────────────────────────────────
 function renderScorecard(){
   if(!S.currentAM) return;
-  const wkCount = S.weekHistory.length;
+  const wkCount = ytdWeeks().length;   // YTD (fiscal-year-to-date) weeks, not all history
   const sA = calcYTDAvgs(S.currentAM);
   const eA = calcYTDEmpAvgs(S.currentAM);
   const score=calcScore(sA,eA), tier=scoreTierLabel(score.total);
