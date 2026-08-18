@@ -3288,6 +3288,7 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
               </div>
               <select id="bulk-year-select" style="font-size:13px;padding:6px 10px;border-radius:6px;border:1px solid var(--border);">
               </select>
+              <label style="font-size:12px;color:var(--text);display:inline-flex;align-items:center;gap:5px;cursor:pointer;align-self:center;" title="Include a manager review for each salon whose manager held it all year (they don't get a stylist review)"><input type="checkbox" id="bulk-include-mgrs" checked style="cursor:pointer;">Include manager reviews</label>
               <button class="btn btn-primary" onclick="bulkPrintReviews()" id="bulk-print-btn">🖨 Generate Reviews</button>
             </div>
             <div id="bulk-print-status" style="margin-top:6px;font-size:12px;color:var(--text-muted);"></div>
@@ -6369,7 +6370,7 @@ function renderSalonReviewBody(salonNum){
     : `<div style="text-align:center;"><div style="font-size:12px;text-transform:uppercase;color:var(--text-muted);">Raise</div><div style="font-weight:800;font-size:26px;color:#999;line-height:1.1;">—</div></div>`;
 
   return `
-    <div style="display:flex;justify-content:flex-end;margin:0 0 6px;">
+    <div class="no-print" style="display:flex;justify-content:flex-end;margin:0 0 6px;">
       <button class="btn btn-secondary btn-sm" onclick="printSalonReview('${salonNum}')" style="font-size:11px;padding:5px 12px;">\u{1F5A8} Print Review</button>
     </div>
     <div id="salon-review-printable">
@@ -13185,13 +13186,18 @@ function bulkSalonsAll(on){ document.querySelectorAll('#bulk-salon-checks .bulk-
 // each one's review via computeReviewData — the SAME consolidated-BonusData logic
 // (***/empty->2 rule) as the on-screen Annual Review, so print, bulk and the in-app
 // reader all match exactly.
-function gatherBulkReviews(salonSel, year){
+function gatherBulkReviews(salonSel, year, includeManagers){
   const allSalons = [...new Set(Object.values(S.homeDataMap||{}).map(r=>String((r&&r.homeSalon)||'').trim()).filter(Boolean))].sort();
   const salons = (!salonSel || salonSel==='ALL') ? allSalons
                : Array.isArray(salonSel) ? salonSel.map(String)
                : [String(salonSel)];
+  // A manager who held their salon the full year gets a MANAGER review, not a
+  // stylist one — exclude those people from the stylist batch (and note the salon
+  // so we can add the manager review instead when requested).
+  const mgrGids = new Set(), mgrSalons = [];
+  salons.forEach(sn=>{ try{ const sr=computeSalonReview(sn, year); if(sr && sr.heldAllYear && sr.managerGid){ mgrGids.add(String(sr.managerGid).trim()); mgrSalons.push(sn); } }catch(e){} });
   const seen=new Set(), people=[];
-  salons.forEach(sn=>{ (stylistsForSalon(sn)||[]).forEach(pp=>{ const g=String(pp.globalId||'').trim(); if(g && !seen.has(g)){ seen.add(g); people.push({globalId:g, name:pp.name||'', preferred:pp.preferred||''}); } }); });
+  salons.forEach(sn=>{ (stylistsForSalon(sn)||[]).forEach(pp=>{ const g=String(pp.globalId||'').trim(); if(g && !seen.has(g) && !mgrGids.has(g)){ seen.add(g); people.push({globalId:g, name:pp.name||'', preferred:pp.preferred||''}); } }); });
   const reviews=[];
   people.forEach(pp=>{
     const rv = computeReviewData(pp.globalId, year);
@@ -13203,7 +13209,7 @@ function gatherBulkReviews(salonSel, year){
   const curPeriod = periodKeyFromWeekEnd(S.currentWeek);
   const discPts={};
   reviews.forEach(r=>{ const pts = activeDiscPoints(r.globalId, curPeriod)||0; if(pts) discPts[(r.name||'').toLowerCase()] = pts; });
-  return { success:true, year, reviews, discPts };
+  return { success:true, year, reviews, discPts, mgrSalons: (includeManagers? mgrSalons : []) };
 }
 
 function bulkPrintReviews(){
@@ -13214,15 +13220,17 @@ function bulkPrintReviews(){
   const status   = document.getElementById('bulk-print-status');
   if(!checked.length){ if(status) status.textContent='Select at least one salon.'; return; }
   const salonSel = (checked.length===cbs.length) ? 'ALL' : checked;   // all checked → fast ALL path
+  const includeManagers = !!(document.getElementById('bulk-include-mgrs') && document.getElementById('bulk-include-mgrs').checked);
   if(btn){ btn.disabled = true; btn.textContent = '⏳ Generating...'; }
   if(status) status.textContent = 'Building reviews from consolidated data…';
   setTimeout(()=>{
     const _reset=()=>{ if(btn){ btn.disabled=false; btn.textContent='🖨 Generate Reviews'; } };
     try {
-      const data = gatherBulkReviews(salonSel, year);
+      const data = gatherBulkReviews(salonSel, year, includeManagers);
       _reset();
-      if(!data.reviews.length){ if(status) status.textContent='No reviewable stylists found for that selection.'; return; }
-      if(status) status.textContent=`Opening ${data.reviews.length} review${data.reviews.length!==1?'s':''}…`;
+      const _mgrCt = (data.mgrSalons||[]).length;
+      if(!data.reviews.length && !_mgrCt){ if(status) status.textContent='No reviewable people found for that selection.'; return; }
+      if(status) status.textContent=`Opening ${data.reviews.length + _mgrCt} review${(data.reviews.length+_mgrCt)!==1?'s':''}…`;
       openBulkPrintWindow(data);
     } catch(err){
       _reset();
@@ -13389,6 +13397,16 @@ function buildAllReviewCardsHTML(data){
 
 function openBulkPrintWindow(data){
   const allHTML = buildAllReviewCardsHTML(data);
+  // Manager reviews (opt-in): render each qualifying salon's manager review using
+  // the same on-tab body, year-scoped via _reviewYear.
+  let mgrHTML = '';
+  const _mgrSalons = data.mgrSalons || [];
+  if(_mgrSalons.length){
+    const _savedYr = (typeof _reviewYear!=='undefined') ? _reviewYear : null;
+    try{ _reviewYear = data.year;
+      mgrHTML = _mgrSalons.map(sn=>`<div class="review-page"><div style="font-size:15px;font-weight:800;color:var(--primary-dark);border-bottom:2px solid var(--primary);padding-bottom:5px;margin-bottom:8px;">${salonDisplay(sn)} \u2014 Manager Review \u00b7 ${data.year}</div>${renderSalonReviewBody(sn)}</div>`).join('');
+    } finally { if(_savedYr!==null) _reviewYear = _savedYr; }
+  }
   const w = window.open('about:blank', '_blank', 'width=1100,height=800');
   if(!w){ alert('Please allow pop-ups for this site, then generate the reviews again.'); return; }
 
@@ -13415,11 +13433,12 @@ function openBulkPrintWindow(data){
     <div class="no-print" style="background:var(--primary-dark);color:white;padding:10px 20px;display:flex;align-items:center;justify-content:space-between;">
       <div>
         <strong>Annual Reviews — ${data.year}</strong>
-        <span style="margin-left:16px;opacity:.7;">${data.reviews.length} stylists</span>
+        <span style="margin-left:16px;opacity:.7;">${data.reviews.length} stylist${data.reviews.length!==1?'s':''}${_mgrSalons.length?' + '+_mgrSalons.length+' manager':''}</span>
       </div>
       <button onclick="window.print()" style="background:white;color:#03654e;border:none;padding:8px 20px;font-weight:700;border-radius:4px;cursor:pointer;font-size:13px;">🖨 Print All</button>
     </div>
     ${allHTML}
+    ${mgrHTML}
   </body></html>`);
   w.document.close();
 }
