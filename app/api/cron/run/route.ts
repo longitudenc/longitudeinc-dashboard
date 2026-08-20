@@ -12,6 +12,7 @@ import { todayET, yesterdayET, dayOfWeek, isLastFridayOfMonth } from '@/lib/fisc
 import { runBonusPeriodForMonth } from '@/lib/bonus-period'
 import { readSheet, rowsToObjects } from '@/lib/sheets'
 import { sendAlert, heartbeat } from '@/lib/alert'
+import { sendPayrollPace } from '@/lib/payroll-pace'
 import {
   runDailyScrape,
   runWeeklyScrape,
@@ -156,6 +157,17 @@ export async function GET(request: Request) {
   results.push({ name: 'employee-daily', result: await runEmployeeDailyScrape() })
   results.push({ name: 'shifts',   result: await runShiftsScrape() })
   results.push({ name: 'chkinout', result: await runChkInOutScrape() })
+
+  // Wednesday: email the week-to-date payroll-pace report (Sat -> yesterday/Tue).
+  // Best-effort — a report failure must never fail the cron.
+  if (dayOfWeek(today) === 3) {
+    try {
+      const pace = await sendPayrollPace()
+      console.log(`[cron/run] payroll-pace: ${pace.sent ? 'sent ' + pace.count + ' salons' : 'skipped'}`)
+    } catch (e) {
+      console.error('[cron/run] payroll-pace failed:', e)
+    }
+  }
 
   const allOk = results.every(r => r.result.ok)
   const durationMs = Date.now() - startedAt
