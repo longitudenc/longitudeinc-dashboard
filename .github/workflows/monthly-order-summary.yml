@@ -1,0 +1,54 @@
+name: Monthly Order Summary
+
+# Orders auto-generate on the 15th; this runs on the 16th and pulls the
+# current month's batch, then emails it.
+#
+# Cron is UTC. 13:00 UTC on the 16th = 09:00 America/New_York (EDT) /
+# 08:00 (EST). GitHub cron does not honor DST or timezones.
+on:
+  schedule:
+    - cron: "0 13 16 * *"
+  workflow_dispatch: {}   # allow manual runs from the Actions tab
+
+jobs:
+  export-and-email:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: salonx-report-scraper   # code lives in this subfolder of the repo
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run scraper + email
+        env:
+          # --- Salon X login (Great Clips ADFS SSO via "Login with Insite") ---
+          # Reuses your existing corporate secrets. SALONX_AUTH_MODE=adfs is the
+          # script default, so these two are all that's needed.
+          SALONX_AUTH_MODE: "adfs"
+          SALONX_USERNAME: ${{ secrets.MYREPORTS_USERNAME }}
+          SALONX_PASSWORD: ${{ secrets.MYREPORTS_PASSWORD }}
+          # Optional cookie fallback (takes priority if set). Leave unset for SSO.
+          SALONX_COOKIE: ${{ secrets.SALONX_COOKIE }}
+
+          # --- Report config (optional; sensible defaults in the script) ---
+          SALONX_EXPORT_TYPE: "Export Order Summary"
+          SALONX_DATE_MODE: "current_month"
+          SALONX_STATUS: ""            # "" = all order statuses
+          SALONX_SORT: "OrderDate_Desc"
+
+          # --- Email delivery via Resend (same service the dashboard uses) ---
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          EMAIL_FROM: "Longitude Reports <noreply@mail.longitudenc.com>"
+          EMAIL_TO: "li-office@longitudeinc.net"
+          # EMAIL_SUBJECT / EMAIL_BODY use defaults from the script if unset.
+        run: python scrape_report.py
