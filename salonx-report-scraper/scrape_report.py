@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import base64
 import calendar
+import html
 import json
 import os
 import re
@@ -255,6 +256,10 @@ def sso_login(session: requests.Session, username: str, password: str) -> None:
     if not authorize:
         sys.exit("ERROR: couldn't find the 'Login with Insite' SSO link on the login page. "
                  "The login layout may have changed; use SALONX_COOKIE mode instead.")
+    # The page HTML-encodes the ampersands in this URL (&#038;). Decode them or the
+    # OAuth query params (client_id, redirect_uri, state...) arrive mangled and ADFS
+    # rejects the request ("client_id missing").
+    authorize = html.unescape(authorize)
     authorize = urljoin(r.url, authorize)
 
     # 2. Load the ADFS sign-in form.
@@ -365,7 +370,7 @@ def browser_login(session: requests.Session, username: str, password: str) -> No
             # fall back to navigating the authorize link directly
             link = page.query_selector("a[href*='adfs/oauth2/authorize']")
             if link:
-                page.goto(link.get_attribute("href"), wait_until="domcontentloaded")
+                page.goto(html.unescape(link.get_attribute("href")), wait_until="domcontentloaded")
             else:
                 browser.close()
                 sys.exit("ERROR: couldn't find the INsite/SSO login button on the page.")
