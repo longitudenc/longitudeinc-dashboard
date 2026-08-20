@@ -117,32 +117,42 @@ def make_session() -> requests.Session:
 
 
 def wp_login(session: requests.Session, username: str, password: str) -> None:
-    """Authenticate against wp-login.php. Raises on failure."""
-    # WordPress sets a test cookie on first GET; posting it back proves cookies work.
-    session.get(LOGIN_URL, timeout=REQUEST_TIMEOUT)
+    """Authenticate against the site's own wp-login.php form (the plain
+    username/password box beneath the blue INsite button). Parses the real
+    #loginform so any hidden fields (nonces, security-plugin tokens) ride along.
+    Raises on failure. One attempt only."""
+    r = session.get(LOGIN_URL, timeout=REQUEST_TIMEOUT)
+    r.raise_for_status()
     session.cookies.set("wordpress_test_cookie", "WP Cookie check", domain=_cookie_domain())
 
+    # Find the WordPress login form (has both log + pwd fields).
+    form = None
+    for f in _parse_forms(r.text):
+        if _key_ci(f["fields"], "log") and _key_ci(f["fields"], "pwd"):
+            form = f
+            break
+    data = dict(form["fields"]) if form else {}
+    data[_key_ci(data, "log") or "log"] = username
+    data[_key_ci(data, "pwd") or "pwd"] = password
+    data[_key_ci(data, "wp-submit") or "wp-submit"] = "Log In"
+    data["redirect_to"] = ORDERS_URL
+    data["testcookie"] = "1"
+    action = urljoin(r.url, form["action"]) if (form and form.get("action")) else LOGIN_URL
+
     resp = session.post(
-        LOGIN_URL,
-        data={
-            "log": username,
-            "pwd": password,
-            "wp-submit": "Log In",
-            "redirect_to": ORDERS_URL,
-            "testcookie": "1",
-        },
-        headers={"Referer": LOGIN_URL},
-        timeout=REQUEST_TIMEOUT,
-        allow_redirects=True,
+        action, data=data, headers={"Referer": r.url},
+        timeout=REQUEST_TIMEOUT, allow_redirects=True,
     )
     resp.raise_for_status()
 
     # A successful login sets a wordpress_logged_in_* cookie.
-    logged_in = any(c.name.startswith("wordpress_logged_in") for c in session.cookies)
-    if not logged_in:
-        # Surface the WP error text if present, without dumping the whole page.
+    if not any(c.name.startswith("wordpress_logged_in") for c in session.cookies):
         msg = _extract_login_error(resp.text)
-        sys.exit(f"ERROR: WordPress login failed. {msg}")
+        sys.exit(
+            "ERROR: WordPress login failed. " + (msg + " " if msg else "") +
+            "If this account only accepts the blue INsite (SSO) button, the plain "
+            "form won't work and we'll need a browser-based login or SALONX_COOKIE."
+        )
 
 
 class _FormParser(HTMLParser):
@@ -256,8 +266,26 @@ def sso_login(session: requests.Session, username: str, password: str) -> None:
             login_form = f
             break
     if not login_form:
-        sys.exit("ERROR: ADFS sign-in form not found. If SSO now requires MFA or a "
-                 "different flow, switch to SALONX_COOKIE mode.")
+        # Diagnostic dump: shows where the SSO flow actually landed so we can tell
+        # a JS-rendered / MFA / IP-block page apart from a simple form change.
+        forms = _parse_forms(r.text)
+        print("---- SSO DIAGNOSTIC ----")
+        print("final URL :", r.url)
+        print("status    :", r.status_code)
+        _t = re.search(r"<title[^>]*>(.*?)</title>", r.text, re.I | re.S)
+        print("page title:", (_t.group(1).strip()[:160] if _t else "(none)"))
+        print("forms found:", len(forms))
+        for i, f in enumerate(forms):
+            print(f"  form[{i}] action={f.get('action')!r} fields={list(f['fields'].keys())[:25]}")
+        _txt = re.sub(r"<script.*?</script>", " ", r.text, flags=re.S | re.I)
+        _txt = re.sub(r"<style.*?</style>", " ", _txt, flags=re.S | re.I)
+        _txt = re.sub(r"<[^>]+>", " ", _txt)
+        _txt = re.sub(r"\s+", " ", _txt).strip()
+        print("text preview:", _txt[:600])
+        print("html length :", len(r.text))
+        print("------------------------")
+        sys.exit("ERROR: ADFS sign-in form not found. See diagnostic above. If SSO now "
+                 "requires MFA or a different flow, switch to SALONX_COOKIE mode.")
 
     # 3. Fill credentials (one attempt).
     data = dict(login_form["fields"])
@@ -282,6 +310,111 @@ def sso_login(session: requests.Session, username: str, password: str) -> None:
         sys.exit("ERROR: SSO login failed. " + detail +
                  "NOT retrying, to avoid locking the corporate AD account. "
                  "Verify MYREPORTS_USERNAME / MYREPORTS_PASSWORD, or use SALONX_COOKIE.")
+
+
+def browser_login(session: requests.Session, username: str, password: str) -> None:
+    """Log in with a real headless browser (Playwright): open the login page,
+    click the blue INsite (SSO) button, sign in on the Great Clips ADFS page,
+    then hand the resulting WordPress session cookies to the requests session.
+
+    SAFETY: submits the password EXACTLY ONCE and never retries, so a wrong or
+    stale password can't trip corporate AD extranet lockout. On any failure it
+    raises without re-attempting.
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        sys.exit("ERROR: browser mode needs Playwright. Add it to requirements.txt "
+                 "and run 'python -m playwright install --with-deps chromium'.")
+
+    def _fill_first(page, selectors, value):
+        for sel in selectors:
+            try:
+                el = page.query_selector(sel)
+                if el and el.is_visible():
+                    el.fill(value)
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def _click_first(page, selectors):
+        for sel in selectors:
+            try:
+                el = page.query_selector(sel)
+                if el and el.is_visible():
+                    el.click()
+                    return True
+            except Exception:
+                continue
+        return False
+
+    cookies = []
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        ctx = browser.new_context(user_agent=USER_AGENT)
+        page = ctx.new_page()
+        page.set_default_timeout(45000)
+
+        print("  browser: loading login page")
+        page.goto(LOGIN_URL, wait_until="domcontentloaded")
+
+        print("  browser: clicking the INsite (SSO) button")
+        if not _click_first(page, ["a[href*='adfs/oauth2/authorize']",
+                                   "a.button-primary", "a.button-large"]):
+            # fall back to navigating the authorize link directly
+            link = page.query_selector("a[href*='adfs/oauth2/authorize']")
+            if link:
+                page.goto(link.get_attribute("href"), wait_until="domcontentloaded")
+            else:
+                browser.close()
+                sys.exit("ERROR: couldn't find the INsite/SSO login button on the page.")
+
+        # Wait for the ADFS sign-in fields to render.
+        print("  browser: waiting for the sign-in form")
+        page.wait_for_selector(
+            "#userNameInput, input[name='UserName'], input[type='email'], input[name='Password'], #passwordInput",
+            timeout=45000,
+        )
+
+        # Classic Great Clips ADFS shows username + password on ONE page.
+        got_u = _fill_first(page, ["#userNameInput", "input[name='UserName']",
+                                   "input[type='email']", "input[name='username']"], username)
+        got_p = _fill_first(page, ["#passwordInput", "input[name='Password']",
+                                   "input[type='password']"], password)
+        if not (got_u and got_p):
+            browser.close()
+            sys.exit("ERROR: ADFS sign-in fields not found (layout may have changed, "
+                     "or it's a multi-step / MFA flow). Not submitting credentials.")
+
+        # ONE submit. No retry.
+        print("  browser: submitting credentials (single attempt)")
+        _click_first(page, ["#submitButton", "span#submitButton", "input[type='submit']",
+                            "button[type='submit']", "#submit"])
+
+        # Wait to land back on the store (OAuth code -> WP session).
+        try:
+            page.wait_for_url("**salonxstore.greatclips.com/**", timeout=60000)
+        except Exception:
+            pass
+        # Confirm by loading the Orders page inside the browser.
+        page.goto(ORDERS_URL, wait_until="domcontentloaded")
+        cookies = ctx.cookies()
+        browser.close()
+
+    # Hand the browser's cookies to the requests session.
+    for c in cookies:
+        try:
+            session.cookies.set(c["name"], c["value"],
+                                domain=(c.get("domain") or "").lstrip("."),
+                                path=c.get("path", "/"))
+        except Exception:
+            continue
+    if not any(cn.name.startswith("wordpress_logged_in") for cn in session.cookies):
+        sys.exit("ERROR: browser SSO login did not produce a WordPress session "
+                 "(no wordpress_logged_in cookie). Not retrying. Verify the "
+                 "MYREPORTS_USERNAME / MYREPORTS_PASSWORD secrets.")
+    print("  browser: SSO login succeeded, session cookies captured")
 
 
 def apply_cookie_header(session: requests.Session, cookie_header: str) -> None:
@@ -518,11 +651,18 @@ def main() -> int:
         print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] Using SALONX_COOKIE session (no login) ...")
         apply_cookie_header(session, cookie_header)
         verify_authenticated(session)
+    elif auth_mode == "browser":
+        username = _require("SALONX_USERNAME")
+        password = _require("SALONX_PASSWORD")
+        print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] Browser SSO login (Insite) to {BASE_URL} ...")
+        browser_login(session, username, password)
+        verify_authenticated(session)
     elif auth_mode == "wordpress":
         username = _require("SALONX_USERNAME")
         password = _require("SALONX_PASSWORD")
         print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] WordPress login to {BASE_URL} ...")
         wp_login(session, username, password)
+        verify_authenticated(session)
     else:  # adfs (default)
         username = _require("SALONX_USERNAME")
         password = _require("SALONX_PASSWORD")
