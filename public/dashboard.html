@@ -331,6 +331,85 @@
   }
   .cmp-d{font-size:9.5px;line-height:1.15;margin-top:1px;font-weight:700;opacity:.92;}
   .cmp-up{color:#1c8a4e;} .cmp-dn{color:#c0392b;} .cmp-flat{color:#bbb;font-weight:400;} .cmp-val{color:#6b7a74;font-weight:600;}
+
+  /* ── Home + Forms ─────────────────────────────────────────── */
+  /* Added with the Home / Forms tabs. Reuses the existing tokens
+     (--primary/--accent/--border) so these surfaces match the rest. */
+  .home-hero{background:linear-gradient(135deg,var(--primary) 0%,var(--primary-dark) 100%);color:#fff;border-radius:14px;padding:22px 26px;margin-bottom:1.25rem;}
+  .home-hero h2{margin:0 0 4px;font-size:22px;font-weight:700;color:#fff;}
+  .home-hero .hh-sub{font-size:13px;opacity:.85;}
+  .home-grid{display:grid;grid-template-columns:1fr 320px;gap:1.25rem;align-items:start;}
+  .home-sec{margin-bottom:1.25rem;}
+  .home-sec-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:.6rem;display:flex;align-items:center;justify-content:space-between;gap:8px;}
+
+  .ann-card{background:#fff;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:10px;padding:14px 16px;margin-bottom:10px;}
+  .ann-card.pinned{border-left-color:var(--primary);background:#f7fbf9;}
+  .ann-title{font-weight:700;font-size:15px;margin-bottom:4px;color:var(--text);}
+  .ann-body{font-size:13.5px;line-height:1.5;color:var(--text-muted);white-space:pre-wrap;}
+  .ann-meta{font-size:11px;color:var(--text-light);margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+  .pin-tag{background:var(--primary);color:#fff;font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:20px;text-transform:uppercase;letter-spacing:.05em;}
+
+  .date-row{display:flex;gap:12px;align-items:center;background:#fff;border:1px solid var(--border);border-radius:10px;padding:10px 13px;margin-bottom:8px;}
+  .date-cal{flex:0 0 46px;text-align:center;border-radius:8px;overflow:hidden;border:1px solid var(--border);}
+  .date-cal .dc-m{background:var(--primary);color:#fff;font-size:9.5px;font-weight:700;text-transform:uppercase;padding:2px 0;letter-spacing:.05em;}
+  .date-cal .dc-d{font-size:17px;font-weight:700;padding:2px 0;color:var(--text);}
+  .date-info{flex:1;min-width:0;}
+  .date-title{font-size:13.5px;font-weight:600;color:var(--text);}
+  .date-note{font-size:11.5px;color:var(--text-muted);margin-top:1px;}
+  .date-away{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap;}
+  .away-now{background:var(--wrn-bg);color:var(--wrn-text);}
+  .away-soon{background:var(--grw-bg);color:var(--grw-text);}
+  .away-far{background:#eef0ee;color:var(--text-muted);}
+
+  .links-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:9px;}
+  .link-tile{display:flex;align-items:center;gap:9px;background:#fff;border:1px solid var(--border);border-radius:10px;padding:11px 13px;text-decoration:none;color:var(--text);font-size:13px;font-weight:600;transition:all .15s;}
+  .link-tile:hover{border-color:var(--primary);box-shadow:0 2px 8px rgba(4,134,103,.12);transform:translateY(-1px);}
+  .link-tile .lt-icon{font-size:17px;line-height:1;}
+  .link-cat{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-light);margin:.75rem 0 .4rem;}
+
+  /* Forms */
+  .forms-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(255px,1fr));gap:12px;}
+  .form-tile{background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 18px;cursor:pointer;transition:all .15s;text-align:left;font:inherit;}
+  .form-tile:hover{border-color:var(--primary);box-shadow:0 3px 12px rgba(4,134,103,.12);transform:translateY(-2px);}
+  .form-tile .ft-icon{font-size:26px;line-height:1;margin-bottom:9px;}
+  .form-tile .ft-title{font-size:15px;font-weight:700;color:var(--text);margin-bottom:4px;}
+  .form-tile .ft-desc{font-size:12.5px;color:var(--text-muted);line-height:1.45;}
+
+  .form-runner{background:#fff;border:1px solid var(--border);border-radius:12px;padding:22px 26px;max-width:660px;}
+  .ff-row{margin-bottom:15px;}
+  .ff-label{display:block;font-size:12.5px;font-weight:700;color:var(--text);margin-bottom:5px;}
+  .ff-req{color:#c0392b;margin-left:3px;}
+  .ff-help{font-size:11.5px;color:var(--text-muted);margin-top:4px;}
+  .ff-input,.ff-select,.ff-textarea{width:100%;font:inherit;font-size:13.5px;padding:9px 11px;border:1px solid var(--border);border-radius:8px;background:#fff;color:var(--text);}
+  .ff-input:focus,.ff-select:focus,.ff-textarea:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(4,134,103,.12);}
+  .ff-textarea{min-height:86px;resize:vertical;}
+  .ff-radio{display:flex;flex-direction:column;gap:7px;}
+  .ff-radio label{display:flex;align-items:center;gap:8px;font-size:13.5px;cursor:pointer;font-weight:400;}
+  .ff-section{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--primary);border-bottom:1px solid var(--border);padding-bottom:6px;margin:22px 0 14px;}
+  .ff-error{background:var(--wrn-bg);border:1px solid var(--wrn-border);color:var(--wrn-text);border-radius:8px;padding:10px 13px;font-size:12.5px;margin-bottom:14px;}
+  .ff-ok{background:var(--exc-bg);border:1px solid var(--exc-border);color:var(--exc-text);border-radius:8px;padding:10px 13px;font-size:12.5px;margin-bottom:14px;}
+  .ff-actions{display:flex;gap:10px;align-items:center;margin-top:20px;padding-top:18px;border-top:1px solid var(--border);}
+
+  .status-pill{font-size:10px;font-weight:700;padding:3px 9px;border-radius:20px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;}
+  .st-submitted{background:#e8eaf5;color:#3a4a9a;}
+  .st-in_review{background:var(--grw-bg);color:var(--grw-text);}
+  .st-approved{background:var(--exc-bg);color:var(--exc-text);}
+  .st-denied{background:var(--wrn-bg);color:var(--wrn-text);}
+  .st-closed{background:#eee;color:#777;}
+
+  .sub-detail{background:#f8faf9;border:1px solid var(--border);border-radius:8px;padding:12px 14px;font-size:12.5px;line-height:1.65;}
+  .sub-detail dt{font-weight:700;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;}
+  .sub-detail dd{margin:0 0 9px;color:var(--text);white-space:pre-wrap;}
+
+  @media (max-width:900px){
+    .home-grid{grid-template-columns:1fr;}
+  }
+  @media (max-width:768px){
+    .home-hero{padding:18px;border-radius:12px;}
+    .home-hero h2{font-size:18px;}
+    .form-runner{padding:16px;}
+    .forms-grid{grid-template-columns:1fr;}
+  }
 </style>
 </head>
 <body>
@@ -3335,6 +3414,37 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
         </div>
       </div>
     </div>
+
+    <!-- HOME — announcements, important dates, quick links. Body is rendered
+         by renderHome() from /api/home so content changes need no deploy. -->
+    <div class="page" id="page-home">
+      <div class="home-hero">
+        <h2 id="home-greeting">Welcome</h2>
+        <div class="hh-sub" id="home-hero-sub">&mdash;</div>
+      </div>
+      <div id="home-body"><div class="no-data">Loading&hellip;</div></div>
+    </div>
+
+    <!-- FORMS — schema-driven. Definitions come from the FormDefs / FormFields
+         spreadsheet tabs via /api/forms/defs; nothing here is form-specific. -->
+    <div class="page" id="page-forms">
+      <div class="page-header">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+          <div>
+            <h2>Forms</h2>
+            <div class="sub" id="forms-sub">Submit and track requests</div>
+          </div>
+        </div>
+      </div>
+      <div class="tabs" id="forms-tabbar">
+        <button class="tab active" id="ftb-new"   onclick="showFormsTab('new')">New Form</button>
+        <button class="tab"        id="ftb-mine"  onclick="showFormsTab('mine')">My Submissions</button>
+        <button class="tab"        id="ftb-queue" onclick="showFormsTab('queue')" style="display:none;">Review Queue</button>
+      </div>
+      <div id="forms-new"><div class="no-data">Loading&hellip;</div></div>
+      <div id="forms-mine"  style="display:none;"></div>
+      <div id="forms-queue" style="display:none;"></div>
+    </div>
   </main>
 </div>
 
@@ -4558,9 +4668,13 @@ function onDataLoaded(data){
     // Small delay to ensure DOM is updated before navigating
     setTimeout(()=>{
       if(isAMRole() && amId && AMS[amId]){
+        // Initialise the AM view first (sets S.currentAM and repositions the
+        // sub-nav) so every code path that assumes currentAM is set after load
+        // keeps working — then land on Home.
         switchAM(amId);
+        switchToHome();
       } else if(canSeeAllSalons()){
-        switchToCompany();
+        switchToHome();
       } else if(role === 'manager' || role === 'stylist'){
         // AM-first beta: manager/stylist views aren't built yet. Show a clean
         // "coming soon" screen rather than the half-built company view, so no
@@ -4611,6 +4725,15 @@ function setupSidebar(){
   if(!sb) return;
   const role = roleClean();
   let html = '';
+
+  // Home — first item for every role that gets a sidebar at all. Added with the
+  // Home/Forms tabs; the landing-page routing in onDataLoaded points here too.
+  if(canSeeAllSalons() || isAMRole()){
+    html += `<button class="am-btn" onclick="switchToHome()" id="btn-home">
+      <div class="am-avatar" style="background:#e6f4ee;color:var(--primary);">&#127968;</div>Home
+    </button>`;
+    html += '<div style="border-top:1px solid var(--border);margin:.5rem 0;"></div>';
+  }
 
   if(canSeeAllSalons()){
     html += '<div class="sidebar-label">Area Managers</div>';
@@ -4667,10 +4790,21 @@ function setupSidebar(){
     }
   }
 
+  // Forms — last, so it never pushes the performance views down. Shown to any
+  // role that already has a sidebar (today: owner/admin/viewer + AMs). When the
+  // manager branch is built this needs no change: which forms a role actually
+  // sees is decided by the `audience` cell in the FormDefs tab, not here.
+  if(html){
+    html += '<div style="border-top:1px solid var(--border);margin:.5rem 0;"></div>';
+    html += `<button class="am-btn" onclick="switchToForms()" id="btn-forms">
+      <div class="am-avatar" style="background:#f2ecdd;color:#8a6d1f;">&#128221;</div>Forms
+    </button>`;
+  }
+
   sb.innerHTML = html;
 }
 
-function clearActive(){ 
+function clearActive(){
   document.querySelectorAll('.am-btn').forEach(b=>b.classList.remove('active')); 
   document.querySelectorAll('.page').forEach(pg=>pg.classList.remove('active')); 
   const csn=document.getElementById('company-subnav'); if(csn) csn.style.display='none';
@@ -13598,6 +13732,577 @@ function reviewViewAllButton(){
   return `<div style="margin:10px 0 8px;"><button onclick="openAllReviews(S_reviewSalonSel)" style="background:var(--primary);color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:700;cursor:pointer;">\uD83D\uDCC4 View All Reviews</button></div>`;
 }
 
+
+// ══════════════════════════════════════════════════════════════
+// HOME + FORMS  —  build tag: LONGITUDE-HOME-FORMS-V1
+// ══════════════════════════════════════════════════════════════
+// Two surfaces, both driven by spreadsheet content rather than code:
+//   Home  — /api/home        → Announcements / ImportantDates / HomeLinks tabs
+//   Forms — /api/forms/defs  → FormDefs / FormFields tabs
+// Adding a form or posting an announcement is a data change, not a deploy.
+
+// HTML-escape. Announcements, link labels and other people's form answers are
+// user-supplied and get rendered through innerHTML — everything coming from a
+// sheet or another user MUST pass through here.
+function hEsc(s){
+  return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+}
+
+let HOME_DATA   = null;
+let FORMS_DEFS  = [];
+let FORMS_SUBS  = [];
+let S_formsTab  = 'new';
+let S_activeForm= null;
+
+// "2026-08-21" → "Fri, Aug 21". Parsed as UTC so the date never shifts a day.
+function hFmtDate(iso, withYear){
+  if(!iso) return '';
+  const d = new Date(iso+'T00:00:00Z');
+  if(isNaN(d)) return iso;
+  const o = { weekday:'short', month:'short', day:'numeric', timeZone:'UTC' };
+  if(withYear) o.year='numeric';
+  return d.toLocaleDateString('en-US', o);
+}
+function hMonthAbbr(iso){
+  if(!iso) return '';
+  const d=new Date(iso+'T00:00:00Z'); if(isNaN(d)) return '';
+  return d.toLocaleDateString('en-US',{month:'short',timeZone:'UTC'});
+}
+function hDayNum(iso){
+  if(!iso) return '';
+  const d=new Date(iso+'T00:00:00Z'); if(isNaN(d)) return '';
+  return String(d.getUTCDate());
+}
+
+// ── Home ──────────────────────────────────────────────────────
+function switchToHome(){
+  clearActive();
+  const b=document.getElementById('btn-home'); if(b) b.classList.add('active');
+  const pg=document.getElementById('page-home'); if(pg) pg.classList.add('active');
+  const mainEl=document.querySelector('.content'); if(mainEl) mainEl.scrollTop=0;
+  renderHome();
+}
+
+function renderHome(){
+  const hero=document.getElementById('home-greeting');
+  const sub =document.getElementById('home-hero-sub');
+  const h=new Date().getHours();
+  const greet = h<12 ? 'Good morning' : h<17 ? 'Good afternoon' : 'Good evening';
+  const who = (SESSION && SESSION.name) ? String(SESSION.name).split(' ')[0] : '';
+  if(hero) hero.textContent = who ? `${greet}, ${who}` : greet;
+  if(sub)  sub.textContent  = new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+
+  // Submissions are fetched here as well as in loadForms() so the "Awaiting
+  // Your Review" tile is right on a cold load, before Forms has ever been opened.
+  Promise.all([
+    fetch('/api/home').then(r=>r.json()).catch(()=>({announcements:[],dates:[],links:[]})),
+    FORMS_SUBS.length
+      ? Promise.resolve({submissions:FORMS_SUBS})
+      : fetch('/api/forms/submissions').then(r=>r.json()).catch(()=>({submissions:[]}))
+  ]).then(([d,subs])=>{
+    HOME_DATA  = d || {};
+    FORMS_SUBS = (subs && subs.submissions) || FORMS_SUBS;
+    paintHome();
+  });
+}
+
+function paintHome(){
+  const host=document.getElementById('home-body'); if(!host) return;
+  const d=HOME_DATA||{};
+  const anns=d.announcements||[], dates=d.dates||[], links=d.links||[];
+  const canEdit=!!d.canEdit;
+
+  // Stat row. Deliberately only facts that are exact and need no derivation —
+  // an invented KPI here would violate the "what you see is what's scored" rule.
+  const pending = (FORMS_SUBS||[]).filter(s=>s.canReview && (s.status==='submitted'||s.status==='in_review')).length;
+  const stats = [
+    ['Active Salons', (typeof ACTIVE_SALONS!=='undefined' && ACTIVE_SALONS ? ACTIVE_SALONS.length : '—'), ''],
+    ['Week Ending',   (S.currentWeek ? hFmtDate(S.currentWeek) : '—'), ''],
+    // Setting the tab before switching avoids racing loadForms()'s own render.
+    ['Awaiting Your Review', pending, pending>0 ? "S_formsTab='queue';switchToForms();" : '']
+  ];
+  let html = '<div class="summary-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:1.25rem;">'
+    + stats.map(([l,v,act])=>`<div class="metric-card"${act?` onclick="${act}" style="cursor:pointer;"`:''}><div class="metric-label">${hEsc(l)}</div><div class="metric-value">${hEsc(v)}</div></div>`).join('')
+    + '</div>';
+
+  html += '<div class="home-grid"><div>';
+
+  // Announcements
+  html += '<div class="home-sec"><div class="home-sec-title"><span>Announcements</span>'
+    + (canEdit?`<button class="btn btn-secondary btn-sm" onclick="openHomeEditor('announcement')">+ New</button>`:'')
+    + '</div>';
+  if(!anns.length){
+    html += '<div class="no-data"><div class="no-data-icon">📣</div>No announcements right now.</div>';
+  } else {
+    html += anns.map(a=>`<div class="ann-card${a.pinned?' pinned':''}">
+      <div class="ann-title">${a.pinned?'<span class="pin-tag">Pinned</span> ':''}${hEsc(a.title)}</div>
+      <div class="ann-body">${hEsc(a.body)}</div>
+      <div class="ann-meta">
+        <span>${a.startDate?hFmtDate(a.startDate,true):''}</span>
+        ${a.endDate?`<span>&middot; through ${hFmtDate(a.endDate,true)}</span>`:''}
+        ${canEdit?`<span style="margin-left:auto;display:flex;gap:6px;">
+          <button class="btn btn-secondary btn-sm" onclick="openHomeEditor('announcement','${hEsc(a.id)}')">Edit</button>
+          <button class="btn btn-secondary btn-sm" onclick="deleteHomeItem('announcement','${hEsc(a.id)}')">Delete</button>
+        </span>`:''}
+      </div>
+    </div>`).join('');
+  }
+  html += '</div>';
+
+  // Quick links, grouped by category
+  html += '<div class="home-sec"><div class="home-sec-title"><span>Quick Links</span>'
+    + (canEdit?`<button class="btn btn-secondary btn-sm" onclick="openHomeEditor('link')">+ New</button>`:'')
+    + '</div>';
+  if(!links.length){
+    html += '<div class="no-data"><div class="no-data-icon">🔗</div>No links yet.</div>';
+  } else {
+    const cats={};
+    links.forEach(l=>{ (cats[l.category]=cats[l.category]||[]).push(l); });
+    Object.keys(cats).sort().forEach(cat=>{
+      html += `<div class="link-cat">${hEsc(cat)}</div><div class="links-grid">`;
+      html += cats[cat].map(l=>{
+        const ext = /^https?:\/\//i.test(l.url);
+        return `<a class="link-tile" href="${hEsc(l.url)}"${ext?' target="_blank" rel="noopener noreferrer"':''}>
+          <span class="lt-icon">${hEsc(l.icon)}</span><span>${hEsc(l.label)}</span></a>`;
+      }).join('');
+      html += '</div>';
+    });
+  }
+  html += '</div></div>';
+
+  // Right rail — important dates
+  html += '<div><div class="home-sec"><div class="home-sec-title"><span>Important Dates</span>'
+    + (canEdit?`<button class="btn btn-secondary btn-sm" onclick="openHomeEditor('date')">+ New</button>`:'')
+    + '</div>';
+  if(!dates.length){
+    html += '<div class="no-data"><div class="no-data-icon">📅</div>Nothing coming up.</div>';
+  } else {
+    html += dates.map(dt=>{
+      const away = dt.daysAway;
+      const cls  = away<=0 ? 'away-now' : away<=14 ? 'away-soon' : 'away-far';
+      const lbl  = away< 0 ? 'Now' : away===0 ? 'Today' : away===1 ? 'Tomorrow' : `${away}d`;
+      return `<div class="date-row">
+        <div class="date-cal"><div class="dc-m">${hEsc(hMonthAbbr(dt.date))}</div><div class="dc-d">${hEsc(hDayNum(dt.date))}</div></div>
+        <div class="date-info">
+          <div class="date-title">${hEsc(dt.title)}</div>
+          ${dt.note?`<div class="date-note">${hEsc(dt.note)}</div>`:''}
+          ${canEdit?`<div style="margin-top:5px;display:flex;gap:5px;">
+            <button class="btn btn-secondary btn-sm" style="padding:3px 9px;font-size:11px;" onclick="openHomeEditor('date','${hEsc(dt.id)}')">Edit</button>
+            <button class="btn btn-secondary btn-sm" style="padding:3px 9px;font-size:11px;" onclick="deleteHomeItem('date','${hEsc(dt.id)}')">Delete</button>
+          </div>`:''}
+        </div>
+        <span class="date-away ${cls}">${hEsc(lbl)}</span>
+      </div>`;
+    }).join('');
+  }
+  html += '</div></div></div>';
+
+  host.innerHTML = html;
+}
+
+// ── Home admin editor ─────────────────────────────────────────
+// Small inline modal. Owner/admin only — the server re-checks on save, so a
+// hidden button is a convenience, not the security boundary.
+function openHomeEditor(kind, id){
+  const d=HOME_DATA||{};
+  const list = kind==='announcement' ? (d.announcements||[]) : kind==='date' ? (d.dates||[]) : (d.links||[]);
+  const item = id ? (list.find(x=>x.id===id)||{}) : {};
+  const F = (label,name,type,val,extra)=>`<div class="ff-row"><label class="ff-label">${label}</label>`
+    + (type==='textarea'
+        ? `<textarea class="ff-textarea" id="he-${name}">${hEsc(val||'')}</textarea>`
+        : `<input class="ff-input" id="he-${name}" type="${type}" value="${hEsc(val||'')}" ${extra||''}>`)
+    + '</div>';
+
+  let body='';
+  if(kind==='announcement'){
+    body = F('Title','title','text',item.title)
+      + F('Body','body','textarea',item.body)
+      + `<div class="ff-row"><label class="ff-label" style="display:flex;align-items:center;gap:8px;font-weight:400;">
+           <input type="checkbox" id="he-pinned" ${item.pinned?'checked':''}> Pin to the top</label></div>`
+      + F('Show From','startDate','date',item.startDate)
+      + F('Hide After','endDate','date',item.endDate)
+      + F('Audience','audience','text',(item.audience||[]).join(','),'placeholder="blank = everyone, or e.g. area_manager,manager"');
+  } else if(kind==='date'){
+    body = F('Title','title','text',item.title)
+      + F('Date','date','date',item.date)
+      + F('End Date','endDate','date',item.endDate)
+      + F('Category','category','text',item.category,'placeholder="e.g. Training, Payroll, Holiday"')
+      + F('Note','note','textarea',item.note)
+      + F('Audience','audience','text',(item.audience||[]).join(','),'placeholder="blank = everyone"');
+  } else {
+    body = F('Label','label','text',item.label)
+      + F('URL','url','text',item.url,'placeholder="https://... or /market.html"')
+      + F('Icon','icon','text',item.icon,'placeholder="an emoji"')
+      + F('Category','category','text',item.category,'placeholder="e.g. Dashboards"')
+      + F('Sort Order','sortOrder','number',item.sortOrder)
+      + F('Audience','audience','text',(item.audience||[]).join(','),'placeholder="blank = everyone"');
+  }
+
+  const titles={announcement:'Announcement',date:'Important Date',link:'Quick Link'};
+  const wrap=document.createElement('div');
+  wrap.id='home-editor';
+  wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9000;display:flex;align-items:flex-start;justify-content:center;padding:5vh 16px;overflow:auto;';
+  wrap.innerHTML=`<div class="form-runner" style="width:100%;max-width:520px;">
+    <h3 style="margin:0 0 16px;font-size:17px;color:var(--primary);">${id?'Edit':'New'} ${titles[kind]}</h3>
+    <div id="he-err"></div>
+    ${body}
+    <div class="ff-actions">
+      <button class="btn btn-primary" onclick="saveHomeItem('${kind}',${id?`'${hEsc(id)}'`:'null'})">Save</button>
+      <button class="btn btn-secondary" onclick="closeHomeEditor()">Cancel</button>
+    </div>
+  </div>`;
+  wrap.addEventListener('click',e=>{ if(e.target===wrap) closeHomeEditor(); });
+  document.body.appendChild(wrap);
+}
+function closeHomeEditor(){ const el=document.getElementById('home-editor'); if(el) el.remove(); }
+
+function saveHomeItem(kind, id){
+  const v=n=>{ const el=document.getElementById('he-'+n); return el?el.value:''; };
+  const item={};
+  if(kind==='announcement'){
+    const p=document.getElementById('he-pinned');
+    Object.assign(item,{title:v('title'),body:v('body'),pinned:!!(p&&p.checked),startDate:v('startDate'),endDate:v('endDate'),audience:v('audience')});
+  } else if(kind==='date'){
+    Object.assign(item,{title:v('title'),date:v('date'),endDate:v('endDate'),category:v('category'),note:v('note'),audience:v('audience')});
+  } else {
+    Object.assign(item,{label:v('label'),url:v('url'),icon:v('icon'),category:v('category'),sortOrder:v('sortOrder'),audience:v('audience')});
+  }
+  if(id) item.id=id;
+
+  fetch('/api/home/save',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({kind,action:id?'update':'add',item,id})})
+    .then(r=>r.json())
+    .then(res=>{
+      if(!res.success){
+        const e=document.getElementById('he-err');
+        if(e) e.innerHTML=`<div class="ff-error">${hEsc(res.error||'Save failed')}</div>`;
+        return;
+      }
+      closeHomeEditor();
+      renderHome();
+    })
+    .catch(err=>{
+      const e=document.getElementById('he-err');
+      if(e) e.innerHTML=`<div class="ff-error">${hEsc(err.message||'Network error')}</div>`;
+    });
+}
+
+function deleteHomeItem(kind,id){
+  if(!confirm('Delete this item? This cannot be undone.')) return;
+  fetch('/api/home/save',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({kind,action:'remove',id})})
+    .then(r=>r.json())
+    .then(res=>{ if(!res.success) alert(res.error||'Delete failed'); renderHome(); })
+    .catch(err=>alert(err.message||'Network error'));
+}
+
+// ── Forms ─────────────────────────────────────────────────────
+function switchToForms(){
+  clearActive();
+  const b=document.getElementById('btn-forms'); if(b) b.classList.add('active');
+  const pg=document.getElementById('page-forms'); if(pg) pg.classList.add('active');
+  const mainEl=document.querySelector('.content'); if(mainEl) mainEl.scrollTop=0;
+  loadForms();
+}
+
+function loadForms(cb){
+  Promise.all([
+    fetch('/api/forms/defs').then(r=>r.json()).catch(()=>({forms:[]})),
+    fetch('/api/forms/submissions').then(r=>r.json()).catch(()=>({submissions:[]}))
+  ]).then(([defs,subs])=>{
+    FORMS_DEFS = defs.forms || [];
+    FORMS_SUBS = subs.submissions || [];
+    // Reveal the review queue only when this person can actually action something.
+    const anyReview = FORMS_SUBS.some(s=>s.canReview);
+    const qb=document.getElementById('ftb-queue');
+    if(qb) qb.style.display = anyReview ? '' : 'none';
+    showFormsTab(S_formsTab);
+    if(cb) cb();
+  });
+}
+
+function showFormsTab(name){
+  S_formsTab = name;
+  // Scoped to this tab bar — the AM tab bar uses the same .tab class and must
+  // not have its active state cleared from here.
+  document.querySelectorAll('#forms-tabbar .tab').forEach(t=>t.classList.remove('active'));
+  const btn=document.getElementById('ftb-'+name); if(btn) btn.classList.add('active');
+  ['new','mine','queue'].forEach(n=>{
+    const el=document.getElementById('forms-'+n);
+    if(el) el.style.display = n===name ? 'block' : 'none';
+  });
+  if(name==='new')   { if(S_activeForm) renderFormRunner(); else renderFormsList(); }
+  if(name==='mine')  renderMySubmissions();
+  if(name==='queue') renderReviewQueue();
+}
+
+function renderFormsList(){
+  S_activeForm=null;
+  const host=document.getElementById('forms-new'); if(!host) return;
+  if(!FORMS_DEFS.length){
+    host.innerHTML = '<div class="no-data"><div class="no-data-icon">📝</div>'
+      + 'No forms are available for your role yet.'
+      + (isAdminRole()?'<div style="margin-top:14px;"><button class="btn btn-primary" onclick="seedForms()">Set up starter forms</button>'
+        + '<div style="margin-top:8px;font-size:11.5px;color:var(--text-muted);">Creates the spreadsheet tabs and three starter forms. Safe to run more than once.</div></div>':'')
+      + '</div>';
+    return;
+  }
+  host.innerHTML = '<div class="forms-grid">' + FORMS_DEFS.map(f=>`
+    <button class="form-tile" onclick="openForm('${hEsc(f.formId)}')">
+      <div class="ft-icon">${hEsc(f.icon)}</div>
+      <div class="ft-title">${hEsc(f.title)}</div>
+      <div class="ft-desc">${hEsc(f.description)}</div>
+    </button>`).join('') + '</div>';
+}
+
+function seedForms(){
+  fetch('/api/forms/seed',{method:'POST'}).then(r=>r.json()).then(res=>{
+    if(!res.success){ alert(res.error||'Setup failed'); return; }
+    alert('Created: '+(res.created||[]).join(', '));
+    loadForms();
+  }).catch(e=>alert(e.message));
+}
+
+function openForm(formId){
+  S_activeForm = FORMS_DEFS.find(f=>f.formId===formId) || null;
+  showFormsTab('new');
+}
+
+// Employee options for a roster-backed picker. Same aggregation the disc-points
+// picker uses — every source, so managers and low-activity staff appear too.
+// Storing the globalId (not a typed name) is the point of this field type.
+function formsEmployeeOptions(){
+  const byId={};
+  const add=(gid,name,salon)=>{
+    gid=String(gid||'').trim(); if(!gid) return;
+    const nm=String(name||'').trim(), sn=String(salon||'').trim();
+    if(!byId[gid]) byId[gid]={name:nm||gid,salon:sn};
+    else { if((!byId[gid].name||byId[gid].name===gid)&&nm) byId[gid].name=nm; if(!byId[gid].salon&&sn) byId[gid].salon=sn; }
+  };
+  Object.entries(S.homeDataMap||{}).forEach(([gid,r])=>add(gid,r&&r.payrollName,r&&r.homeSalon));
+  (S.weekHistory||[]).forEach(w=>(w.emps||[]).forEach(e=>add(e.globalId,e.empName||e.employeeName,e.salonNum)));
+  Object.entries(S_managerTable||{}).forEach(([sn,m])=>add(m&&m.globalId,m&&m.name,sn));
+  Object.entries(INACTIVE_MAP||{}).forEach(([gid,r])=>add(gid,r&&r.name,r&&r.homeSalon));
+  return Object.entries(byId)
+    .filter(([gid,o])=>o.name && o.name!==gid && !isInactive(gid))
+    .filter(([gid,o])=>!o.salon || canDrillSalon(o.salon))   // never list staff outside the user's scope
+    .sort((a,b)=>fmtName(a[1].name).localeCompare(fmtName(b[1].name)))
+    .map(([gid,o])=>`<option value="${hEsc(gid)}">${hEsc(fmtName(o.name))}${o.salon?' ('+hEsc(o.salon)+')':''}</option>`)
+    .join('');
+}
+
+// Salons the signed-in person may attribute a submission to. canDrillSalon is
+// the same guard the drill-downs use, so scope stays consistent app-wide.
+function formsSalonOptions(){
+  return allActiveSalons()
+    .filter(canDrillSalon)
+    .map(sn=>`<option value="${hEsc(sn)}">${hEsc(sn)}${SALON_NAMES[sn]?' — '+hEsc(SALON_NAMES[sn]):''}</option>`)
+    .join('');
+}
+
+function renderFormField(f){
+  const id='fld-'+f.fieldKey;
+  const req=f.required?'<span class="ff-req">*</span>':'';
+  if(f.type==='section') return `<div class="ff-section">${hEsc(f.label)}</div>`;
+
+  let input='';
+  if(f.type==='textarea'){
+    input=`<textarea class="ff-textarea" id="${id}" placeholder="${hEsc(f.placeholder)}"></textarea>`;
+  } else if(f.type==='select'){
+    input=`<select class="ff-select" id="${id}"><option value="">— Select —</option>`
+      + f.options.map(o=>`<option value="${hEsc(o)}">${hEsc(o)}</option>`).join('') + '</select>';
+  } else if(f.type==='radio'){
+    input='<div class="ff-radio">' + f.options.map(o=>
+      `<label><input type="radio" name="${id}" value="${hEsc(o)}"> ${hEsc(o)}</label>`).join('') + '</div>';
+  } else if(f.type==='checkbox'){
+    input=`<label style="display:flex;align-items:center;gap:8px;font-size:13.5px;cursor:pointer;">
+      <input type="checkbox" id="${id}"> ${hEsc(f.placeholder||'Yes')}</label>`;
+  } else if(f.type==='employee'){
+    input=`<select class="ff-select" id="${id}"><option value="">— Select employee —</option>${formsEmployeeOptions()}</select>`;
+  } else if(f.type==='salon'){
+    input=`<select class="ff-select" id="${id}"><option value="">— Select salon —</option>${formsSalonOptions()}</select>`;
+  } else if(f.type==='date'){
+    input=`<input class="ff-input" type="date" id="${id}">`;
+  } else if(f.type==='number'){
+    input=`<input class="ff-input" type="number" id="${id}" placeholder="${hEsc(f.placeholder)}">`;
+  } else {
+    input=`<input class="ff-input" type="text" id="${id}" placeholder="${hEsc(f.placeholder)}">`;
+  }
+
+  return `<div class="ff-row">
+    <label class="ff-label" for="${id}">${hEsc(f.label)}${req}</label>
+    ${input}
+    ${f.help?`<div class="ff-help">${hEsc(f.help)}</div>`:''}
+  </div>`;
+}
+
+function renderFormRunner(){
+  const host=document.getElementById('forms-new'); const f=S_activeForm;
+  if(!host||!f) return;
+  host.innerHTML = `
+    <button class="back-btn" onclick="renderFormsList()">&larr; All forms</button>
+    <div class="form-runner" style="margin-top:12px;">
+      <h3 style="margin:0 0 6px;font-size:19px;color:var(--primary);">${hEsc(f.icon)} ${hEsc(f.title)}</h3>
+      <p style="margin:0 0 20px;font-size:13px;color:var(--text-muted);">${hEsc(f.description)}</p>
+      <div id="form-msg"></div>
+      ${f.fields.map(renderFormField).join('')}
+      <div class="ff-actions">
+        <button class="btn btn-primary" id="form-submit-btn" onclick="submitActiveForm()">Submit</button>
+        <button class="btn btn-secondary" onclick="renderFormsList()">Cancel</button>
+        <span style="font-size:11.5px;color:var(--text-muted);margin-left:auto;">Fields marked <span class="ff-req">*</span> are required</span>
+      </div>
+    </div>`;
+}
+
+function submitActiveForm(){
+  const f=S_activeForm; if(!f) return;
+  const msg=document.getElementById('form-msg');
+  const btn=document.getElementById('form-submit-btn');
+  const data={}; const missing=[];
+
+  f.fields.forEach(fl=>{
+    if(fl.type==='section') return;
+    const id='fld-'+fl.fieldKey;
+    let val='';
+    if(fl.type==='radio'){
+      const sel=document.querySelector('input[name="'+id+'"]:checked');
+      val = sel?sel.value:'';
+    } else if(fl.type==='checkbox'){
+      const el=document.getElementById(id);
+      val = (el&&el.checked)?'Yes':'';
+    } else {
+      const el=document.getElementById(id);
+      val = el?String(el.value).trim():'';
+    }
+    if(fl.required && !val) missing.push(fl.label);
+    if(val) data[fl.fieldKey]=val;
+  });
+
+  if(missing.length){
+    if(msg){
+      msg.innerHTML=`<div class="ff-error">Please complete: ${hEsc(missing.join(', '))}</div>`;
+      msg.scrollIntoView({behavior:'smooth',block:'center'});
+    }
+    return;
+  }
+
+  if(btn){ btn.disabled=true; btn.textContent='Submitting…'; }
+  fetch('/api/forms/submit',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({formId:f.formId,data})})
+    .then(r=>r.json())
+    .then(res=>{
+      if(!res.success){
+        if(msg) msg.innerHTML=`<div class="ff-error">${hEsc(res.error||'Submission failed')}</div>`;
+        if(btn){ btn.disabled=false; btn.textContent='Submit'; }
+        return;
+      }
+      const host=document.getElementById('forms-new');
+      if(host) host.innerHTML=`<div class="form-runner">
+        <div class="ff-ok"><strong>Submitted.</strong> Your ${hEsc(f.title)} has been recorded.</div>
+        <div class="ff-actions" style="border-top:none;padding-top:0;margin-top:6px;">
+          <button class="btn btn-primary" onclick="openForm('${hEsc(f.formId)}')">Submit another</button>
+          <button class="btn btn-secondary" onclick="renderFormsList()">All forms</button>
+          <button class="btn btn-secondary" onclick="showFormsTab('mine')">View my submissions</button>
+        </div></div>`;
+      S_activeForm=null;
+      loadForms();
+    })
+    .catch(err=>{
+      if(msg) msg.innerHTML=`<div class="ff-error">${hEsc(err.message||'Network error')}</div>`;
+      if(btn){ btn.disabled=false; btn.textContent='Submit'; }
+    });
+}
+
+function statusPill(st){
+  const label={submitted:'Submitted',in_review:'In Review',approved:'Approved',denied:'Denied',closed:'Closed'}[st]||st;
+  return `<span class="status-pill st-${hEsc(st)}">${hEsc(label)}</span>`;
+}
+
+function submissionRows(list, showWho){
+  if(!list.length) return '<div class="no-data"><div class="no-data-icon">📭</div>Nothing here yet.</div>';
+  return `<div class="table-card"><table class="data-table"><thead><tr>
+      <th>Form</th>${showWho?'<th>Submitted By</th>':''}<th>Salon</th><th>Submitted</th><th>Status</th><th></th>
+    </tr></thead><tbody>` + list.map(s=>`
+      <tr>
+        <td><strong>${hEsc(s.formTitle)}</strong><div style="font-size:11.5px;color:var(--text-muted);max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${hEsc(s.summary)}</div></td>
+        ${showWho?`<td>${hEsc(fmtName(s.submittedByName||''))}</td>`:''}
+        <td>${hEsc(s.salonNum||'—')}</td>
+        <td>${hEsc(s.submittedAt?hFmtDate(s.submittedAt.slice(0,10),true):'—')}</td>
+        <td>${statusPill(s.status)}</td>
+        <td style="text-align:right;"><button class="btn btn-secondary btn-sm" onclick="toggleSubmission('${hEsc(s.submissionId)}')">Details</button></td>
+      </tr>
+      <tr id="sub-${hEsc(s.submissionId)}" style="display:none;"><td colspan="${showWho?6:5}">${submissionDetail(s)}</td></tr>
+    `).join('') + '</tbody></table></div>';
+}
+
+function submissionDetail(s){
+  const def=FORMS_DEFS.find(f=>f.formId===s.formId);
+  let dl='<dl class="sub-detail">';
+  if(def){
+    def.fields.forEach(f=>{
+      if(f.type==='section') return;
+      const v=s.data[f.fieldKey];
+      if(v===undefined||v==='') return;
+      let shown=v;
+      // Employee picker stores a globalId — show the name back to the reader.
+      if(f.type==='employee'){
+        const p=(INACTIVE_MAP||{})[v];
+        shown = p&&p.name ? fmtName(p.name)+' ('+v+')' : v;
+      }
+      dl += `<dt>${hEsc(f.label)}</dt><dd>${hEsc(shown)}</dd>`;
+    });
+  } else {
+    Object.entries(s.data||{}).forEach(([k,v])=>{ dl += `<dt>${hEsc(k)}</dt><dd>${hEsc(v)}</dd>`; });
+  }
+  dl += '</dl>';
+
+  if(s.reviewNote){
+    dl += `<div style="margin-top:10px;font-size:12.5px;"><strong>Review note:</strong> ${hEsc(s.reviewNote)}`
+      + (s.reviewedBy?` <span style="color:var(--text-muted);">— ${hEsc(s.reviewedBy)}</span>`:'') + '</div>';
+  }
+
+  if(s.canReview){
+    dl += `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
+      <label class="ff-label">Review note (optional)</label>
+      <input class="ff-input" id="rn-${hEsc(s.submissionId)}" value="${hEsc(s.reviewNote||'')}" style="margin-bottom:9px;">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn btn-secondary btn-sm" onclick="setSubStatus('${hEsc(s.submissionId)}','in_review')">Mark In Review</button>
+        <button class="btn btn-primary btn-sm" onclick="setSubStatus('${hEsc(s.submissionId)}','approved')">Approve</button>
+        <button class="btn btn-secondary btn-sm" onclick="setSubStatus('${hEsc(s.submissionId)}','denied')">Deny</button>
+        <button class="btn btn-secondary btn-sm" onclick="setSubStatus('${hEsc(s.submissionId)}','closed')">Close</button>
+      </div></div>`;
+  }
+  return dl;
+}
+
+function toggleSubmission(id){
+  const row=document.getElementById('sub-'+id);
+  if(row) row.style.display = row.style.display==='none' ? 'table-row' : 'none';
+}
+
+function setSubStatus(id,status){
+  const noteEl=document.getElementById('rn-'+id);
+  fetch('/api/forms/status',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({submissionId:id,status,reviewNote:noteEl?noteEl.value:''})})
+    .then(r=>r.json())
+    .then(res=>{ if(!res.success){ alert(res.error||'Update failed'); return; } loadForms(); })
+    .catch(err=>alert(err.message||'Network error'));
+}
+
+function renderMySubmissions(){
+  const host=document.getElementById('forms-mine'); if(!host) return;
+  host.innerHTML = submissionRows(FORMS_SUBS.filter(s=>s.isMine), false);
+}
+
+function renderReviewQueue(){
+  const host=document.getElementById('forms-queue'); if(!host) return;
+  const open=FORMS_SUBS.filter(s=>s.canReview && (s.status==='submitted'||s.status==='in_review'));
+  const done=FORMS_SUBS.filter(s=>s.canReview && !(s.status==='submitted'||s.status==='in_review'));
+  host.innerHTML = `<div class="home-sec-title" style="margin-bottom:.6rem;">Needs Action (${open.length})</div>`
+    + submissionRows(open,true)
+    + `<div class="home-sec-title" style="margin:1.5rem 0 .6rem;">Resolved (${done.length})</div>`
+    + submissionRows(done,true);
+}
 
 // ── Start ─────────────────────────────────────────────────────
 init();
