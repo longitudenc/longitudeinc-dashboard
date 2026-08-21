@@ -376,12 +376,23 @@
   .forms-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(255px,1fr));gap:12px;}
   .form-tile{background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px 18px;cursor:pointer;transition:all .15s;text-align:left;font:inherit;}
   .form-tile:hover{border-color:var(--primary);box-shadow:0 3px 12px rgba(4,134,103,.12);transform:translateY(-2px);}
-  .form-tile .ft-icon{font-size:26px;line-height:1;margin-bottom:9px;}
+  .form-tile .ft-icon{width:42px;height:42px;border-radius:11px;background:var(--accent-light);display:flex;align-items:center;justify-content:center;font-size:21px;line-height:1;margin-bottom:12px;}
   .form-tile .ft-title{font-size:15px;font-weight:700;color:var(--text);margin-bottom:4px;}
   .form-tile .ft-desc{font-size:12.5px;color:var(--text-muted);line-height:1.45;}
 
-  .form-runner{background:#fff;border:1px solid var(--border);border-radius:12px;padding:22px 26px;max-width:660px;}
-  .ff-row{margin-bottom:15px;}
+  .form-runner{background:#fff;border:1px solid var(--border);border-radius:14px;padding:26px 30px;max-width:720px;box-shadow:0 1px 3px rgba(0,0,0,.04);}
+  /* Form header — icon chip + title, separated from the fields. */
+  .form-head{display:flex;gap:14px;align-items:flex-start;padding-bottom:18px;margin-bottom:22px;border-bottom:1px solid var(--border);}
+  .form-head-icon{flex:0 0 46px;height:46px;border-radius:12px;background:var(--accent-light);display:flex;align-items:center;justify-content:center;font-size:23px;line-height:1;}
+  .form-head h3{margin:0 0 3px;font-size:19px;font-weight:700;color:var(--text);}
+  .form-head p{margin:0;font-size:13px;color:var(--text-muted);line-height:1.45;}
+  /* Two-column field grid. Rows span the full width by default; short inputs
+     (dates, numbers, pickers) opt into a half so forms don't read as one long
+     skinny column. .ff-row outside a .ff-grid is unaffected — grid-column is
+     inert on a non-grid child, so the Home editor modal still stacks. */
+  .ff-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 18px;}
+  .ff-row{margin-bottom:16px;grid-column:1/-1;}
+  .ff-row.short{grid-column:auto;}
   .ff-label{display:block;font-size:12.5px;font-weight:700;color:var(--text);margin-bottom:5px;}
   .ff-req{color:#c0392b;margin-left:3px;}
   .ff-help{font-size:11.5px;color:var(--text-muted);margin-top:4px;}
@@ -390,10 +401,12 @@
   .ff-textarea{min-height:86px;resize:vertical;}
   .ff-radio{display:flex;flex-direction:column;gap:7px;}
   .ff-radio label{display:flex;align-items:center;gap:8px;font-size:13.5px;cursor:pointer;font-weight:400;}
-  .ff-section{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--primary);border-bottom:1px solid var(--border);padding-bottom:6px;margin:22px 0 14px;}
-  .ff-error{background:var(--wrn-bg);border:1px solid var(--wrn-border);color:var(--wrn-text);border-radius:8px;padding:10px 13px;font-size:12.5px;margin-bottom:14px;}
-  .ff-ok{background:var(--exc-bg);border:1px solid var(--exc-border);color:var(--exc-text);border-radius:8px;padding:10px 13px;font-size:12.5px;margin-bottom:14px;}
-  .ff-actions{display:flex;gap:10px;align-items:center;margin-top:20px;padding-top:18px;border-top:1px solid var(--border);}
+  .ff-section{grid-column:1/-1;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--primary);border-bottom:1px solid var(--border);padding-bottom:6px;margin:10px 0 16px;}
+  .ff-section:first-child{margin-top:0;}
+  .ff-error{grid-column:1/-1;background:var(--wrn-bg);border:1px solid var(--wrn-border);color:var(--wrn-text);border-radius:8px;padding:10px 13px;font-size:12.5px;margin-bottom:14px;}
+  .ff-ok{background:var(--exc-bg);border:1px solid var(--exc-border);color:var(--exc-text);border-radius:8px;padding:12px 15px;font-size:13px;margin-bottom:14px;}
+  .ff-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:6px;padding-top:20px;border-top:1px solid var(--border);}
+  #forms-mine .data-table tbody tr:hover,#forms-queue .data-table tbody tr:hover{background:#fafbfa;}
 
   .status-pill{font-size:10px;font-weight:700;padding:3px 9px;border-radius:20px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;}
   .st-submitted{background:#e8eaf5;color:#3a4a9a;}
@@ -412,8 +425,12 @@
   @media (max-width:768px){
     .home-hero{padding:18px;border-radius:12px;}
     .home-hero h2{font-size:18px;}
-    .form-runner{padding:16px;}
+    .form-runner{padding:18px;}
     .forms-grid{grid-template-columns:1fr;}
+    /* Single column on phones — half-width fields would be unusable. */
+    .ff-grid{grid-template-columns:1fr;}
+    .ff-row.short{grid-column:1/-1;}
+    .aud-grid{grid-template-columns:1fr;}
   }
 </style>
 </head>
@@ -14182,7 +14199,10 @@ function renderFormField(f){
     input=`<input class="ff-input" type="text" id="${id}" placeholder="${hEsc(f.placeholder)}">`;
   }
 
-  return `<div class="ff-row">
+  // Inherently narrow inputs take half a row so adjacent ones pair up
+  // (Start Date / End Date, Salon / Request Type) instead of stacking.
+  const short = ['date','number','select','salon'].includes(f.type) ? ' short' : '';
+  return `<div class="ff-row${short}">
     <label class="ff-label" for="${id}">${hEsc(f.label)}${req}</label>
     ${input}
     ${f.help?`<div class="ff-help">${hEsc(f.help)}</div>`:''}
@@ -14192,17 +14212,23 @@ function renderFormField(f){
 function renderFormRunner(){
   const host=document.getElementById('forms-new'); const f=S_activeForm;
   if(!host||!f) return;
+  const reqCount = f.fields.filter(x=>x.required && x.type!=='section').length;
   host.innerHTML = `
     <button class="back-btn" onclick="renderFormsList()">&larr; All forms</button>
     <div class="form-runner" style="margin-top:12px;">
-      <h3 style="margin:0 0 6px;font-size:19px;color:var(--primary);">${hEsc(f.icon)} ${hEsc(f.title)}</h3>
-      <p style="margin:0 0 20px;font-size:13px;color:var(--text-muted);">${hEsc(f.description)}</p>
+      <div class="form-head">
+        <div class="form-head-icon">${hEsc(f.icon)}</div>
+        <div>
+          <h3>${hEsc(f.title)}</h3>
+          ${f.description?`<p>${hEsc(f.description)}</p>`:''}
+        </div>
+      </div>
       <div id="form-msg"></div>
-      ${f.fields.map(renderFormField).join('')}
+      <div class="ff-grid">${f.fields.map(renderFormField).join('')}</div>
       <div class="ff-actions">
         <button class="btn btn-primary" id="form-submit-btn" onclick="submitActiveForm()">Submit</button>
         <button class="btn btn-secondary" onclick="renderFormsList()">Cancel</button>
-        <span style="font-size:11.5px;color:var(--text-muted);margin-left:auto;">Fields marked <span class="ff-req">*</span> are required</span>
+        ${reqCount?`<span style="font-size:11.5px;color:var(--text-muted);margin-left:auto;">${reqCount} required field${reqCount===1?'':'s'} <span class="ff-req">*</span></span>`:''}
       </div>
     </div>`;
 }
@@ -14257,8 +14283,12 @@ function submitActiveForm(){
       }
       const host=document.getElementById('forms-new');
       if(host) host.innerHTML=`<div class="form-runner">
-        <div class="ff-ok"><strong>Submitted.</strong> Your ${hEsc(f.title)} has been recorded.</div>
-        <div class="ff-actions" style="border-top:none;padding-top:0;margin-top:6px;">
+        <div style="text-align:center;padding:14px 0 6px;">
+          <div style="width:52px;height:52px;border-radius:50%;background:var(--exc-bg);color:var(--exc-text);display:flex;align-items:center;justify-content:center;font-size:26px;margin:0 auto 14px;">&#10003;</div>
+          <h3 style="margin:0 0 5px;font-size:18px;color:var(--text);">Submitted</h3>
+          <p style="margin:0;font-size:13px;color:var(--text-muted);">Your ${hEsc(f.title)} has been recorded.</p>
+        </div>
+        <div class="ff-actions" style="justify-content:center;margin-top:20px;">
           <button class="btn btn-primary" onclick="openForm('${hEsc(f.formId)}')">Submit another</button>
           <button class="btn btn-secondary" onclick="renderFormsList()">All forms</button>
           <button class="btn btn-secondary" onclick="showFormsTab('mine')">View my submissions</button>
