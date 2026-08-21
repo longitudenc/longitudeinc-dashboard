@@ -21,7 +21,7 @@ export const TAB_DATES = 'ImportantDates'
 export const TAB_LINKS = 'HomeLinks'
 
 export const ANNOUNCEMENT_COLUMNS = [
-  'id', 'title', 'body', 'pinned', 'startDate', 'endDate', 'audience', 'createdBy', 'createdAt',
+  'id', 'title', 'body', 'imageUrl', 'pinned', 'startDate', 'endDate', 'audience', 'createdBy', 'createdAt',
 ] as const
 
 export const DATE_COLUMNS = [
@@ -69,10 +69,19 @@ export function normalizeDate(v: unknown): string {
   return ''
 }
 
+// Only http(s) and same-origin paths are allowed anywhere a URL from the sheet
+// becomes an href or an img src. Blocks `javascript:` and keeps `data:` blobs
+// (which would bloat a cell and dodge review) out of the page.
+export function isSafeUrl(url: unknown): boolean {
+  const s = norm(url)
+  return !!s && (/^https?:\/\//i.test(s) || s.startsWith('/'))
+}
+
 export interface Announcement {
   id: string
   title: string
   body: string
+  imageUrl: string
   pinned: boolean
   startDate: string
   endDate: string
@@ -125,6 +134,8 @@ export async function getAnnouncements(role: Role | string): Promise<Announcemen
       id: norm(r.id),
       title: norm(r.title),
       body: norm(r.body),
+      // Dropped rather than rendered if it isn't a safe URL.
+      imageUrl: isSafeUrl(r.imageUrl) ? norm(r.imageUrl) : '',
       pinned: truthy(r.pinned),
       startDate: normalizeDate(r.startDate),
       endDate: normalizeDate(r.endDate),
@@ -189,9 +200,7 @@ export async function getHomeLinks(role: Role | string): Promise<HomeLink[]> {
     }))
     .filter(l => l.id && l.label && l.url)
     .filter(l => audienceAllows(l.audience, role))
-    // Only http(s) and same-origin paths. Blocks javascript: URLs from a
-    // spreadsheet cell turning into script execution when rendered as an href.
-    .filter(l => /^https?:\/\//i.test(l.url) || l.url.startsWith('/'))
+    .filter(l => isSafeUrl(l.url))
     .sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label))
 }
 

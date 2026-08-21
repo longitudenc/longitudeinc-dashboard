@@ -16,7 +16,7 @@ import { readSheet, rowsToObjects, writeSheet } from '@/lib/sheets'
 import {
   TAB_ANNOUNCEMENTS, TAB_DATES, TAB_LINKS,
   ANNOUNCEMENT_COLUMNS, DATE_COLUMNS, LINK_COLUMNS,
-  normalizeDate, newId,
+  normalizeDate, newId, isSafeUrl,
 } from '@/lib/home'
 
 const KINDS = {
@@ -40,6 +40,7 @@ function shapeItem(kind: Kind, raw: any, existing: Record<string, any> | null, e
   if (kind === 'announcement') {
     set('title', str(raw.title, 300))
     set('body', str(raw.body, 4000))
+    set('imageUrl', str(raw.imageUrl, 1000))
     set('pinned', raw.pinned ? 'yes' : '')
     set('startDate', normalizeDate(raw.startDate))
     set('endDate', normalizeDate(raw.endDate))
@@ -66,11 +67,6 @@ function shapeItem(kind: Kind, raw: any, existing: Record<string, any> | null, e
   return out
 }
 
-// Reject anything that isn't http(s) or a same-origin path — a javascript:
-// URL in a link row would otherwise execute when someone clicks the tile.
-function badUrl(url: string): boolean {
-  return !(/^https?:\/\//i.test(url) || url.startsWith('/'))
-}
 
 export async function POST(req: Request) {
   const gate = await requireAdmin()
@@ -105,8 +101,12 @@ export async function POST(req: Request) {
         return NextResponse.json({ success: false, error: 'item is required' }, { status: 400 })
       }
 
-      if (kind === 'link' && raw.url !== undefined && badUrl(str(raw.url, 1000))) {
+      // Reject unsafe URLs up front so a bad value never reaches the sheet.
+      if (kind === 'link' && raw.url !== undefined && !isSafeUrl(str(raw.url, 1000))) {
         return NextResponse.json({ success: false, error: 'url must start with http://, https://, or /' }, { status: 400 })
+      }
+      if (kind === 'announcement' && str(raw.imageUrl, 1000) && !isSafeUrl(str(raw.imageUrl, 1000))) {
+        return NextResponse.json({ success: false, error: 'image URL must start with http://, https://, or /' }, { status: 400 })
       }
 
       if (action === 'add') {

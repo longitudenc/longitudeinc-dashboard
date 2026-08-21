@@ -346,6 +346,9 @@
   .ann-card.pinned{border-left-color:var(--primary);background:#f7fbf9;}
   .ann-title{font-weight:700;font-size:15px;margin-bottom:4px;color:var(--text);}
   .ann-body{font-size:13.5px;line-height:1.5;color:var(--text-muted);white-space:pre-wrap;}
+  .ann-img{display:block;max-width:100%;max-height:420px;border-radius:8px;border:1px solid var(--border);margin-top:11px;cursor:zoom-in;}
+  .aud-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;}
+  .aud-grid label{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:400;cursor:pointer;}
   .ann-meta{font-size:11px;color:var(--text-light);margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
   .pin-tag{background:var(--primary);color:#fff;font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:20px;text-transform:uppercase;letter-spacing:.05em;}
 
@@ -365,6 +368,8 @@
   .link-tile{display:flex;align-items:center;gap:9px;background:#fff;border:1px solid var(--border);border-radius:10px;padding:11px 13px;text-decoration:none;color:var(--text);font-size:13px;font-weight:600;transition:all .15s;}
   .link-tile:hover{border-color:var(--primary);box-shadow:0 2px 8px rgba(4,134,103,.12);transform:translateY(-1px);}
   .link-tile .lt-icon{font-size:17px;line-height:1;}
+  .link-slot{display:flex;flex-direction:column;gap:5px;}
+  .link-edit{display:flex;gap:5px;}
   .link-cat{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-light);margin:.75rem 0 .4rem;}
 
   /* Forms */
@@ -13837,6 +13842,7 @@ function paintHome(){
     html += anns.map(a=>`<div class="ann-card${a.pinned?' pinned':''}">
       <div class="ann-title">${a.pinned?'<span class="pin-tag">Pinned</span> ':''}${hEsc(a.title)}</div>
       <div class="ann-body">${hEsc(a.body)}</div>
+      ${a.imageUrl?`<a href="${hEsc(a.imageUrl)}" target="_blank" rel="noopener noreferrer" title="Open full size"><img class="ann-img" src="${hEsc(a.imageUrl)}" alt="" loading="lazy" onerror="this.parentNode.style.display='none';"></a>`:''}
       <div class="ann-meta">
         <span>${a.startDate?hFmtDate(a.startDate,true):''}</span>
         ${a.endDate?`<span>&middot; through ${hFmtDate(a.endDate,true)}</span>`:''}
@@ -13862,8 +13868,15 @@ function paintHome(){
       html += `<div class="link-cat">${hEsc(cat)}</div><div class="links-grid">`;
       html += cats[cat].map(l=>{
         const ext = /^https?:\/\//i.test(l.url);
-        return `<a class="link-tile" href="${hEsc(l.url)}"${ext?' target="_blank" rel="noopener noreferrer"':''}>
+        const tile = `<a class="link-tile" href="${hEsc(l.url)}"${ext?' target="_blank" rel="noopener noreferrer"':''}>
           <span class="lt-icon">${hEsc(l.icon)}</span><span>${hEsc(l.label)}</span></a>`;
+        if(!canEdit) return tile;
+        // The buttons sit OUTSIDE the anchor — nesting them would be invalid
+        // HTML and a click would follow the link instead of opening the editor.
+        return `<div class="link-slot">${tile}<div class="link-edit">
+          <button class="btn btn-secondary btn-sm" style="padding:3px 9px;font-size:11px;" onclick="openHomeEditor('link','${hEsc(l.id)}')">Edit</button>
+          <button class="btn btn-secondary btn-sm" style="padding:3px 9px;font-size:11px;" onclick="deleteHomeItem('link','${hEsc(l.id)}')">Delete</button>
+        </div></div>`;
       }).join('');
       html += '</div>';
     });
@@ -13913,29 +13926,44 @@ function openHomeEditor(kind, id){
         : `<input class="ff-input" id="he-${name}" type="${type}" value="${hEsc(val||'')}" ${extra||''}>`)
     + '</div>';
 
+  // Audience picker — a tick-list rather than free text, so a typo can't
+  // silently hide an item from everyone. "Everyone" and the individual roles
+  // are mutually exclusive.
+  const AUD=(sel)=>{
+    const chosen=(sel||[]).map(s=>String(s).toLowerCase());
+    const all=chosen.length===0||chosen.includes('all');
+    return `<div class="ff-row"><label class="ff-label">Who can see this</label>
+      <div class="aud-grid">
+        <label style="grid-column:1/-1;font-weight:600;"><input type="checkbox" id="he-aud-all" ${all?'checked':''} onchange="audToggleAll(this)"> Everyone</label>`
+      + HOME_ROLE_OPTS.map(([v,l])=>`<label><input type="checkbox" class="he-aud" value="${v}" ${chosen.includes(v)?'checked':''} onchange="audToggleRole()"> ${l}</label>`).join('')
+      + `</div><div class="ff-help">Tick Everyone, or choose which roles see it.</div></div>`;
+  };
+
   let body='';
   if(kind==='announcement'){
     body = F('Title','title','text',item.title)
       + F('Body','body','textarea',item.body)
+      + F('Image URL','imageUrl','text',item.imageUrl,'placeholder="https://... or /announcements/flyer.png"')
+      + `<div class="ff-help" style="margin:-11px 0 15px;">Optional. Paste a link to an image, or upload one to the site and use its path.</div>`
       + `<div class="ff-row"><label class="ff-label" style="display:flex;align-items:center;gap:8px;font-weight:400;">
            <input type="checkbox" id="he-pinned" ${item.pinned?'checked':''}> Pin to the top</label></div>`
       + F('Show From','startDate','date',item.startDate)
       + F('Hide After','endDate','date',item.endDate)
-      + F('Audience','audience','text',(item.audience||[]).join(','),'placeholder="blank = everyone, or e.g. area_manager,manager"');
+      + AUD(item.audience);
   } else if(kind==='date'){
     body = F('Title','title','text',item.title)
       + F('Date','date','date',item.date)
       + F('End Date','endDate','date',item.endDate)
       + F('Category','category','text',item.category,'placeholder="e.g. Training, Payroll, Holiday"')
       + F('Note','note','textarea',item.note)
-      + F('Audience','audience','text',(item.audience||[]).join(','),'placeholder="blank = everyone"');
+      + AUD(item.audience);
   } else {
     body = F('Label','label','text',item.label)
       + F('URL','url','text',item.url,'placeholder="https://... or /market.html"')
       + F('Icon','icon','text',item.icon,'placeholder="an emoji"')
       + F('Category','category','text',item.category,'placeholder="e.g. Dashboards"')
       + F('Sort Order','sortOrder','number',item.sortOrder)
-      + F('Audience','audience','text',(item.audience||[]).join(','),'placeholder="blank = everyone"');
+      + AUD(item.audience);
   }
 
   const titles={announcement:'Announcement',date:'Important Date',link:'Quick Link'};
@@ -13956,16 +13984,36 @@ function openHomeEditor(kind, id){
 }
 function closeHomeEditor(){ const el=document.getElementById('home-editor'); if(el) el.remove(); }
 
+// Roles offered by the audience picker. Order matches the sidebar hierarchy.
+const HOME_ROLE_OPTS=[['owner','Owner'],['admin','Admin'],['viewer','Viewer'],
+                      ['area_manager','Area Manager'],['manager','Manager'],['stylist','Stylist']];
+// Everyone vs specific roles are mutually exclusive: ticking Everyone clears the
+// role boxes, and ticking any role clears Everyone.
+function audToggleAll(cb){
+  if(cb.checked) document.querySelectorAll('.he-aud').forEach(x=>x.checked=false);
+}
+function audToggleRole(){
+  const any=[...document.querySelectorAll('.he-aud')].some(x=>x.checked);
+  const all=document.getElementById('he-aud-all');
+  if(all) all.checked=!any;
+}
+// '' means everyone — matches the server's blank-audience contract.
+function audValue(){
+  const all=document.getElementById('he-aud-all');
+  if(all && all.checked) return '';
+  return [...document.querySelectorAll('.he-aud')].filter(x=>x.checked).map(x=>x.value).join(',');
+}
+
 function saveHomeItem(kind, id){
   const v=n=>{ const el=document.getElementById('he-'+n); return el?el.value:''; };
-  const item={};
+  const item={}; const audience=audValue();
   if(kind==='announcement'){
     const p=document.getElementById('he-pinned');
-    Object.assign(item,{title:v('title'),body:v('body'),pinned:!!(p&&p.checked),startDate:v('startDate'),endDate:v('endDate'),audience:v('audience')});
+    Object.assign(item,{title:v('title'),body:v('body'),imageUrl:v('imageUrl'),pinned:!!(p&&p.checked),startDate:v('startDate'),endDate:v('endDate'),audience});
   } else if(kind==='date'){
-    Object.assign(item,{title:v('title'),date:v('date'),endDate:v('endDate'),category:v('category'),note:v('note'),audience:v('audience')});
+    Object.assign(item,{title:v('title'),date:v('date'),endDate:v('endDate'),category:v('category'),note:v('note'),audience});
   } else {
-    Object.assign(item,{label:v('label'),url:v('url'),icon:v('icon'),category:v('category'),sortOrder:v('sortOrder'),audience:v('audience')});
+    Object.assign(item,{label:v('label'),url:v('url'),icon:v('icon'),category:v('category'),sortOrder:v('sortOrder'),audience});
   }
   if(id) item.id=id;
 
@@ -14117,6 +14165,11 @@ function renderFormField(f){
   } else if(f.type==='checkbox'){
     input=`<label style="display:flex;align-items:center;gap:8px;font-size:13.5px;cursor:pointer;">
       <input type="checkbox" id="${id}"> ${hEsc(f.placeholder||'Yes')}</label>`;
+  } else if(f.type==='multiselect'){
+    // Tick-all-that-apply. Submits an array; this is what a Google Forms
+    // checkbox question maps to.
+    input='<div class="ff-radio">' + f.options.map(o=>
+      `<label><input type="checkbox" class="${id}-opt" value="${hEsc(o)}"> ${hEsc(o)}</label>`).join('') + '</div>';
   } else if(f.type==='employee'){
     input=`<select class="ff-select" id="${id}"><option value="">— Select employee —</option>${formsEmployeeOptions()}</select>`;
   } else if(f.type==='salon'){
@@ -14167,6 +14220,9 @@ function submitActiveForm(){
     if(fl.type==='radio'){
       const sel=document.querySelector('input[name="'+id+'"]:checked');
       val = sel?sel.value:'';
+    } else if(fl.type==='multiselect'){
+      // Kept as an array — validateSubmission and buildSummary both handle it.
+      val = [...document.querySelectorAll('.'+id+'-opt')].filter(x=>x.checked).map(x=>x.value);
     } else if(fl.type==='checkbox'){
       const el=document.getElementById(id);
       val = (el&&el.checked)?'Yes':'';
@@ -14174,8 +14230,11 @@ function submitActiveForm(){
       const el=document.getElementById(id);
       val = el?String(el.value).trim():'';
     }
-    if(fl.required && !val) missing.push(fl.label);
-    if(val) data[fl.fieldKey]=val;
+    // An empty array is truthy, so emptiness has to be tested per-shape or a
+    // required multiselect would pass with nothing ticked.
+    const empty = Array.isArray(val) ? val.length===0 : !val;
+    if(fl.required && empty) missing.push(fl.label);
+    if(!empty) data[fl.fieldKey]=val;
   });
 
   if(missing.length){
@@ -14242,8 +14301,8 @@ function submissionDetail(s){
     def.fields.forEach(f=>{
       if(f.type==='section') return;
       const v=s.data[f.fieldKey];
-      if(v===undefined||v==='') return;
-      let shown=v;
+      if(v===undefined||v===''||(Array.isArray(v)&&!v.length)) return;
+      let shown=Array.isArray(v)?v.join(', '):v;
       // Employee picker stores a globalId — show the name back to the reader.
       if(f.type==='employee'){
         const p=(INACTIVE_MAP||{})[v];

@@ -43,9 +43,11 @@ export const SUBS_COLUMNS = [
 // Field types the client renderer knows how to draw. `employee` and `salon`
 // are roster-backed pickers — they store the real globalId / salonNum rather
 // than a typed name, which is the whole point of moving off Google Forms.
+// `multiselect` is a tick-all-that-apply group and stores an ARRAY; it is what a
+// Google Forms checkbox question migrates to. `checkbox` stays a single yes/no.
 export const FIELD_TYPES = [
   'text', 'textarea', 'number', 'date', 'select', 'radio', 'checkbox',
-  'employee', 'salon', 'section',
+  'multiselect', 'employee', 'salon', 'section',
 ] as const
 export type FieldType = (typeof FIELD_TYPES)[number]
 
@@ -299,6 +301,13 @@ export function validateSubmission(def: FormDef, data: Record<string, any>): str
     if ((f.type === 'select' || f.type === 'radio') && f.options.length > 0) {
       if (!f.options.includes(String(raw))) {
         errors.push(`${f.label} must be one of: ${f.options.join(', ')}`)
+      }
+    }
+    if (f.type === 'multiselect' && f.options.length > 0) {
+      const chosen = Array.isArray(raw) ? raw : [raw]
+      const unknown = chosen.map(String).filter(v => !f.options.includes(v))
+      if (unknown.length) {
+        errors.push(`${f.label} has invalid option(s): ${unknown.join(', ')}`)
       }
     }
   }
