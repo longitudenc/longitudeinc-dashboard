@@ -52,9 +52,9 @@ export interface PaceRow {
   diff: number     // actual − target, in percentage points (+ = over)
 }
 
-export async function buildPayrollPace(asOf?: string): Promise<{ weekStart: string; lastDay: string; rows: PaceRow[] }> {
+export async function buildPayrollPace(asOf?: string): Promise<{ weekStart: string; weekEnd: string; lastDay: string; rows: PaceRow[] }> {
   const today = asOf || todayET()
-  const { start: weekStart } = fiscalWeekContaining(today) // this week's Saturday
+  const { start: weekStart, end: weekEnd } = fiscalWeekContaining(today) // Sat start, Fri end
   const lastDay = addDays(today, -1)                        // through yesterday (settled)
   const windowStart = addDays(weekStart, -42)               // 6 prior weeks for the CC band
 
@@ -120,7 +120,7 @@ export async function buildPayrollPace(asOf?: string): Promise<{ weekStart: stri
     })
     .sort((x, y) => Number(x.salonNum) - Number(y.salonNum)) // numerical salon order
 
-  return { weekStart, lastDay, rows: out }
+  return { weekStart, weekEnd, lastDay, rows: out }
 }
 
 function fmtMDY(iso: string): string {
@@ -128,7 +128,7 @@ function fmtMDY(iso: string): string {
   return `${Number(m)}/${Number(d)}/${y}`
 }
 
-function paceHtml(weekStart: string, lastDay: string, rows: PaceRow[]): string {
+function paceHtml(weekEnd: string, lastDay: string, rows: PaceRow[]): string {
   const cell = (v: string, style = '') => `<td style="padding:6px 10px;border-bottom:1px solid #eee;${style}">${v}</td>`
   const body = rows.map(r => {
     const over = r.diff > 0.05
@@ -146,7 +146,7 @@ function paceHtml(weekStart: string, lastDay: string, rows: PaceRow[]): string {
   }).join('')
 
   return `<div style="font-family:system-ui,-apple-system,sans-serif;font-size:14px;color:#1a2b25;max-width:640px;">
-    <h2 style="margin:0 0 2px;color:#03654e;">Payroll Pace — week of ${fmtMDY(weekStart)}</h2>
+    <h2 style="margin:0 0 2px;color:#03654e;">Payroll Pace — week ending ${fmtMDY(weekEnd)}</h2>
     <div style="color:#666;margin-bottom:12px;">Week-to-date through ${fmtMDY(lastDay)}. Actual payroll % vs. daily target. <b style="color:#b23;">+ = over</b> (tighten up), <b style="color:#1a7a3a;">− = under</b>.</div>
     <table style="border-collapse:collapse;width:100%;font-size:13px;">
       <thead><tr style="background:#03654e;color:#fff;">
@@ -171,17 +171,17 @@ export async function sendPayrollPace(asOf?: string): Promise<{ sent: boolean; c
     console.warn('[payroll-pace] skipped — RESEND_API_KEY or PAYROLL_PACE_EMAIL not set')
     return { sent: false, count: 0 }
   }
-  const { weekStart, lastDay, rows } = await buildPayrollPace(asOf)
+  const { weekEnd, lastDay, rows } = await buildPayrollPace(asOf)
   if (!rows.length) {
     console.warn('[payroll-pace] no salon data for the current week-to-date; nothing sent')
     return { sent: false, count: 0 }
   }
-  const html = paceHtml(weekStart, lastDay, rows)
+  const html = paceHtml(weekEnd, lastDay, rows)
   const resend = new Resend(process.env.RESEND_API_KEY)
   await resend.emails.send({
     from: FROM,
     to,
-    subject: `Payroll Pace — week of ${fmtMDY(weekStart)} (through ${fmtMDY(lastDay)})`,
+    subject: `Payroll Pace — week ending ${fmtMDY(weekEnd)} (through ${fmtMDY(lastDay)})`,
     html,
   })
   console.log(`[payroll-pace] sent to ${to.join(', ')} — ${rows.length} salons`)
