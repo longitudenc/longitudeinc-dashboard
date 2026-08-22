@@ -47,7 +47,7 @@ export const SUBS_COLUMNS = [
 // Google Forms checkbox question migrates to. `checkbox` stays a single yes/no.
 export const FIELD_TYPES = [
   'text', 'textarea', 'number', 'date', 'select', 'radio', 'checkbox',
-  'multiselect', 'employee', 'salon', 'section',
+  'multiselect', 'employee', 'salon', 'photo', 'section', // PHOTO-FIELD-v1
 ] as const
 export type FieldType = (typeof FIELD_TYPES)[number]
 
@@ -269,6 +269,12 @@ export function buildSummary(def: FormDef, data: Record<string, any>): string {
     if (f.type === 'section') continue
     const raw = data[f.fieldKey]
     if (raw === undefined || raw === null || raw === '') continue
+    if (f.type === 'photo') {
+      const n = Array.isArray(raw) ? raw.length : (raw ? 1 : 0)
+      if (n === 0) continue
+      parts.push(`${f.label}: ${n} photo${n === 1 ? '' : 's'}`)
+      continue
+    }
     const val = Array.isArray(raw) ? raw.join(', ') : String(raw)
     parts.push(`${f.label}: ${val}`)
   }
@@ -309,6 +315,13 @@ export function validateSubmission(def: FormDef, data: Record<string, any>): str
       if (unknown.length) {
         errors.push(`${f.label} has invalid option(s): ${unknown.join(', ')}`)
       }
+    }
+    if (f.type === 'photo') {
+      // Values must look like pathnames the upload route produced — this stops
+      // a hand-crafted POST stuffing arbitrary strings or URLs into the sheet.
+      const arr = Array.isArray(raw) ? raw : [raw]
+      const bad = arr.map(String).filter(v => !/^forms\/[a-z0-9_-]+\/[\w.\-]+$/i.test(v))
+      if (bad.length) errors.push(`${f.label} has invalid photo reference(s)`)
     }
   }
   return errors

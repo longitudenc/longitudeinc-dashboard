@@ -14195,6 +14195,12 @@ function renderFormField(f){
     input=`<input class="ff-input" type="date" id="${id}">`;
   } else if(f.type==='number'){
     input=`<input class="ff-input" type="number" id="${id}" placeholder="${hEsc(f.placeholder)}">`;
+  } else if(f.type==='photo'){
+    input=`<input type="hidden" id="${id}" value="[]">`
+      +`<input type="file" id="${id}-file" accept="image/*" multiple style="display:none" onchange="ffPhotoPick(this,'${f.fieldKey}')">`
+      +`<div id="${id}-thumbs" style="display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 0;"></div>`
+      +`<button type="button" class="btn btn-secondary btn-sm" style="margin-top:8px;" onclick="document.getElementById('${id}-file').click()">📷 Add photos</button>`
+      +`<div id="${id}-status" class="ff-help"></div>`;
   } else {
     input=`<input class="ff-input" type="text" id="${id}" placeholder="${hEsc(f.placeholder)}">`;
   }
@@ -14207,6 +14213,66 @@ function renderFormField(f){
     ${input}
     ${f.help?`<div class="ff-help">${hEsc(f.help)}</div>`:''}
   </div>`;
+}
+
+// PHOTO-FIELD-v1 — photo fields upload to the PRIVATE Blob store via
+// /api/forms/photos. Each pick is downscaled in the browser, uploaded, and its
+// returned pathname kept in a hidden input as a JSON array, so submitActiveForm
+// reads it like any other field. Thumbnails preview straight from the local file.
+function ffPhotoState(key){
+  const el=document.getElementById('fld-'+key);
+  let arr=[]; try{ arr=JSON.parse((el&&el.value)||'[]'); }catch(e){ arr=[]; }
+  if(!Array.isArray(arr)) arr=[];
+  return arr;
+}
+function ffPhotoSave(key,arr){ const el=document.getElementById('fld-'+key); if(el) el.value=JSON.stringify(arr); }
+function ffPhotoCompress(file){
+  return new Promise((resolve,reject)=>{
+    if(!/^image\//.test(file.type)) return reject(new Error('not an image'));
+    const img=new Image();
+    img.onload=()=>{
+      let w=img.naturalWidth, h=img.naturalHeight; const max=1600;
+      if(w>max||h>max){ const s=Math.min(max/w,max/h); w=Math.round(w*s); h=Math.round(h*s); }
+      const c=document.createElement('canvas'); c.width=w; c.height=h;
+      c.getContext('2d').drawImage(img,0,0,w,h);
+      c.toBlob(b=> b?resolve(b):reject(new Error('could not process image')), 'image/jpeg', 0.85);
+      URL.revokeObjectURL(img.src);
+    };
+    img.onerror=()=>{ URL.revokeObjectURL(img.src); reject(new Error('could not read image')); };
+    img.src=URL.createObjectURL(file);
+  });
+}
+async function ffPhotoPick(inputEl,key){
+  const files=[...(inputEl.files||[])]; inputEl.value='';
+  const thumbs=document.getElementById('fld-'+key+'-thumbs');
+  const status=document.getElementById('fld-'+key+'-status');
+  if(status) status.textContent='';
+  for(const file of files){
+    const cell=document.createElement('div'); cell.className='ff-photo';
+    cell.style.cssText='position:relative;width:74px;height:74px;border-radius:8px;overflow:hidden;border:1px solid var(--border);background:var(--surface-2,#eee);display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--text-muted);';
+    cell.textContent='…'; if(thumbs) thumbs.appendChild(cell);
+    try{
+      const blob=await ffPhotoCompress(file);
+      const fd=new FormData();
+      fd.append('file',blob,String(file.name||'photo').replace(/\.\w+$/,'')+'.jpg');
+      fd.append('formId',(S_activeForm&&S_activeForm.formId)||'misc');
+      const res=await fetch('/api/forms/photos',{method:'POST',body:fd});
+      const j=await res.json();
+      if(!j||!j.success) throw new Error((j&&j.error)||'upload failed');
+      const arr=ffPhotoState(key); arr.push(j.pathname); ffPhotoSave(key,arr);
+      cell.textContent='';
+      cell.innerHTML=`<img src="${URL.createObjectURL(blob)}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;">`
+        +`<button type="button" title="Remove" onclick="ffPhotoRemove('${key}','${hEsc(j.pathname)}',this)" style="position:absolute;top:2px;right:2px;width:19px;height:19px;border-radius:50%;border:none;background:rgba(0,0,0,.6);color:#fff;font-size:13px;line-height:1;cursor:pointer;padding:0;">&times;</button>`;
+    }catch(e){
+      cell.remove();
+      if(status) status.innerHTML=`<span style="color:#c0392b;">Couldn't add ${hEsc(file.name||'photo')}: ${hEsc(e.message||'error')}</span>`;
+    }
+  }
+}
+function ffPhotoRemove(key,pathname,btn){
+  const arr=ffPhotoState(key); const i=arr.indexOf(pathname);
+  if(i>=0){ arr.splice(i,1); ffPhotoSave(key,arr); }
+  const cell=btn&&btn.closest('.ff-photo'); if(cell) cell.remove();
 }
 
 function renderFormRunner(){
@@ -14252,6 +14318,10 @@ function submitActiveForm(){
     } else if(fl.type==='checkbox'){
       const el=document.getElementById(id);
       val = (el&&el.checked)?'Yes':'';
+    } else if(fl.type==='photo'){
+      const el=document.getElementById(id);
+      try{ val = (el&&el.value)?JSON.parse(el.value):[]; }catch(e){ val=[]; }
+      if(!Array.isArray(val)) val=[];
     } else {
       const el=document.getElementById(id);
       val = el?String(el.value).trim():'';
@@ -14332,6 +14402,11 @@ function submissionDetail(s){
       if(f.type==='section') return;
       const v=s.data[f.fieldKey];
       if(v===undefined||v===''||(Array.isArray(v)&&!v.length)) return;
+      if(f.type==='photo'){
+        const n=Array.isArray(v)?v.length:0;
+        dl += `<dt>${hEsc(f.label)}</dt><dd>📷 ${n} photo${n===1?'':'s'} attached</dd>`;
+        return;
+      }
       let shown=Array.isArray(v)?v.join(', '):v;
       // Employee picker stores a globalId — show the name back to the reader.
       if(f.type==='employee'){
