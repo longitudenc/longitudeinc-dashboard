@@ -8,6 +8,7 @@
     "start": "next start"
   },
   "dependencies": {
+    "@vercel/blob": "^2.8.0",
     "google-auth-library": "^9.11.0",
     "googleapis": "^140.0.0",
     "next": "15.3.8",
