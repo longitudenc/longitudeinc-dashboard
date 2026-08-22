@@ -3,26 +3,69 @@
     {
       "path": "/api/market/ratings",
       "schedule": "0 9 1 * *"
+    },
+    {
+      "path": "/api/cron/weekly",
+      "schedule": "0 9 * * 6"
     }
   ],
   "functions": {
-    "app/api/scrape/daily/route.ts":                { "maxDuration": 60 },
-    "app/api/scrape/weekly/route.ts":               { "maxDuration": 60 },
-    "app/api/scrape/monthly/route.ts":              { "maxDuration": 60 },
-    "app/api/scrape/roster/route.ts":               { "maxDuration": 60 },
-    "app/api/scrape/profile/route.ts":              { "maxDuration": 60 },
-    "app/api/scrape/employee/route.ts":             { "maxDuration": 60 },
-    "app/api/scrape/employee-daily/route.ts":       { "maxDuration": 60 },
-    "app/api/scrape/employee-weekly-cons/route.ts": { "maxDuration": 60 },
-    "app/api/scrape/payroll/route.ts":              { "maxDuration": 60 },
-    "app/api/scrape/shifts/route.ts":               { "maxDuration": 60 },
-    "app/api/scrape/chkinout/route.ts":             { "maxDuration": 60 },
-    "app/api/scrape/demand/route.ts":               { "maxDuration": 60 },
-    "app/api/scrape/halfhour/route.ts":             { "maxDuration": 60 },
-    "app/api/scrape/bonus-period/route.ts":         { "maxDuration": 60 },
-    "app/api/scrape/manual/route.ts":               { "maxDuration": 60 },
-    "app/api/cron/run/route.ts":                    { "maxDuration": 60 },
-    "app/api/market/ratings/route.ts":              { "maxDuration": 60 },
-    "app/api/market/resolve-places/route.ts":       { "maxDuration": 60 }
+    "app/api/scrape/daily/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/scrape/weekly/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/scrape/monthly/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/scrape/roster/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/scrape/profile/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/scrape/employee/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/scrape/employee-daily/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/scrape/employee-weekly-cons/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/scrape/payroll/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/scrape/shifts/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/scrape/chkinout/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/scrape/demand/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/scrape/halfhour/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/scrape/bonus-period/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/scrape/manual/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/cron/run/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/market/ratings/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/market/resolve-places/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/cron/weekly/route.ts": {
+      "maxDuration": 60
+    }
   }
 }

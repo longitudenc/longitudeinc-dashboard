@@ -13,21 +13,30 @@ import { runBonusPeriodForMonth } from '@/lib/bonus-period'
 import { readSheet, rowsToObjects } from '@/lib/sheets'
 import { sendAlert, heartbeat } from '@/lib/alert'
 import { sendPayrollPace } from '@/lib/payroll-pace'
+
 import {
   runDailyScrape,
-  runWeeklyScrape,
   runMonthlyScrape,
-  runRosterScrape,
-  runEmployeeScrape,
-  runEmployeeWeeklyConsolidatedScrape,
   runEmployeeDailyScrape,
-  runPayrollScrape,
   runProfileScrape,
   runShiftsScrape,
   runChkInOutScrape,
   runDemandScrape,
   runHalfHourScrape,
 } from '@/lib/scrape-runner'
+// Kick off the dedicated weekly finalizer in its OWN function invocation (own 60s).
+// Give the request a few seconds to be received (so the weekly function starts),
+// then detach — the weekly route runs to completion independently of this request.
+async function triggerWeekly(): Promise<string> {
+  const base = process.env.SELF_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '')
+  if (!base || !process.env.CRON_SECRET) return 'skipped (no base url / secret)'
+  const url = `${base}/api/cron/weekly?secret=${encodeURIComponent(process.env.CRON_SECRET)}`
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), 6000)
+  try { await fetch(url, { signal: ctrl.signal }); return 'completed' }
+  catch { return 'dispatched (running in background)' }
+  finally { clearTimeout(timer) }
+}
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -99,10 +108,9 @@ export async function GET(request: Request) {
   // week is missing (a prior Saturday was skipped/failed).
   const expectedFriday = mostRecentFriday(yesterday)
   const weeklyStale = !isSaturday && (await weeklyDataStale(expectedFriday))
-  const needWeekly = isSaturday || weeklyStale
 
   const fired: string[] = ['daily', 'employee-daily', 'demand', 'halfhour']
-  if (needWeekly) fired.push(weeklyStale ? 'weekly (catch-up)' : 'weekly')
+  if (weeklyStale) fired.push('weekly (catch-up → /api/cron/weekly)')
   if (isMonthEnd) fired.push('monthly', 'bonus-period')
 
   console.log(
@@ -129,16 +137,13 @@ export async function GET(request: Request) {
   // Access control: departed employees drop from EmployeeProfile within a day.
   results.push({ name: 'profile', result: await runProfileScrape() })
 
-  // 3. WEEKLY finalizer — Saturday, or catch-up when a prior Saturday was missed
-  //    (see weeklyDataStale). Moved AHEAD of the recoverable detail scrapes: it
-  //    used to run 8th and get starved by the timeout, which is why a missed
-  //    week never finalized. Salon weekly first, then the weekly-cadence entities.
-  if (needWeekly) {
-    results.push({ name: 'weekly',   result: await runWeeklyScrape() })
-    results.push({ name: 'roster',   result: await runRosterScrape() })
-    results.push({ name: 'employee', result: await runEmployeeScrape() })
-    results.push({ name: 'employee-weekly-cons', result: await runEmployeeWeeklyConsolidatedScrape() })
-    results.push({ name: 'payroll',  result: await runPayrollScrape() })
+  // 3. WEEKLY finalizer — now its OWN Vercel cron (Saturday, /api/cron/weekly) with
+  //    a clean 60s, so the salon weekly can't be starved by the daily scrapes above.
+  //    Here we only self-heal: if a prior Saturday's run was missed (weeklyStale on a
+  //    non-Saturday), kick that route off in its own function invocation.
+  if (weeklyStale) {
+    const disp = await triggerWeekly()
+    results.push({ name: 'weekly-catchup', result: { ok: true, message: `/api/cron/weekly ${disp}` } })
   }
 
   // 4. Month-end bonuses (only when yesterday was a month-end Friday).
