@@ -10,7 +10,7 @@
 
 import { NextResponse } from 'next/server'
 import { requireSignedIn } from '@/lib/require-role'
-import { getSubmissions, filterSubmissions, canReviewSubmission } from '@/lib/forms'
+import { getSubmissions, filterSubmissions, canReviewSubmission, getFormDefs } from '@/lib/forms'
 
 export async function GET(req: Request) {
   const gate = await requireSignedIn()
@@ -22,7 +22,9 @@ export async function GET(req: Request) {
     const status = String(url.searchParams.get('status') || '').trim().toLowerCase()
 
     const all = await getSubmissions()
-    let visible = filterSubmissions(all, gate.access, gate.email)
+    const defs = await getFormDefs()
+    const rvMap = new Map(defs.map(d => [d.formId, d.responseView || 'standard']))
+    let visible = filterSubmissions(all, gate.access, gate.email, defs)
 
     if (formId) visible = visible.filter(s => s.formId === formId)
     if (status) visible = visible.filter(s => s.status === status)
@@ -49,7 +51,7 @@ export async function GET(req: Request) {
         reviewNote: s.reviewNote,
         // Drives whether the client shows review controls. The server re-checks
         // this on write regardless — this is only to avoid dead buttons.
-        canReview: canReviewSubmission(s, gate.access),
+        canReview: canReviewSubmission(s, gate.access, rvMap.get(s.formId) || 'standard'),
         isMine: !!myGid && s.submittedByGid === myGid,
       }))
 

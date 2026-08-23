@@ -13,7 +13,7 @@
 import { NextResponse } from 'next/server'
 import { get } from '@vercel/blob'
 import { requireSignedIn } from '@/lib/require-role'
-import { getSubmissions, canViewSubmission } from '@/lib/forms'
+import { getSubmissions, canViewSubmission, getFormDefs } from '@/lib/forms'
 
 export const runtime = 'nodejs'
 
@@ -32,7 +32,8 @@ export async function GET(req: Request) {
   // returned on a permission miss so we don't reveal that the id exists.
   const sub = (await getSubmissions()).find(s => s.submissionId === sid)
   if (!sub) return new NextResponse('Not found', { status: 404 })
-  if (!canViewSubmission(sub, gate.access, gate.email)) {
+  const rv = (await getFormDefs()).find(d => d.formId === sub.formId)?.responseView || 'standard'
+  if (!canViewSubmission(sub, gate.access, gate.email, rv)) {
     return new NextResponse('Not found', { status: 404 })
   }
 

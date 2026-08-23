@@ -19,6 +19,7 @@ import { readSheet, rowsToObjects, writeSheet } from '@/lib/sheets'
 import {
   getSubmissions,
   canReviewSubmission,
+  getFormDefs,
   SUBMISSION_STATUSES,
   TAB_SUBS,
   SUBS_COLUMNS,
@@ -49,7 +50,9 @@ export async function POST(req: Request) {
     if (!target) {
       return NextResponse.json({ success: false, error: 'submission not found' }, { status: 404 })
     }
-    if (!canReviewSubmission(target, gate.access)) {
+    const defs = await getFormDefs()
+    const rv = defs.find(d => d.formId === target.formId)?.responseView || 'standard'
+    if (!canReviewSubmission(target, gate.access, rv)) {
       return NextResponse.json({ success: false, error: 'insufficient permissions' }, { status: 403 })
     }
 
