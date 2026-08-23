@@ -14219,6 +14219,29 @@ function renderFormField(f){
 // /api/forms/photos. Each pick is downscaled in the browser, uploaded, and its
 // returned pathname kept in a hidden input as a JSON array, so submitActiveForm
 // reads it like any other field. Thumbnails preview straight from the local file.
+//
+// HEIC-READY-v1 — iPhone photos are often HEIC, which Chrome/Firefox can't
+// decode. When a HEIC is picked we lazy-load a self-hosted converter
+// (/vendor/heic2any.min.js) and turn it into a JPEG before compressing. The
+// library only loads if a HEIC actually appears, so normal uploads pay nothing.
+let _ffHeicLib=null;
+function ffIsHeic(file){
+  const t=String(file&&file.type||'').toLowerCase();
+  const n=String(file&&file.name||'').toLowerCase();
+  return t==='image/heic'||t==='image/heif'||/\.hei[cf]$/.test(n);
+}
+function ffLoadHeic(){
+  if(window.heic2any) return Promise.resolve();
+  if(_ffHeicLib) return _ffHeicLib;
+  _ffHeicLib=new Promise((resolve,reject)=>{
+    const s=document.createElement('script');
+    s.src='/vendor/heic2any.min.js';
+    s.onload=()=>window.heic2any?resolve():reject(new Error('HEIC converter did not load'));
+    s.onerror=()=>reject(new Error('could not load HEIC converter'));
+    document.head.appendChild(s);
+  });
+  return _ffHeicLib;
+}
 function ffPhotoState(key){
   const el=document.getElementById('fld-'+key);
   let arr=[]; try{ arr=JSON.parse((el&&el.value)||'[]'); }catch(e){ arr=[]; }
@@ -14252,7 +14275,14 @@ async function ffPhotoPick(inputEl,key){
     cell.style.cssText='position:relative;width:74px;height:74px;border-radius:8px;overflow:hidden;border:1px solid var(--border);background:var(--surface-2,#eee);display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--text-muted);';
     cell.textContent='…'; if(thumbs) thumbs.appendChild(cell);
     try{
-      const blob=await ffPhotoCompress(file);
+      let src=file;
+      if(ffIsHeic(file)){
+        cell.textContent='converting…';
+        await ffLoadHeic();
+        const out=await window.heic2any({blob:file, toType:'image/jpeg', quality:0.9});
+        src = Array.isArray(out) ? out[0] : out;
+      }
+      const blob=await ffPhotoCompress(src);
       const fd=new FormData();
       fd.append('file',blob,String(file.name||'photo').replace(/\.\w+$/,'')+'.jpg');
       fd.append('formId',(S_activeForm&&S_activeForm.formId)||'misc');
@@ -14273,6 +14303,17 @@ function ffPhotoRemove(key,pathname,btn){
   const arr=ffPhotoState(key); const i=arr.indexOf(pathname);
   if(i>=0){ arr.splice(i,1); ffPhotoSave(key,arr); }
   const cell=btn&&btn.closest('.ff-photo'); if(cell) cell.remove();
+}
+// PHOTO-VIEW-v1 — full-screen preview of a stored photo, streamed from the
+// authenticated /api/forms/photos/view route. Click anywhere to dismiss.
+function ffPhotoView(sid,pathname){
+  const u='/api/forms/photos/view?sid='+encodeURIComponent(sid)+'&p='+encodeURIComponent(pathname);
+  const ov=document.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;z-index:99999;cursor:zoom-out;padding:20px;';
+  ov.innerHTML=`<img src="${u}" style="max-width:100%;max-height:100%;border-radius:8px;box-shadow:0 10px 50px rgba(0,0,0,.6);">`;
+  ov.onclick=()=>ov.remove();
+  document.addEventListener('keydown',function esc(e){ if(e.key==='Escape'){ ov.remove(); document.removeEventListener('keydown',esc); } });
+  document.body.appendChild(ov);
 }
 
 function renderFormRunner(){
@@ -14403,8 +14444,12 @@ function submissionDetail(s){
       const v=s.data[f.fieldKey];
       if(v===undefined||v===''||(Array.isArray(v)&&!v.length)) return;
       if(f.type==='photo'){
-        const n=Array.isArray(v)?v.length:0;
-        dl += `<dt>${hEsc(f.label)}</dt><dd>📷 ${n} photo${n===1?'':'s'} attached</dd>`;
+        const list=Array.isArray(v)?v:[];
+        const thumbs=list.map(p=>{
+          const u='/api/forms/photos/view?sid='+encodeURIComponent(s.submissionId)+'&p='+encodeURIComponent(p);
+          return `<img src="${u}" loading="lazy" title="Tap to enlarge" onclick="ffPhotoView('${s.submissionId}','${p}')" style="width:66px;height:66px;object-fit:cover;border-radius:6px;border:1px solid var(--border);cursor:zoom-in;">`;
+        }).join('');
+        dl += `<dt>${hEsc(f.label)}</dt><dd>${list.length?`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:2px;">${thumbs}</div>`:'—'}</dd>`;
         return;
       }
       let shown=Array.isArray(v)?v.join(', '):v;
