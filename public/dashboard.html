@@ -3461,7 +3461,7 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
       <div class="tabs" id="forms-tabbar">
         <button class="tab active" id="ftb-new"   onclick="showFormsTab('new')">New Form</button>
         <button class="tab"        id="ftb-mine"  onclick="showFormsTab('mine')">My Submissions</button>
-        <button class="tab"        id="ftb-queue" onclick="showFormsTab('queue')" style="display:none;">Review Queue</button>
+        <button class="tab"        id="ftb-queue" onclick="showFormsTab('queue')" style="display:none;">Requests</button>
       </div>
       <div id="forms-new"><div class="no-data">Loading&hellip;</div></div>
       <div id="forms-mine"  style="display:none;"></div>
@@ -13841,7 +13841,7 @@ function paintHome(){
     ['Active Salons', (typeof ACTIVE_SALONS!=='undefined' && ACTIVE_SALONS ? ACTIVE_SALONS.length : '—'), ''],
     ['Week Ending',   (S.currentWeek ? hFmtDate(S.currentWeek) : '—'), ''],
     // Setting the tab before switching avoids racing loadForms()'s own render.
-    ['Awaiting Your Review', pending, pending>0 ? "S_formsTab='queue';switchToForms();" : '']
+    ['Requests to Handle', pending, pending>0 ? "S_formsTab='queue';switchToForms();" : '']
   ];
   let html = '<div class="summary-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:1.25rem;">'
     + stats.map(([l,v,act])=>`<div class="metric-card"${act?` onclick="${act}" style="cursor:pointer;"`:''}><div class="metric-label">${hEsc(l)}</div><div class="metric-value">${hEsc(v)}</div></div>`).join('')
@@ -14112,12 +14112,30 @@ function renderFormsList(){
       + '</div>';
     return;
   }
-  host.innerHTML = '<div class="forms-grid">' + FORMS_DEFS.map(f=>`
-    <button class="form-tile" onclick="openForm('${hEsc(f.formId)}')">
+  // FORMS-UX-v1 — search box appears once there are more than 6 forms.
+  const search = FORMS_DEFS.length > 6
+    ? `<input type="text" class="ff-input" id="forms-search" placeholder="🔍  Search forms…" oninput="filterFormsList(this.value)" style="max-width:340px;margin-bottom:16px;">`
+    : '';
+  host.innerHTML = search + '<div class="forms-grid" id="forms-grid">' + FORMS_DEFS.map(f=>`
+    <button class="form-tile" data-search="${hEsc(((f.title||'')+' '+(f.description||'')).toLowerCase())}" onclick="openForm('${hEsc(f.formId)}')">
       <div class="ft-icon">${hEsc(f.icon)}</div>
       <div class="ft-title">${hEsc(f.title)}</div>
       <div class="ft-desc">${hEsc(f.description)}</div>
-    </button>`).join('') + '</div>';
+    </button>`).join('') + '</div>'
+    + '<div id="forms-noresult" style="display:none;color:var(--text-muted);padding:14px 4px;">No forms match that search.</div>';
+}
+
+function filterFormsList(q){
+  q=(q||'').trim().toLowerCase();
+  const grid=document.getElementById('forms-grid'); if(!grid) return;
+  let shown=0;
+  grid.querySelectorAll('.form-tile').forEach(el=>{
+    const hit = !q || (el.getAttribute('data-search')||'').includes(q);
+    el.style.display = hit ? '' : 'none';
+    if(hit) shown++;
+  });
+  const none=document.getElementById('forms-noresult');
+  if(none) none.style.display = shown ? 'none' : 'block';
 }
 
 function seedForms(){
