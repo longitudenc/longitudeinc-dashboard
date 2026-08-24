@@ -85,20 +85,7 @@ export async function resolveAccess(email: string): Promise<Access | null> {
   const e = norm(email)
   if (!e) return null
 
-  // Load the inputs. Each reader tolerates a missing tab (returns []).
-  const [users, areaManagers, managerTable, amAssignments, profiles, roster] =
-    await Promise.all([
-      getUsers(),
-      getAreaManagers(),
-      getManagerTable(),
-      getAMAssignments(),
-      getEmployeeProfiles(),
-      getSalonRoster(),
-    ])
-
-  // 1) Manual list (owner / admin / viewer / exceptions). Wins over everything.
-  // Tolerant of header variations: email/Email/E-mail, role/Role/Access, and
-  // globalId/GlobalId, salons/Salons.
+  // Header-tolerant cell picker: email/Email/E-mail, role/Role/Access, etc.
   const pick = (row: any, ...names: string[]) => {
     for (const n of names) {
       for (const k of Object.keys(row)) {
@@ -107,6 +94,13 @@ export async function resolveAccess(email: string): Promise<Access | null> {
     }
     return ''
   }
+
+  // 1) Manual list FIRST — and ALONE. Owner/admin/viewer and every non-employee
+  // login lives here, so this is the ONLY tab most authenticated requests need.
+  // Reading just this tab (instead of all six up front) cuts Sheets reads ~6x
+  // for those users — the difference between staying under Google's per-minute
+  // read quota and tripping it into slow rate-limit backoff.
+  const users = await getUsers()
   const u = users.find((r: any) => norm(pick(r, 'email', 'e-mail', 'emailaddress', 'email address')) === e)
   if (u) {
     const role = norm(pick(u, 'role', 'access', 'tier')) as Role
@@ -121,6 +115,16 @@ export async function resolveAccess(email: string): Promise<Access | null> {
       return access
     }
   }
+
+  // Not in the manual list → an employee. ONLY NOW pay for the employee tables.
+  const [areaManagers, managerTable, amAssignments, profiles, roster] =
+    await Promise.all([
+      getAreaManagers(),
+      getManagerTable(),
+      getAMAssignments(),
+      getEmployeeProfiles(),
+      getSalonRoster(),
+    ])
 
   // For employee roles we need their globalId, from the SD3 email list.
   const profile = profiles.find((p: any) => norm(p.email) === e)
