@@ -134,7 +134,6 @@ export async function POST(req: Request) {
           globalId: String(clean.employee || '').trim(),
           violation: String(clean.violation || ''),
           date: String(clean.violationDate || '').trim(),
-          action: String(clean.action || ''),
         })
       } catch (e: any) { console.error('[submit] disc event failed:', e?.message) }
     }

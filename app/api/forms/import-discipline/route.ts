@@ -34,7 +34,7 @@ const VIOLATIONS = [
   'Leaving station unclean (2 pts)',
   'Clocking out with 2+ customers waiting without approval (2 pts)',
   'Not completing duties (2 pts)',
-  'Gossip about a coworker, their family, or owner (2 pts)',
+  'Gossip about a coworker their family or owner (2 pts)',
   'Two or more redos in a month (2 pts)',
   'Two or more customer complaints in a month (2 pts)',
   'Clocking out and leaving a stylist alone (4 pts)',
@@ -42,11 +42,10 @@ const VIOLATIONS = [
   'Performing unapproved services (4 pts)',
   'Unprofessional behavior/conversation in front of a customer or management (4 pts)',
   'Giving unauthorized discounts or coupons (6 pts)',
-  'Falsification of work, personnel, or other company records (6 pts)',
+  'Falsification of work / personnel / company records (6 pts)',
   'Soliciting customers at any time for a competitive business (8 pts)',
 ].join('|')
 
-const ACTIONS = 'None at this time|3 day suspension|7 day suspension|Self Termination'
 
 const DEF: Record<string, string> = {
   formId: FORM_ID,
@@ -66,7 +65,6 @@ const FIELDS: Array<Record<string, string>> = [
   { fieldKey: 'salon', label: 'Salon', type: 'salon', required: 'yes', options: '', placeholder: '', help: '', sortOrder: '20' },
   { fieldKey: 'violationDate', label: 'Date of Violation', type: 'date', required: 'yes', options: '', placeholder: '', help: '', sortOrder: '30' },
   { fieldKey: 'violation', label: 'Violation', type: 'select', required: 'yes', options: VIOLATIONS, placeholder: '', help: 'Points are assigned automatically from the violation.', sortOrder: '40' },
-  { fieldKey: 'action', label: 'Action to be Taken', type: 'radio', required: 'yes', options: ACTIONS, placeholder: '', help: '', sortOrder: '50' },
   { fieldKey: 'employeeResponse', label: "Employee's Response", type: 'textarea', required: 'yes', options: '', placeholder: '', help: '', sortOrder: '60' },
   { fieldKey: 'comments', label: 'Additional Comments', type: 'textarea', required: '', options: '', placeholder: '', help: '', sortOrder: '70' },
 ]
