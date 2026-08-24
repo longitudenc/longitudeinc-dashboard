@@ -3485,6 +3485,7 @@ let USER_AM_NAME= '';
 function roleClean(){ return String(USER_ROLE||'').replace(/["']/g,'').trim().toLowerCase(); }
 function isAdminRole(){ const r=roleClean(); return r==='owner'||r==='admin'; }
 function isViewerRole(){ return roleClean()==='viewer'; }
+function isOwnerRole(){ return roleClean()==='owner'; }
 function isAMRole(){ const r=roleClean(); return r==='area_manager'||r==='am'; }
 function canSeeAllSalons(){ return isAdminRole()||isViewerRole(); }
 // Day Review (whole-company single-day) — owner/admin/viewer (canSeeAllSalons),
@@ -14117,10 +14118,11 @@ function renderFormsList(){
     ? `<input type="text" class="ff-input" id="forms-search" placeholder="🔍  Search forms…" oninput="filterFormsList(this.value)" style="max-width:340px;margin-bottom:16px;">`
     : '';
   host.innerHTML = search + '<div class="forms-grid" id="forms-grid">' + FORMS_DEFS.map(f=>`
-    <button class="form-tile" data-search="${hEsc(((f.title||'')+' '+(f.description||'')).toLowerCase())}" onclick="openForm('${hEsc(f.formId)}')">
+    <button class="form-tile" data-search="${hEsc(((f.title||'')+' '+(f.description||'')).toLowerCase())}" onclick="openForm('${hEsc(f.formId)}')" style="position:relative;">
       <div class="ft-icon">${hEsc(f.icon)}</div>
       <div class="ft-title">${hEsc(f.title)}</div>
       <div class="ft-desc">${hEsc(f.description)}</div>
+      ${isOwnerRole()?`<span role="button" title="Manage access" onclick="event.stopPropagation();openAccessDialog('${hEsc(f.formId)}')" style="position:absolute;top:8px;right:8px;width:28px;height:28px;border-radius:50%;border:1px solid var(--border);background:var(--surface,#fff);cursor:pointer;font-size:14px;line-height:26px;text-align:center;">⚙️</span>`:''}
     </button>`).join('') + '</div>'
     + '<div id="forms-noresult" style="display:none;color:var(--text-muted);padding:14px 4px;">No forms match that search.</div>';
 }
@@ -14136,6 +14138,74 @@ function filterFormsList(q){
   });
   const none=document.getElementById('forms-noresult');
   if(none) none.style.display = shown ? 'none' : 'block';
+}
+
+// ACCESS-PANEL-v1 — owner-only "Manage access" dialog (the gear on each form
+// tile). A friendly front door on the same engine: it writes the form's
+// responseView / notify tags via /api/forms/access. Pre-fills from FORMS_DEFS,
+// which the browser already has.
+function openAccessDialog(formId){
+  const f = FORMS_DEFS.find(x=>x.formId===formId); if(!f) return;
+  const view   = (f.responseView||[]).map(x=>String(x).toLowerCase());
+  const notify = (f.notify||[]).map(x=>String(x).toLowerCase());
+  const emails = (f.notify||[]).filter(x=>String(x).includes('@'));
+  const has = (arr,v)=>arr.includes(v);
+  const cb = (id,label,checked)=>`<label style="display:flex;align-items:center;gap:9px;padding:5px 0;cursor:pointer;"><input type="checkbox" id="${id}" ${checked?'checked':''}><span>${label}</span></label>`;
+
+  const ov=document.createElement('div');
+  ov.id='access-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:99999;padding:20px;';
+  ov.innerHTML=`
+    <div style="background:var(--surface,#fff);color:var(--text,#111);border-radius:14px;max-width:430px;width:100%;padding:22px 24px;box-shadow:0 20px 60px rgba(0,0,0,.35);max-height:90vh;overflow:auto;" onclick="event.stopPropagation()">
+      <div style="font-size:17px;font-weight:600;">Manage access</div>
+      <div style="font-size:12.5px;color:var(--text-muted);margin-bottom:16px;">${hEsc(f.icon)} ${hEsc(f.title)}</div>
+
+      <div style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin-bottom:2px;">Who can see responses</div>
+      ${cb('acv-am',"Salon's area manager",has(view,'am'))}
+      ${cb('acv-office','Office (Laura, Brandy)',has(view,'office'))}
+      ${cb('acv-maint','Maintenance (handyman)',has(view,'maintenance'))}
+      <label style="display:flex;align-items:center;gap:9px;padding:8px 0 4px;cursor:pointer;border-top:1px solid var(--border);margin-top:6px;"><input type="checkbox" id="acv-owner" ${has(view,'owner')?'checked':''}><span>Owner only — hide from admins like Kayla</span></label>
+
+      <div style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin:16px 0 2px;">Who gets emailed</div>
+      ${cb('acn-am',"Salon's area manager",has(notify,'am'))}
+      ${cb('acn-office','Office (Laura, Brandy)',has(notify,'office'))}
+      ${cb('acn-maint','Maintenance (handyman)',has(notify,'maintenance'))}
+      ${cb('acn-owner','Owner & admins',has(notify,'owner'))}
+      <input type="text" id="acn-email" class="ff-input" placeholder="Also email (optional): name@example.com" value="${hEsc(emails.join(', '))}" style="margin-top:8px;">
+
+      <div style="font-size:12px;color:var(--text-muted);margin-top:14px;line-height:1.5;">You always see everything. Whoever submits always sees their own request.</div>
+      <div id="access-msg" style="font-size:12.5px;color:#c0392b;margin-top:8px;"></div>
+
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px;">
+        <button class="btn btn-secondary" onclick="closeAccessDialog()">Cancel</button>
+        <button class="btn btn-primary" id="access-save" onclick="saveAccess('${hEsc(formId)}')">Save</button>
+      </div>
+    </div>`;
+  ov.onclick=()=>closeAccessDialog();
+  document.body.appendChild(ov);
+}
+function closeAccessDialog(){ const o=document.getElementById('access-overlay'); if(o) o.remove(); }
+function saveAccess(formId){
+  const g=id=>document.getElementById(id);
+  const view=[];
+  if(g('acv-am').checked)     view.push('am');
+  if(g('acv-office').checked)  view.push('office');
+  if(g('acv-maint').checked)   view.push('maintenance');
+  if(g('acv-owner').checked)   view.push('owner');
+  const notify=[];
+  if(g('acn-am').checked)     notify.push('am');
+  if(g('acn-office').checked)  notify.push('office');
+  if(g('acn-maint').checked)   notify.push('maintenance');
+  if(g('acn-owner').checked)   notify.push('owner');
+  String(g('acn-email').value||'').split(/[,;\s]+/).map(s=>s.trim()).filter(s=>s.includes('@')).forEach(e=>notify.push(e));
+  const btn=g('access-save'), msg=g('access-msg');
+  if(btn){ btn.disabled=true; btn.textContent='Saving…'; }
+  fetch('/api/forms/access',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({formId,responseView:view,notify})})
+    .then(r=>r.json()).then(res=>{
+      if(!res.success){ if(msg) msg.textContent=res.error||'Save failed'; if(btn){btn.disabled=false;btn.textContent='Save';} return; }
+      const f=FORMS_DEFS.find(x=>x.formId===formId); if(f){ f.responseView=res.responseView; f.notify=res.notify; }
+      closeAccessDialog();
+    }).catch(e=>{ if(msg) msg.textContent=e.message; if(btn){btn.disabled=false;btn.textContent='Save';} });
 }
 
 function seedForms(){
