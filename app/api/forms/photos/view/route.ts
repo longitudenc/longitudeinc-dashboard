@@ -32,7 +32,7 @@ export async function GET(req: Request) {
   // returned on a permission miss so we don't reveal that the id exists.
   const sub = (await getSubmissions()).find(s => s.submissionId === sid)
   if (!sub) return new NextResponse('Not found', { status: 404 })
-  const rv = (await getFormDefs()).find(d => d.formId === sub.formId)?.responseView || 'standard'
+  const rv = (await getFormDefs()).find(d => d.formId === sub.formId)?.responseView || []
   if (!canViewSubmission(sub, gate.access, gate.email, rv)) {
     return new NextResponse('Not found', { status: 404 })
   }

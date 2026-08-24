@@ -77,7 +77,7 @@ export interface FormDef {
   status: string            // 'active' | anything else = hidden
   sortOrder: number
   notify: string[]          // RESPONSE-CONFIG-v1 — emails / 'am' who get emailed on activity
-  responseView: string      // 'standard' (default) | 'confidential' (owner/admin only)
+  responseView: string[]    // RESPONSE-CONFIG-v2 tags: am / office / maintenance / owner (owner-lock)
   fields: FormField[]
 }
 
@@ -156,7 +156,7 @@ export async function getFormDefs(): Promise<FormDef[]> {
         status: lower(r.status) || 'active',
         sortOrder: num(r.sortOrder),
         notify: splitList(r.notify),
-        responseView: lower(r.responseView) || 'standard',
+        responseView: splitList(r.responseView),
         fields: byForm.get(formId) || [],
       } as FormDef
     })
@@ -228,48 +228,50 @@ export async function getSubmissions(): Promise<Submission[]> {
 // A submission with no salonNum is visible only to its author and to
 // owner/admin/viewer — it can't be attributed to a salon scope, so it must not
 // leak sideways to an AM who happens to be looking.
-export function canViewSubmission(sub: Submission, access: Access, email: string, responseView: string = 'standard'): boolean {
-  const role = access.role
-  const confidential = String(responseView).toLowerCase() === 'confidential'
-  if (role === 'owner' || role === 'admin') return true
+// RESPONSE-CONFIG-v2 — who may SEE or ACT on a submission, from the form's
+// responseView tags. Tags ADD groups: 'am' (the salon's area manager),
+// 'office' (Laura/Brandy's role), 'maintenance' (the handyman's role). The
+// 'owner' tag LOCKS a form to the owner — admins are excluded. Blank defaults
+// to 'am'. Legacy values are honored: 'standard'→am, 'confidential'→owner-lock.
+function roleSeesTags(role: string, responseView: string[], salonInScope: boolean): boolean {
+  const t = (responseView || []).map(x => {
+    const v = String(x).toLowerCase().trim()
+    return v === 'standard' ? 'am' : v === 'confidential' ? 'owner' : v
+  })
+  const ownerLocked = t.includes('owner')
+  const amDefault = t.length === 0 || t.includes('am')
 
-  // The person who submitted always sees their own request.
+  if (role === 'owner') return true
+  if (role === 'admin') return !ownerLocked              // admin sees all EXCEPT owner-locked
+  if (role === 'viewer') return false                    // viewers never see responses
+  if (role === 'area_manager' || role === 'manager') return amDefault && salonInScope
+  if (role === 'office') return t.includes('office')
+  if (role === 'maintenance') return t.includes('maintenance')
+  return false
+}
+
+export function canViewSubmission(sub: Submission, access: Access, email: string, responseView: string[] = []): boolean {
+  // The person who submitted always sees their own request — even confidential.
   const mine =
     (!!access.globalId && sub.submittedByGid === access.globalId) ||
     (!!email && sub.submittedByEmail.toLowerCase() === email.toLowerCase())
   if (mine) return true
-
-  // Read-only viewers see all standard responses, but never confidential ones.
-  if (role === 'viewer') return !confidential
-
-  // Confidential forms grant NO salon-scoped access — owner/admin (and the
-  // author, handled above) only.
-  if (confidential) return false
-
-  if (role === 'area_manager' || role === 'manager') {
-    const scope = (access.salons || []).map(s => String(s).trim())
-    return !!sub.salonNum && scope.includes(sub.salonNum)
-  }
-  return false
+  const scope = (access.salons || []).map(s => String(s).trim())
+  const salonInScope = !!sub.salonNum && scope.includes(sub.salonNum)
+  return roleSeesTags(access.role, responseView, salonInScope)
 }
 
 // Who may CHANGE a submission's status. Deliberately narrower than viewing:
 // authors can see their own request but must not approve it themselves.
-export function canReviewSubmission(sub: Submission, access: Access, responseView: string = 'standard'): boolean {
-  const role = access.role
-  if (role === 'owner' || role === 'admin') return true
-  // Confidential forms are owner/admin only — no salon-scoped review.
-  if (String(responseView).toLowerCase() === 'confidential') return false
-  if (role === 'area_manager' || role === 'manager') {
-    const scope = (access.salons || []).map(s => String(s).trim())
-    return !!sub.salonNum && scope.includes(sub.salonNum)
-  }
-  return false
+export function canReviewSubmission(sub: Submission, access: Access, responseView: string[] = []): boolean {
+  const scope = (access.salons || []).map(s => String(s).trim())
+  const salonInScope = !!sub.salonNum && scope.includes(sub.salonNum)
+  return roleSeesTags(access.role, responseView, salonInScope)
 }
 
 export function filterSubmissions(subs: Submission[], access: Access, email: string, defs: FormDef[] = []): Submission[] {
-  const rv = new Map(defs.map(d => [d.formId, d.responseView || 'standard']))
-  return subs.filter(s => canViewSubmission(s, access, email, rv.get(s.formId) || 'standard'))
+  const rv = new Map(defs.map(d => [d.formId, d.responseView || []]))
+  return subs.filter(s => canViewSubmission(s, access, email, rv.get(s.formId) || []))
 }
 
 // ── Write helpers ─────────────────────────────────────────────

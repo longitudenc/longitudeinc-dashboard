@@ -36,6 +36,8 @@ export type Role =
   | 'area_manager'
   | 'manager'
   | 'stylist'
+  | 'office'
+  | 'maintenance'
 
 export interface Access {
   role: Role

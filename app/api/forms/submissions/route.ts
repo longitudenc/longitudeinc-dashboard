@@ -23,7 +23,7 @@ export async function GET(req: Request) {
 
     const all = await getSubmissions()
     const defs = await getFormDefs()
-    const rvMap = new Map(defs.map(d => [d.formId, d.responseView || 'standard']))
+    const rvMap = new Map(defs.map(d => [d.formId, d.responseView || []]))
     let visible = filterSubmissions(all, gate.access, gate.email, defs)
 
     if (formId) visible = visible.filter(s => s.formId === formId)
@@ -51,7 +51,7 @@ export async function GET(req: Request) {
         reviewNote: s.reviewNote,
         // Drives whether the client shows review controls. The server re-checks
         // this on write regardless — this is only to avoid dead buttons.
-        canReview: canReviewSubmission(s, gate.access, rvMap.get(s.formId) || 'standard'),
+        canReview: canReviewSubmission(s, gate.access, rvMap.get(s.formId) || []),
         isMine: !!myGid && s.submittedByGid === myGid,
       }))
 

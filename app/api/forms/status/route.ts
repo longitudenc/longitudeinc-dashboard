@@ -51,7 +51,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: 'submission not found' }, { status: 404 })
     }
     const defs = await getFormDefs()
-    const rv = defs.find(d => d.formId === target.formId)?.responseView || 'standard'
+    const rv = defs.find(d => d.formId === target.formId)?.responseView || []
     if (!canReviewSubmission(target, gate.access, rv)) {
       return NextResponse.json({ success: false, error: 'insufficient permissions' }, { status: 403 })
     }

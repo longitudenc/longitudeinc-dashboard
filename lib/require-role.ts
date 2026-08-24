@@ -42,5 +42,5 @@ export function requireOwner() {
 
 // Any signed-in person with a real role — for reads that still need a session.
 export function requireSignedIn() {
-  return requireRoles(['owner', 'admin', 'viewer', 'area_manager', 'manager', 'stylist'])
+  return requireRoles(['owner', 'admin', 'viewer', 'area_manager', 'manager', 'stylist', 'office', 'maintenance'])
 }
