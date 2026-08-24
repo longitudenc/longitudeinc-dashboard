@@ -13,6 +13,7 @@ import { NextResponse } from 'next/server'
 import { requireSignedIn } from '@/lib/require-role'
 import { appendSheet, readSheet, getEmployeeProfiles } from '@/lib/sheets'
 import { notifyNewSubmission } from '@/lib/notify'
+import { recordDisciplinaryEvent } from '@/lib/disc-points'
 import {
   getFormDefs,
   audienceAllows,
@@ -116,7 +117,7 @@ export async function POST(req: Request) {
     // Best-effort notify — never fail the submission over an email.
     try {
       await notifyNewSubmission({
-        submissionId: row.submissionId, // fix: pass required submissionId
+        submissionId: row.submissionId,
         notify: def.notify || [],
         salonNum: row.salonNum,
         formTitle: def.title,
@@ -125,6 +126,18 @@ export async function POST(req: Request) {
         submitterEmail: row.submittedByEmail,
       })
     } catch (e: any) { console.error('[submit] notify failed:', e?.message) }
+
+    // Disciplinary form → also record a points event in the tracker (best-effort).
+    if (def.formId === 'discipline') {
+      try {
+        await recordDisciplinaryEvent({
+          globalId: String(clean.employee || '').trim(),
+          violation: String(clean.violation || ''),
+          date: String(clean.violationDate || '').trim(),
+          action: String(clean.action || ''),
+        })
+      } catch (e: any) { console.error('[submit] disc event failed:', e?.message) }
+    }
 
     return NextResponse.json({ success: true, submissionId: row.submissionId })
   } catch (e: any) {
