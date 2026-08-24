@@ -14122,7 +14122,7 @@ function renderFormsList(){
       <div class="ft-icon">${hEsc(f.icon)}</div>
       <div class="ft-title">${hEsc(f.title)}</div>
       <div class="ft-desc">${hEsc(f.description)}</div>
-      ${isOwnerRole()?`<span role="button" title="Manage access" onclick="event.stopPropagation();openAccessDialog('${hEsc(f.formId)}')" style="position:absolute;top:8px;right:8px;width:28px;height:28px;border-radius:50%;border:1px solid var(--border);background:var(--surface,#fff);cursor:pointer;font-size:14px;line-height:26px;text-align:center;">⚙️</span>`:''}
+      ${isAdminRole()?`<span role="button" title="Manage access" onclick="event.stopPropagation();openAccessDialog('${hEsc(f.formId)}')" style="position:absolute;top:8px;right:8px;width:28px;height:28px;border-radius:50%;border:1px solid var(--border);background:var(--surface,#fff);cursor:pointer;font-size:14px;line-height:26px;text-align:center;">⚙️</span>`:''}
     </button>`).join('') + '</div>'
     + '<div id="forms-noresult" style="display:none;color:var(--text-muted);padding:14px 4px;">No forms match that search.</div>';
 }
@@ -14164,7 +14164,6 @@ function openAccessDialog(formId){
       ${cb('acv-am',"Salon's area manager",has(view,'am'))}
       ${cb('acv-office','Office (Laura, Brandy)',has(view,'office'))}
       ${cb('acv-maint','Maintenance (handyman)',has(view,'maintenance'))}
-      <label style="display:flex;align-items:center;gap:9px;padding:8px 0 4px;cursor:pointer;border-top:1px solid var(--border);margin-top:6px;"><input type="checkbox" id="acv-owner" ${has(view,'owner')?'checked':''}><span>Owner only — hide from admins like Kayla</span></label>
 
       <div style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin:16px 0 2px;">Who gets emailed</div>
       ${cb('acn-am',"Salon's area manager",has(notify,'am'))}
@@ -14173,7 +14172,7 @@ function openAccessDialog(formId){
       ${cb('acn-owner','Owner & admins',has(notify,'owner'))}
       <input type="text" id="acn-email" class="ff-input" placeholder="Also email (optional): name@example.com" value="${hEsc(emails.join(', '))}" style="margin-top:8px;">
 
-      <div style="font-size:12px;color:var(--text-muted);margin-top:14px;line-height:1.5;">You always see everything. Whoever submits always sees their own request.</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-top:14px;line-height:1.5;">Owners and admins always see everything. Whoever submits always sees their own request.</div>
       <div id="access-msg" style="font-size:12.5px;color:#c0392b;margin-top:8px;"></div>
 
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px;">
@@ -14191,7 +14190,6 @@ function saveAccess(formId){
   if(g('acv-am').checked)     view.push('am');
   if(g('acv-office').checked)  view.push('office');
   if(g('acv-maint').checked)   view.push('maintenance');
-  if(g('acv-owner').checked)   view.push('owner');
   const notify=[];
   if(g('acn-am').checked)     notify.push('am');
   if(g('acn-office').checked)  notify.push('office');

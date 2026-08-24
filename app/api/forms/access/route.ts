@@ -7,11 +7,11 @@
 // route: only two cells on one FormDefs row change; every other column and
 // row round-trips untouched.
 //
-// Owner-ONLY on purpose: if an admin could edit this, they could un-lock an
-// owner-locked form (e.g. C.A.R.E. Fund) and grant themselves access.
+// Owner or admin: you told me there are no sensitive forms, so admins (Kayla)
+// manage access too.
 
 import { NextResponse } from 'next/server'
-import { requireOwner } from '@/lib/require-role'
+import { requireAdmin } from '@/lib/require-role'
 import { readSheet, rowsToObjects, writeSheet } from '@/lib/sheets'
 import { TAB_DEFS, DEFS_COLUMNS } from '@/lib/forms'
 
@@ -35,7 +35,7 @@ function cleanList(list: any, allowEmail: boolean): string[] {
 }
 
 export async function POST(req: Request) {
-  const gate = await requireOwner()
+  const gate = await requireAdmin()
   if (!gate.ok) return gate.response
 
   try {

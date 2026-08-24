@@ -228,21 +228,19 @@ export async function getSubmissions(): Promise<Submission[]> {
 // A submission with no salonNum is visible only to its author and to
 // owner/admin/viewer — it can't be attributed to a salon scope, so it must not
 // leak sideways to an AM who happens to be looking.
-// RESPONSE-CONFIG-v2 — who may SEE or ACT on a submission, from the form's
-// responseView tags. Tags ADD groups: 'am' (the salon's area manager),
-// 'office' (Laura/Brandy's role), 'maintenance' (the handyman's role). The
-// 'owner' tag LOCKS a form to the owner — admins are excluded. Blank defaults
-// to 'am'. Legacy values are honored: 'standard'→am, 'confidential'→owner-lock.
+// RESPONSE-CONFIG-v3 — who may SEE or ACT on a submission, from the form's
+// responseView tags. Owner and admin always see everything. Tags ADD groups
+// for the scoped roles only: 'am' (the salon's area manager), 'office'
+// (Laura/Brandy), 'maintenance' (the handyman). Blank defaults to 'am'.
+// Legacy 'standard' is read as 'am'.
 function roleSeesTags(role: string, responseView: string[], salonInScope: boolean): boolean {
   const t = (responseView || []).map(x => {
     const v = String(x).toLowerCase().trim()
-    return v === 'standard' ? 'am' : v === 'confidential' ? 'owner' : v
+    return v === 'standard' ? 'am' : v
   })
-  const ownerLocked = t.includes('owner')
   const amDefault = t.length === 0 || t.includes('am')
 
-  if (role === 'owner') return true
-  if (role === 'admin') return !ownerLocked              // admin sees all EXCEPT owner-locked
+  if (role === 'owner' || role === 'admin') return true  // both see everything
   if (role === 'viewer') return false                    // viewers never see responses
   if (role === 'area_manager' || role === 'manager') return amDefault && salonInScope
   if (role === 'office') return t.includes('office')
