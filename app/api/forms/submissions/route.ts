@@ -39,6 +39,7 @@ export async function GET(req: Request) {
 
     const isAdmin = gate.access.role === 'owner' || gate.access.role === 'admin'
     const myGid = String(gate.access.globalId || '').trim()
+    const myEmail = String(gate.email || '').trim().toLowerCase()
 
     const submissions = visible
       .sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || ''))
@@ -60,7 +61,8 @@ export async function GET(req: Request) {
         // Drives whether the client shows review controls. The server re-checks
         // this on write regardless — this is only to avoid dead buttons.
         canReview: canReviewSubmission(s, gate.access, rvMap.get(s.formId) || []),
-        isMine: !!myGid && s.submittedByGid === myGid,
+        // Match by ID OR email, so owner/admin accounts (no globalId) still see their own.
+        isMine: (!!myGid && s.submittedByGid === myGid) || (!!myEmail && s.submittedByEmail.toLowerCase() === myEmail),
         comments: commentsBySub.get(s.submissionId) || [],
       }))
 
