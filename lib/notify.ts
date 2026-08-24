@@ -71,14 +71,14 @@ export async function resolveNotifyEmails(notify: string[], salonNum: string): P
   return [...out]
 }
 
-async function send(to: string[], subject: string, heading: string, lines: string[]) {
+async function send(to: string[], subject: string, heading: string, lines: string[], link?: string) {
   const recipients = [...new Set(to.map(lower).filter(Boolean))]
   if (!recipients.length || !process.env.RESEND_API_KEY) return
   const body = lines.filter(Boolean).map(l => `<p style="margin:0 0 8px;font-size:14px;color:#222;">${l}</p>`).join('')
   const html = `<div style="font-family:system-ui,-apple-system,sans-serif;max-width:520px;">
     <h2 style="font-size:16px;margin:0 0 12px;">${esc(heading)}</h2>
     ${body}
-    <p style="margin:18px 0 0;"><a href="${DASH_URL}" style="background:#0a7;color:#fff;text-decoration:none;padding:9px 16px;border-radius:8px;font-size:14px;display:inline-block;">Open the dashboard</a></p>
+    <p style="margin:18px 0 0;"><a href="${link || DASH_URL}" style="background:#0a7;color:#fff;text-decoration:none;padding:9px 16px;border-radius:8px;font-size:14px;display:inline-block;">Open this request</a></p>
   </div>`
   try {
     const resend = new Resend(process.env.RESEND_API_KEY)
@@ -89,7 +89,7 @@ async function send(to: string[], subject: string, heading: string, lines: strin
 }
 
 export async function notifyNewSubmission(o: {
-  notify: string[]; salonNum: string; formTitle: string; summary: string
+  submissionId: string; notify: string[]; salonNum: string; formTitle: string; summary: string
   submitterName: string; submitterEmail: string
 }) {
   const to = (await resolveNotifyEmails(o.notify, o.salonNum)).filter(e => e !== lower(o.submitterEmail))
@@ -101,14 +101,15 @@ export async function notifyNewSubmission(o: {
       o.salonNum ? `<strong>Salon:</strong> ${esc(o.salonNum)}` : '',
       `<strong>From:</strong> ${esc(o.submitterName || o.submitterEmail)}`,
       o.summary ? esc(o.summary) : '',
-    ]
+    ],
+    `${DASH_URL}/?req=${encodeURIComponent(o.submissionId)}`
   )
 }
 
 // A new comment notifies the form's recipients AND the original submitter (so
 // they hear about a reply), minus whoever wrote the comment.
 export async function notifyNewComment(o: {
-  notify: string[]; salonNum: string; formTitle: string; body: string
+  submissionId: string; notify: string[]; salonNum: string; formTitle: string; body: string
   authorName: string; authorEmail: string; submitterEmail: string
 }) {
   const base = await resolveNotifyEmails(o.notify, o.salonNum)
@@ -120,6 +121,7 @@ export async function notifyNewComment(o: {
     [
       o.salonNum ? `<strong>Salon:</strong> ${esc(o.salonNum)}` : '',
       `<strong>${esc(o.authorName || o.authorEmail)}:</strong> ${esc(o.body)}`,
-    ]
+    ],
+    `${DASH_URL}/?req=${encodeURIComponent(o.submissionId)}`
   )
 }

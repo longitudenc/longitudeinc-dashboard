@@ -3459,7 +3459,7 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
         </div>
       </div>
       <div class="tabs" id="forms-tabbar">
-        <button class="tab active" id="ftb-new"   onclick="showFormsTab('new')">New Form</button>
+        <button class="tab active" id="ftb-new"   onclick="showFormsTab('new')">Forms</button>
         <button class="tab"        id="ftb-mine"  onclick="showFormsTab('mine')">My Submissions</button>
         <button class="tab"        id="ftb-queue" onclick="showFormsTab('queue')" style="display:none;">Requests</button>
       </div>
@@ -4509,6 +4509,7 @@ function startDashboard(){
     // role-gating reads the verified role/scope.
     USER_EMAIL = SESSION.email || '';
     USER_ROLE  = SESSION.role || 'none';
+    try { S_deepReq = new URLSearchParams(location.search).get('req') || null; } catch(e){ S_deepReq=null; }
     // Map an area_manager's globalId to their amKey (the dashboard's amId).
     if(SESSION.role === 'area_manager' && SESSION.globalId){
       const entry = Object.entries(AMS).find(([k,v])=>v.globalId===SESSION.globalId);
@@ -4533,8 +4534,8 @@ function startDashboard(){
     if(SESSION.role === 'office' || SESSION.role === 'maintenance'){
       // Focused login for back-office (Laura/Brandy) and the handyman: skip the
       // salon dataset they don't need and land straight on their jobs.
-      S_formsTab = 'queue';
-      switchToForms();
+      if(S_deepReq){ openRequestDeepLink(S_deepReq); }
+      else { S_formsTab = 'queue'; switchToForms(); }
       hideLoading();
       return;
     }
@@ -4722,6 +4723,7 @@ function onDataLoaded(data){
         document.getElementById('no-access-email').textContent = USER_EMAIL;
       }
       if(isAdminRole()){ renderWeeksList(); loadDataNotes(); }
+      if(S_deepReq) openRequestDeepLink(S_deepReq);
       hideLoading();
     }, 100);
 
@@ -13784,6 +13786,8 @@ let HOME_DATA   = null;
 let FORMS_DEFS  = [];
 let FORMS_SUBS  = [];
 let S_formsTab  = 'new';
+let S_deepReq   = null;
+let S_reqFormFilter = '';
 let S_activeForm= null;
 
 // "2026-08-21" → "Fri, Aug 21". Parsed as UTC so the date never shifts a day.
@@ -14126,7 +14130,7 @@ function renderFormsList(){
   const search = FORMS_DEFS.length > 6
     ? `<input type="text" class="ff-input" id="forms-search" placeholder="🔍  Search forms…" oninput="filterFormsList(this.value)" style="max-width:340px;margin-bottom:16px;">`
     : '';
-  host.innerHTML = search + '<div class="forms-grid" id="forms-grid">' + FORMS_DEFS.map(f=>`
+  host.innerHTML = search + '<div class="forms-grid" id="forms-grid">' + FORMS_DEFS.slice().sort((a,b)=>String(a.title||'').localeCompare(String(b.title||''))).map(f=>`
     <button class="form-tile" data-search="${hEsc(((f.title||'')+' '+(f.description||'')).toLowerCase())}" onclick="openForm('${hEsc(f.formId)}')" style="position:relative;">
       <div class="ft-icon">${hEsc(f.icon)}</div>
       <div class="ft-title">${hEsc(f.title)}</div>
@@ -14657,12 +14661,87 @@ function renderMySubmissions(){
 
 function renderReviewQueue(){
   const host=document.getElementById('forms-queue'); if(!host) return;
-  const open=FORMS_SUBS.filter(s=>s.canReview && (s.status==='submitted'||s.status==='in_review'));
-  const done=FORMS_SUBS.filter(s=>s.canReview && !(s.status==='submitted'||s.status==='in_review'));
-  host.innerHTML = `<div class="home-sec-title" style="margin-bottom:.6rem;">Needs Action (${open.length})</div>`
+  const reviewable=FORMS_SUBS.filter(s=>s.canReview);
+  const ids=[...new Set(reviewable.map(s=>s.formId))].map(fid=>({fid,
+      title:((FORMS_DEFS.find(f=>f.formId===fid)||{}).title)||((reviewable.find(s=>s.formId===fid)||{}).formTitle)||fid}))
+    .sort((a,b)=>a.title.localeCompare(b.title));
+  const filter=`<div style="margin-bottom:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <label class="ff-label" style="margin:0;">View</label>
+      <select class="ff-select" style="max-width:300px;" onchange="setReqFormFilter(this.value)">
+        <option value="">Active by status (all forms)</option>
+        ${ids.map(o=>`<option value="${hEsc(o.fid)}" ${S_reqFormFilter===o.fid?'selected':''}>All &ldquo;${hEsc(o.title)}&rdquo; responses</option>`).join('')}
+      </select>
+      ${S_reqFormFilter?`<button class="btn btn-secondary btn-sm" onclick="exportResponsesCSV('${hEsc(S_reqFormFilter)}')">⬇ Export CSV</button>`:''}
+    </div>`;
+  if(S_reqFormFilter){ host.innerHTML = filter + renderResponsesTable(S_reqFormFilter); return; }
+  const open=reviewable.filter(s=>(s.status==='submitted'||s.status==='in_review'));
+  const done=reviewable.filter(s=>!(s.status==='submitted'||s.status==='in_review'));
+  host.innerHTML = filter
+    + `<div class="home-sec-title" style="margin-bottom:.6rem;">Needs Action (${open.length})</div>`
     + submissionRows(open,true,'q-')
     + `<div class="home-sec-title" style="margin:1.5rem 0 .6rem;">Resolved (${done.length})</div>`
     + submissionRows(done,true,'q-');
+}
+function setReqFormFilter(v){ S_reqFormFilter=v||''; renderReviewQueue(); }
+
+// FORMS-RESPONSES-v1 — a spreadsheet view of every response to one form (scoped
+// to what you can review), with CSV export. Columns are the form's own fields.
+function responsesFor(formId){
+  return FORMS_SUBS.filter(s=>s.canReview && s.formId===formId)
+    .slice().sort((a,b)=>String(b.submittedAt||'').localeCompare(String(a.submittedAt||'')));
+}
+function responsesColumns(formId){
+  const def=FORMS_DEFS.find(f=>f.formId===formId);
+  return (def&&def.fields||[]).filter(f=>f.type!=='section');
+}
+function respCell(f,v){
+  if(v===undefined||v===null||v==='') return '';
+  if(f.type==='photo') return (Array.isArray(v)?v.length:0)+' photo'+((Array.isArray(v)&&v.length===1)?'':'s');
+  if(f.type==='employee'){ const p=(INACTIVE_MAP||{})[v]; return p&&p.name?fmtName(p.name):String(v); }
+  if(Array.isArray(v)) return v.join(', ');
+  return String(v);
+}
+function renderResponsesTable(formId){
+  const rows=responsesFor(formId), fields=responsesColumns(formId);
+  if(!rows.length) return '<div class="no-data"><div class="no-data-icon">📭</div>No responses yet.</div>';
+  const head=`<th>Submitted</th><th>By</th><th>Salon</th><th>Status</th>`+fields.map(f=>`<th>${hEsc(f.label)}</th>`).join('');
+  const body=rows.map(s=>`<tr>
+      <td style="white-space:nowrap;">${hEsc(s.submittedAt?hFmtDate(s.submittedAt.slice(0,10),true):'—')}</td>
+      <td>${hEsc(fmtName(s.submittedByName||''))}</td>
+      <td>${hEsc(s.salonNum||'—')}</td>
+      <td>${statusPill(s.status, formWorkflow(s.formId))}</td>
+      ${fields.map(f=>`<td>${hEsc(respCell(f,(s.data||{})[f.fieldKey]))}</td>`).join('')}
+    </tr>`).join('');
+  return `<div class="home-sec-title" style="margin-bottom:.6rem;">${rows.length} response${rows.length===1?'':'s'}</div>
+    <div class="table-card" style="overflow:auto;"><table class="data-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+function csvCell(v){ v=String(v==null?'':v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
+function exportResponsesCSV(formId){
+  const rows=responsesFor(formId), fields=responsesColumns(formId);
+  const def=FORMS_DEFS.find(f=>f.formId===formId);
+  const header=['Submitted','Submitted By','Salon','Status'].concat(fields.map(f=>f.label));
+  const lines=[header.map(csvCell).join(',')];
+  rows.forEach(s=>{ lines.push([s.submittedAt||'',s.submittedByName||'',s.salonNum||'',s.status||'']
+    .concat(fields.map(f=>respCell(f,(s.data||{})[f.fieldKey]))).map(csvCell).join(',')); });
+  const blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob), a=document.createElement('a');
+  a.href=url; a.download=(((def&&def.title)||'responses').replace(/[^a-z0-9]+/gi,'_'))+'.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+function openRequestDeepLink(id){
+  S_deepReq=null;
+  clearActive();
+  const b=document.getElementById('btn-forms'); if(b) b.classList.add('active');
+  const pg=document.getElementById('page-forms'); if(pg) pg.classList.add('active');
+  loadForms(()=>{
+    const s=(FORMS_SUBS||[]).find(x=>x.submissionId===id);
+    if(!s){ showFormsTab('new'); return; }
+    const ctx = s.canReview ? 'q-' : 'm-';
+    showFormsTab(s.canReview ? 'queue' : 'mine');
+    setTimeout(()=>{ const row=document.getElementById('sub-'+ctx+id);
+      if(row){ row.style.display='table-row'; try{ row.scrollIntoView({behavior:'smooth',block:'center'}); }catch(e){} } }, 60);
+  });
 }
 
 // ── Start ─────────────────────────────────────────────────────

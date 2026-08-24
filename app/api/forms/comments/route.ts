@@ -52,6 +52,7 @@ export async function POST(req: Request) {
     // Best-effort notify — never fail the comment over an email.
     try {
       await notifyNewComment({
+        submissionId,
         notify: def?.notify || [],
         salonNum: sub.salonNum,
         formTitle: sub.formTitle,
