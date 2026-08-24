@@ -45,7 +45,42 @@ async function withRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
   }
 }
 
-export async function readSheet(sheetName: string, range?: string) {
+// ── Short-lived read cache ────────────────────────────────────
+// SHEETS-READ-CACHE-v1
+// Every request reads from Sheets; with no caching, one page load (auth + data
+// across many endpoints, times two people) blows past Google's per-minute read
+// quota and each throttled read backs off for up to 30s. A brief in-memory
+// cache collapses repeat reads of the same tab within a burst.
+//
+// Safety: tabs a person edits and expects to see change immediately — and the
+// tabs the app read-modify-writes — are NEVER cached, so they always read fresh
+// and a save shows at once. Every write also invalidates its own tab as a
+// second guarantee. The cache is per serverless instance (no external service),
+// which is exactly enough to absorb the bursts that trip the rate limit.
+const READ_CACHE_TTL_MS = 15000
+const NO_CACHE_TABS = new Set<string>([
+  // home content — edited via the page, must appear the instant it's saved
+  'Announcements', 'ImportantDates', 'HomeLinks', 'HomeData',
+  // forms — read-modify-written by the submit / status / access routes
+  'FormSubmissions', 'FormDefs', 'FormFields',
+])
+type ReadCacheEntry = { data: any[][]; expires: number }
+const readCache = new Map<string, ReadCacheEntry>()
+const cacheKeyFor = (sheetName: string, range?: string) => sheetName + '\u0000' + (range || '')
+
+// Clear every cached range for a tab. Writes call this so the next read is fresh.
+export function invalidateReadCache(sheetName: string): void {
+  const prefix = sheetName + '\u0000'
+  for (const k of readCache.keys()) if (k.startsWith(prefix)) readCache.delete(k)
+}
+
+export async function readSheet(sheetName: string, range?: string, opts?: { fresh?: boolean }) {
+  const cacheable = !NO_CACHE_TABS.has(sheetName)
+  const key = cacheKeyFor(sheetName, range)
+  if (cacheable && !opts?.fresh) {
+    const hit = readCache.get(key)
+    if (hit && hit.expires > Date.now()) return hit.data
+  }
   try {
     const sheets = sheetsClient()
     const fullRange = range ? `${sheetName}!${range}` : sheetName
@@ -55,7 +90,9 @@ export async function readSheet(sheetName: string, range?: string) {
         range: fullRange,
       })
     )
-    return response.data.values || []
+    const data = response.data.values || []
+    if (cacheable) readCache.set(key, { data, expires: Date.now() + READ_CACHE_TTL_MS })
+    return data
   } catch (error) {
     console.error(`Error reading sheet ${sheetName}:`, error)
     return []
@@ -333,7 +370,7 @@ export async function writeSheet(
     range: tabName,
   })
 
-  if (rows.length === 0) return
+  if (rows.length === 0) { invalidateReadCache(tabName); return }
 
   await sheets.spreadsheets.values.update({
     spreadsheetId: SHEET_ID,
@@ -341,6 +378,7 @@ export async function writeSheet(
     valueInputOption: 'RAW',
     requestBody: { values: rows },
   })
+  invalidateReadCache(tabName)
 }
 
 export async function appendSheet(
@@ -358,6 +396,7 @@ export async function appendSheet(
     insertDataOption: 'INSERT_ROWS',
     requestBody: { values: rows },
   })
+  invalidateReadCache(tabName)
 }
 
 export async function upsertSheet(
@@ -371,7 +410,7 @@ export async function upsertSheet(
   const sheets = sheetsClient()
   await ensureTab(tabName)
 
-  const existing = await readSheet(tabName)
+  const existing = await readSheet(tabName, undefined, { fresh: true })
 
   let existingHeaders: string[]
   let existingRows: any[][]
@@ -470,5 +509,6 @@ export async function upsertSheet(
     })
   }
 
+  invalidateReadCache(tabName)
   return { updated: updatedCount, inserted: insertRows.length }
 }
