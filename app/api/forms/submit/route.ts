@@ -12,6 +12,7 @@
 import { NextResponse } from 'next/server'
 import { requireSignedIn } from '@/lib/require-role'
 import { appendSheet, readSheet, getEmployeeProfiles } from '@/lib/sheets'
+import { notifyNewSubmission } from '@/lib/notify'
 import {
   getFormDefs,
   audienceAllows,
@@ -111,6 +112,18 @@ export async function POST(req: Request) {
 
     await ensureHeader()
     await appendSheet(TAB_SUBS, [SUBS_COLUMNS.map(c => row[c] ?? '')])
+
+    // Best-effort notify — never fail the submission over an email.
+    try {
+      await notifyNewSubmission({
+        notify: def.notify || [],
+        salonNum: row.salonNum,
+        formTitle: def.title,
+        summary: row.summary,
+        submitterName: row.submittedByName,
+        submitterEmail: row.submittedByEmail,
+      })
+    } catch (e: any) { console.error('[submit] notify failed:', e?.message) }
 
     return NextResponse.json({ success: true, submissionId: row.submissionId })
   } catch (e: any) {

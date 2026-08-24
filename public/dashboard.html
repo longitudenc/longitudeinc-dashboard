@@ -4530,6 +4530,15 @@ function startDashboard(){
       return;
     }
 
+    if(SESSION.role === 'office' || SESSION.role === 'maintenance'){
+      // Focused login for back-office (Laura/Brandy) and the handyman: skip the
+      // salon dataset they don't need and land straight on their jobs.
+      S_formsTab = 'queue';
+      switchToForms();
+      hideLoading();
+      return;
+    }
+
     Promise.all([
       fetch('/api/gs/getAllData').then(r=>r.json()),
       fetch('/api/market/ratings-data').then(r=>r.json()).catch(()=>({ratings:{}}))

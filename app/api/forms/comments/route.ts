@@ -10,6 +10,7 @@ import { NextResponse } from 'next/server'
 import { requireSignedIn } from '@/lib/require-role'
 import { appendSheet } from '@/lib/sheets'
 import { getSubmissions, getFormDefs, canViewSubmission, TAB_COMMENTS, COMMENT_COLUMNS } from '@/lib/forms'
+import { notifyNewComment } from '@/lib/notify'
 
 export const runtime = 'nodejs'
 
@@ -32,7 +33,8 @@ export async function POST(req: Request) {
     // You must be allowed to SEE the ticket to comment on it.
     const sub = (await getSubmissions()).find(s => s.submissionId === submissionId)
     if (!sub) return NextResponse.json({ success: false, error: 'submission not found' }, { status: 404 })
-    const rv = (await getFormDefs()).find(d => d.formId === sub.formId)?.responseView || []
+    const def = (await getFormDefs()).find(d => d.formId === sub.formId)
+    const rv = def?.responseView || []
     if (!canViewSubmission(sub, gate.access, gate.email, rv)) {
       return NextResponse.json({ success: false, error: 'not allowed' }, { status: 403 })
     }
@@ -46,6 +48,19 @@ export async function POST(req: Request) {
       createdAt: new Date().toISOString(),
     }
     await appendSheet(TAB_COMMENTS, [COMMENT_COLUMNS.map(c => String((comment as any)[c] ?? ''))])
+
+    // Best-effort notify — never fail the comment over an email.
+    try {
+      await notifyNewComment({
+        notify: def?.notify || [],
+        salonNum: sub.salonNum,
+        formTitle: sub.formTitle,
+        body,
+        authorName: gate.access.name || gate.email,
+        authorEmail: gate.email,
+        submitterEmail: sub.submittedByEmail,
+      })
+    } catch (e: any) { console.error('[comment] notify failed:', e?.message) }
 
     return NextResponse.json({ success: true, comment })
   } catch (e: any) {
