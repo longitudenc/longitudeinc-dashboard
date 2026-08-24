@@ -28,7 +28,7 @@ export const TAB_COMMENTS = 'FormComments'
 
 export const DEFS_COLUMNS = [
   'formId', 'title', 'description', 'icon', 'audience', 'status', 'sortOrder',
-  'notify', 'responseView',
+  'notify', 'responseView', 'workflow',
 ] as const
 
 export const FIELDS_COLUMNS = [
@@ -84,6 +84,7 @@ export interface FormDef {
   sortOrder: number
   notify: string[]          // RESPONSE-CONFIG-v1 — emails / 'am' who get emailed on activity
   responseView: string[]    // RESPONSE-CONFIG-v2 tags: am / office / maintenance / owner (owner-lock)
+  workflow: string          // WORKFLOW-v1: 'ticket' | 'approval' | 'record' | '' (legacy = all actions)
   fields: FormField[]
 }
 
@@ -163,6 +164,7 @@ export async function getFormDefs(): Promise<FormDef[]> {
         sortOrder: num(r.sortOrder),
         notify: splitList(r.notify),
         responseView: splitList(r.responseView),
+        workflow: lower(r.workflow),
         fields: byForm.get(formId) || [],
       } as FormDef
     })

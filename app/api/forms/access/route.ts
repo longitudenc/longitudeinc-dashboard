@@ -18,6 +18,7 @@ import { TAB_DEFS, DEFS_COLUMNS } from '@/lib/forms'
 // The only group tags the engine understands. Anything else is dropped, except
 // that notify additionally accepts real email addresses.
 const GROUP_TAGS = new Set(['am', 'office', 'maintenance', 'owner'])
+const WORKFLOWS = new Set(['ticket', 'approval', 'record'])
 const isEmail = (v: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)
 
 function cleanList(list: any, allowEmail: boolean): string[] {
@@ -47,6 +48,8 @@ export async function POST(req: Request) {
 
     const responseView = cleanList(body?.responseView, false) // tags only
     const notify = cleanList(body?.notify, true)               // tags + emails
+    const wfIn = String(body?.workflow || '').trim().toLowerCase()
+    const workflow = WORKFLOWS.has(wfIn) ? wfIn : ''
 
     // Re-read raw rows so every untouched column round-trips exactly.
     const raw = rowsToObjects(await readSheet(TAB_DEFS))
@@ -54,7 +57,7 @@ export async function POST(req: Request) {
     const rows = raw.map(r => {
       if (String(r.formId || '').trim() === formId) {
         found = true
-        return { ...r, responseView: responseView.join(', '), notify: notify.join(', ') }
+        return { ...r, responseView: responseView.join(', '), notify: notify.join(', '), workflow }
       }
       return r
     })
@@ -68,7 +71,7 @@ export async function POST(req: Request) {
     ])
 
     // Return the cleaned arrays so the dialog can update its local copy.
-    return NextResponse.json({ success: true, formId, responseView, notify })
+    return NextResponse.json({ success: true, formId, responseView, notify, workflow })
   } catch (e: any) {
     return NextResponse.json({ success: false, error: e.message }, { status: 500 })
   }

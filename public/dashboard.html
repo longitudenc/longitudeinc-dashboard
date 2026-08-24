@@ -14149,6 +14149,7 @@ function openAccessDialog(formId){
   const view   = (f.responseView||[]).map(x=>String(x).toLowerCase());
   const notify = (f.notify||[]).map(x=>String(x).toLowerCase());
   const emails = (f.notify||[]).filter(x=>String(x).includes('@'));
+  const wf = String(f.workflow||'').toLowerCase();
   const has = (arr,v)=>arr.includes(v);
   const cb = (id,label,checked)=>`<label style="display:flex;align-items:center;gap:9px;padding:5px 0;cursor:pointer;"><input type="checkbox" id="${id}" ${checked?'checked':''}><span>${label}</span></label>`;
 
@@ -14171,6 +14172,14 @@ function openAccessDialog(formId){
       ${cb('acn-maint','Maintenance (handyman)',has(notify,'maintenance'))}
       ${cb('acn-owner','Owner & admins',has(notify,'owner'))}
       <input type="text" id="acn-email" class="ff-input" placeholder="Also email (optional): name@example.com" value="${hEsc(emails.join(', '))}" style="margin-top:8px;">
+
+      <div style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin:16px 0 4px;">Workflow</div>
+      <select id="acf-workflow" class="ff-select">
+        <option value="" ${!wf?'selected':''}>Default — all actions</option>
+        <option value="ticket" ${wf==='ticket'?'selected':''}>Ticket — In Progress → Done</option>
+        <option value="approval" ${wf==='approval'?'selected':''}>Approval — Approve / Deny</option>
+        <option value="record" ${wf==='record'?'selected':''}>Record — Mark Reviewed</option>
+      </select>
 
       <div style="font-size:12px;color:var(--text-muted);margin-top:14px;line-height:1.5;">Owners and admins always see everything. Whoever submits always sees their own request.</div>
       <div id="access-msg" style="font-size:12.5px;color:#c0392b;margin-top:8px;"></div>
@@ -14196,12 +14205,13 @@ function saveAccess(formId){
   if(g('acn-maint').checked)   notify.push('maintenance');
   if(g('acn-owner').checked)   notify.push('owner');
   String(g('acn-email').value||'').split(/[,;\s]+/).map(s=>s.trim()).filter(s=>s.includes('@')).forEach(e=>notify.push(e));
+  const workflow=((g('acf-workflow')||{}).value)||'';
   const btn=g('access-save'), msg=g('access-msg');
   if(btn){ btn.disabled=true; btn.textContent='Saving…'; }
-  fetch('/api/forms/access',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({formId,responseView:view,notify})})
+  fetch('/api/forms/access',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({formId,responseView:view,notify,workflow})})
     .then(r=>r.json()).then(res=>{
       if(!res.success){ if(msg) msg.textContent=res.error||'Save failed'; if(btn){btn.disabled=false;btn.textContent='Save';} return; }
-      const f=FORMS_DEFS.find(x=>x.formId===formId); if(f){ f.responseView=res.responseView; f.notify=res.notify; }
+      const f=FORMS_DEFS.find(x=>x.formId===formId); if(f){ f.responseView=res.responseView; f.notify=res.notify; f.workflow=res.workflow; }
       closeAccessDialog();
     }).catch(e=>{ if(msg) msg.textContent=e.message; if(btn){btn.disabled=false;btn.textContent='Save';} });
 }
@@ -14499,8 +14509,14 @@ function submitActiveForm(){
     });
 }
 
-function statusPill(st){
-  const label={submitted:'Submitted',in_review:'In Review',approved:'Approved',denied:'Denied',closed:'Closed'}[st]||st;
+function formWorkflow(formId){ return String((FORMS_DEFS.find(f=>f.formId===formId)||{}).workflow||'').toLowerCase(); }
+function statusPill(st, wf){
+  const MAP={
+    ticket:{submitted:'New',in_review:'In Progress',approved:'Done',denied:'Cancelled',closed:'Done'},
+    approval:{submitted:'Pending',in_review:'Reviewing',approved:'Approved',denied:'Denied',closed:'Closed'},
+    record:{submitted:'New',in_review:'Reviewing',approved:'Reviewed',denied:'Filed',closed:'Reviewed'},
+  }[String(wf||'').toLowerCase()] || {submitted:'Submitted',in_review:'In Review',approved:'Approved',denied:'Denied',closed:'Closed'};
+  const label=MAP[st]||st;
   return `<span class="status-pill st-${hEsc(st)}">${hEsc(label)}</span>`;
 }
 
@@ -14514,7 +14530,7 @@ function submissionRows(list, showWho){
         ${showWho?`<td>${hEsc(fmtName(s.submittedByName||''))}</td>`:''}
         <td>${hEsc(s.salonNum||'—')}</td>
         <td>${hEsc(s.submittedAt?hFmtDate(s.submittedAt.slice(0,10),true):'—')}</td>
-        <td>${statusPill(s.status)}</td>
+        <td>${statusPill(s.status, formWorkflow(s.formId))}</td>
         <td style="text-align:right;"><button class="btn btn-secondary btn-sm" onclick="toggleSubmission('${hEsc(s.submissionId)}')">Details</button></td>
       </tr>
       <tr id="sub-${hEsc(s.submissionId)}" style="display:none;"><td colspan="${showWho?6:5}">${submissionDetail(s)}</td></tr>
@@ -14557,15 +14573,17 @@ function submissionDetail(s){
   }
 
   if(s.canReview){
+    const id=hEsc(s.submissionId), wf=formWorkflow(s.formId);
+    const B=(status,label,primary)=>`<button class="btn ${primary?'btn-primary':'btn-secondary'} btn-sm" onclick="setSubStatus('${id}','${status}')">${label}</button>`;
+    let btns;
+    if(wf==='ticket')        btns = B('in_review','Mark In Progress') + B('closed','✓ Done',true) + B('denied','Cancel');
+    else if(wf==='record')   btns = B('closed','✓ Mark Reviewed',true);
+    else if(wf==='approval') btns = B('in_review','Mark In Review') + B('approved','Approve',true) + B('denied','Deny');
+    else                     btns = B('in_review','Mark In Review') + B('approved','Approve',true) + B('denied','Deny') + B('closed','Close');
     dl += `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
-      <label class="ff-label">Review note (optional)</label>
-      <input class="ff-input" id="rn-${hEsc(s.submissionId)}" value="${hEsc(s.reviewNote||'')}" style="margin-bottom:9px;">
-      <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <button class="btn btn-secondary btn-sm" onclick="setSubStatus('${hEsc(s.submissionId)}','in_review')">Mark In Review</button>
-        <button class="btn btn-primary btn-sm" onclick="setSubStatus('${hEsc(s.submissionId)}','approved')">Approve</button>
-        <button class="btn btn-secondary btn-sm" onclick="setSubStatus('${hEsc(s.submissionId)}','denied')">Deny</button>
-        <button class="btn btn-secondary btn-sm" onclick="setSubStatus('${hEsc(s.submissionId)}','closed')">Close</button>
-      </div></div>`;
+      <label class="ff-label">Note (optional)</label>
+      <input class="ff-input" id="rn-${id}" value="${hEsc(s.reviewNote||'')}" style="margin-bottom:9px;">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">${btns}</div></div>`;
   }
   dl += `<div id="cmts-${hEsc(s.submissionId)}" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);">${renderCommentThread(s)}</div>`;
   return dl;
@@ -14586,8 +14604,8 @@ function setSubStatus(id,status){
 }
 
 // FORM-COMMENTS-v1 — the conversation on a request. Anyone who can see the
-// ticket can post; "Mark done" (reviewers only) closes it via the existing
-// status flow. Posting updates the thread in place, no full reload.
+// ticket can post. Posting updates the thread in place, no full reload.
+// (Completing/closing lives in the workflow buttons on the review row.)
 function fmtCommentTime(iso){
   try{ const d=new Date(iso); if(isNaN(d.getTime())) return String(iso||''); return d.toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); }
   catch(e){ return String(iso||''); }
@@ -14600,14 +14618,11 @@ function renderCommentThread(s){
       <div style="font-size:11.5px;color:var(--text-muted);"><strong>${hEsc(c.author||'')}</strong> · ${hEsc(fmtCommentTime(c.createdAt))}</div>
       <div style="font-size:13px;white-space:pre-wrap;margin-top:2px;">${hEsc(c.body||'')}</div>
     </div>`).join('') || `<div style="font-size:12.5px;color:var(--text-muted);padding:6px 0;">No comments yet.</div>`;
-  const markDone=(s.canReview && s.status!=='closed')
-    ? `<button class="btn btn-secondary btn-sm" onclick="setSubStatus('${hEsc(id)}','closed')">✓ Mark done</button>` : '';
   return `<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin-bottom:4px;">Conversation</div>
     ${items}
     <textarea class="ff-textarea" id="cmt-${hEsc(id)}" placeholder="Add a comment…" style="margin-top:8px;min-height:52px;"></textarea>
     <div style="display:flex;gap:8px;margin-top:6px;">
       <button class="btn btn-primary btn-sm" id="cmtbtn-${hEsc(id)}" onclick="postComment('${hEsc(id)}')">Post</button>
-      ${markDone}
     </div>`;
 }
 function postComment(id){
