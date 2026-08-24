@@ -24,6 +24,7 @@ import type { Access, Role } from './auth-roles'
 export const TAB_DEFS = 'FormDefs'
 export const TAB_FIELDS = 'FormFields'
 export const TAB_SUBS = 'FormSubmissions'
+export const TAB_COMMENTS = 'FormComments'
 
 export const DEFS_COLUMNS = [
   'formId', 'title', 'description', 'icon', 'audience', 'status', 'sortOrder',
@@ -39,6 +40,11 @@ export const SUBS_COLUMNS = [
   'submittedByEmail', 'submittedByGid', 'submittedByName',
   'salonNum', 'status', 'summary', 'dataJson',
   'submittedAt', 'updatedAt', 'reviewedBy', 'reviewNote',
+] as const
+
+// FORM-COMMENTS-v1 — the conversation thread on a submission. Append-only.
+export const COMMENT_COLUMNS = [
+  'id', 'submissionId', 'author', 'authorRole', 'body', 'createdAt',
 ] as const
 
 // Field types the client renderer knows how to draw. `employee` and `salon`
@@ -189,6 +195,32 @@ export interface Submission {
   updatedAt: string
   reviewedBy: string
   reviewNote: string
+}
+
+export interface Comment {
+  id: string
+  submissionId: string
+  author: string
+  authorRole: string
+  body: string
+  createdAt: string
+}
+
+// All comments across all submissions. The caller groups by submissionId and
+// attaches only threads the viewer is already allowed to see, so this never
+// leaks. FormComments is small and append-only.
+export async function getComments(): Promise<Comment[]> {
+  const rows = rowsToObjects(await readSheet(TAB_COMMENTS))
+  return rows
+    .map(r => ({
+      id: norm(r.id),
+      submissionId: norm(r.submissionId),
+      author: norm(r.author),
+      authorRole: norm(r.authorRole),
+      body: norm(r.body),
+      createdAt: norm(r.createdAt),
+    }))
+    .filter(c => c.id && c.submissionId)
 }
 
 export async function getSubmissions(): Promise<Submission[]> {

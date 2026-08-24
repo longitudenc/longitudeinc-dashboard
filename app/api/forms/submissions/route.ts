@@ -10,7 +10,7 @@
 
 import { NextResponse } from 'next/server'
 import { requireSignedIn } from '@/lib/require-role'
-import { getSubmissions, filterSubmissions, canReviewSubmission, getFormDefs } from '@/lib/forms'
+import { getSubmissions, filterSubmissions, canReviewSubmission, getFormDefs, getComments } from '@/lib/forms'
 
 export async function GET(req: Request) {
   const gate = await requireSignedIn()
@@ -24,6 +24,14 @@ export async function GET(req: Request) {
     const all = await getSubmissions()
     const defs = await getFormDefs()
     const rvMap = new Map(defs.map(d => [d.formId, d.responseView || []]))
+
+    // Attach each ticket's conversation. Grouped once; only visible submissions
+    // (filtered below) ever get their thread returned, so nothing leaks.
+    const commentsBySub = new Map<string, any[]>()
+    for (const c of await getComments()) {
+      const arr = commentsBySub.get(c.submissionId)
+      if (arr) arr.push(c); else commentsBySub.set(c.submissionId, [c])
+    }
     let visible = filterSubmissions(all, gate.access, gate.email, defs)
 
     if (formId) visible = visible.filter(s => s.formId === formId)
@@ -53,6 +61,7 @@ export async function GET(req: Request) {
         // this on write regardless — this is only to avoid dead buttons.
         canReview: canReviewSubmission(s, gate.access, rvMap.get(s.formId) || []),
         isMine: !!myGid && s.submittedByGid === myGid,
+        comments: commentsBySub.get(s.submissionId) || [],
       }))
 
     return NextResponse.json({ success: true, submissions, count: submissions.length })
