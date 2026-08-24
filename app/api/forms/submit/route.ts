@@ -116,6 +116,7 @@ export async function POST(req: Request) {
     // Best-effort notify — never fail the submission over an email.
     try {
       await notifyNewSubmission({
+        submissionId: row.submissionId, // fix: pass required submissionId
         notify: def.notify || [],
         salonNum: row.salonNum,
         formTitle: def.title,
