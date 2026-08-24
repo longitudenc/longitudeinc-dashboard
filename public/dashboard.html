@@ -14520,24 +14520,26 @@ function statusPill(st, wf){
   return `<span class="status-pill st-${hEsc(st)}">${hEsc(label)}</span>`;
 }
 
-function submissionRows(list, showWho){
+function submissionRows(list, showWho, ctx){
+  ctx=ctx||'';
   if(!list.length) return '<div class="no-data"><div class="no-data-icon">📭</div>Nothing here yet.</div>';
   return `<div class="table-card"><table class="data-table"><thead><tr>
       <th>Form</th>${showWho?'<th>Submitted By</th>':''}<th>Salon</th><th>Submitted</th><th>Status</th><th></th>
-    </tr></thead><tbody>` + list.map(s=>`
+    </tr></thead><tbody>` + list.map(s=>{ const k=ctx+s.submissionId; return `
       <tr>
         <td><strong>${hEsc(s.formTitle)}</strong><div style="font-size:11.5px;color:var(--text-muted);max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${hEsc(s.summary)}</div></td>
         ${showWho?`<td>${hEsc(fmtName(s.submittedByName||''))}</td>`:''}
         <td>${hEsc(s.salonNum||'—')}</td>
         <td>${hEsc(s.submittedAt?hFmtDate(s.submittedAt.slice(0,10),true):'—')}</td>
         <td>${statusPill(s.status, formWorkflow(s.formId))}</td>
-        <td style="text-align:right;"><button class="btn btn-secondary btn-sm" onclick="toggleSubmission('${hEsc(s.submissionId)}')">Details</button></td>
+        <td style="text-align:right;"><button class="btn btn-secondary btn-sm" onclick="toggleSubmission('${hEsc(k)}')">Details</button></td>
       </tr>
-      <tr id="sub-${hEsc(s.submissionId)}" style="display:none;"><td colspan="${showWho?6:5}">${submissionDetail(s)}</td></tr>
-    `).join('') + '</tbody></table></div>';
+      <tr id="sub-${hEsc(k)}" style="display:none;"><td colspan="${showWho?6:5}">${submissionDetail(s, ctx)}</td></tr>
+    `; }).join('') + '</tbody></table></div>';
 }
 
-function submissionDetail(s){
+function submissionDetail(s, ctx){
+  const k=(ctx||'')+s.submissionId, sid=hEsc(s.submissionId);
   const def=FORMS_DEFS.find(f=>f.formId===s.formId);
   let dl='<dl class="sub-detail">';
   if(def){
@@ -14573,8 +14575,8 @@ function submissionDetail(s){
   }
 
   if(s.canReview){
-    const id=hEsc(s.submissionId), wf=formWorkflow(s.formId);
-    const B=(status,label,primary)=>`<button class="btn ${primary?'btn-primary':'btn-secondary'} btn-sm" onclick="setSubStatus('${id}','${status}')">${label}</button>`;
+    const wf=formWorkflow(s.formId);
+    const B=(status,label,primary)=>`<button class="btn ${primary?'btn-primary':'btn-secondary'} btn-sm" onclick="setSubStatus('${hEsc(k)}','${sid}','${status}')">${label}</button>`;
     let btns;
     if(wf==='ticket')        btns = B('in_review','Mark In Progress') + B('closed','✓ Done',true) + B('denied','Cancel');
     else if(wf==='record')   btns = B('closed','✓ Mark Reviewed',true);
@@ -14582,10 +14584,10 @@ function submissionDetail(s){
     else                     btns = B('in_review','Mark In Review') + B('approved','Approve',true) + B('denied','Deny') + B('closed','Close');
     dl += `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
       <label class="ff-label">Note (optional)</label>
-      <input class="ff-input" id="rn-${id}" value="${hEsc(s.reviewNote||'')}" style="margin-bottom:9px;">
+      <input class="ff-input" id="rn-${hEsc(k)}" value="${hEsc(s.reviewNote||'')}" style="margin-bottom:9px;">
       <div style="display:flex;gap:8px;flex-wrap:wrap;">${btns}</div></div>`;
   }
-  dl += `<div id="cmts-${hEsc(s.submissionId)}" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);">${renderCommentThread(s)}</div>`;
+  dl += `<div id="cmts-${hEsc(k)}" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);">${renderCommentThread(s, k)}</div>`;
   return dl;
 }
 
@@ -14594,10 +14596,10 @@ function toggleSubmission(id){
   if(row) row.style.display = row.style.display==='none' ? 'table-row' : 'none';
 }
 
-function setSubStatus(id,status){
-  const noteEl=document.getElementById('rn-'+id);
+function setSubStatus(k, sid, status){
+  const noteEl=document.getElementById('rn-'+k);
   fetch('/api/forms/status',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({submissionId:id,status,reviewNote:noteEl?noteEl.value:''})})
+      body:JSON.stringify({submissionId:sid,status,reviewNote:noteEl?noteEl.value:''})})
     .then(r=>r.json())
     .then(res=>{ if(!res.success){ alert(res.error||'Update failed'); return; } loadForms(); })
     .catch(err=>alert(err.message||'Network error'));
@@ -14610,8 +14612,8 @@ function fmtCommentTime(iso){
   try{ const d=new Date(iso); if(isNaN(d.getTime())) return String(iso||''); return d.toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); }
   catch(e){ return String(iso||''); }
 }
-function renderCommentThread(s){
-  const id=s.submissionId;
+function renderCommentThread(s, k){
+  k=k||s.submissionId; const sid=s.submissionId;
   const list=(s.comments||[]).slice().sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt)));
   const items=list.map(c=>`
     <div style="padding:7px 0;border-top:1px solid var(--border);">
@@ -14620,28 +14622,28 @@ function renderCommentThread(s){
     </div>`).join('') || `<div style="font-size:12.5px;color:var(--text-muted);padding:6px 0;">No comments yet.</div>`;
   return `<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin-bottom:4px;">Conversation</div>
     ${items}
-    <textarea class="ff-textarea" id="cmt-${hEsc(id)}" placeholder="Add a comment…" style="margin-top:8px;min-height:52px;"></textarea>
+    <textarea class="ff-textarea" id="cmt-${hEsc(k)}" placeholder="Add a comment…" style="margin-top:8px;min-height:52px;"></textarea>
     <div style="display:flex;gap:8px;margin-top:6px;">
-      <button class="btn btn-primary btn-sm" id="cmtbtn-${hEsc(id)}" onclick="postComment('${hEsc(id)}')">Post</button>
+      <button class="btn btn-primary btn-sm" id="cmtbtn-${hEsc(k)}" onclick="postComment('${hEsc(k)}','${hEsc(sid)}')">Post</button>
     </div>`;
 }
-function postComment(id){
-  const ta=document.getElementById('cmt-'+id); if(!ta) return;
+function postComment(k, sid){
+  const ta=document.getElementById('cmt-'+k); if(!ta) return;
   const body=String(ta.value||'').trim(); if(!body) return;
-  const btn=document.getElementById('cmtbtn-'+id); if(btn){ btn.disabled=true; btn.textContent='Posting…'; }
-  fetch('/api/forms/comments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({submissionId:id,body})})
+  const btn=document.getElementById('cmtbtn-'+k); if(btn){ btn.disabled=true; btn.textContent='Posting…'; }
+  fetch('/api/forms/comments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({submissionId:sid,body})})
     .then(r=>r.json()).then(res=>{
       if(!res.success){ alert(res.error||'Could not post comment'); if(btn){ btn.disabled=false; btn.textContent='Post'; } return; }
-      const s=(FORMS_SUBS||[]).find(x=>x.submissionId===id);
+      const s=(FORMS_SUBS||[]).find(x=>x.submissionId===sid);
       if(s){ s.comments=(s.comments||[]).concat([res.comment]); }
-      const host=document.getElementById('cmts-'+id);
-      if(host&&s) host.innerHTML=renderCommentThread(s);
+      const host=document.getElementById('cmts-'+k);
+      if(host&&s) host.innerHTML=renderCommentThread(s, k);
     }).catch(e=>{ alert(e.message||'Network error'); if(btn){ btn.disabled=false; btn.textContent='Post'; } });
 }
 
 function renderMySubmissions(){
   const host=document.getElementById('forms-mine'); if(!host) return;
-  host.innerHTML = submissionRows(FORMS_SUBS.filter(s=>s.isMine), false);
+  host.innerHTML = submissionRows(FORMS_SUBS.filter(s=>s.isMine), false, 'm-');
 }
 
 function renderReviewQueue(){
@@ -14649,9 +14651,9 @@ function renderReviewQueue(){
   const open=FORMS_SUBS.filter(s=>s.canReview && (s.status==='submitted'||s.status==='in_review'));
   const done=FORMS_SUBS.filter(s=>s.canReview && !(s.status==='submitted'||s.status==='in_review'));
   host.innerHTML = `<div class="home-sec-title" style="margin-bottom:.6rem;">Needs Action (${open.length})</div>`
-    + submissionRows(open,true)
+    + submissionRows(open,true,'q-')
     + `<div class="home-sec-title" style="margin:1.5rem 0 .6rem;">Resolved (${done.length})</div>`
-    + submissionRows(done,true);
+    + submissionRows(done,true,'q-');
 }
 
 // ── Start ─────────────────────────────────────────────────────
