@@ -23,12 +23,12 @@ export function parseViolationPoints(label: string): number {
 
 export async function recordDisciplinaryEvent(o: {
   globalId: string
-  violation: string
+  points: number
+  reason: string
   date: string
-  action?: string
 }): Promise<void> {
-  const points = parseViolationPoints(o.violation)
   const globalId = String(o.globalId || '').trim()
+  const points = Number(o.points) || 0
   const date = String(o.date || '').trim()
   // Nothing trackable without a real employee, a point value, and a date.
   if (!globalId || !points || !date) return
@@ -40,10 +40,7 @@ export async function recordDisciplinaryEvent(o: {
     if (p) employeeName = String((p as any).name || (p as any).employeeName || '').trim()
   } catch { /* name is display-only; globalId is what matters */ }
 
-  const action = String(o.action || '').trim()
-  const reason = action && action.toLowerCase() !== 'none at this time'
-    ? `${o.violation} — ${action}`
-    : o.violation
+  const reason = String(o.reason || '').trim()
 
   const row: Record<string, string> = {
     eventId: 'dp_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),

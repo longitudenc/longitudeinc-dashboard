@@ -44,6 +44,7 @@ const VIOLATIONS = [
   'Giving unauthorized discounts or coupons (6 pts)',
   'Falsification of work / personnel / company records (6 pts)',
   'Soliciting customers at any time for a competitive business (8 pts)',
+  'Other (describe below)',
 ].join('|')
 
 
@@ -64,7 +65,9 @@ const FIELDS: Array<Record<string, string>> = [
   { fieldKey: 'employee', label: 'Documented Employee', type: 'employee', required: 'yes', options: '', placeholder: '', help: '', sortOrder: '10' },
   { fieldKey: 'salon', label: 'Salon', type: 'salon', required: 'yes', options: '', placeholder: '', help: '', sortOrder: '20' },
   { fieldKey: 'violationDate', label: 'Date of Violation', type: 'date', required: 'yes', options: '', placeholder: '', help: '', sortOrder: '30' },
-  { fieldKey: 'violation', label: 'Violation', type: 'select', required: 'yes', options: VIOLATIONS, placeholder: '', help: 'Points are assigned automatically from the violation.', sortOrder: '40' },
+  { fieldKey: 'violation', label: 'Violation', type: 'select', required: 'yes', options: VIOLATIONS, placeholder: '', help: 'Points are assigned automatically. Pick "Other" to enter one not listed.', sortOrder: '40' },
+  { fieldKey: 'otherViolation', label: 'If "Other": describe the violation', type: 'text', required: '', options: '', placeholder: '', help: '', sortOrder: '42' },
+  { fieldKey: 'otherPoints', label: 'If "Other": points', type: 'number', required: '', options: '', placeholder: '', help: '', sortOrder: '44' },
   { fieldKey: 'employeeResponse', label: "Employee's Response", type: 'textarea', required: 'yes', options: '', placeholder: '', help: '', sortOrder: '60' },
   { fieldKey: 'comments', label: 'Additional Comments', type: 'textarea', required: '', options: '', placeholder: '', help: '', sortOrder: '70' },
 ]

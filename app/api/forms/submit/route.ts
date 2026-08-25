@@ -13,7 +13,7 @@ import { NextResponse } from 'next/server'
 import { requireSignedIn } from '@/lib/require-role'
 import { appendSheet, readSheet, getEmployeeProfiles } from '@/lib/sheets'
 import { notifyNewSubmission } from '@/lib/notify'
-import { recordDisciplinaryEvent } from '@/lib/disc-points'
+import { recordDisciplinaryEvent, parseViolationPoints } from '@/lib/disc-points'
 import {
   getFormDefs,
   audienceAllows,
@@ -130,9 +130,13 @@ export async function POST(req: Request) {
     // Disciplinary form → also record a points event in the tracker (best-effort).
     if (def.formId === 'discipline') {
       try {
+        const violation = String(clean.violation || '')
+        const isOther = /^other\b/i.test(violation)
+        const points = isOther ? (Number(clean.otherPoints) || 0) : parseViolationPoints(violation)
+        const reason = isOther ? (String(clean.otherViolation || '').trim() || 'Other violation') : violation
         await recordDisciplinaryEvent({
           globalId: String(clean.employee || '').trim(),
-          violation: String(clean.violation || ''),
+          points, reason,
           date: String(clean.violationDate || '').trim(),
         })
       } catch (e: any) { console.error('[submit] disc event failed:', e?.message) }
