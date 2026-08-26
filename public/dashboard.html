@@ -13827,7 +13827,7 @@ function renderHome(){
   const h=new Date().getHours();
   const greet = h<12 ? 'Good morning' : h<17 ? 'Good afternoon' : 'Good evening';
   const who = (SESSION && SESSION.name) ? String(SESSION.name).split(' ')[0] : '';
-  if(hero) hero.textContent = who ? `${greet}, ${who}` : greet;
+  if(hero) hero.textContent = (who ? `${greet}, ${who}` : greet) + ' \u{1F44B}';
   if(sub)  sub.textContent  = new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
 
   // Submissions are fetched here as well as in loadForms() so the "Awaiting
@@ -13849,99 +13849,106 @@ function paintHome(){
   const d=HOME_DATA||{};
   const anns=d.announcements||[], dates=d.dates||[], links=d.links||[];
   const canEdit=!!d.canEdit;
+  const pending=(FORMS_SUBS||[]).filter(s=>s.canReview && (s.status==='submitted'||s.status==='in_review')).length;
+  const dIcon=(t)=>{ t=String(t||'').toLowerCase();
+    if(/birthday|bday/.test(t)) return '🎂';
+    if(/anniversary|years with|\byear\b|\byr\b/.test(t)) return '🎉';
+    if(/welcome|new hire|joined|new team/.test(t)) return '👋';
+    if(/holiday|closed|labor day|christmas|thanksgiving|new year/.test(t)) return '🗓️';
+    return '⭐'; };
 
-  // Stat row. Deliberately only facts that are exact and need no derivation —
-  // an invented KPI here would violate the "what you see is what's scored" rule.
-  const pending = (FORMS_SUBS||[]).filter(s=>s.canReview && (s.status==='submitted'||s.status==='in_review')).length;
-  const stats = [
-    ['Active Salons', (typeof ACTIVE_SALONS!=='undefined' && ACTIVE_SALONS ? ACTIVE_SALONS.length : '—'), ''],
-    ['Week Ending',   (S.currentWeek ? hFmtDate(S.currentWeek) : '—'), ''],
-    // Setting the tab before switching avoids racing loadForms()'s own render.
-    ['Requests to Handle', pending, pending>0 ? "S_formsTab='queue';switchToForms();" : '']
-  ];
-  let html = '<div class="summary-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:1.25rem;">'
-    + stats.map(([l,v,act])=>`<div class="metric-card"${act?` onclick="${act}" style="cursor:pointer;"`:''}><div class="metric-label">${hEsc(l)}</div><div class="metric-value">${hEsc(v)}</div></div>`).join('')
-    + '</div>';
+  const HOME_C_STYLE = `<style>
+    .home-hero{background:linear-gradient(135deg,#03654e,#048667)!important;color:#eafaf2!important;border-radius:16px;padding:26px 30px;margin-bottom:20px;border:0!important;}
+    #home-greeting{color:#eafaf2!important;}
+    .home-hero .hh-sub{color:#bfe3d5!important;font-family:'Space Mono',ui-monospace,monospace;font-size:12px;letter-spacing:.03em;}
+    .hc-sec{margin-bottom:22px;}
+    .hc-h2{font-size:1.35rem;font-weight:700;color:var(--text,#12231d);margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:10px;}
+    .hc-cele{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14px;}
+    .hc-cel{border:1px solid var(--border,#e6ebe7);border-radius:16px;padding:20px 18px;text-align:center;background:var(--surface,#f4f7f4);}
+    .hc-ic{font-size:26px;line-height:1;}
+    .hc-nm{font-weight:600;margin-top:10px;color:var(--text,#12231d);}
+    .hc-sub{color:var(--text-muted,#5c6b64);font-size:.85rem;margin-top:2px;}
+    .hc-tag{display:inline-block;margin-top:9px;background:var(--paper,#fff);border:1px solid var(--border,#e6ebe7);border-radius:999px;padding:2px 11px;font-size:11px;font-family:'Space Mono',ui-monospace,monospace;color:#048667;}
+    .hc-edit{margin-top:9px;display:flex;gap:5px;justify-content:center;}
+    .hc-pill{display:flex;align-items:center;gap:6px;background:#03654e;color:#eafaf2;border-radius:14px;padding:14px 18px;font-size:.95rem;margin-bottom:22px;cursor:pointer;transition:.15s;}
+    .hc-pill:hover{background:#024c3a;}
+    .hc-pill b{color:#9acb3a;font-size:1.15rem;font-weight:700;}
+    .hc-pill .hc-cta{color:#9acb3a;font-weight:600;margin-left:auto;font-size:.85rem;}
+    .hc-two{display:grid;grid-template-columns:1fr 1fr;gap:28px;}
+    .hc-eyebrow{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted,#5c6b64);margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;gap:8px;}
+    .hc-note{padding:12px 0;border-bottom:1px solid var(--border,#e6ebe7);}
+    .hc-note:last-child{border-bottom:0;}
+    .hc-note.pinned .hc-note-t{color:#03654e;}
+    .hc-pin{background:#9acb3a;color:#03654e;border-radius:5px;padding:1px 7px;font-size:10px;font-weight:700;text-transform:uppercase;}
+    .hc-note-t{font-weight:600;color:var(--text,#12231d);}
+    .hc-note-b{color:var(--text-muted,#5c6b64);font-size:.92rem;margin-top:3px;white-space:pre-wrap;}
+    .hc-img{max-width:100%;border-radius:10px;margin-top:8px;}
+    .hc-note-m{display:flex;gap:8px;align-items:center;color:var(--text-muted,#5c6b64);font-size:11px;margin-top:8px;flex-wrap:wrap;}
+    .hc-cat{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted,#5c6b64);margin:12px 0 4px;}
+    .hc-link{display:flex;align-items:center;gap:9px;padding:9px 0;border-bottom:1px solid var(--border,#e6ebe7);color:#03654e;font-weight:500;text-decoration:none;}
+    .hc-link:hover{color:#048667;}
+    .hc-link-ic{font-size:16px;}
+    .hc-link-slot{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+    .hc-link-slot .hc-link{flex:1;}
+    .hc-link-edit{display:flex;gap:4px;flex-shrink:0;}
+    @media(max-width:760px){.hc-two{grid-template-columns:1fr;gap:20px;}}
+  </style>`;
 
-  html += '<div class="home-grid"><div>';
+  let html = HOME_C_STYLE;
 
-  // Announcements
-  html += '<div class="home-sec"><div class="home-sec-title"><span>Announcements</span>'
-    + (canEdit?`<button class="btn btn-secondary btn-sm" onclick="openHomeEditor('announcement')">+ New</button>`:'')
-    + '</div>';
-  if(!anns.length){
-    html += '<div class="no-data"><div class="no-data-icon">📣</div>No announcements right now.</div>';
+  // ── Coming up (people-first) ──
+  html += `<div class="hc-sec"><div class="hc-h2"><span>Coming up at Longitude</span>${canEdit?`<button class="btn btn-secondary btn-sm" onclick="openHomeEditor('date')">+ New</button>`:''}</div>`;
+  if(!dates.length){
+    html += '<div class="no-data"><div class="no-data-icon">🗓️</div>Nothing on the calendar yet.</div>';
   } else {
-    html += anns.map(a=>`<div class="ann-card${a.pinned?' pinned':''}">
-      <div class="ann-title">${a.pinned?'<span class="pin-tag">Pinned</span> ':''}${hEsc(a.title)}</div>
-      <div class="ann-body">${hEsc(a.body)}</div>
-      ${a.imageUrl?`<a href="${hEsc(a.imageUrl)}" target="_blank" rel="noopener noreferrer" title="Open full size"><img class="ann-img" src="${hEsc(a.imageUrl)}" alt="" loading="lazy" onerror="this.parentNode.style.display='none';"></a>`:''}
-      <div class="ann-meta">
-        <span>${a.startDate?hFmtDate(a.startDate,true):''}</span>
-        ${a.endDate?`<span>&middot; through ${hFmtDate(a.endDate,true)}</span>`:''}
-        ${canEdit?`<span style="margin-left:auto;display:flex;gap:6px;">
-          <button class="btn btn-secondary btn-sm" onclick="openHomeEditor('announcement','${hEsc(a.id)}')">Edit</button>
-          <button class="btn btn-secondary btn-sm" onclick="deleteHomeItem('announcement','${hEsc(a.id)}')">Delete</button>
-        </span>`:''}
-      </div>
-    </div>`).join('');
+    html += '<div class="hc-cele">'+dates.map(dt=>{
+      const away=dt.daysAway, lbl = (away===0?'Today':away===1?'Tomorrow':(away>1&&away<=31?away+' days':''));
+      return `<div class="hc-cel">
+        <div class="hc-ic">${dIcon(dt.title)}</div>
+        <div class="hc-nm">${hEsc(dt.title)}</div>
+        ${dt.note?`<div class="hc-sub">${hEsc(dt.note)}</div>`:''}
+        <div class="hc-tag">${hEsc(hMonthAbbr(dt.date))} ${hEsc(hDayNum(dt.date))}${lbl?' · '+lbl:''}</div>
+        ${canEdit?`<div class="hc-edit"><button class="btn btn-secondary btn-sm" onclick="openHomeEditor('date','${hEsc(dt.id)}')">Edit</button><button class="btn btn-secondary btn-sm" onclick="deleteHomeItem('date','${hEsc(dt.id)}')">Delete</button></div>`:''}
+      </div>`;
+    }).join('')+'</div>';
   }
   html += '</div>';
 
-  // Quick links, grouped by category
-  html += '<div class="home-sec"><div class="home-sec-title"><span>Quick Links</span>'
-    + (canEdit?`<button class="btn btn-secondary btn-sm" onclick="openHomeEditor('link')">+ New</button>`:'')
-    + '</div>';
+  // ── Pending pill ──
+  if(pending>0){
+    html += `<div class="hc-pill" onclick="S_formsTab='queue';switchToForms();"><b>${pending}</b> request${pending===1?' is':'s are'} waiting on you<span class="hc-cta">tap to review →</span></div>`;
+  }
+
+  // ── Announcements + Quick Links ──
+  html += '<div class="hc-two"><div>';
+  html += `<div class="hc-eyebrow"><span>Announcements</span>${canEdit?`<button class="btn btn-secondary btn-sm" onclick="openHomeEditor('announcement')">+ New</button>`:''}</div>`;
+  if(!anns.length){
+    html += '<div class="no-data"><div class="no-data-icon">📣</div>No announcements right now.</div>';
+  } else {
+    html += anns.map(a=>`<div class="hc-note${a.pinned?' pinned':''}">
+      <div class="hc-note-t">${a.pinned?'<span class="hc-pin">Pinned</span> ':''}${hEsc(a.title)}</div>
+      <div class="hc-note-b">${hEsc(a.body)}</div>
+      ${a.imageUrl?`<a href="${hEsc(a.imageUrl)}" target="_blank" rel="noopener noreferrer"><img class="hc-img" src="${hEsc(a.imageUrl)}" alt="" loading="lazy" onerror="this.parentNode.style.display='none';"></a>`:''}
+      <div class="hc-note-m"><span>${a.startDate?hFmtDate(a.startDate,true):''}</span>${a.endDate?`<span> · through ${hFmtDate(a.endDate,true)}</span>`:''}${canEdit?`<span style="margin-left:auto;display:flex;gap:6px;"><button class="btn btn-secondary btn-sm" onclick="openHomeEditor('announcement','${hEsc(a.id)}')">Edit</button><button class="btn btn-secondary btn-sm" onclick="deleteHomeItem('announcement','${hEsc(a.id)}')">Delete</button></span>`:''}</div>
+    </div>`).join('');
+  }
+  html += '</div><div>';
+  html += `<div class="hc-eyebrow"><span>Quick Links</span>${canEdit?`<button class="btn btn-secondary btn-sm" onclick="openHomeEditor('link')">+ New</button>`:''}</div>`;
   if(!links.length){
     html += '<div class="no-data"><div class="no-data-icon">🔗</div>No links yet.</div>';
   } else {
-    const cats={};
-    links.forEach(l=>{ (cats[l.category]=cats[l.category]||[]).push(l); });
+    const cats={}; links.forEach(l=>{(cats[l.category||'Links']=cats[l.category||'Links']||[]).push(l);});
     Object.keys(cats).sort().forEach(cat=>{
-      html += `<div class="link-cat">${hEsc(cat)}</div><div class="links-grid">`;
+      html += `<div class="hc-cat">${hEsc(cat)}</div>`;
       html += cats[cat].map(l=>{
-        const ext = /^https?:\/\//i.test(l.url);
-        const tile = `<a class="link-tile" href="${hEsc(l.url)}"${ext?' target="_blank" rel="noopener noreferrer"':''}>
-          <span class="lt-icon">${hEsc(l.icon)}</span><span>${hEsc(l.label)}</span></a>`;
+        const ext=/^https?:\/\//i.test(l.url);
+        const tile=`<a class="hc-link" href="${hEsc(l.url)}"${ext?' target="_blank" rel="noopener noreferrer"':''}><span class="hc-link-ic">${hEsc(l.icon||'🔗')}</span><span>${hEsc(l.label)}</span></a>`;
         if(!canEdit) return tile;
-        // The buttons sit OUTSIDE the anchor — nesting them would be invalid
-        // HTML and a click would follow the link instead of opening the editor.
-        return `<div class="link-slot">${tile}<div class="link-edit">
-          <button class="btn btn-secondary btn-sm" style="padding:3px 9px;font-size:11px;" onclick="openHomeEditor('link','${hEsc(l.id)}')">Edit</button>
-          <button class="btn btn-secondary btn-sm" style="padding:3px 9px;font-size:11px;" onclick="deleteHomeItem('link','${hEsc(l.id)}')">Delete</button>
-        </div></div>`;
+        return `<div class="hc-link-slot">${tile}<div class="hc-link-edit"><button class="btn btn-secondary btn-sm" style="padding:3px 8px;font-size:11px;" onclick="openHomeEditor('link','${hEsc(l.id)}')">Edit</button><button class="btn btn-secondary btn-sm" style="padding:3px 8px;font-size:11px;" onclick="deleteHomeItem('link','${hEsc(l.id)}')">Delete</button></div></div>`;
       }).join('');
-      html += '</div>';
     });
   }
   html += '</div></div>';
-
-  // Right rail — important dates
-  html += '<div><div class="home-sec"><div class="home-sec-title"><span>Important Dates</span>'
-    + (canEdit?`<button class="btn btn-secondary btn-sm" onclick="openHomeEditor('date')">+ New</button>`:'')
-    + '</div>';
-  if(!dates.length){
-    html += '<div class="no-data"><div class="no-data-icon">📅</div>Nothing coming up.</div>';
-  } else {
-    html += dates.map(dt=>{
-      const away = dt.daysAway;
-      const cls  = away<=0 ? 'away-now' : away<=14 ? 'away-soon' : 'away-far';
-      const lbl  = away< 0 ? 'Now' : away===0 ? 'Today' : away===1 ? 'Tomorrow' : `${away}d`;
-      return `<div class="date-row">
-        <div class="date-cal"><div class="dc-m">${hEsc(hMonthAbbr(dt.date))}</div><div class="dc-d">${hEsc(hDayNum(dt.date))}</div></div>
-        <div class="date-info">
-          <div class="date-title">${hEsc(dt.title)}</div>
-          ${dt.note?`<div class="date-note">${hEsc(dt.note)}</div>`:''}
-          ${canEdit?`<div style="margin-top:5px;display:flex;gap:5px;">
-            <button class="btn btn-secondary btn-sm" style="padding:3px 9px;font-size:11px;" onclick="openHomeEditor('date','${hEsc(dt.id)}')">Edit</button>
-            <button class="btn btn-secondary btn-sm" style="padding:3px 9px;font-size:11px;" onclick="deleteHomeItem('date','${hEsc(dt.id)}')">Delete</button>
-          </div>`:''}
-        </div>
-        <span class="date-away ${cls}">${hEsc(lbl)}</span>
-      </div>`;
-    }).join('');
-  }
-  html += '</div></div></div>';
 
   host.innerHTML = html;
 }
