@@ -12,7 +12,6 @@ import { todayET, yesterdayET, dayOfWeek, isLastFridayOfMonth } from '@/lib/fisc
 import { runBonusPeriodForMonth } from '@/lib/bonus-period'
 import { readSheet, rowsToObjects } from '@/lib/sheets'
 import { sendAlert, heartbeat } from '@/lib/alert'
-import { sendPayrollPace } from '@/lib/payroll-pace'
 
 import {
   runDailyScrape,
@@ -36,6 +35,25 @@ async function triggerWeekly(): Promise<string> {
   try { await fetch(url, { signal: ctrl.signal }); return 'completed' }
   catch { return 'dispatched (running in background)' }
   finally { clearTimeout(timer) }
+}
+
+// Fire the Wednesday payroll-pace email in its OWN function invocation (own 60s),
+// so it can never be starved by the daily scrapes. It's fast (~10s), so we AWAIT
+// the result (bounded) — that way a dispatch or send failure is visible here and
+// trips the cron's failure alert, on top of the route's own alert.
+async function triggerPayrollPace(): Promise<{ ok: boolean; detail: string }> {
+  const base = process.env.SELF_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '')
+  if (!base || !process.env.CRON_SECRET) return { ok: false, detail: 'skipped (no base url / secret)' }
+  const url = `${base}/api/report/payroll-pace?secret=${encodeURIComponent(process.env.CRON_SECRET)}`
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), 30000)
+  try {
+    const res = await fetch(url, { signal: ctrl.signal })
+    const j: any = await res.json().catch(() => ({}))
+    return { ok: res.ok && j?.ok !== false && j?.sent !== false, detail: res.ok ? (j?.sent === false ? 'route ran but sent=false' : 'sent') : `http ${res.status}` }
+  } catch (e: any) {
+    return { ok: false, detail: `dispatch failed: ${String(e?.message || e)}` }
+  } finally { clearTimeout(timer) }
 }
 
 export const runtime = 'nodejs'
@@ -156,6 +174,13 @@ export async function GET(request: Request) {
     results.push({ name: 'bonus-period', result: await runBonusPeriodForMonth(by, bm) })
   }
 
+  // Wednesday: fire the payroll-pace email in its OWN invocation (own 60s) so it
+  // can't be starved. This runs after the daily scrape has landed Tuesday's data.
+  if (dayOfWeek(today) === 3) {
+    const pp = await triggerPayrollPace()
+    results.push({ name: 'payroll-pace', result: { ok: pp.ok, message: pp.detail } })
+  }
+
   // 5. RECOVERABLE detail — runs last on purpose. These use a week-to-date
   //    default and fill in place, so a late timeout just means they complete on
   //    the next nightly run rather than losing anything.
@@ -163,16 +188,6 @@ export async function GET(request: Request) {
   results.push({ name: 'shifts',   result: await runShiftsScrape() })
   results.push({ name: 'chkinout', result: await runChkInOutScrape() })
 
-  // Wednesday: email the week-to-date payroll-pace report (Sat -> yesterday/Tue).
-  // Best-effort — a report failure must never fail the cron.
-  if (dayOfWeek(today) === 3) {
-    try {
-      const pace = await sendPayrollPace()
-      console.log(`[cron/run] payroll-pace: ${pace.sent ? 'sent ' + pace.count + ' salons' : 'skipped'}`)
-    } catch (e) {
-      console.error('[cron/run] payroll-pace failed:', e)
-    }
-  }
 
   const allOk = results.every(r => r.result.ok)
   const durationMs = Date.now() - startedAt

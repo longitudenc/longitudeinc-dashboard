@@ -10,6 +10,7 @@
 // Callable manually: /api/cron/weekly?secret=…
 
 import { NextResponse } from 'next/server'
+import { sendAlert } from '@/lib/alert'
 import {
   runWeeklyScrape,
   runRosterScrape,
@@ -47,5 +48,9 @@ export async function GET(request: Request) {
 
   const allOk = results.every(r => r.result?.ok)
   console.log(`[cron/weekly] ${results.map(r => `${r.name}:${r.result?.ok ? 'ok' : 'FAIL'}`).join(' ')}`)
+  if (!allOk) {
+    const failed = results.filter(r => !r.result?.ok).map(r => `${r.name}: ${r.result?.error || 'failed'}`).join('<br>')
+    await sendAlert('[Longitude] Weekly finalizer \u2717 — a scrape failed', `<p>The Saturday weekly run had failures:</p><p>${failed}</p>`)
+  }
   return NextResponse.json({ ok: allOk, results })
 }

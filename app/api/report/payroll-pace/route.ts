@@ -10,6 +10,7 @@
 
 import { NextResponse } from 'next/server'
 import { buildPayrollPace, sendPayrollPace } from '@/lib/payroll-pace'
+import { sendAlert } from '@/lib/alert'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -27,8 +28,15 @@ export async function GET(request: Request) {
       return NextResponse.json({ ok: true, ...data })
     }
     const r = await sendPayrollPace(asOf)
+    if (!r.sent) {
+      await sendAlert(
+        '[Longitude] Payroll pace did NOT send',
+        `<p>sendPayrollPace returned sent=false (salons=${r.count}). Check that PAYROLL_PACE_EMAIL is set and that there is week-to-date data.</p>`
+      )
+    }
     return NextResponse.json({ ok: true, ...r })
   } catch (e: any) {
+    await sendAlert('[Longitude] Payroll pace FAILED', `<p>${String(e?.message || e)}</p>`)
     return NextResponse.json({ ok: false, error: String(e?.message || e) }, { status: 500 })
   }
 }
