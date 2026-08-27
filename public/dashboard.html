@@ -13926,8 +13926,9 @@ function paintHome(){
   };
   const celYears=(dt)=>{ const m=String(dt.title||'').match(/(\d+)\s*-?\s*year/i); return m?(m[1]+' year'+(m[1]==='1'?'':'s')):''; };
   // Home salon comes from EmployeeProfile via getCelebrations; curated events
-  // have none, so they fall back to their own note.
-  const celSalon=(dt)=>dt.salonNum?salonDisplay(String(dt.salonNum)):'';
+  // have none, so they fall back to their own note. Number only -- the salon name
+  // adds width without telling anyone here anything they don't already know.
+  const celSalon=(dt)=>String(dt.salonNum||'').trim();
   const celSub=(dt)=>{
     const k=dt.kind||'event', salon=celSalon(dt);
     if(k==='anniversary') return [celYears(dt),salon].filter(Boolean).join(' \u00b7 ');
@@ -13935,12 +13936,13 @@ function paintHome(){
     if(k==='birthday')    return salon;
     return dt.note||'';
   };
-  // Hover detail. Phone number would belong here too, but it is not scraped into
-  // EmployeeProfile (PROFILE_COLUMNS is a strict allow-list that omits it).
+  // Hover detail. `phone` is present only when the API decided this role may have
+  // it (owner/admin/office); for everyone else it is absent and simply omitted.
   const celTip=(dt)=>{
     const k=dt.kind||'event';
     const parts=[String(dt.title||''), celSalon(dt), hFmtDate(dt.date,true)];
     if(k==='event' && dt.note) parts.push(dt.note);
+    if(dt.phone) parts.push(String(dt.phone));
     return parts.filter(Boolean).join(' \u00b7 ');
   };
   const celRow=(dt)=>{

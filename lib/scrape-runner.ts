@@ -1490,6 +1490,9 @@ const PROFILE_COLUMNS = [
   'inactiveDate',   // YYYY-MM-DD or '' — when they went inactive
   'dateOfHire',     // YYYY-MM-DD
   'rehireDate',     // YYYY-MM-DD or ''
+  'phone',          // homePhone, else phone2 -- RESTRICTED. Served only to
+                    // owner/admin/office (see app/api/home/route.ts). Never
+                    // emergencyPhone, which SD3 also returns.
   'birthday',       // MM-DD only (no year — for birthday celebrations; no age stored)
   'homeStoreNum',   // public salon number, from primaryStoreDict.n (e.g. "2554")
   'homeStoreName',  // from primaryStoreDict.a (e.g. "Carmel Commons")
@@ -1555,6 +1558,10 @@ function profileRow(e: any): Record<string, any> | null {
       if (md) return `${String(md[1]).padStart(2, '0')}-${String(md[2]).padStart(2, '0')}`
       return ''
     })(),
+    // Contact number for the Home celebration hover. homePhone is the primary,
+    // phone2 the secondary. emergencyPhone is deliberately NOT read -- it is for
+    // emergencies, not for wishing someone a happy birthday.
+    phone: String(e?.homePhone ?? e?.phone2 ?? '').trim(),
     homeStoreNum: home?.n != null ? String(home.n).trim() : '',
     homeStoreName: home?.a != null ? String(home.a).trim() : '',
     homeStoreId: home?.pk != null ? (Number(home.pk) || '') : '',

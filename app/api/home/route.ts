@@ -10,6 +10,12 @@ import { NextResponse } from 'next/server'
 import { requireSignedIn } from '@/lib/require-role'
 import { getAnnouncements, getImportantDates, getHomeLinks, getCelebrations, todayIsoET } from '@/lib/home'
 
+// Phone numbers on the Home celebration hover go to back-office roles only.
+// Enforced here, server-side: for anyone else getCelebrations is called without
+// includePhone, so the number is absent from the response rather than hidden by
+// the client. An area manager sees their team's birthdays, but not their numbers.
+const PHONE_ROLES = new Set(['owner', 'admin', 'office'])
+
 export async function GET(req: Request) {
   const gate = await requireSignedIn()
   if (!gate.ok) return gate.response
@@ -23,7 +29,7 @@ export async function GET(req: Request) {
       getAnnouncements(role),
       getImportantDates(role, horizon),
       getHomeLinks(role),
-      getCelebrations(gate.access.salons).catch(() => []),
+      getCelebrations(gate.access.salons, { includePhone: PHONE_ROLES.has(role) }).catch(() => []),
     ])
     // Auto celebrations sit alongside curated dates in "Coming up".
     const allDates = [...celebrations, ...dates].sort((a, b) => a.date.localeCompare(b.date))
