@@ -1559,9 +1559,11 @@ function profileRow(e: any): Record<string, any> | null {
       return ''
     })(),
     // Contact number for the Home celebration hover. homePhone is the primary,
-    // phone2 the secondary. emergencyPhone is deliberately NOT read -- it is for
+    // phone2 the fallback. Deliberately `||` and not `??`: SD3 returns a BLANK
+    // homePhone far more often than a missing one, and `??` would keep the empty
+    // string and never reach phone2. emergencyPhone is not read -- it is for
     // emergencies, not for wishing someone a happy birthday.
-    phone: String(e?.homePhone ?? e?.phone2 ?? '').trim(),
+    phone: (String(e?.homePhone ?? '').trim() || String(e?.phone2 ?? '').trim()),
     homeStoreNum: home?.n != null ? String(home.n).trim() : '',
     homeStoreName: home?.a != null ? String(home.a).trim() : '',
     homeStoreId: home?.pk != null ? (Number(home.pk) || '') : '',
