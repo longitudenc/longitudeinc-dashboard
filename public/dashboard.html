@@ -13936,17 +13936,18 @@ function paintHome(){
     if(k==='birthday')    return salon;
     return dt.note||'';
   };
-  // Hover detail. `phone` is present only when the API decided this role may have
-  // it (owner/admin/office); for everyone else it is absent and simply omitted.
-  const celPhone=(v)=>{ const s=String(v||'').trim(), d=s.replace(/D/g,'');
+  // Phone renders as (843) 517-9102. homePhone arrives as bare digits while phone2
+  // is already punctuated, so normalize anything that reduces to exactly 10 digits
+  // and leave everything else as SD3 gave it. [^0-9] rather than \D on purpose:
+  // this file is patched by scripts, and a lone backslash does not survive.
+  const celPhone=(v)=>{ const s=String(v||'').trim(), d=s.replace(/[^0-9]/g,'');
     return d.length===10 ? '('+d.slice(0,3)+') '+d.slice(3,6)+'-'+d.slice(6) : s; };
-  const celTip=(dt)=>{
-    const k=dt.kind||'event';
-    const parts=[String(dt.title||''), celSalon(dt), hFmtDate(dt.date,true)];
-    if(k==='event' && dt.note) parts.push(dt.note);
-    if(dt.phone) parts.push(celPhone(dt.phone));
-    return parts.filter(Boolean).join(' \u00b7 ');
-  };
+  // Hover detail: name + phone, nothing else. Salon and date are already on the
+  // row, so repeating them only made the tooltip noise. The name earns its place
+  // because a long one is ellipsised in the row. `phone` is present only when the
+  // API decided this role may have it (owner/admin/office); for everyone else it
+  // is absent and the tooltip quietly falls back to just the name.
+  const celTip=(dt)=>[celName(dt), dt.phone?celPhone(dt.phone):''].filter(Boolean).join(' \u00b7 ');
   const celRow=(dt)=>{
     const away=dt.daysAway, lbl=(away===0?'Today':away===1?'Tomorrow':(away>1&&away<=31?away+'d':''));
     const sub=celSub(dt);
