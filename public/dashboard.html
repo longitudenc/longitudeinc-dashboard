@@ -9806,8 +9806,8 @@ function toggleSidebar(){
 document.addEventListener('DOMContentLoaded', ()=>{
   const l = document.querySelector('.main-layout');
   if(!l) return;
-  let pref = '0';
-  try{ pref = localStorage.getItem('sidebarCollapsed') || '0'; }catch(e){}
+  let pref = '1';
+  try{ pref = localStorage.getItem('sidebarCollapsed') || '1'; }catch(e){}
   if(pref==='1' || window.innerWidth<=768){ l.classList.add('sidebar-collapsed'); }
   const sb = document.getElementById('sidebar');
   if(sb) sb.addEventListener('click', e=>{
@@ -13858,15 +13858,16 @@ function paintHome(){
     return '⭐'; };
 
   const HOME_C_STYLE = `<style>
+    @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&display=swap');
     .home-hero{background:linear-gradient(135deg,#03654e,#048667)!important;color:#eafaf2!important;border-radius:16px;padding:26px 30px;margin-bottom:20px;border:0!important;}
-    #home-greeting{color:#eafaf2!important;}
+    #home-greeting{color:#eafaf2!important;font-family:'Fraunces',Georgia,serif;font-weight:500;}
     .home-hero .hh-sub{color:#bfe3d5!important;font-family:'Space Mono',ui-monospace,monospace;font-size:12px;letter-spacing:.03em;}
     .hc-sec{margin-bottom:22px;}
-    .hc-h2{font-size:1.35rem;font-weight:700;color:var(--text,#12231d);margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:10px;}
+    .hc-h2{font-family:'Fraunces',Georgia,serif;font-size:1.5rem;font-weight:600;color:var(--text,#12231d);margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:10px;}
     .hc-cele{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14px;}
     .hc-cel{border:1px solid var(--border,#e6ebe7);border-radius:16px;padding:20px 18px;text-align:center;background:var(--surface,#f4f7f4);}
     .hc-ic{font-size:26px;line-height:1;}
-    .hc-nm{font-weight:600;margin-top:10px;color:var(--text,#12231d);}
+    .hc-nm{font-family:'Fraunces',Georgia,serif;font-weight:500;font-size:1.05rem;margin-top:10px;color:var(--text,#12231d);}
     .hc-sub{color:var(--text-muted,#5c6b64);font-size:.85rem;margin-top:2px;}
     .hc-tag{display:inline-block;margin-top:9px;background:var(--paper,#fff);border:1px solid var(--border,#e6ebe7);border-radius:999px;padding:2px 11px;font-size:11px;font-family:'Space Mono',ui-monospace,monospace;color:#048667;}
     .hc-edit{margin-top:9px;display:flex;gap:5px;justify-content:center;}
@@ -13908,7 +13909,7 @@ function paintHome(){
         <div class="hc-nm">${hEsc(dt.title)}</div>
         ${dt.note?`<div class="hc-sub">${hEsc(dt.note)}</div>`:''}
         <div class="hc-tag">${hEsc(hMonthAbbr(dt.date))} ${hEsc(hDayNum(dt.date))}${lbl?' · '+lbl:''}</div>
-        ${canEdit?`<div class="hc-edit"><button class="btn btn-secondary btn-sm" onclick="openHomeEditor('date','${hEsc(dt.id)}')">Edit</button><button class="btn btn-secondary btn-sm" onclick="deleteHomeItem('date','${hEsc(dt.id)}')">Delete</button></div>`:''}
+        ${(canEdit && !dt.auto)?`<div class="hc-edit"><button class="btn btn-secondary btn-sm" onclick="openHomeEditor('date','${hEsc(dt.id)}')">Edit</button><button class="btn btn-secondary btn-sm" onclick="deleteHomeItem('date','${hEsc(dt.id)}')">Delete</button></div>`:''}
       </div>`;
     }).join('')+'</div>';
   }

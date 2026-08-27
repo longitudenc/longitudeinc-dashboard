@@ -8,7 +8,7 @@
 
 import { NextResponse } from 'next/server'
 import { requireSignedIn } from '@/lib/require-role'
-import { getAnnouncements, getImportantDates, getHomeLinks, todayIsoET } from '@/lib/home'
+import { getAnnouncements, getImportantDates, getHomeLinks, getCelebrations, todayIsoET } from '@/lib/home'
 
 export async function GET(req: Request) {
   const gate = await requireSignedIn()
@@ -19,11 +19,14 @@ export async function GET(req: Request) {
     const horizon = Number(url.searchParams.get('horizon') || '') || 120
 
     const role = gate.access.role
-    const [announcements, dates, links] = await Promise.all([
+    const [announcements, dates, links, celebrations] = await Promise.all([
       getAnnouncements(role),
       getImportantDates(role, horizon),
       getHomeLinks(role),
+      getCelebrations(gate.access.salons).catch(() => []),
     ])
+    // Auto celebrations sit alongside curated dates in "Coming up".
+    const allDates = [...celebrations, ...dates].sort((a, b) => a.date.localeCompare(b.date))
 
     return NextResponse.json({
       success: true,
@@ -31,7 +34,7 @@ export async function GET(req: Request) {
       role,
       name: gate.access.name || '',
       announcements,
-      dates,
+      dates: allDates,
       links,
       canEdit: role === 'owner' || role === 'admin',
     })

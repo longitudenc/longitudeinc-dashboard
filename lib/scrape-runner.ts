@@ -1490,6 +1490,7 @@ const PROFILE_COLUMNS = [
   'inactiveDate',   // YYYY-MM-DD or '' — when they went inactive
   'dateOfHire',     // YYYY-MM-DD
   'rehireDate',     // YYYY-MM-DD or ''
+  'birthday',       // MM-DD only (no year — for birthday celebrations; no age stored)
   'homeStoreNum',   // public salon number, from primaryStoreDict.n (e.g. "2554")
   'homeStoreName',  // from primaryStoreDict.a (e.g. "Carmel Commons")
   'homeStoreId',    // SD3 store id, from primaryStoreDict.pk
@@ -1544,6 +1545,16 @@ function profileRow(e: any): Record<string, any> | null {
     inactiveDate: e?.inactiveDate ? String(e.inactiveDate).trim() : '',
     dateOfHire: e?.dateOfHire ? String(e.dateOfHire).trim() : '',
     rehireDate: e?.rehireDate ? String(e.rehireDate).trim() : '',
+    // Birthday: read whichever field the source uses, store MONTH-DAY only.
+    birthday: (() => {
+      const raw = String(e?.dateOfBirth ?? e?.birthDate ?? e?.birthdate ?? e?.dob ?? e?.birthday ?? '').trim()
+      if (!raw) return ''
+      const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(raw)
+      if (iso) return `${iso[2]}-${iso[3]}`
+      const md = /^(\d{1,2})[\/\-](\d{1,2})/.exec(raw)
+      if (md) return `${String(md[1]).padStart(2, '0')}-${String(md[2]).padStart(2, '0')}`
+      return ''
+    })(),
     homeStoreNum: home?.n != null ? String(home.n).trim() : '',
     homeStoreName: home?.a != null ? String(home.a).trim() : '',
     homeStoreId: home?.pk != null ? (Number(home.pk) || '') : '',
