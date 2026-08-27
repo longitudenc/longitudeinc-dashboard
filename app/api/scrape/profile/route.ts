@@ -4,10 +4,17 @@
 // home store from SD3's JSON `reporting` endpoint and upserts one row per
 // employee (keyed by globalId) into the EmployeeProfile tab.
 //
-// PII SAFETY: the reporting payload carries names, addresses, and photo
-// thumbnails. The runner's profileRow() reads ONLY an explicit six-field
-// allow-list and never copies the source object, so PII never reaches the
-// sheet. This route returns counts only — never the underlying data.
+// PII SAFETY: the reporting payload carries names, addresses, SSNs, passwords
+// and photo thumbnails. The runner's profileRow() reads ONLY an explicit
+// allow-list (PROFILE_COLUMNS) and never copies the source object, so none of
+// that reaches the sheet.
+//
+// Two allow-listed fields ARE personal and are restricted downstream:
+//   email — login resolution only; never sent to a browser.
+//   phone — homePhone, else phone2 (never emergencyPhone). Served only to
+//           owner/admin/office, via the includePhone gate in /api/home.
+//
+// This route returns counts only — never the underlying data.
 //
 // Cadence: monthly (hire/rehire/home-store changes rarely). Wired into the
 // cron's month-end branch; this route exists for manual/ad-hoc runs.
