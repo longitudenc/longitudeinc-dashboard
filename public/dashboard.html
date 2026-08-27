@@ -199,11 +199,9 @@
   .status-bar span{color:#d6ec9f;}
 
   /* Admin upload panel */
-  .upload-panel{background:white;border:1px solid var(--border);border-radius:12px;padding:1.5rem;margin-bottom:1.5rem;}
-  .upload-instructions{font-size:13px;line-height:1.8;color:var(--text-muted);}
-  .upload-instructions strong{color:var(--text);}
-  .folder-name{background:#f0efec;padding:3px 8px;border-radius:6px;font-family:monospace;font-size:12px;color:var(--primary);}
-  .refresh-btn{display:flex;align-items:center;gap:8px;margin-top:1rem;}
+  .admin-panel{background:white;border:1px solid var(--border);border-radius:12px;padding:1.5rem;margin-bottom:1.5rem;}
+  .admin-sections{font-size:13px;line-height:1.8;color:var(--text-muted);}
+  .admin-sections strong{color:var(--text);}
 
   /* Trend Charts */
   .trend-layout{display:grid;grid-template-columns:185px 1fr;min-height:520px;}
@@ -3150,7 +3148,7 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
       <div id="tab-dayreview" style="display:none;"></div>
       <div id="tab-bonus" style="display:none;">
         <div id="bonus-container">
-          <div class="no-data"><div class="no-data-icon">💰</div>No bonus data loaded yet.<br><span style="font-size:12px;color:var(--text-muted);">Drop a monthly employee CSV with "bonus" in the filename into your upload folder.</span></div>
+          <div class="no-data"><div class="no-data-icon">💰</div>No bonus data loaded yet.<br><span style="font-size:12px;color:var(--text-muted);">Bonus figures are built at month-end by the nightly scrape.</span></div>
         </div>
       </div>
 
@@ -3280,9 +3278,9 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
     <!-- Admin upload panel -->
     <div class="page" id="page-admin">
       <div class="page-header"><h2>Admin — Data Management</h2><div class="sub">Upload new weekly reports and manage data</div></div>
-      <div class="upload-panel">
+      <div class="admin-panel">
         <div class="card-title">Admin — Data Management</div>
-        <div class="upload-instructions">
+        <div class="admin-sections">
 
           <!-- Disciplinary Points editor -->
           <div style="margin-bottom:1.2rem;">
@@ -3395,9 +3393,6 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
             <div id="bulk-print-status" style="margin-top:6px;font-size:12px;color:var(--text-muted);"></div>
           </div>
 
-        </div>
-        <div class="refresh-btn">
-          <span id="refresh-status" style="font-size:12px;color:var(--text-muted);margin-left:10px;"></span>
         </div>
       </div>
 
@@ -8689,8 +8684,8 @@ function renderWeeksList(){
   const homeRetro = S.homeRetroUpdated > 0 ? ' · ' + S.homeRetroUpdated + ' historical rows synced' : '';
   const homeStatus = homeCount > 0
     ? `<div style="margin-bottom:1rem;padding:8px 12px;background:var(--exc-bg);border:1px solid var(--exc-border);border-radius:8px;font-size:12px;color:var(--exc-text);font-weight:600;">✓ Home salon file loaded — ${homeCount} stylists assigned${homeEffDate}${homeRetro}</div>`
-    : `<div style="margin-bottom:1rem;padding:8px 12px;background:#fff8e8;border:1px solid #f0d060;border-radius:8px;font-size:12px;color:#7a5a00;">⚠ No home salon file loaded — multi-salon employees will be skipped. Drop a file with "home" in the name into your upload folder.</div>`;
-  if(!S.weekHistory || !S.weekHistory.length){ el.innerHTML=homeStatus+'<div class="no-data">No weeks loaded yet — drop CSV files into your Google Drive upload folder.</div>'; return; }
+    : `<div style="margin-bottom:1rem;padding:8px 12px;background:#fff8e8;border:1px solid #f0d060;border-radius:8px;font-size:12px;color:#7a5a00;">⚠ No home salon file loaded — multi-salon employees will be skipped. It is refreshed by the nightly profile scrape.</div>`;
+  if(!S.weekHistory || !S.weekHistory.length){ el.innerHTML=homeStatus+'<div class="no-data">No weeks loaded yet — the nightly scrape fills this in.</div>'; return; }
 
   const weeks=[...S.weekHistory].sort((a,b)=>new Date(a.weekEnding)-new Date(b.weekEnding));
   const latest=weeks[weeks.length-1];
@@ -9396,7 +9391,7 @@ function calcMgrBonusFromSalonRow(salonRow, bonusMgrRow, waiver, periodLabel, is
 
 function buildManagerBonusPeriod(amSalonNums){
   if(!S_salonSummaryPeriods.length)
-    return '<div class="no-data">No Salon Summary data loaded.<br><span style="font-size:12px;color:var(--text-muted);">Drop a "Salon Summary" CSV into the upload folder and click Check for New Files.</span></div>';
+    return '<div class="no-data">No Salon Summary data loaded.<br><span style="font-size:12px;color:var(--text-muted);">Monthly summaries are built at month-end by the nightly scrape.</span></div>';
   if(!S_mgrBonusPeriod){ const _d=S_salonSummaryPeriods.filter(p=>_monthDone(p.periodKey)); const _l=(_d.length?_d:S_salonSummaryPeriods); S_mgrBonusPeriod = _l[_l.length-1].periodKey; }
   const ssPeriod = S_salonSummaryPeriods.find(p=>p.periodKey===S_mgrBonusPeriod);
   if(!ssPeriod) return '<div class="no-data">No salon summary data for this period.</div>';
@@ -10788,7 +10783,7 @@ function renderCompanyManagerBonus(){
   if(!el) return;
 
   if(!S_salonSummaryPeriods.length){
-    el.innerHTML = '<div class="no-data" style="padding:2rem;">No Salon Summary data loaded.<br><span style="font-size:12px;color:var(--text-muted);">Drop Salon Summary CSVs into the upload folder and click Check for New Files.</span></div>';
+    el.innerHTML = '<div class="no-data" style="padding:2rem;">No Salon Summary data loaded.<br><span style="font-size:12px;color:var(--text-muted);">Monthly summaries are built at month-end by the nightly scrape.</span></div>';
     return;
   }
 
