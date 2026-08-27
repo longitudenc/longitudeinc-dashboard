@@ -1547,7 +1547,7 @@ function profileRow(e: any): Record<string, any> | null {
     rehireDate: e?.rehireDate ? String(e.rehireDate).trim() : '',
     // Birthday: read whichever field the source uses, store MONTH-DAY only.
     birthday: (() => {
-      const raw = String(e?.dateOfBirth ?? e?.birthDate ?? e?.birthdate ?? e?.dob ?? e?.birthday ?? '').trim()
+      const raw = String(e?.birthDay ?? e?.dateOfBirth ?? e?.birthDate ?? e?.birthdate ?? e?.dob ?? e?.birthday ?? '').trim()
       if (!raw) return ''
       const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(raw)
       if (iso) return `${iso[2]}-${iso[3]}`
