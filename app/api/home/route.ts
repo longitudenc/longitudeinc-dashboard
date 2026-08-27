@@ -16,7 +16,7 @@ export async function GET(req: Request) {
 
   try {
     const url = new URL(req.url)
-    const horizon = Number(url.searchParams.get('horizon') || '') || 120
+    const horizon = Number(url.searchParams.get('horizon') || '') || 31  // events out ~1 month
 
     const role = gate.access.role
     const [announcements, dates, links, celebrations] = await Promise.all([

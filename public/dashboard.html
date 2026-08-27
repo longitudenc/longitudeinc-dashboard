@@ -13897,22 +13897,28 @@ function paintHome(){
 
   let html = HOME_C_STYLE;
 
-  // ── Coming up (people-first) ──
-  html += `<div class="hc-sec"><div class="hc-h2"><span>Coming up at Longitude</span>${canEdit?`<button class="btn btn-secondary btn-sm" onclick="openHomeEditor('date')">+ New</button>`:''}</div>`;
-  if(!dates.length){
-    html += '<div class="no-data"><div class="no-data-icon">🗓️</div>Nothing on the calendar yet.</div>';
-  } else {
-    html += '<div class="hc-cele">'+dates.map(dt=>{
-      const away=dt.daysAway, lbl = (away===0?'Today':away===1?'Tomorrow':(away>1&&away<=31?away+' days':''));
-      return `<div class="hc-cel">
-        <div class="hc-ic">${dIcon(dt.title)}</div>
-        <div class="hc-nm">${hEsc(dt.title)}</div>
-        ${dt.note?`<div class="hc-sub">${hEsc(dt.note)}</div>`:''}
-        <div class="hc-tag">${hEsc(hMonthAbbr(dt.date))} ${hEsc(hDayNum(dt.date))}${lbl?' · '+lbl:''}</div>
-        ${(canEdit && !dt.auto)?`<div class="hc-edit"><button class="btn btn-secondary btn-sm" onclick="openHomeEditor('date','${hEsc(dt.id)}')">Edit</button><button class="btn btn-secondary btn-sm" onclick="deleteHomeItem('date','${hEsc(dt.id)}')">Delete</button></div>`:''}
-      </div>`;
-    }).join('')+'</div>';
-  }
+  // ── Coming up (people-first, grouped) ──
+  const celCard=(dt)=>{
+    const away=dt.daysAway, lbl=(away===0?'Today':away===1?'Tomorrow':(away>1&&away<=31?away+' days':''));
+    return `<div class="hc-cel">
+      <div class="hc-ic">${dIcon(dt.title)}</div>
+      <div class="hc-nm">${hEsc(dt.title)}</div>
+      ${dt.note?`<div class="hc-sub">${hEsc(dt.note)}</div>`:''}
+      <div class="hc-tag">${hEsc(hMonthAbbr(dt.date))} ${hEsc(hDayNum(dt.date))}${lbl?' · '+lbl:''}</div>
+      ${(canEdit && !dt.auto)?`<div class="hc-edit"><button class="btn btn-secondary btn-sm" onclick="openHomeEditor('date','${hEsc(dt.id)}')">Edit</button><button class="btn btn-secondary btn-sm" onclick="deleteHomeItem('date','${hEsc(dt.id)}')">Delete</button></div>`:''}
+    </div>`;
+  };
+  html += `<div class="hc-sec"><div class="hc-h2"><span>Coming up at Longitude</span>${canEdit?`<button class="btn btn-secondary btn-sm" onclick="openHomeEditor('date')">+ New event</button>`:''}</div>`;
+  const groups=[['event','Events'],['birthday','Birthdays'],['anniversary','Anniversaries'],['newhire','New Hires']];
+  let anyDate=false;
+  groups.forEach(([kind,label])=>{
+    const items=(dates||[]).filter(dt=>((dt.kind||'event')===kind));
+    if(!items.length) return;
+    anyDate=true;
+    html += `<div class="hc-cat" style="margin:16px 0 6px;font-size:12px;">${label}</div>`;
+    html += '<div class="hc-cele">'+items.map(celCard).join('')+'</div>';
+  });
+  if(!anyDate){ html += '<div class="no-data"><div class="no-data-icon">🗓️</div>Nothing on the calendar yet.</div>'; }
   html += '</div>';
 
   // ── Pending pill ──
