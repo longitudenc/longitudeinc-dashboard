@@ -13871,16 +13871,19 @@ function paintHome(){
     .hc-sub{color:var(--text-muted,#5c6b64);font-size:.85rem;margin-top:2px;}
     .hc-tag{display:inline-block;margin-top:9px;background:var(--paper,#fff);border:1px solid var(--border,#e6ebe7);border-radius:999px;padding:2px 11px;font-size:11px;font-family:'Space Mono',ui-monospace,monospace;color:#048667;}
     .hc-edit{margin-top:9px;display:flex;gap:5px;justify-content:center;}
-    .hc-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(300px,100%),1fr));gap:6px 14px;}
-    .hc-li{display:flex;align-items:center;gap:10px;padding:7px 12px;border:1px solid var(--border,#e6ebe7);border-radius:10px;background:var(--surface,#f4f7f4);min-width:0;}
-    .hc-li-ic{font-size:17px;line-height:1;flex-shrink:0;}
-    .hc-li-tx{flex:1;min-width:0;}
-    .hc-li-nm{display:block;font-family:'Fraunces',Georgia,serif;font-weight:500;font-size:.95rem;color:var(--text,#12231d);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-    .hc-li-sub{display:block;color:var(--text-muted,#5c6b64);font-size:.76rem;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-    .hc-li-when{flex-shrink:0;font-family:'Space Mono',ui-monospace,monospace;font-size:10.5px;color:#048667;white-space:nowrap;}
+    .hc-groups{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(290px,100%),1fr));gap:18px 20px;align-items:start;}
+    .hc-group{min-width:0;}
+    .hc-gh{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted,#5c6b64);margin:0 0 8px;padding-bottom:5px;border-bottom:1px solid var(--border,#e6ebe7);}
+    .hc-count{margin-left:6px;font-weight:400;opacity:.7;}
+    .hc-list{display:flex;flex-direction:column;gap:8px;}
+    .hc-li{display:flex;align-items:center;flex-wrap:wrap;gap:6px 11px;padding:11px 14px;border:1px solid var(--border,#e6ebe7);border-radius:12px;background:var(--surface,#f4f7f4);min-width:0;}
+    .hc-li-ic{font-size:20px;line-height:1;flex-shrink:0;}
+    .hc-li-tx{flex:1 1 130px;min-width:0;}
+    .hc-li-nm{display:block;font-family:'Fraunces',Georgia,serif;font-weight:500;font-size:1rem;color:var(--text,#12231d);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .hc-li-sub{display:block;color:var(--text-muted,#5c6b64);font-size:.8rem;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .hc-li-when{margin-left:auto;flex-shrink:0;font-family:'Space Mono',ui-monospace,monospace;font-size:11px;color:#048667;white-space:nowrap;}
     .hc-li-act{display:flex;gap:4px;flex-shrink:0;}
-    .hc-li-act .btn{padding:2px 8px;font-size:11px;}
-    .hc-count{margin-left:6px;font-weight:400;color:var(--text-muted,#5c6b64);}
+    .hc-li-act .btn{padding:3px 9px;font-size:11px;}
     .hc-pill{display:flex;align-items:center;gap:6px;background:#03654e;color:#eafaf2;border-radius:14px;padding:14px 18px;font-size:.95rem;margin-bottom:22px;cursor:pointer;transition:.15s;}
     .hc-pill:hover{background:#024c3a;}
     .hc-pill b{color:#9acb3a;font-size:1.15rem;font-weight:700;}
@@ -13911,6 +13914,9 @@ function paintHome(){
   // Group headings already say "Birthdays" / "Anniversaries" / "New Hires", so the
   // generated title's suffix is redundant in a list. Strip it and move the useful
   // part (years of service) into the sub-line.
+  // Group headings already say "Birthdays" / "Anniversaries" / "New Hires", so the
+  // generated title's suffix is redundant in a list. Strip it and move the useful
+  // parts (years of service, home salon) onto the sub-line.
   const celName=(dt)=>{
     const t=String(dt.title||''), k=dt.kind||'event';
     if(k==='birthday')    return t.replace(/\s*\u2014\s*Birthday\s*$/i,'');
@@ -13918,32 +13924,46 @@ function paintHome(){
     if(k==='newhire')     return t.replace(/^\s*Welcome\s+/i,'');
     return t;
   };
+  const celYears=(dt)=>{ const m=String(dt.title||'').match(/(\d+)\s*-?\s*year/i); return m?(m[1]+' year'+(m[1]==='1'?'':'s')):''; };
+  // Home salon comes from EmployeeProfile via getCelebrations; curated events
+  // have none, so they fall back to their own note.
+  const celSalon=(dt)=>dt.salonNum?salonDisplay(String(dt.salonNum)):'';
   const celSub=(dt)=>{
-    const k=dt.kind||'event';
-    if(k==='anniversary'){ const m=String(dt.title||'').match(/(\d+)\s*-?\s*year/i); return m?(m[1]+' year'+(m[1]==='1'?'':'s')):''; }
-    if(k==='newhire')     return dt.note||'New team member';
+    const k=dt.kind||'event', salon=celSalon(dt);
+    if(k==='anniversary') return [celYears(dt),salon].filter(Boolean).join(' \u00b7 ');
+    if(k==='newhire')     return [dt.note||'New team member',salon].filter(Boolean).join(' \u00b7 ');
+    if(k==='birthday')    return salon;
     return dt.note||'';
+  };
+  // Hover detail. Phone number would belong here too, but it is not scraped into
+  // EmployeeProfile (PROFILE_COLUMNS is a strict allow-list that omits it).
+  const celTip=(dt)=>{
+    const k=dt.kind||'event';
+    const parts=[String(dt.title||''), celSalon(dt), hFmtDate(dt.date,true)];
+    if(k==='event' && dt.note) parts.push(dt.note);
+    return parts.filter(Boolean).join(' \u00b7 ');
   };
   const celRow=(dt)=>{
     const away=dt.daysAway, lbl=(away===0?'Today':away===1?'Tomorrow':(away>1&&away<=31?away+'d':''));
     const sub=celSub(dt);
-    return `<div class="hc-li">
+    return `<div class="hc-li" title="${hEsc(celTip(dt))}">
       <span class="hc-li-ic">${dIcon(dt.title)}</span>
       <span class="hc-li-tx"><span class="hc-li-nm">${hEsc(celName(dt))}</span>${sub?`<span class="hc-li-sub">${hEsc(sub)}</span>`:''}</span>
       <span class="hc-li-when">${hEsc(hMonthAbbr(dt.date))} ${hEsc(hDayNum(dt.date))}${lbl?' \u00b7 '+lbl:''}</span>
       ${(canEdit && !dt.auto)?`<span class="hc-li-act"><button class="btn btn-secondary btn-sm" onclick="openHomeEditor('date','${hEsc(dt.id)}')">Edit</button><button class="btn btn-secondary btn-sm" onclick="deleteHomeItem('date','${hEsc(dt.id)}')">Delete</button></span>`:''}
     </div>`;
   };
-  html += `<div class="hc-sec"><div class="hc-h2"><span>Coming up at Longitude</span>${canEdit?`<button class="btn btn-secondary btn-sm" onclick="openHomeEditor('date')">+ New event</button>`:''}</div>`;
+  html += `<div class="hc-sec"><div class="hc-h2"><span>Coming up at Longitude</span>${canEdit?`<button class="btn btn-secondary btn-sm" onclick="openHomeEditor('date')">+ New event</button>`:''}</div><div class="hc-groups">`;
   const groups=[['event','Events'],['birthday','Birthdays'],['anniversary','Anniversaries'],['newhire','New Hires']];
   let anyDate=false;
   groups.forEach(([kind,label])=>{
     const items=(dates||[]).filter(dt=>((dt.kind||'event')===kind));
     if(!items.length) return;
     anyDate=true;
-    html += `<div class="hc-cat">${label}<span class="hc-count">${items.length}</span></div>`;
-    html += '<div class="hc-list">'+items.map(celRow).join('')+'</div>';
+    html += `<div class="hc-group"><div class="hc-gh">${label}<span class="hc-count">${items.length}</span></div>`;
+    html += '<div class="hc-list">'+items.map(celRow).join('')+'</div></div>';
   });
+  html += '</div>';
   if(!anyDate){ html += '<div class="no-data"><div class="no-data-icon">🗓️</div>Nothing on the calendar yet.</div>'; }
   html += '</div>';
 

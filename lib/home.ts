@@ -93,6 +93,7 @@ export interface Announcement {
 export interface ImportantDate {
   auto?: boolean            // true = generated celebration (no edit controls)
   kind?: string             // 'event' | 'birthday' | 'anniversary' | 'newhire'
+  salonNum?: string         // auto rows only: the person's home salon number
   id: string
   title: string
   date: string
@@ -258,18 +259,18 @@ export async function getCelebrations(
     if (/^\d{4}-\d{2}-\d{2}$/.test(hire)) {
       const sinceHire = daysBetween(hire, today)
       if (sinceHire >= 0 && sinceHire <= newHireDays) {
-        out.push({ id: 'auto-hire-' + gid, title: `Welcome ${nm}`, date: hire, endDate: '', category: '', note: 'New team member', audience: [], daysAway: 0, auto: true, kind: 'newhire' })
+        out.push({ id: 'auto-hire-' + gid, title: `Welcome ${nm}`, date: hire, endDate: '', category: '', note: 'New team member', audience: [], daysAway: 0, auto: true, kind: 'newhire', salonNum: home })
       }
       const occ = nextOccurrence(monthDay(hire))
       if (occ && occ.daysAway <= horizon) {
         const years = Number(occ.date.slice(0, 4)) - Number(hire.slice(0, 4))
-        if (years >= 1) out.push({ id: 'auto-anniv-' + gid, title: `${nm} — ${years}-year work anniversary`, date: occ.date, endDate: '', category: '', note: '', audience: [], daysAway: occ.daysAway, auto: true, kind: 'anniversary' })
+        if (years >= 1) out.push({ id: 'auto-anniv-' + gid, title: `${nm} — ${years}-year work anniversary`, date: occ.date, endDate: '', category: '', note: '', audience: [], daysAway: occ.daysAway, auto: true, kind: 'anniversary', salonNum: home })
       }
     }
 
     const bocc = nextOccurrence(String(p.birthday || '').trim())
     if (bocc && bocc.daysAway <= horizon) {
-      out.push({ id: 'auto-bday-' + gid, title: `${nm} — Birthday`, date: bocc.date, endDate: '', category: '', note: '', audience: [], daysAway: bocc.daysAway, auto: true, kind: 'birthday' })
+      out.push({ id: 'auto-bday-' + gid, title: `${nm} — Birthday`, date: bocc.date, endDate: '', category: '', note: '', audience: [], daysAway: bocc.daysAway, auto: true, kind: 'birthday', salonNum: home })
     }
   }
 
