@@ -131,6 +131,20 @@ export interface PunchSegment {
   absent: boolean
 }
 
+/**
+ * One employee's floor hours for ONE DAY at one salon, from SD3's employee
+ * daily feed (SD_EMP_DAILY). Keyed by Payroll ID — the SAME key the payroll
+ * report uses — so counting 6-day qualifying days from this needs no name
+ * matching at all, and the day hours use the same "floor hours" definition
+ * the weekly report totals.
+ */
+export interface DailyFloorRow {
+  date: string
+  payId: string
+  salonNum: string
+  floorHours: number
+}
+
 /** What produced an extra earnings line — keeps the totals from double-counting. */
 export type EarningKind = 'sixDay' | 'break' | 'bonus' | 'manual'
 
@@ -171,8 +185,10 @@ export interface SixDayDetail {
   days: { date: string; floorHours: number; counted: boolean }[]
   /** Floor hours for the week from the payroll report (what the $1 multiplies). */
   weekFloorHours: number
-  /** Floor hours the punches add up to — a cross-check, not the pay basis. */
+  /** Floor hours the day-level feed adds up to — a cross-check, not the pay basis. */
   punchFloorHours: number
+  /** Which feed supplied the per-day hours: the daily report, or clock punches. */
+  source: 'daily' | 'punch' | 'none'
   amount: number
   /** Why it did not qualify, when it didn't. */
   reason: string
@@ -496,21 +512,38 @@ export function applyFloaterOvertime(rows: PayConsolRow[], threshold: number): v
  * Days and hours are counted for the PERSON, not the salon, so a floater who
  * works Monday at one salon and Tuesday at another has worked two days.
  *
- * Day counting comes from the punch feed (the only source with per-day detail);
- * the dollar amount multiplies the PAYROLL REPORT's floor hours, which is the
- * figure ADP and the salon P&L already agree on. Both numbers are returned so
- * any drift between them is visible rather than silent.
+ * Day counting prefers SD3's employee DAILY feed, which is keyed by Payroll ID
+ * and uses the same floor-hours definition as the weekly report — so the days
+ * and the dollars agree, and no name matching is involved. Clock punches are
+ * the fallback when the daily feed has nothing for that week.
+ *
+ * The dollar amount always multiplies the PAYROLL REPORT's floor hours, which
+ * is the figure ADP and the salon P&L already agree on. The day-feed total is
+ * returned alongside it so any drift is visible rather than silent.
  */
 export function computeSixDay(
   rows: PayConsolRow[],
   punches: PunchSegment[],
-  settings: AdpSettings
+  settings: AdpSettings,
+  dailyFloor: DailyFloorRow[] = []
 ): { details: SixDayDetail[]; exceptions: PayrollException[] } {
   const { sixDayRate, sixDayMinDays, sixDayMinShiftHours, sixDayMinFloorHours } = settings.rules
   const details: SixDayDetail[] = []
   const exceptions: PayrollException[] = []
 
-  // Floor time per person per day, from the punch feed.
+  // PRIMARY: floor time per person per day from the daily report, by Payroll ID.
+  const floorByPayIdDate = new Map<string, Map<string, number>>()
+  for (const d of dailyFloor) {
+    const payId = String(d.payId || '').trim()
+    if (!payId || !d.date) continue
+    const hrs = Number(d.floorHours) || 0
+    if (!(hrs > 0)) continue
+    let byDate = floorByPayIdDate.get(payId)
+    if (!byDate) floorByPayIdDate.set(payId, (byDate = new Map()))
+    byDate.set(d.date, (byDate.get(d.date) || 0) + hrs)
+  }
+
+  // FALLBACK: floor time per person per day, from the punch feed (matched on name).
   const floorByKeyDate = new Map<string, Map<string, number>>()
   for (const p of punches) {
     if (p.absent) continue
@@ -528,27 +561,32 @@ export function computeSixDay(
   for (const [payId, group] of byPay) {
     const employeeName = group[0].employeeName
     const weekFloorHours = round2(group.reduce((s, r) => s + r.floorHours, 0))
-    const key = nameKeyFromReport(employeeName)
-    const byDate = floorByKeyDate.get(key)
+    // Daily report first (exact Payroll ID join), punches second (name join).
+    let byDate = floorByPayIdDate.get(payId)
+    let source: 'daily' | 'punch' | 'none' = byDate && byDate.size ? 'daily' : 'none'
+    if (source === 'none') {
+      byDate = floorByKeyDate.get(nameKeyFromReport(employeeName))
+      if (byDate && byDate.size) source = 'punch'
+    }
 
-    // No punches at all for someone with floor hours: we cannot count their
-    // days, so we cannot qualify them. Say so instead of quietly paying $0.
+    // No day-level data at all for someone with floor hours: we cannot count
+    // their days, so we cannot qualify them. Say so instead of quietly paying $0.
     if (!byDate || byDate.size === 0) {
       if (weekFloorHours >= sixDayMinFloorHours) {
         exceptions.push({
           severity: 'warning',
-          kind: 'no-punch-data',
+          kind: 'no-daily-data',
           message:
-            `${employeeName} has ${weekFloorHours} floor hours but no clock punches — ` +
-            `6-day pay could not be evaluated`,
+            `${employeeName} has ${weekFloorHours} floor hours but no day-level data ` +
+            `(daily report or clock punches) — 6-day pay could not be evaluated`,
           employeeName,
           payId,
         })
       }
       details.push({
         payId, employeeName, qualifies: false, qualifyingDays: 0, days: [],
-        weekFloorHours, punchFloorHours: 0, amount: 0,
-        reason: 'no clock punches found for this employee',
+        weekFloorHours, punchFloorHours: 0, amount: 0, source: 'none',
+        reason: 'no day-level hours found for this employee',
       })
       continue
     }
@@ -585,6 +623,7 @@ export function computeSixDay(
       days,
       weekFloorHours,
       punchFloorHours,
+      source,
       amount: qualifies ? round2(weekFloorHours * sixDayRate) : 0,
       reason,
     })
@@ -681,6 +720,8 @@ export function buildPayroll(input: {
   settings: AdpSettings
   weekStart: string
   weekEnd: string
+  /** Per-day floor hours by Payroll ID. Preferred over punches for 6-day pay. */
+  dailyFloor?: DailyFloorRow[]
   /**
    * Bonus lines to place on this week. The CALLER decides whether this is the
    * bonus week — `isBonusWeek` in the result says what the rule would pick, so
@@ -700,7 +741,8 @@ export function buildPayroll(input: {
   // Cross-salon overtime, in place, before anything reads overtimePay.
   applyFloaterOvertime(rows, rules.otThresholdHours)
 
-  const { details: sixDay, exceptions: sixDayExceptions } = computeSixDay(rows, punches, settings)
+  const { details: sixDay, exceptions: sixDayExceptions } =
+    computeSixDay(rows, punches, settings, input.dailyFloor ?? [])
   exceptions.push(...sixDayExceptions)
   const breaks = computeShortBreaks(rows, punches, settings)
 

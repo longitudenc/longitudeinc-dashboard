@@ -26,6 +26,9 @@
 //   --week YYYY-MM-DD   week-ending Friday (default: last completed week)
 //   --csv PATH          Payroll Consolidated CSV instead of pulling from SD3
 //   --punches PATH      punches JSON (as saved by a previous --save run)
+//   --daily PATH        Employee Performance CSV covering the week, one row per
+//                       employee PER DAY. This is the 6-day day-count source and
+//                       joins on Pay ID, so no name matching is involved.
 //   --compare PATH      an ADP upload CSV to diff this run against
 //   --codes k=v,k=v     assign earnings codes for this run, e.g. sixDay=11
 //   --out DIR           output folder (default ./payroll-dryrun)
@@ -44,6 +47,7 @@ import {
   payDateFor,
   occurrenceInMonth,
   round2,
+  type DailyFloorRow,
   type PunchSegment,
 } from '../adp-payroll'
 
@@ -62,6 +66,7 @@ const weekStart = fiscalWeekContaining(weekEnd).start
 const outDir = arg('out') || './payroll-dryrun'
 const csvPath = arg('csv')
 const punchPath = arg('punches')
+const dailyPath = arg('daily')
 const comparePath = arg('compare')
 
 if (!/^\d{4}-\d{2}-\d{2}$/.test(weekEnd)) {
@@ -81,6 +86,56 @@ const money = (n: number) => '$' + n.toFixed(2)
 const pad = (s: string | number, n: number) => String(s).padEnd(n)
 const padL = (s: string | number, n: number) => String(s).padStart(n)
 
+/** Add N days to a YYYY-MM-DD string (UTC, so the weekday never shifts). */
+function addDaysIso(iso: string, n: number): string {
+  const d = new Date(iso + 'T00:00:00Z')
+  d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().slice(0, 10)
+}
+
+/**
+ * Read DailyFloorRows out of an SD3 Employee Performance CSV.
+ *
+ * That report has a 4-line title/filter preamble before the header and a few
+ * footnote lines after the data, so rows without a Pay ID are skipped. `date`
+ * is taken from the file's own Date column when it has one, otherwise from the
+ * caller (SD3's per-day pull produces one file per date, with no date column).
+ */
+function dailyRowsFromCsv(csvText: string, date?: string): DailyFloorRow[] {
+  const rows = parseCsv(csvText)
+  // Locate the header line rather than assuming index 4 — a combined export
+  // saved by hand may not carry the same preamble.
+  let headerIdx = rows.findIndex(r => r.some(c => c.trim() === 'Pay ID'))
+  if (headerIdx < 0) headerIdx = 4
+  const objects = rowsToObjectsAt(rows, headerIdx)
+  const out: DailyFloorRow[] = []
+  for (const o of objects) {
+    const payId = (o['Pay ID'] || '').trim()
+    if (!payId) continue
+    const floorHours = parseFloat((o['Floor Hours'] || '').replace(/[$,%]/g, ''))
+    if (!Number.isFinite(floorHours) || floorHours <= 0) continue
+    const rowDate = (o['Date'] || o['Business Date'] || '').trim() || date || ''
+    if (!rowDate) continue
+    out.push({
+      date: normalizeIso(rowDate),
+      payId,
+      salonNum: (o['Salon #'] || '').trim(),
+      floorHours,
+    })
+  }
+  return out
+}
+
+function normalizeIso(s: string): string {
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10)
+  const m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})/)
+  if (m) {
+    const yr = m[3].length === 2 ? '20' + m[3] : m[3]
+    return `${yr}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`
+  }
+  return s
+}
+
 async function main() {
   mkdirSync(outDir, { recursive: true })
   console.log(`\nPayroll dry run — week ${weekStart} → ${weekEnd}`)
@@ -89,6 +144,7 @@ async function main() {
   // ── Inputs ──
   let csvText: string
   let punches: PunchSegment[] = []
+  let dailyFloor: DailyFloorRow[] = []
   let punchNote = ''
 
   if (csvPath) {
@@ -96,7 +152,8 @@ async function main() {
     console.log(`Payroll report : ${csvPath}`)
   } else {
     // Imported lazily so the offline path needs no credentials at all.
-    const { authenticate, fetchSalons, fetchPayrollCsv, fetchEmpChkInOut, batchMap } = await import('../sd3')
+    const { authenticate, fetchSalons, fetchPayrollCsv, fetchEmpChkInOut,
+            fetchEmployeePerformanceCsv, batchMap } = await import('../sd3')
     if (!process.env.SD3_USERNAME || !process.env.SD3_PASSWORD) {
       console.error(
         '\nSD3_USERNAME / SD3_PASSWORD are not set.\n' +
@@ -126,28 +183,59 @@ async function main() {
       }
     })
     punches = perStore.flat()
+
+    // Per-day floor hours: SD3's employee report, pulled one day at a time so
+    // each row is a single date. Keyed by Pay ID, so it joins to payroll exactly.
+    console.log('Daily hours    : pulling 7 days live from SD3…')
+    const days: string[] = []
+    for (let d = weekStart; d <= weekEnd; d = addDaysIso(d, 1)) days.push(d)
+    const perDay = await batchMap(days, 3, async (d: string) => {
+      try {
+        const csv = await fetchEmployeePerformanceCsv(session, salons.map(s => s.storeId), d, d)
+        return dailyRowsFromCsv(csv, d)
+      } catch (e) {
+        console.warn(`  ! ${d}: ${e instanceof Error ? e.message : e}`)
+        return [] as DailyFloorRow[]
+      }
+    })
+    dailyFloor = perDay.flat()
   }
 
   if (punchPath) {
     punches = JSON.parse(readFileSync(punchPath, 'utf8'))
     console.log(`Clock punches  : ${punchPath}`)
   }
-  if (punches.length === 0) {
+  if (dailyPath) {
+    // One Employee Performance CSV covering the week, in Detail mode. Each row
+    // must carry a date; SD3's per-day pull is one file per day, so a combined
+    // export is read here by its "Date" column when present.
+    dailyFloor = dailyRowsFromCsv(readFileSync(dailyPath, 'utf8'))
+    console.log(`Daily hours    : ${dailyPath} (${dailyFloor.length} employee-days)`)
+  }
+
+  if (dailyFloor.length === 0 && punches.length === 0) {
     punchNote =
-      '\n  ⚠ No clock punches. 6-day pay and short breaks CANNOT be evaluated —\n' +
+      '\n  ⚠ No day-level hours. 6-day pay and short breaks CANNOT be evaluated —\n' +
       '    every employee will show as not qualifying. Run without --csv to pull\n' +
-      '    them live, or pass --punches.'
+      '    everything live, or pass --daily (6-day) and --punches (breaks).'
+  } else if (dailyFloor.length === 0) {
+    punchNote = '\n  Note: 6-day days counted from CLOCK PUNCHES (matched on name).\n' +
+      '    Pass --daily for the exact Payroll ID join.'
+  } else if (punches.length === 0) {
+    punchNote = '\n  Note: no clock punches, so paid short breaks cannot be evaluated.\n' +
+      '    6-day pay is unaffected — it uses the daily hours.'
   }
 
   if (flag('save')) {
     writeFileSync(join(outDir, `payroll-${weekEnd}.csv`), csvText)
     writeFileSync(join(outDir, `punches-${weekEnd}.json`), JSON.stringify(punches))
+    writeFileSync(join(outDir, `daily-${weekEnd}.json`), JSON.stringify(dailyFloor))
     console.log(`Saved raw inputs to ${outDir}/ for offline replay`)
   }
 
   // ── Run ──
   const rows = toPayConsolRows(rowsToObjectsAt(parseCsv(csvText), 0))
-  const result = buildPayroll({ rows, punches, settings, weekStart, weekEnd })
+  const result = buildPayroll({ rows, punches, settings, weekStart, weekEnd, dailyFloor })
 
   console.log(`\nRows ${rows.length} · employees ${result.totals.employees} ` +
     `(${result.totals.floaters} across multiple salons) · punch segments ${punches.length}`)
@@ -161,12 +249,18 @@ async function main() {
   // weak, 6-day pay silently under-pays — so it gets reported every run.
   const withFloor = result.sixDay.filter(s => s.weekFloorHours > 0)
   const matched = withFloor.filter(s => s.punchFloorHours > 0)
-  if (punches.length > 0) {
-    console.log(`\nName match     : ${matched.length}/${withFloor.length} employees with floor hours ` +
-      `also found in the punch feed`)
+  const bySource = new Map<string, number>()
+  for (const s of result.sixDay) bySource.set(s.source, (bySource.get(s.source) || 0) + 1)
+  console.log(`\nDay-count source: ` +
+    [...bySource].map(([k, v]) => `${k} ${v}`).join(' · ') +
+    `   (daily = exact Payroll ID join, punch = name match)`)
+
+  if (withFloor.length > 0) {
+    console.log(`Matched        : ${matched.length}/${withFloor.length} employees with floor hours ` +
+      `have day-level hours`)
     const unmatched = withFloor.filter(s => s.punchFloorHours === 0)
     if (unmatched.length) {
-      console.log('  Not matched (6-day pay cannot be evaluated for these):')
+      console.log('  No day-level hours (6-day pay cannot be evaluated for these):')
       unmatched.slice(0, 15).forEach(s =>
         console.log(`    ${pad(s.employeeName, 30)} ${padL(s.weekFloorHours, 6)} floor hrs`))
       if (unmatched.length > 15) console.log(`    …and ${unmatched.length - 15} more`)
@@ -178,9 +272,9 @@ async function main() {
       .filter(x => Math.abs(x.d) > 2)
       .sort((a, b) => Math.abs(b.d) - Math.abs(a.d))
     if (drift.length) {
-      console.log(`  Punch hours differ from the report by >2h for ${drift.length}:`)
+      console.log(`  Day hours differ from the weekly report by >2h for ${drift.length}:`)
       drift.slice(0, 10).forEach(x =>
-        console.log(`    ${pad(x.n, 30)} report ${padL(x.r, 6)}  punches ${padL(round2(x.r + x.d), 6)}  (${x.d > 0 ? '+' : ''}${x.d})`))
+        console.log(`    ${pad(x.n, 30)} weekly ${padL(x.r, 6)}  daily ${padL(round2(x.r + x.d), 6)}  (${x.d > 0 ? '+' : ''}${x.d})`))
     }
   }
 

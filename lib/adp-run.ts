@@ -9,6 +9,7 @@
 //
 // Inputs gathered here:
 //   • Payroll Consolidated CSV — live from SD3, the identical report/date range
+//   • Per-day floor hours      — SD_EMP_DAILY, keyed by Payroll ID (6-day pay)
 //   • Clock punches            — SD_CHKINOUT (scraped nightly), or live on request
 //   • Settings                 — ADP_SETTINGS / ADP_SALONS, or built-in defaults
 //   • Bonuses                  — BonusData, on the 3rd-paycheck week only
@@ -17,7 +18,7 @@
 
 import { authenticate, fetchSalons, fetchPayrollCsv, fetchEmpChkInOut, batchMap } from '@/lib/sd3'
 import { parseCsv, rowsToObjectsAt } from '@/lib/csv'
-import { readSheet, rowsToObjects, getChkInOutRange } from '@/lib/sheets'
+import { readSheet, rowsToObjects, getChkInOutRange, getDailyRange } from '@/lib/sheets'
 import { loadAdpSettings, type AdpSettings } from '@/lib/adp-settings'
 import { salonMonth } from '@/lib/salon-month'
 import { fiscalWeekContaining, lastCompletedFiscalWeek, todayET } from '@/lib/fiscal'
@@ -25,6 +26,7 @@ import {
   buildPayroll,
   toPayConsolRows,
   isBonusPayWeek,
+  type DailyFloorRow,
   type ExtraEarning,
   type PayrollBuildResult,
   type PunchSegment,
@@ -61,6 +63,8 @@ export interface RunResult extends PayrollBuildResult {
   meta: {
     punchSource: 'sheet' | 'live'
     punchSegments: number
+    /** Per-day floor-hour rows found for the week (the 6-day day-count source). */
+    dailyFloorRows: number
     payrollRows: number
     salonsInReport: string[]
     bonusPeriod: string | null
@@ -144,6 +148,26 @@ export async function loadManualLines(weekEnd: string): Promise<(ExtraEarning & 
     .filter(l => l.payId && l.amount !== 0)
 }
 
+/**
+ * Per-employee, per-day floor hours for the week from SD_EMP_DAILY.
+ *
+ * This is the 6-day day-count source: it carries Payroll ID, so it joins to the
+ * payroll report exactly, and its floor hours are the same measure the weekly
+ * report totals. Empty is fine — the engine falls back to clock punches.
+ */
+async function dailyFloorFromSheet(weekStart: string, weekEnd: string): Promise<DailyFloorRow[]> {
+  const { empDaily } = await getDailyRange(weekStart, weekEnd)
+  const out: DailyFloorRow[] = []
+  for (const r of empDaily) {
+    const payId = String(r.payId || '').trim()
+    const date = String(r.date || '').trim()
+    const floorHours = numOrNull(r.floorHours) ?? 0
+    if (!payId || !date || !(floorHours > 0)) continue
+    out.push({ date, payId, salonNum: String(r.salonNum || '').trim(), floorHours })
+  }
+  return out
+}
+
 /** Punches from the nightly scrape. Cheap — one Sheets read for the week. */
 async function punchesFromSheet(weekStart: string, weekEnd: string): Promise<PunchSegment[]> {
   const { chkinout } = await getChkInOutRange(weekStart, weekEnd)
@@ -186,6 +210,14 @@ export async function runPayrollBuild(opts: RunOptions = {}): Promise<RunResult>
 
   const csvText = await fetchPayrollCsv(session, storeIds, weekStart, weekEnd)
   const rows = toPayConsolRows(rowsToObjectsAt(parseCsv(csvText), 0))
+
+  // ── Per-day floor hours (6-day pay) ──
+  let dailyFloor: DailyFloorRow[] = []
+  try {
+    dailyFloor = await dailyFloorFromSheet(weekStart, weekEnd)
+  } catch {
+    dailyFloor = []
+  }
 
   // ── Punches ──
   let punchSource: 'sheet' | 'live' = opts.punchSource === 'live' ? 'live' : 'sheet'
@@ -244,6 +276,7 @@ export async function runPayrollBuild(opts: RunOptions = {}): Promise<RunResult>
     settings,
     weekStart,
     weekEnd,
+    dailyFloor,
     bonuses,
     manual,
   })
@@ -258,6 +291,7 @@ export async function runPayrollBuild(opts: RunOptions = {}): Promise<RunResult>
     meta: {
       punchSource,
       punchSegments: punches.length,
+      dailyFloorRows: dailyFloor.length,
       payrollRows: rows.length,
       salonsInReport: [...new Set(rows.map(r => r.salonNum))].sort(),
       bonusPeriod,

@@ -28,6 +28,7 @@ import {
   occurrenceInMonth,
   allocate,
   round2,
+  type DailyFloorRow,
   type PunchSegment,
 } from '../adp-payroll'
 
@@ -280,6 +281,45 @@ const noCode = buildPayroll({
 check(
   'unassigned earnings code blocks rather than dropping the pay',
   noCode.exceptions.some(e => e.severity === 'blocking' && e.kind === 'missing-code')
+)
+
+// The DAILY feed is the preferred day-count source: it carries Payroll ID, so
+// it joins to the payroll report exactly instead of matching on name.
+const dailyDays = ['2026-08-15','2026-08-16','2026-08-17','2026-08-18','2026-08-19','2026-08-20']
+const daily: DailyFloorRow[] = dailyDays.map((date, i) => ({
+  date, payId: empRows[0].payId,
+  salonNum: i === 2 ? '3043' : '3062',
+  floorHours: i === 2 ? 5.09 : 6.7,
+}))
+const viaDaily = computeSixDay(empRows, [], settings, daily).details[0]
+check(
+  'daily feed alone qualifies the same person (no punches, no name match)',
+  viaDaily.qualifies && viaDaily.qualifyingDays === 6 && viaDaily.source === 'daily',
+  `qualifies=${viaDaily.qualifies} days=${viaDaily.qualifyingDays} source=${viaDaily.source}`
+)
+// A payroll report name the punch feed spells differently would break a name
+// join; the Payroll ID join is unaffected.
+const renamed = empRows.map(r => ({ ...r, employeeName: 'NEWMAN-CHONG, C SIONG' }))
+const viaDailyRenamed = computeSixDay(renamed, punches, settings, daily).details[0]
+check(
+  'daily feed still matches when the name would not',
+  viaDailyRenamed.qualifies && viaDailyRenamed.source === 'daily',
+  `qualifies=${viaDailyRenamed.qualifies} source=${viaDailyRenamed.source}`
+)
+check(
+  'punches are used when the daily feed has nothing',
+  computeSixDay(empRows, punches, settings, []).details[0].source === 'punch'
+)
+check(
+  'daily feed wins over punches when both are present',
+  computeSixDay(empRows, punches, settings, daily).details[0].source === 'daily'
+)
+check(
+  'neither feed → reported, not silently unqualified',
+  (() => {
+    const d = computeSixDay(empRows, [], settings, []).details[0]
+    return d.source === 'none' && !d.qualifies && d.reason.includes('no day-level hours')
+  })()
 )
 
 // ── 5) Short breaks ──
