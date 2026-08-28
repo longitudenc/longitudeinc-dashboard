@@ -3043,6 +3043,10 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
   .hub-card:hover{box-shadow:0 4px 14px rgba(0,0,0,.10);transform:translateY(-1px);}
   .hub-card .hc-t{font-weight:700;font-size:14px;color:#03654e;margin-bottom:3px;}
   .hub-card .hc-d{font-size:12px;color:var(--text-muted);line-height:1.45;}
+  .hub-sec{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+          color:var(--text-muted);margin:20px 0 2px;}
+  .hub-sec:first-of-type{margin-top:14px;}
+  #topnav .tn-back{color:#9acb3a;font-weight:700;}
 </style>
 <nav id="topnav" aria-label="Main"></nav>
 
@@ -4597,6 +4601,7 @@ function init(){
     };
     SESSION_CAPS = new Set(me.caps || []);
     renderTopNav();
+    initSidebarNavSync();
     renderViewAsBanner();
     startDashboard();
   }).catch(()=>{ showLogin(); });
@@ -10259,6 +10264,7 @@ function initAdminCollapse(){
 }
 
 
+
 // == Top navigation + hub pages ==============================================
 // The old sidebar is organised by WHO (pick an area manager, then a report),
 // which is why Bonus, Reviews, Day Review and Team each exist three times over
@@ -10266,65 +10272,89 @@ function initAdminCollapse(){
 // functions the sidebar calls -- nothing is reimplemented here, so the two
 // navigations cannot disagree about what a screen shows.
 //
+// Cards carry a `sec` so a group can be split into Company vs Area manager.
+// That split is temporary scaffolding: the end state is ONE set of reports with
+// a scope switcher, at which point these two sections collapse into each other.
+//
+// GATING RULE: a card must be visible to exactly the people who could already
+// reach it from the sidebar -- no wider, no narrower. setupSidebar() is the
+// reference. Note the AM branch gives area managers their own All Salons,
+// Standouts and Reviews entries, so those are NOT canSeeAllSalons()-only.
+//
 // Deliberately NOT here: company KPI tiles. Recomputing company aggregates for
 // a landing page would create a second implementation of numbers that are
-// scored and paid against, and the two would eventually drift. The hub routes
-// to the views that already own that maths.
+// scored and paid against, and the two would eventually drift.
+
+// Everyone who gets a performance sidebar at all: owner/admin/viewer + AMs.
+function _navPerfUser(){ return canSeeAllSalons() || isAMRole(); }
 
 const HUB_GROUPS = {
   performance: {
     title: 'Performance',
     sub: 'How the salons are doing',
     cards: [
-      // view.company on every card that lands on the Company page: the sidebar
-      // only ever showed Company Overview to canSeeAllSalons(), so omitting it
-      // here would hand managers and stylists a page they never had.
-      { t:'All Salons',     d:'Every salon for the selected period, with tier colouring.', cap:'view.company',
-        go:function(){ switchToCompany(); } },
-      { t:'Scorecards',     d:'Area manager rankings and per-AM performance.', cap:'view.company',
+      // --- Company ---
+      { sec:'Company', t:'All Salons', d:'Every salon for the selected period, with tier colouring.',
+        show:_navPerfUser, go:function(){ switchToCompany(); } },
+      { sec:'Company', t:'Scorecards', d:'Area manager rankings and per-AM performance.', cap:'view.company',
         go:function(){ switchToCompany(); showCompanyTab('ams'); } },
-      { t:'Day Review',     d:'The whole company on a single day.', cap:'view.dayreview',
+      { sec:'Company', t:'Day Review', d:'The whole company on a single day.', cap:'view.dayreview',
         go:function(){ switchToCompany(); showCompanyTab('dayreview'); } },
-      { t:'Day of Week',    d:'Weekday comparisons across a date window.', cap:'view.dayofweek',
+      { sec:'Company', t:'Day of Week', d:'Weekday comparisons across a date window.', cap:'view.dayofweek',
         go:function(){ switchToCompany(); showCompanyTab('dayofweek'); } },
-      { t:'Market Compare', d:'How we sit against the wider Charlotte market.', cap:'view.market',
+      { sec:'Company', t:'Market Compare', d:'How we sit against the wider Charlotte market.', cap:'view.market',
         href:'/market.html' },
+      // --- Area manager (amSubTab picks the current AM, or your own if you are one) ---
+      { sec:'Area manager', t:'Scorecard', d:'One area manager’s scorecard for the period.',
+        show:_navPerfUser, go:function(){ amSubTab('score'); } },
+      { sec:'Area manager', t:'Salon Performance', d:'Each salon under that area manager.',
+        show:_navPerfUser, go:function(){ amSubTab('salon'); } },
+      { sec:'Area manager', t:'My Team’s Performance', d:'Every stylist in those salons.',
+        show:_navPerfUser, go:function(){ amSubTab('individual'); } },
+      { sec:'Area manager', t:'Trends', d:'Movement over time for those salons.',
+        show:_navPerfUser, go:function(){ amSubTab('trends'); } },
     ],
   },
   pay: {
     title: 'Pay',
-    sub: 'Bonuses, recognition and payroll',
+    sub: 'Bonuses and payroll',
     cards: [
-      { t:'Bonuses',   d:'Stylist, manager and area manager bonus detail.', cap:'view.company',
+      { sec:'Company', t:'Bonuses', d:'Stylist, manager and area manager bonus detail.', cap:'view.company',
         go:function(){ switchToCompany(); showCompanyTab('bonus'); } },
-      { t:'Standouts', d:'Monthly recognition across the company.', cap:'view.company',
-        go:function(){ switchToCompany(); showCompanyTab('standouts'); } },
-      { t:'Payroll',   d:'Build and review the ADP upload for a week.', cap:'view.payroll',
+      { sec:'Area manager', t:'Bonus', d:'Bonus detail for one area manager’s salons.',
+        show:_navPerfUser, go:function(){ amSubTab('bonus'); } },
+      { sec:'Office', t:'Payroll', d:'Build and review the ADP upload for a week.', cap:'view.payroll',
         href:'/office.html' },
     ],
   },
   people: {
     title: 'People',
-    sub: 'The team, their reviews and their records',
+    sub: 'The team, their recognition and their records',
     cards: [
-      { t:'Team',                d:'Everyone, sortable, with hours and performance.', cap:'view.company',
+      // Standouts is recognition, not pay -- it belongs with People.
+      { sec:'Company', t:'Standouts', d:'Monthly recognition across the company.',
+        show:_navPerfUser, go:function(){ switchToCompany(); showCompanyTab('standouts'); } },
+      { sec:'Company', t:'Team', d:'Everyone, sortable, with hours and performance.', cap:'view.company',
         go:function(){ switchToCompany(); showCompanyTab('team'); } },
-      { t:'Reviews',             d:'Stylist and manager reviews.', cap:'view.company',
-        go:function(){ switchToCompany(); showCompanyTab('reviews'); } },
+      { sec:'Company', t:'Reviews', d:'Stylist and manager reviews.',
+        show:_navPerfUser, go:function(){ switchToCompany(); showCompanyTab('reviews'); } },
+      { sec:'Area manager', t:'Reviews', d:'Reviews for one area manager’s stylists.',
+        show:_navPerfUser, go:function(){ amSubTab('reviews'); } },
       // No capability for this one yet -- see lib/capabilities.ts. `show` mirrors
       // the reveal rule on the #ftb-points tab exactly, so the card appears for
       // precisely the people who already had it. Swap to cap:'view.points' once
       // something enforces it server-side.
-      { t:'Disciplinary points', d:'Active points, flags and per-person history.',
+      { sec:'Records', t:'Disciplinary points', d:'Active points, flags and per-person history.',
         show:function(){ return isAdminRole() || isAMRole(); },
         go:function(){ switchToForms(); showFormsTab('points'); } },
     ],
   },
 };
 
-// Which top-level item is showing. Kept separate from the sidebar's own state
-// so the two never fight over the highlight.
+// Which top-level item is showing, and whether we have drilled into a card.
+// Kept separate from the sidebar's own state so the two never fight.
 let S_topNav = '';
+let S_hubDrilled = false;
 
 // A card shows when its capability allows it AND any extra client-side
 // predicate does. `show` exists for gates that are not capabilities yet; it
@@ -10339,11 +10369,11 @@ function renderTopNav(){
   const nav = document.getElementById('topnav');
   if(!nav) return;
   const items = [
-    { key:'home',        label:'Home',        go:function(){ switchToHome(); } },
-    { key:'performance', label:'Performance', go:function(){ showHub('performance'); } },
-    { key:'pay',         label:'Pay',         go:function(){ showHub('pay'); } },
-    { key:'people',      label:'People',      go:function(){ showHub('people'); } },
-    { key:'requests',    label:'Requests',    go:function(){ switchToForms(); } },
+    { key:'home',        label:'Home' },
+    { key:'performance', label:'Performance' },
+    { key:'pay',         label:'Pay' },
+    { key:'people',      label:'People' },
+    { key:'requests',    label:'Requests' },
   ];
   let html = '';
   items.forEach(function(it){
@@ -10354,6 +10384,12 @@ function renderTopNav(){
           + ' onclick="topNavGo(this)">' + _accEsc(it.label) + '</button>';
   });
   html += '<span class="tn-spacer"></span>';
+  // Back out of a destination without hunting for the sidebar. Only once you
+  // have actually drilled in from a hub, so it is never a no-op.
+  if(S_hubDrilled && HUB_GROUPS[S_topNav]){
+    html += '<button class="tn tn-back" data-nav="' + _accEsc(S_topNav) + '" onclick="topNavGo(this)">'
+          + '&#8249; Back to ' + _accEsc(HUB_GROUPS[S_topNav].title) + '</button>';
+  }
   if(hasCap('edit.settings') || hasCap('manage.access')){
     html += '<button class="tn' + (S_topNav === 'admin' ? ' active' : '') + '" data-nav="admin"'
           + ' title="Settings" onclick="topNavGo(this)">&#9881;</button>';
@@ -10364,10 +10400,10 @@ function renderTopNav(){
 function topNavGo(btn){
   const key = btn.getAttribute('data-nav');
   S_topNav = key;
-  if(key === 'home')      { switchToHome(); }
-  else if(key === 'requests'){ switchToForms(); }
-  else if(key === 'admin')   { switchToAdminFromNav(); }
-  else                       { showHub(key); }
+  if(key === 'home')         { S_hubDrilled = false; switchToHome(); }
+  else if(key === 'requests'){ S_hubDrilled = false; switchToForms(); }
+  else if(key === 'admin')   { S_hubDrilled = false; switchToAdminFromNav(); }
+  else                       { showHub(key); return; }   // showHub re-renders
   renderTopNav();
 }
 
@@ -10382,6 +10418,7 @@ function showHub(key){
   const g = HUB_GROUPS[key];
   if(!g) return;
   S_topNav = key;
+  S_hubDrilled = false;
   clearActive();
   const pg = document.getElementById('page-hub');
   if(pg) pg.classList.add('active');
@@ -10395,17 +10432,26 @@ function showHub(key){
   if(!allowed.length){
     html += '<div style="color:var(--text-muted);font-size:13px;">Nothing here is available to your login.</div>';
   } else {
-    html += '<div class="hub-grid">';
-    allowed.forEach(function(c, i){
-      html += '<button class="hub-card" data-hub="' + _accEsc(key) + '" data-i="' + i + '" onclick="hubGo(this)">'
-            + '<div class="hc-t">' + _accEsc(c.t) + '</div>'
-            + '<div class="hc-d">' + _accEsc(c.d) + '</div>'
-            + '</button>';
+    // Group by section, preserving first-seen order.
+    const order = [];
+    allowed.forEach(function(c){
+      const sec = c.sec || '';
+      if(order.indexOf(sec) < 0) order.push(sec);
     });
-    html += '</div>';
+    order.forEach(function(sec){
+      if(sec) html += '<div class="hub-sec">' + _accEsc(sec) + '</div>';
+      html += '<div class="hub-grid">';
+      allowed.forEach(function(c, i){
+        if((c.sec || '') !== sec) return;
+        html += '<button class="hub-card" data-hub="' + _accEsc(key) + '" data-i="' + i + '" onclick="hubGo(this)">'
+              + '<div class="hc-t">' + _accEsc(c.t) + '</div>'
+              + '<div class="hc-d">' + _accEsc(c.d) + '</div>'
+              + '</button>';
+      });
+      html += '</div>';
+    });
   }
-  const host = document.getElementById('page-hub');
-  if(host) host.innerHTML = html;
+  if(pg) pg.innerHTML = html;
   renderTopNav();
 }
 
@@ -10417,7 +10463,26 @@ function hubGo(btn){
   const card = g.cards.filter(_tnAllowed)[i];
   if(!card) return;
   if(card.href){ window.location.href = card.href; return; }
-  if(card.go) card.go();
+  if(card.go){
+    card.go();                 // this calls clearActive() internally
+    S_topNav = key;
+    S_hubDrilled = true;
+    renderTopNav();            // so the Back control appears
+  }
+}
+
+// Using the sidebar means you are no longer inside a hub journey, so drop the
+// Back control rather than leaving it pointing somewhere you did not come from.
+// Delegated to the container, which survives setupSidebar() rebuilding it.
+function initSidebarNavSync(){
+  const sb = document.getElementById('sidebar');
+  if(!sb || sb.dataset.navSync) return;
+  sb.dataset.navSync = '1';
+  sb.addEventListener('click', function(){
+    S_hubDrilled = false;
+    S_topNav = '';
+    renderTopNav();
+  });
 }
 
 // == Admin: Users & Access ===================================================
