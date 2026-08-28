@@ -19,6 +19,12 @@ import {
   type Role,
 } from './auth-roles'
 import { getUsers } from './sheets'
+import {
+  getCapabilityOverrides,
+  resolveCapabilities,
+  ROLE_DEFAULTS,
+  type Capability,
+} from './capabilities'
 
 export type AccessSource = 'Users' | 'AreaManagers' | 'ManagerTable' | 'EmployeeProfile'
 
@@ -31,6 +37,10 @@ export interface AccessEntry {
   salons: string[]
   globalId: string
   amId: string          // Users-tab column the client reads as USER_AM_ID
+  /** Resolved capabilities: role defaults plus this person's overrides. */
+  caps: Capability[]
+  /** Capabilities that differ from this role's defaults, so the panel can flag them. */
+  overridden: Capability[]
   editable: boolean     // only Users-tab rows can be changed from the panel
 }
 
@@ -66,7 +76,21 @@ function nameOfProfile(p: any): string {
 
 /** Everyone who can sign in, with the reason their role resolves as it does. */
 export async function listAllAccess(): Promise<AccessAudit> {
-  const [users, tables] = await Promise.all([getUsers(), loadAccessTables()])
+  const [users, tables, overrides] = await Promise.all([
+    getUsers(), loadAccessTables(), getCapabilityOverrides(),
+  ])
+
+  // Resolved once per person from data already in memory — no extra I/O.
+  const capsFor = (role: any, email: string) => {
+    const caps = resolveCapabilities({ role } as any, email, overrides)
+    const defaults = new Set(ROLE_DEFAULTS[role as keyof typeof ROLE_DEFAULTS] || [])
+    const list = [...caps]
+    const overridden = [
+      ...list.filter(c => !defaults.has(c)),                       // granted
+      ...[...defaults].filter(c => !caps.has(c)),                  // revoked
+    ]
+    return { caps: list, overridden }
+  }
 
   const entries: AccessEntry[] = []
   const seen = new Set<string>()
@@ -89,6 +113,7 @@ export async function listAllAccess(): Promise<AccessAudit> {
       salons: salons ? salons.split(/[,\s]+/).filter(Boolean) : [],
       globalId: pick(u, 'globalId', 'global id', 'globalemployeekey'),
       amId: pick(u, 'amId', 'am id', 'am'),
+      ...capsFor(role, email),
       editable: true,
     })
   }
@@ -134,6 +159,7 @@ export async function listAllAccess(): Promise<AccessAudit> {
       salons: access.salons || [],
       globalId: access.globalId || globalId,
       amId: '',
+      ...capsFor(access.role, email),
       editable: false,
     })
   }

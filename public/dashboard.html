@@ -3476,12 +3476,21 @@ function isAdminRole(){ const r=roleClean(); return r==='owner'||r==='admin'; }
 function isViewerRole(){ return roleClean()==='viewer'; }
 function isOwnerRole(){ return roleClean()==='owner'; }
 function isAMRole(){ const r=roleClean(); return r==='area_manager'||r==='am'; }
-function canSeeAllSalons(){ return isAdminRole()||isViewerRole(); }
-// Day Review (whole-company single-day) — owner/admin/viewer (canSeeAllSalons),
-// plus Kayla as a
-// fallback in case her admin role hasn't been set in the users list yet.
-function canSeeDayReview(){ return canSeeAllSalons() || (isAMRole() && String(USER_AM_ID||'').replace(/["']/g,'').trim()==='kayla'); }
-function canSeeDayOfWeek(){ return canSeeAllSalons() || isAMRole(); }  // each role sees the stores they're responsible for
+// Capabilities resolved by the SERVER (/api/auth/me): role defaults from
+// lib/capabilities.ts plus any per-person rows on the Capabilities tab.
+// These hide UI only — every one of them is also enforced server-side, so a
+// tampered-with SESSION_CAPS reveals buttons that then get a 403.
+//
+// The role fallbacks below apply only when the list is missing (an older
+// cached page, or /api/auth/me failing): better to render the previous
+// behaviour than an empty dashboard.
+let SESSION_CAPS = new Set();
+function hasCap(c){ return SESSION_CAPS.has(c); }
+function canSeeAllSalons(){ return SESSION_CAPS.size ? hasCap('view.company')   : (isAdminRole()||isViewerRole()); }
+// Kayla no longer needs naming in code: she is admin, so view.dayreview is
+// simply one of her defaults. Any further exception is an override row.
+function canSeeDayReview(){  return SESSION_CAPS.size ? hasCap('view.dayreview')  : canSeeAllSalons(); }
+function canSeeDayOfWeek(){  return SESSION_CAPS.size ? hasCap('view.dayofweek')  : (canSeeAllSalons()||isAMRole()); }
 
 const AMS = {
   cassi:     {name:'Cassi Sharpe',       init:'CS', color:'#a03030', globalId:'2014-0001-6376', salons:['3015','3058','4138']},
@@ -4562,6 +4571,7 @@ function init(){
       viewingAs: me.viewingAs || '',
       realEmail: me.realEmail || ''
     };
+    SESSION_CAPS = new Set(me.caps || []);
     renderViewAsBanner();
     startDashboard();
   }).catch(()=>{ showLogin(); });
@@ -4595,14 +4605,14 @@ function startDashboard(){
       return;
     }
 
-    // Office Tools (the ADP payroll upload) — the roles requireOffice() allows.
-    if(['owner','admin','office'].includes(SESSION.role)){
+    // Office Tools (the ADP payroll upload).
+    if(hasCap('view.payroll')){
       const ol = document.getElementById('office-link');
       if(ol) ol.style.display = 'inline-block';
     }
 
-    // Market Compare — requireMarketView(): the office roles plus viewer.
-    if(['owner','admin','viewer','office'].includes(SESSION.role)){
+    // Market Compare.
+    if(hasCap('view.market')){
       const ml = document.getElementById('market-link');
       if(ml) ml.style.display = 'inline-block';
     }
@@ -10279,6 +10289,7 @@ function _accRow(e, roles){
     + '<td style="' + _ACC_TD + '"><input class="acc-salons" style="' + _ACC_INP + '" value="' + _accEsc((e.salons || []).join(' ')) + '" placeholder="e.g. 3058 7728"></td>'
     + '<td style="' + _ACC_TD + '" nowrap>'
     + (e.email ? '<button class="btn btn-sm" title="View the site as this person" data-email="' + _accEsc(e.email) + '" onclick="accViewAsClick(this)">&#128065;</button> ' : '')
+    + (e.email ? '<button class="btn btn-sm" title="What this person can see" data-email="' + _accEsc(e.email) + '" onclick="accCapsClick(this)">&#9881;</button> ' : '')
     + '<button class="btn btn-sm" title="Remove" onclick="accRemoveRow(this)">&#10005;</button></td>'
     + '</tr>';
 }
@@ -10333,8 +10344,12 @@ function renderAccessPanel(){
               + '<td style="' + _ACC_TD + 'color:var(--text-muted);">' + _accEsc(e.email) + '</td>'
               + '<td style="' + _ACC_TD + '"><b>' + _accEsc(e.role) + '</b></td>'
               + '<td style="' + _ACC_TD + '">' + _accEsc(scope) + '</td>'
-              + '<td style="' + _ACC_TD + 'color:var(--text-muted);">' + _accEsc(e.why) + '</td>'
-              + '<td style="' + _ACC_TD + '"><button class="btn btn-sm" title="View the site as this person" data-email="' + _accEsc(e.email) + '" onclick="accViewAsClick(this)">&#128065;</button></td>'
+              + '<td style="' + _ACC_TD + 'color:var(--text-muted);">' + _accEsc(e.why)
+                + ((e.overridden && e.overridden.length) ? '<br><b style="color:#b06a00;">custom access: ' + _accEsc(e.overridden.join(', ')) + '</b>' : '')
+                + '</td>'
+              + '<td style="' + _ACC_TD + '" nowrap>'
+              + '<button class="btn btn-sm" title="View the site as this person" data-email="' + _accEsc(e.email) + '" onclick="accViewAsClick(this)">&#128065;</button> '
+              + '<button class="btn btn-sm" title="What this person can see" data-email="' + _accEsc(e.email) + '" onclick="accCapsClick(this)">&#9881;</button></td>'
               + '</tr>';
           }).join('')
         + '</tbody></table></div>';
@@ -10390,6 +10405,92 @@ async function saveUsersTab(){
   }
 }
 
+
+
+// == Admin: per-person capabilities ==========================================
+// A dialog of tick boxes over the capability list. What gets SAVED is the
+// deviation from that person's role defaults, so the Capabilities tab reads as
+// a short list of exceptions rather than a yes/no grid for everyone -- and
+// changing a role default in code still reaches everyone not explicitly excepted.
+
+function accCapsClick(btn){
+  const em = btn && btn.getAttribute ? btn.getAttribute('data-email') : '';
+  if(em) accOpenCaps(em);
+}
+
+function accCloseCaps(){
+  const d = document.getElementById('caps-dialog');
+  if(d) d.remove();
+}
+
+function accOpenCaps(email){
+  if(!ACCESS_DATA) return;
+  const entry = (ACCESS_DATA.entries || []).filter(function(e){ return e.email === email; })[0];
+  if(!entry) return;
+  const meta = ACCESS_DATA.capabilityMeta || [];
+  const defaults = (ACCESS_DATA.roleDefaults || {})[entry.role] || [];
+  const have = new Set(entry.caps || []);
+  const isDefault = new Set(defaults);
+
+  accCloseCaps();
+  const wrap = document.createElement('div');
+  wrap.id = 'caps-dialog';
+  wrap.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.45);'
+    + 'display:flex;align-items:center;justify-content:center;padding:16px;';
+
+  let rows = '';
+  meta.forEach(function(m){
+    const on = have.has(m.key);
+    const def = isDefault.has(m.key);
+    const tag = (on === def)
+      ? '<span style="color:var(--text-muted);font-size:10px;">default</span>'
+      : '<span style="color:#b06a00;font-size:10px;font-weight:700;">' + (on ? 'granted' : 'revoked') + '</span>';
+    rows += '<label style="display:flex;gap:8px;align-items:flex-start;padding:7px 4px;border-bottom:1px solid var(--border);cursor:pointer;">'
+      + '<input type="checkbox" class="cap-box" data-cap="' + _accEsc(m.key) + '"' + (on ? ' checked' : '') + ' style="margin-top:2px;">'
+      + '<span style="flex:1;"><b style="font-size:12px;">' + _accEsc(m.label) + '</b> ' + tag
+      + '<br><span style="font-size:11px;color:var(--text-muted);">' + _accEsc(m.description) + '</span></span>'
+      + '</label>';
+  });
+
+  wrap.innerHTML = '<div style="background:#fff;border-radius:10px;max-width:560px;width:100%;'
+    + 'max-height:86vh;overflow:auto;padding:16px 18px;box-shadow:0 8px 30px rgba(0,0,0,.3);">'
+    + '<div style="font-weight:700;font-size:14px;color:#03654e;">' + _accEsc(entry.name || entry.email) + '</div>'
+    + '<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">' + _accEsc(entry.email)
+    + ' &middot; role <b>' + _accEsc(entry.role) + '</b></div>'
+    + '<div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;">'
+    + 'Ticks matching the role default are not stored. Capabilities decide which <i>features</i>; '
+    + 'which <i>salons</i> they see is still their scope.</div>'
+    + rows
+    + '<div style="margin-top:12px;display:flex;gap:8px;align-items:center;">'
+    + '<button class="btn btn-primary btn-sm" data-email="' + _accEsc(entry.email) + '" onclick="accSaveCaps(this)">Save</button>'
+    + '<button class="btn btn-sm" onclick="accCloseCaps()">Cancel</button>'
+    + '<span id="caps-msg" style="font-size:11px;color:var(--text-muted);"></span>'
+    + '</div></div>';
+
+  wrap.addEventListener('click', function(ev){ if(ev.target === wrap) accCloseCaps(); });
+  document.body.appendChild(wrap);
+}
+
+async function accSaveCaps(btn){
+  const email = btn.getAttribute('data-email');
+  const caps = Array.prototype.slice.call(document.querySelectorAll('#caps-dialog .cap-box'))
+    .filter(function(b){ return b.checked; })
+    .map(function(b){ return b.getAttribute('data-cap'); });
+  const msg = document.getElementById('caps-msg');
+  if(msg){ msg.textContent = 'Saving…'; msg.style.color = 'var(--text-muted)'; }
+  try{
+    const r = await fetch('/api/admin/capabilities', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email, caps: caps })
+    }).then(function(x){ return x.json(); });
+    if(!r || !r.success) throw new Error((r && r.error) || 'save failed');
+    accCloseCaps();
+    await loadAccessPanel();
+  }catch(e){
+    if(msg){ msg.textContent = String(e.message || e); msg.style.color = '#b3261e'; }
+  }
+}
 
 // == View As =================================================================
 // Owner-only, read-only, resolved SERVER-side: the cookie swaps the Access that

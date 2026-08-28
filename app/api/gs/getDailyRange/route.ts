@@ -18,7 +18,7 @@
 
 import { NextResponse } from 'next/server'
 import { readSheet, getSalonRoster } from '@/lib/sheets'
-import { requireSignedIn } from '@/lib/require-role'
+import { requireCapability } from '@/lib/require-role'
 import { scopeSalonRows } from '@/lib/scope-filter'
 
 export const runtime = 'nodejs'
@@ -34,7 +34,7 @@ function inRange(iso: string, start: string, end: string): boolean {
 }
 
 export async function GET(req: Request) {
-  const gate = await requireSignedIn()
+  const gate = await requireCapability('view.dayofweek')
   if (!gate.ok) return gate.response
 
   try {

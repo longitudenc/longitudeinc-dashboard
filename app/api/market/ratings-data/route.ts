@@ -6,7 +6,7 @@
 
 import { NextResponse } from 'next/server'
 import { readSheet, rowsToObjects } from '@/lib/sheets'
-import { requireSalonView } from '@/lib/require-role'
+import { requireCapability } from '@/lib/require-role'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -21,7 +21,7 @@ export async function GET() {
   // Our own salons' Google ratings. Manager and up; not stylists.
   // The dashboard reads this as GRATINGS=(rd&&rd.ratings)||{}, so a refusal
   // degrades to "no ratings shown" rather than breaking the page.
-  const gate = await requireSalonView()
+  const gate = await requireCapability('view.salondata')
   if (!gate.ok) return gate.response
   try {
     if (cache && Date.now() - cache.timestamp < CACHE_TTL) {

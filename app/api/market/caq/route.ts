@@ -13,7 +13,7 @@
 
 import { NextResponse } from 'next/server'
 import { readSheet, rowsToObjects } from '@/lib/sheets'
-import { requireSalonView } from '@/lib/require-role'
+import { requireCapability } from '@/lib/require-role'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -46,7 +46,7 @@ function periodYear(pk: string): number {
 
 export async function GET() {
   // Our own salons' address quality. Manager and up; not stylists.
-  const gate = await requireSalonView()
+  const gate = await requireCapability('view.salondata')
   if (!gate.ok) return gate.response
   try {
     if (cache && Date.now() - cache.timestamp < CACHE_TTL) {

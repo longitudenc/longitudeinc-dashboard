@@ -121,6 +121,14 @@ is a separate path used only by `/api/cron/weekly` and `/api/report/payroll-pace
   tabs), e.g. `fetch('/api/forms/import-discipline', {method:'POST'}).then(r=>r.json()).then(console.log)`.
 - **Owner/admin logins have no `globalId`** (they're Users-tab rows, not roster employees).
   Code that matches "mine"/an employee must also match by email, not just globalId.
+- **Capabilities, not role lists.** `lib/capabilities.ts` holds named capabilities
+  (`view.company`, `view.dayreview`, `view.dayofweek`, `view.market`, `view.salondata`,
+  `view.payroll`, `edit.settings`, `manage.access`) with role defaults in code and
+  per-person exceptions on the **`Capabilities`** tab (deviations only). Gate routes with
+  `requireCapability(cap)`; the client mirrors it via `hasCap()` from `/api/auth/me`.
+  **Capabilities are FEATURES, not rows** — `lib/scope-filter.ts` still trims data to
+  `access.salons`, so a grant never widens which salons someone sees. Do not add a
+  capability before something enforces it: a toggle that does nothing is worse than none.
 - **Every data route needs a guard, and reads need scoping.** `lib/require-role.ts`
   exports `requireOwner` / `requireAdmin` / `requireOffice` / `requireSalonView` /
   `requireSignedIn`; anything returning salon or employee rows must ALSO scope through

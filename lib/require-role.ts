@@ -12,6 +12,7 @@ import { NextResponse } from 'next/server'
 import { getSessionEmail } from './session'
 import { getViewAsEmail } from './view-as'
 import { resolveAccess, type Access, type Role } from './auth-roles'
+import { capabilitiesFor, type Capability } from './capabilities'
 
 type GateOk = {
   ok: true
@@ -22,6 +23,8 @@ type GateOk = {
   realAccess: Access
   /** Set only while an owner is viewing as someone else. */
   viewingAs?: string
+  /** Whose capabilities apply: the impersonated person when viewing as. */
+  effectiveEmail: string
 }
 type GateFail = { ok: false; response: NextResponse }
 
@@ -63,7 +66,7 @@ async function requireRoles(allowed: Role[]): Promise<GateOk | GateFail> {
       }, { status: 403 }),
     }
   }
-  return { ok: true, access, email, realAccess, viewingAs }
+  return { ok: true, access, email, realAccess, viewingAs, effectiveEmail: viewingAs || email.trim().toLowerCase() }
 }
 
 // Owner OR admin — for business edits (disc points, assignments, waivers, etc.)
@@ -87,19 +90,28 @@ export function requireSignedIn() {
   return requireRoles(['owner', 'admin', 'viewer', 'area_manager', 'manager', 'stylist', 'office', 'maintenance'])
 }
 
-// Market-wide data (MarketWeekly, which covers salons we do not operate).
-// The office roles PLUS viewer, which sees everything else in the app.
-// Kept separate from requireOffice() on purpose: that gates the ADP payroll
-// builder under /api/office/*, and viewer has no business there.
-export function requireMarketView() {
-  return requireRoles(['owner', 'admin', 'viewer', 'office'])
-}
 
-// Owner, admin, viewer, AM, manager, office — everyone entitled to a
-// salon-level view of our own salons (Google ratings, CAQ). Excludes stylist,
-// who sees only themselves, and maintenance, a scoped requests-only login.
-// NOT for market-wide data: MarketWeekly covers other operators' salons and is
-// gated to requireOffice().
-export function requireSalonView() {
-  return requireRoles(['owner', 'admin', 'viewer', 'area_manager', 'manager', 'office'])
+// Gate on a named capability rather than a hard-coded role list. Role defaults
+// live in lib/capabilities.ts and per-person overrides live in the Capabilities
+// tab, so granting one person one screen no longer means editing code.
+//
+// Capabilities decide WHICH FEATURES. They do NOT widen data: lib/scope-filter.ts
+// still trims rows to access.salons, so an AM granted a company screen sees that
+// screen over their own salons only.
+export async function requireCapability(cap: Capability) {
+  const gate = await requireSignedIn()
+  if (!gate.ok) return gate
+  const caps = await capabilitiesFor(gate.access, gate.effectiveEmail)
+  if (!caps.has(cap)) {
+    return {
+      ok: false as const,
+      response: NextResponse.json({
+        success: false,
+        error: gate.viewingAs
+          ? `insufficient permissions — you are viewing as ${gate.viewingAs}, who does not have "${cap}"`
+          : `insufficient permissions (${cap})`,
+      }, { status: 403 }),
+    }
+  }
+  return gate
 }

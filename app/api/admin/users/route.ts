@@ -16,6 +16,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireOwner } from '@/lib/require-role'
 import { readSheet, writeSheet } from '@/lib/sheets'
 import { listAllAccess } from '@/lib/access-audit'
+import { CAPABILITY_META, ROLE_DEFAULTS } from '@/lib/capabilities'
 import type { Role } from '@/lib/auth-roles'
 
 export const runtime = 'nodejs'
@@ -58,7 +59,12 @@ export async function GET() {
   if (!gate.ok) return gate.response
   try {
     const audit = await listAllAccess()
-    return NextResponse.json({ success: true, ...audit, validRoles: VALID_ROLES })
+    return NextResponse.json({
+      success: true, ...audit,
+      validRoles: VALID_ROLES,
+      capabilityMeta: CAPABILITY_META,
+      roleDefaults: ROLE_DEFAULTS,
+    })
   } catch (e: any) {
     return NextResponse.json({ success: false, error: String(e?.message || e) }, { status: 500 })
   }
@@ -154,7 +160,12 @@ export async function POST(req: NextRequest) {
 
     await writeSheet(TAB, rows)
     const audit = await listAllAccess()
-    return NextResponse.json({ success: true, saved: clean.length, ...audit })
+    return NextResponse.json({
+      success: true, saved: clean.length, ...audit,
+      validRoles: VALID_ROLES,
+      capabilityMeta: CAPABILITY_META,
+      roleDefaults: ROLE_DEFAULTS,
+    })
   } catch (e: any) {
     return NextResponse.json({ success: false, error: String(e?.message || e) }, { status: 500 })
   }

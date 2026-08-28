@@ -9,6 +9,7 @@ import { NextResponse } from 'next/server'
 import { getSessionEmail } from '@/lib/session'
 import { resolveAccess } from '@/lib/auth-roles'
 import { getViewAsEmail } from '@/lib/view-as'
+import { capabilitiesFor } from '@/lib/capabilities'
 
 export async function GET() {
   const email = await getSessionEmail()
@@ -24,9 +25,11 @@ export async function GET() {
     if (target && target !== email.trim().toLowerCase()) {
       const targetAccess = await resolveAccess(target)
       if (targetAccess) {
-        return NextResponse.json({ email: target, access: targetAccess, viewingAs: target, realEmail: email })
+        const caps = await capabilitiesFor(targetAccess, target)
+        return NextResponse.json({ email: target, access: targetAccess, caps: [...caps], viewingAs: target, realEmail: email })
       }
     }
   }
-  return NextResponse.json({ email, access })
+  const caps = await capabilitiesFor(access, email)
+  return NextResponse.json({ email, access, caps: [...caps] })
 }
