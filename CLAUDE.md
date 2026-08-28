@@ -40,6 +40,14 @@ big static file (`public/dashboard.html`); its changes are live on refresh after
 
 ## Architecture map
 
+**Navigation (in transition):** a top bar (`#topnav`, `renderTopNav`) groups screens by
+WHAT — Home / Performance / Pay / People / Requests / ⚙ — with `page-hub` rendering a
+group's destination cards, capability-gated. It routes into the SAME functions the
+sidebar calls, so the two cannot disagree. **The sidebar is still live and unchanged**;
+remove it only once the top bar has earned it. The hub deliberately shows NO company
+KPI tiles: recomputing aggregates there would be a second implementation of numbers
+that get scored and paid against.
+
 **Client:** `public/dashboard.html` (~14,900 lines, single file — HTML + CSS + JS). This is
 the whole authenticated app: home, salon/AM/company views, bonuses, reviews, forms, points.
 Edited surgically; validate the inline scripts after each change.

@@ -3024,6 +3024,27 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
     <div class="user-chip" id="user-chip" title="Click to sign out" onclick="if(confirm('Sign out?')) logout();" style="cursor:pointer;">Loading...</div>
   </div>
 </header>
+<style>
+  /* Top navigation — the new information architecture. Grouped by WHAT you
+     want (Performance / Pay / People / Requests), not by WHICH area manager.
+     The sidebar is still present and still works; this sits above it so both
+     are usable while the grouping settles. */
+  #topnav{background:#03654e;border-top:1px solid rgba(255,255,255,.14);display:flex;
+          align-items:center;gap:2px;padding:0 12px;overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  #topnav .tn{background:transparent;border:0;color:rgba(255,255,255,.82);font-size:13px;
+          font-weight:600;padding:10px 14px;cursor:pointer;white-space:nowrap;
+          border-bottom:3px solid transparent;font-family:inherit;}
+  #topnav .tn:hover{color:#fff;background:rgba(255,255,255,.07);}
+  #topnav .tn.active{color:#fff;border-bottom-color:#9acb3a;}
+  #topnav .tn-spacer{flex:1 1 auto;}
+  .hub-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;margin-top:14px;}
+  .hub-card{background:#fff;border:1px solid var(--border);border-radius:10px;padding:14px 15px;
+          cursor:pointer;text-align:left;font-family:inherit;transition:box-shadow .12s,transform .12s;}
+  .hub-card:hover{box-shadow:0 4px 14px rgba(0,0,0,.10);transform:translateY(-1px);}
+  .hub-card .hc-t{font-weight:700;font-size:14px;color:#03654e;margin-bottom:3px;}
+  .hub-card .hc-d{font-size:12px;color:var(--text-muted);line-height:1.45;}
+</style>
+<nav id="topnav" aria-label="Main"></nav>
 
 <div class="main-layout">
   <div id="sidebar-backdrop" onclick="toggleSidebar()"></div>
@@ -3275,6 +3296,9 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
 
 
 
+
+    <!-- Hub landing for a top-nav group (Performance / Pay / People). -->
+    <div class="page" id="page-hub"></div>
 
     <!-- Admin upload panel -->
     <div class="page" id="page-admin">
@@ -4572,6 +4596,7 @@ function init(){
       realEmail: me.realEmail || ''
     };
     SESSION_CAPS = new Set(me.caps || []);
+    renderTopNav();
     renderViewAsBanner();
     startDashboard();
   }).catch(()=>{ showLogin(); });
@@ -10231,6 +10256,153 @@ function initAdminCollapse(){
     });
     apply();
   });
+}
+
+
+// == Top navigation + hub pages ==============================================
+// The old sidebar is organised by WHO (pick an area manager, then a report),
+// which is why Bonus, Reviews, Day Review and Team each exist three times over
+// in this file. This groups by WHAT instead. It routes into the SAME render
+// functions the sidebar calls -- nothing is reimplemented here, so the two
+// navigations cannot disagree about what a screen shows.
+//
+// Deliberately NOT here: company KPI tiles. Recomputing company aggregates for
+// a landing page would create a second implementation of numbers that are
+// scored and paid against, and the two would eventually drift. The hub routes
+// to the views that already own that maths.
+
+const HUB_GROUPS = {
+  performance: {
+    title: 'Performance',
+    sub: 'How the salons are doing',
+    cards: [
+      { t:'All Salons',     d:'Every salon for the selected period, with tier colouring.',
+        go:function(){ switchToCompany(); } },
+      { t:'Scorecards',     d:'Area manager rankings and per-AM performance.', cap:'view.company',
+        go:function(){ switchToCompany(); showCompanyTab('ams'); } },
+      { t:'Day Review',     d:'The whole company on a single day.', cap:'view.dayreview',
+        go:function(){ switchToCompany(); showCompanyTab('dayreview'); } },
+      { t:'Day of Week',    d:'Weekday comparisons across a date window.', cap:'view.dayofweek',
+        go:function(){ switchToCompany(); showCompanyTab('dayofweek'); } },
+      { t:'Market Compare', d:'How we sit against the wider Charlotte market.', cap:'view.market',
+        href:'/market.html' },
+    ],
+  },
+  pay: {
+    title: 'Pay',
+    sub: 'Bonuses, recognition and payroll',
+    cards: [
+      { t:'Bonuses',   d:'Stylist, manager and area manager bonus detail.', cap:'view.company',
+        go:function(){ switchToCompany(); showCompanyTab('bonus'); } },
+      { t:'Standouts', d:'Monthly recognition across the company.',
+        go:function(){ switchToCompany(); showCompanyTab('standouts'); } },
+      { t:'Payroll',   d:'Build and review the ADP upload for a week.', cap:'view.payroll',
+        href:'/office.html' },
+    ],
+  },
+  people: {
+    title: 'People',
+    sub: 'The team, their reviews and their records',
+    cards: [
+      { t:'Team',                d:'Everyone, sortable, with hours and performance.',
+        go:function(){ switchToCompany(); showCompanyTab('team'); } },
+      { t:'Reviews',             d:'Stylist and manager reviews.',
+        go:function(){ switchToCompany(); showCompanyTab('reviews'); } },
+      { t:'Disciplinary points', d:'Active points, flags and per-person history.',
+        go:function(){ switchToForms(); showFormsTab('points'); } },
+    ],
+  },
+};
+
+// Which top-level item is showing. Kept separate from the sidebar's own state
+// so the two never fight over the highlight.
+let S_topNav = '';
+
+function _tnAllowed(card){ return !card.cap || hasCap(card.cap); }
+
+function renderTopNav(){
+  const nav = document.getElementById('topnav');
+  if(!nav) return;
+  const items = [
+    { key:'home',        label:'Home',        go:function(){ switchToHome(); } },
+    { key:'performance', label:'Performance', go:function(){ showHub('performance'); } },
+    { key:'pay',         label:'Pay',         go:function(){ showHub('pay'); } },
+    { key:'people',      label:'People',      go:function(){ showHub('people'); } },
+    { key:'requests',    label:'Requests',    go:function(){ switchToForms(); } },
+  ];
+  let html = '';
+  items.forEach(function(it){
+    // A group with nothing in it would be a dead end, so hide it entirely.
+    const g = HUB_GROUPS[it.key];
+    if(g && !g.cards.some(_tnAllowed)) return;
+    html += '<button class="tn' + (S_topNav === it.key ? ' active' : '') + '" data-nav="' + it.key + '"'
+          + ' onclick="topNavGo(this)">' + _accEsc(it.label) + '</button>';
+  });
+  html += '<span class="tn-spacer"></span>';
+  if(hasCap('edit.settings') || hasCap('manage.access')){
+    html += '<button class="tn' + (S_topNav === 'admin' ? ' active' : '') + '" data-nav="admin"'
+          + ' title="Settings" onclick="topNavGo(this)">&#9881;</button>';
+  }
+  nav.innerHTML = html;
+}
+
+function topNavGo(btn){
+  const key = btn.getAttribute('data-nav');
+  S_topNav = key;
+  if(key === 'home')      { switchToHome(); }
+  else if(key === 'requests'){ switchToForms(); }
+  else if(key === 'admin')   { switchToAdminFromNav(); }
+  else                       { showHub(key); }
+  renderTopNav();
+}
+
+// Reuse the sidebar's own entry point rather than duplicating its page-show +
+// loader sequence, so the admin panel initialises identically from either nav.
+function switchToAdminFromNav(){
+  if(typeof switchToAdmin === 'function'){ switchToAdmin(); return; }
+  showPage('admin');
+}
+
+function showHub(key){
+  const g = HUB_GROUPS[key];
+  if(!g) return;
+  S_topNav = key;
+  clearActive();
+  const pg = document.getElementById('page-hub');
+  if(pg) pg.classList.add('active');
+  const mainEl = document.querySelector('.content');
+  if(mainEl) mainEl.scrollTop = 0;
+
+  const allowed = g.cards.filter(_tnAllowed);
+  let html = '<div class="page-header"><h2>' + _accEsc(g.title) + '</h2>'
+           + '<div class="sub">' + _accEsc(g.sub) + '</div></div>';
+
+  if(!allowed.length){
+    html += '<div style="color:var(--text-muted);font-size:13px;">Nothing here is available to your login.</div>';
+  } else {
+    html += '<div class="hub-grid">';
+    allowed.forEach(function(c, i){
+      html += '<button class="hub-card" data-hub="' + _accEsc(key) + '" data-i="' + i + '" onclick="hubGo(this)">'
+            + '<div class="hc-t">' + _accEsc(c.t) + '</div>'
+            + '<div class="hc-d">' + _accEsc(c.d) + '</div>'
+            + '</button>';
+    });
+    html += '</div>';
+  }
+  const host = document.getElementById('page-hub');
+  if(host) host.innerHTML = html;
+  renderTopNav();
+}
+
+function hubGo(btn){
+  const key = btn.getAttribute('data-hub');
+  const i = parseInt(btn.getAttribute('data-i'), 10);
+  const g = HUB_GROUPS[key];
+  if(!g) return;
+  const card = g.cards.filter(_tnAllowed)[i];
+  if(!card) return;
+  if(card.href){ window.location.href = card.href; return; }
+  if(card.go) card.go();
 }
 
 // == Admin: Users & Access ===================================================
