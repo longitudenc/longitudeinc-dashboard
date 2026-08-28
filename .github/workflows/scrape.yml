@@ -29,7 +29,13 @@ name: SD3 Nightly Scrape
 
 on:
   schedule:
-    - cron: '0 8 * * *'      # 08:00 UTC daily (~4 AM ET)
+    # THREE firings a day, deliberately. GitHub delayed one scheduled run by 11
+    # hours and dropped the next one entirely, which lost a day of data. Every
+    # run re-pulls the last 7 days, so a later firing repairs whatever an
+    # earlier one missed, and the scrapes are idempotent upserts.
+    - cron: '0 8 * * *'      # 08:00 UTC (~4 AM ET) - primary
+    - cron: '0 15 * * *'     # 15:00 UTC (~11 AM ET) - catch-up
+    - cron: '0 22 * * *'     # 22:00 UTC (~6 PM ET) - catch-up
   workflow_dispatch:
     inputs:
       date:
@@ -57,7 +63,9 @@ jobs:
             echo "::error title=missing secret::CRON_SECRET is not set on this repo"
             exit 1
           fi
-          url="$BASE/api/cron/plan?secret=$SECRET"
+          # hour lets the plan keep once-a-day jobs (the payroll-pace email)
+          # to the first run, now that the schedule fires more than once.
+          url="$BASE/api/cron/plan?secret=$SECRET&hour=$(date -u +%H)"
           if [ -n "${PLAN_DATE:-}" ]; then url="$url&date=$PLAN_DATE"; fi
           code=$(curl -s -o plan.json -w '%{http_code}' --max-time 60 "$url" || echo 000)
           if [ "$code" != "200" ]; then

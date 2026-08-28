@@ -26,7 +26,13 @@ export async function GET(request: Request) {
   if (!isAuthorized(request)) {
     return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
   }
-  const date = new URL(request.url).searchParams.get('date') || undefined
-  const jobs = planForDate(date)
+  const params = new URL(request.url).searchParams
+  const date = params.get('date') || undefined
+  // Which run of the day this is, so once-a-day jobs (the payroll-pace email)
+  // fire once even though the schedule now runs several times.
+  const hourRaw = params.get('hour')
+  const hourNum = hourRaw === null ? NaN : Number(hourRaw)
+  const hour = Number.isFinite(hourNum) ? hourNum : undefined
+  const jobs = planForDate(date, hour)
   return NextResponse.json({ ok: true, date: date || todayUtc(), count: jobs.length, jobs })
 }

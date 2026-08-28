@@ -48,11 +48,13 @@ const scrape = (name: string, query = ''): PlannedJob => ({ name, path: `/api/sc
 
 /**
  * How many days each nightly run re-pulls, counting back from yesterday.
- * 4 means a run can be missed three nights running and still self-heal.
+ * 7 means every run repairs a whole week of missed nights. GitHub has dropped
+ * a scheduled run outright and delayed another by 11 hours, so this is sized
+ * for the trigger being unreliable rather than for the happy path.
  * Raising it costs roughly (21s + 4s + 13s) per extra day, spread over
  * separate requests.
  */
-export const LOOKBACK_DAYS = 4
+export const LOOKBACK_DAYS = 7
 
 // ── UTC date helpers ────────────────────────────────────────────────────────
 // String in, string out. Everything is YYYY-MM-DD so a lexicographic compare is
@@ -101,7 +103,7 @@ export function lookbackDays(today: string, n = LOOKBACK_DAYS): string[] {
  * `today` is the day the workflow fires; `y` is yesterday, the most recent
  * completed day.
  */
-export function planForDate(todayIso?: string): PlannedJob[] {
+export function planForDate(todayIso?: string, hourUtc?: number): PlannedJob[] {
   const today = todayIso && /^\d{4}-\d{2}-\d{2}$/.test(todayIso) ? todayIso : todayUtc()
   const y = addDaysUtc(today, -1)
   const dow = dowUtc(today)
@@ -164,7 +166,10 @@ export function planForDate(todayIso?: string): PlannedJob[] {
   //    above have landed, so it goes near the end. This used to hang off
   //    /api/cron/run, which nothing scheduled after the workflow took over, so
   //    it had silently stopped sending.
-  if (dow === 3) {
+  //    Only on the FIRST run of the day. The schedule now fires several times so
+  //    a dropped trigger is covered, and scrapes are idempotent -- but an email
+  //    is not. hourUtc is undefined for a manual run, which still sends.
+  if (dow === 3 && (hourUtc === undefined || hourUtc < 12)) {
     jobs.push({ name: 'payroll-pace', path: '/api/report/payroll-pace', query: '' })
   }
 
