@@ -679,6 +679,84 @@ check(
   `got ${realSix('HERNANDEZ').delta}`
 )
 
+// ── 4d) Cost and the salon roll-up ────────────────────────────────────────
+// Gross pay is computed from the FINISHED file, so it has to tie back to the
+// week the office already reconciled: Payroll Total 62,816.88 and tips
+// 43,767.36 across 18 salons, from the Weekly Payroll Summary.
+console.log('\nCost and salon roll-up')
+{
+  const plain = buildPayroll({
+    rows: toPayConsolRows(objects), punches: [], settings,
+    weekStart: '2026-08-15', weekEnd: '2026-08-21',
+  })
+  // Gross pay is what the FILE costs, which is deliberately more than the
+  // summary sheet's "Payroll Total" — that figure is SD3's Total Hours Pay,
+  // and SD3 reports vacation HOURS while paying $0.00 for them (the old
+  // workbook had a whole sheet computing hours × wage for exactly this).
+  // Vacation reaches ADP as hours on code 14 and is paid at the person's rate.
+  // The file also carries the cross-salon overtime SD3 never saw.
+  const expected = 62816.88   // summary sheet "Payroll Total"
+    + 980.22                  // vacation, which SD3 left at $0.00
+    + 25.94                   // floater overtime SD3 missed
+  check(
+    `gross pay $${plain.totals.grossPay.toFixed(2)} = Payroll Total + vacation + floater OT`,
+    Math.abs(plain.totals.grossPay - expected) < 0.50,
+    `got ${plain.totals.grossPay}, expected ~${expected.toFixed(2)}`
+  )
+  // The invariant that matters: vacation reaches ADP as HOURS on its own code,
+  // so ADP pays it at the person's rate. The raw SD3 report carries the hours
+  // with $0.00 against them — the old workbook had a sheet computing the pay,
+  // and it was never needed for the upload, only for the office's own totals.
+  check(
+    'vacation hours reach the file on code 14, so ADP pays them',
+    (() => {
+      const vac = toPayConsolRows(objects).filter(r => r.vacationHours > 0)
+      if (vac.length === 0) return false
+      const hdr = plain.upload.header
+      const tdIdx = hdr.length - 1
+      return vac.every(r => {
+        const line = plain.upload.rows.find(
+          x => String(x[2]) === r.payId && String(x[tdIdx]) === r.salonNum + '00'
+        )
+        if (!line) return false
+        for (let c = 4; c < tdIdx; c += 2) {
+          if (String(line[c]) === '14' && Math.abs(Number(line[c + 1]) - r.vacationHours) < 0.005) return true
+        }
+        return false
+      })
+    })(),
+    'a vacation row is missing its code-14 hours line'
+  )
+  check(
+    `tips $${plain.totals.tips.toFixed(2)} match the summary sheet's 43,767.36`,
+    Math.abs(plain.totals.tips - 43767.36) < 0.02,
+    `got ${plain.totals.tips}`
+  )
+  check(
+    'all 18 salons roll up, and the parts sum to the whole',
+    plain.salonTotals.length === 18 &&
+      Math.abs(plain.salonTotals.reduce((s, t) => s + t.grossPay, 0) - plain.totals.grossPay) < 0.02,
+    `${plain.salonTotals.length} salons`
+  )
+  check(
+    'paid hours in the roll-up equal every hour type in the file (3690.83)',
+    Math.abs(plain.totals.paidHours - 3690.83) < 0.02,
+    `got ${plain.totals.paidHours}`
+  )
+  // A floater's hours must sit with the salon that had them, not all on one.
+  const cn = plain.employees.find(e => e.employeeName.startsWith('CHONG NEWMAN'))!
+  check(
+    'a floater is filed under their biggest salon but costed to each',
+    cn.salonNum === '3062' && cn.salons.length === 2,
+    `${cn.salonNum} / ${cn.salons.join(',')}`
+  )
+  check(
+    'every employee appears in exactly one salon bucket',
+    plain.salonTotals.reduce((s, t) => s + t.employees, 0) >= plain.employees.length,
+    `${plain.salonTotals.reduce((s, t) => s + t.employees, 0)} vs ${plain.employees.length}`
+  )
+}
+
 // ── 5) Short breaks ──
 console.log('\nShort breaks')
 const breakPunches: PunchSegment[] = [

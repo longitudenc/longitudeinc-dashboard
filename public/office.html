@@ -80,6 +80,17 @@
   .pill.err{background:var(--wrn-bg);color:var(--wrn-text);}
   .daychip{display:inline-block;font-size:10.5px;padding:1px 6px;border-radius:5px;margin:1px 2px 1px 0;background:#eef2f0;color:var(--text-muted);font-variant-numeric:tabular-nums;}
   .daychip.on{background:var(--accent-light);color:#3d6b0a;font-weight:600;}
+  th[data-sort]{cursor:pointer;user-select:none;}
+  th[data-sort]:hover{background:var(--accent-light);color:var(--text);}
+  th[data-sort]::after{content:'\2195';opacity:.3;margin-left:5px;font-size:9px;}
+  th[data-sort].sorted::after{content:'\25B2';opacity:.9;}
+  th[data-sort].sorted[data-dir=desc]::after{content:'\25BC';}
+  tr.salon-row{cursor:pointer;}
+  tr.salon-row:hover{background:var(--accent-light);}
+  tr.sub-row{display:none;background:#fbfcfb;}
+  tr.sub-row.open{display:table-row;}
+  tr.sub-row td{font-size:12.5px;color:var(--text-muted);padding-left:26px;}
+  .twisty{display:inline-block;width:12px;color:var(--text-muted);font-size:10px;}
   .exc{display:flex;gap:9px;padding:8px 10px;border-bottom:1px solid #f1f3f1;font-size:13px;align-items:baseline;}
   .exc:last-child{border-bottom:none;}
   .loading{padding:40px;text-align:center;color:var(--text-muted);font-size:14px;}
@@ -102,6 +113,7 @@
 <div class="tabs" id="tabs" style="display:none;">
   <button class="tab active" data-panel="build" onclick="showPanel('build')">Build Upload</button>
   <button class="tab" data-panel="manual" onclick="showPanel('manual')">Manual Earnings</button>
+  <button class="tab" data-panel="history" onclick="showPanel('history')">History</button>
   <button class="tab" data-panel="settings" onclick="showPanel('settings')">Settings</button>
 </div>
 
@@ -173,6 +185,22 @@
     </div>
   </div>
 
+  <!-- ── History ──────────────────────────────────────────────── -->
+  <div class="panel" id="panel-history">
+    <div class="card">
+      <h2>Downloaded weeks <span class="sub">newest first</span></h2>
+      <div class="body" style="padding:0;">
+        <div class="hint" style="padding:12px 14px;margin:0;">
+          One entry per week, written when the ADP file is downloaded — that is the
+          moment the week is processed. Rebuilding an old week can give different
+          numbers, because SD3 keeps settling figures for days after a week closes;
+          these are what was actually sent.
+        </div>
+        <div id="history-out" class="loading">Loading\u2026</div>
+      </div>
+    </div>
+  </div>
+
   <!-- ── Settings ─────────────────────────────────────────────── -->
   <div class="panel" id="panel-settings">
     <div id="settings-out" class="loading">Loading settings…</div>
@@ -223,6 +251,7 @@ function showPanel(name){
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.panel===name));
   $('panel-'+name).classList.add('active');
   if(name==='manual') loadManual();
+  if(name==='history') loadHistory();
 }
 
 // ── Week list ─────────────────────────────────────────────────
@@ -261,6 +290,44 @@ function onWeekChange(){
   $('build-out').innerHTML = '';
   $('week-sub').textContent = 'week ending ' + $('week-select').value;
 }
+
+// ── Sortable tables ───────────────────────────────────────────
+// Any table gets sorting by adding data-sort to its <th>: "num" for numeric,
+// "text" otherwise. Values come from the cell's data-v when present (so a
+// formatted "$1,234.50" still sorts as a number), else its text.
+function sortTable(th){
+  const table = th.closest('table');
+  const tbody = table.tBodies[0];
+  const idx = [...th.parentNode.children].indexOf(th);
+  const kind = th.dataset.sort || 'text';
+  const asc = th.dataset.dir !== 'asc';
+  [...th.parentNode.children].forEach(o=>{ if(o!==th){ delete o.dataset.dir; o.classList.remove('sorted'); }});
+  th.dataset.dir = asc ? 'asc' : 'desc';
+  th.classList.add('sorted');
+
+  // Detail rows travel with the row above them rather than sorting on their own.
+  const rows = [...tbody.rows].filter(r=>!r.classList.contains('sub-row'));
+  const subs = new Map();
+  rows.forEach(r=>{
+    const kids = [];
+    let n = r.nextElementSibling;
+    while(n && n.classList.contains('sub-row')){ kids.push(n); n = n.nextElementSibling; }
+    subs.set(r, kids);
+  });
+  const val = r => {
+    const c = r.cells[idx];
+    if(!c) return kind==='num' ? -Infinity : '';
+    const raw = c.dataset.v !== undefined ? c.dataset.v : c.textContent;
+    if(kind==='num'){ const n = parseFloat(String(raw).replace(/[^0-9.\-]/g,'')); return isNaN(n)?-Infinity:n; }
+    return String(raw).trim().toLowerCase();
+  };
+  rows.sort((a,b)=>{ const x=val(a), y=val(b); return (x<y?-1:x>y?1:0) * (asc?1:-1); });
+  rows.forEach(r=>{ tbody.appendChild(r); (subs.get(r)||[]).forEach(k=>tbody.appendChild(k)); });
+}
+document.addEventListener('click', e=>{
+  const th = e.target.closest('th[data-sort]');
+  if(th) sortTable(th);
+});
 
 // ── Build ─────────────────────────────────────────────────────
 function buildQuery(){
@@ -336,6 +403,16 @@ function renderBuild(d){
   // so these are what actually need reviewing.
   const otFloaters = d.employees.filter(e=>Math.abs(e.overtimeDelta||0)>=0.005);
   const sixMoved   = d.sixDay.filter(s=>Math.abs(s.delta)>=0.005);
+  h += '<div class="card"><h2>This week <span class="sub">'+esc(d.weekStart)+' \u2192 '+esc(d.weekEnd)
+     + ' \u00b7 file '+esc(d.fileName)+'</span></h2><div class="stats">'
+     + bigstat('Total payroll cost', money(d.totals.grossPay),
+         'wages + overtime + incentives', 0)
+     + stat('Tips', money(d.totals.tips), 'paid through, not a wage cost')
+     + stat('Paid hours', hrs(d.totals.paidHours), 'every hour type in the file')
+     + stat('Employees', d.totals.employees, d.totals.floaters+' across multiple salons')
+     + stat('Salons', (d.salonTotals||[]).length, '')
+     + '</div></div>';
+
   h += '<div class="card"><h2>What this file corrects '
      + '<span class="sub">everything else is SD3\u2019s own figures, unchanged</span></h2>'
      + '<div class="stats">'
@@ -348,15 +425,8 @@ function renderBuild(d){
          + ' people \u2014 ' + hrs(d.totals.breakPayHours) + ' hrs paid back', d.totals.breakMinutes)
      + '</div></div>';
 
-  // ── Totals ──
-  h += '<div class="card"><h2>This week <span class="sub">'+esc(d.weekStart)+' → '+esc(d.weekEnd)
-     + ' · file '+esc(d.fileName)+'</span></h2><div class="stats">'
-     + stat('Employees', d.totals.employees, d.totals.floaters+' across multiple salons')
-     + stat('Floor hours', hrs(d.totals.floorHours), '')
-     + stat('Overtime total', money(d.totals.overtimePay), 'blended, cross-salon')
-     + stat('6-day owed', money(d.totals.sixDayPay), d.sixDay.filter(s=>s.qualifies).length+' qualified')
-     + stat('Bonuses + manual', money(d.totals.extraEarnings), '')
-     + '</div></div>';
+  // ── Salon breakdown, expandable to the employees inside ──
+  h += salonBreakdownHtml(d);
 
   // ── 1) Floater overtime ──
   h += '<div class="card"><h2>1 \u00b7 Floater overtime <span class="sub">'
@@ -366,19 +436,22 @@ function renderBuild(d){
     h += '<div class="body muted">No cross-salon overtime this week \u2014 nobody passed '
        + d.rules.otThresholdHours + ' hours once their salons were merged.</div>';
   } else {
-    h += '<div class="scroll"><table><thead><tr><th>Employee</th><th>Salons</th>'
-       + '<th class="num">Hrs worked</th><th class="num">OT hrs</th>'
-       + '<th class="num">SD3 paid</th><th class="num">Owed</th><th class="num">Difference</th>'
+    h += '<div class="scroll"><table><thead><tr><th data-sort="text">Employee</th>'
+       + '<th data-sort="text">Salons</th>'
+       + '<th data-sort="num" class="num">Hrs worked</th><th data-sort="num" class="num">OT hrs</th>'
+       + '<th data-sort="num" class="num">SD3 paid</th><th data-sort="num" class="num">Owed</th>'
+       + '<th data-sort="num" class="num">Difference</th>'
        + '</tr></thead><tbody>';
     otFloaters.sort((a,b)=>b.overtimeDelta-a.overtimeDelta).forEach(e=>{
       h += '<tr><td>'+esc(e.employeeName)+(e.isFloater?' <span class="pill jade">floater</span>':'')+'</td>'
          + '<td class="muted">'+esc(e.salons.join(', '))+'</td>'
-         + '<td class="num">'+hrs(e.totalHoursWorked)+'</td>'
-         + '<td class="num">'+hrs(e.overtimeHours)+'</td>'
-         + '<td class="num">'+money(e.sd3OvertimePay)+'</td>'
-         + '<td class="num">'+money(e.overtimePay)+'</td>'
-         + '<td class="num" style="font-weight:600;color:'+(e.overtimeDelta<0?'#b3261e':'#1a5c0a')+'">'
-         + (e.overtimeDelta>0?'+':'')+money(e.overtimeDelta)+'</td></tr>';
+         + numTd(hrs(e.totalHoursWorked), e.totalHoursWorked)
+         + numTd(hrs(e.overtimeHours), e.overtimeHours)
+         + numTd(money(e.sd3OvertimePay), e.sd3OvertimePay)
+         + numTd(money(e.overtimePay), e.overtimePay)
+         + numTd((e.overtimeDelta>0?'+':'')+money(e.overtimeDelta), e.overtimeDelta,
+                 e.overtimeDelta<0?'#b3261e':'#1a5c0a')
+         + '</tr>';
     });
     h += '</tbody></table></div>';
   }
@@ -418,39 +491,20 @@ function renderBuild(d){
   if(!moved.length){
     h += '<div class="body muted">Nothing to correct — SD3 paid exactly what everyone is owed.</div>';
   } else {
-    h += '<div class="scroll"><table><thead><tr><th>Employee</th><th class="num">Owed</th>'
-       + '<th class="num">SD3 paid</th><th class="num">Net change</th><th>Why</th></tr></thead><tbody>';
+    h += '<div class="scroll"><table><thead><tr><th data-sort="text">Employee</th>'
+       + '<th data-sort="num" class="num">Owed</th>'
+       + '<th data-sort="num" class="num">SD3 paid</th>'
+       + '<th data-sort="num" class="num">Net change</th><th data-sort="text">Why</th>'
+       + '</tr></thead><tbody>';
     moved.forEach(s=>{
       const why = s.delta<0
         ? 'SD3 paid, but '+esc(s.reason||'does not qualify')
         : (s.sd3Paid===0 ? 'qualifies, but SD3 paid nothing (floater across salons)' : 'SD3 underpaid');
       h += '<tr><td>'+esc(s.employeeName)+'</td>'
-         + '<td class="num">'+money(s.amount)+'</td>'
-         + '<td class="num">'+money(s.sd3Paid)+'</td>'
-         + '<td class="num" style="font-weight:600;color:'+(s.delta<0?'#b3261e':'#1a5c0a')+'">'
-         + (s.delta>0?'+':'')+money(s.delta)+'</td>'
+         + numTd(money(s.amount), s.amount)
+         + numTd(money(s.sd3Paid), s.sd3Paid)
+         + numTd((s.delta>0?'+':'')+money(s.delta), s.delta, s.delta<0?'#b3261e':'#1a5c0a')
          + '<td class="muted">'+why+'</td></tr>';
-    });
-    h += '</tbody></table></div>';
-  }
-  h += '</div></div>';
-
-  h += '<div class="card"><h2>6-day pay <span class="sub">'
-     + '6+ floor days at '+d.rules.sixDayMinShiftHours+'+ hrs, '+d.rules.sixDayMinFloorHours
-     + '+ floor hrs → $'+d.rules.sixDayRate+'/floor hr</span></h2><div class="body" style="padding:0;">';
-  if(!six.length && !near.length){
-    h += '<div class="body muted">Nobody qualified this week.</div>';
-  } else {
-    h += '<div class="scroll"><table><thead><tr><th>Employee</th><th class="num">Floor days</th>'
-       + '<th class="num">Floor hrs</th><th class="num">Pays</th><th>Days worked</th></tr></thead><tbody>';
-    six.concat(near).forEach(s=>{
-      h += '<tr'+(s.qualifies?'':' class="muted"')+'><td>'+esc(s.employeeName)
-         + (s.qualifies?'':' <span class="pill">'+esc(s.reason)+'</span>')+'</td>'
-         + '<td class="num">'+s.qualifyingDays+'</td>'
-         + '<td class="num">'+hrs(s.weekFloorHours)+'</td>'
-         + '<td class="num">'+(s.qualifies?'<b>'+money(s.amount)+'</b>':'—')+'</td>'
-         + '<td>'+s.days.map(x=>'<span class="daychip'+(x.counted?' on':'')+'" title="'+esc(x.date)+'">'
-             + x.date.slice(5)+' · '+hrs(x.floorHours)+'</span>').join('')+'</td></tr>';
     });
     h += '</tbody></table></div>';
   }
@@ -470,36 +524,21 @@ function renderBuild(d){
       : '<div class="body muted">No breaks under '+d.rules.breakMaxMinutes
         + ' minutes this week, across '+d.meta.punchSegments+' punch segments.</div>';
   } else {
-    h += '<div class="scroll"><table><thead><tr><th>Employee</th><th class="num">Minutes</th>'
-       + '<th class="num">Hours added</th><th>Each break</th></tr></thead><tbody>';
+    h += '<div class="scroll"><table><thead><tr><th data-sort="text">Employee</th>'
+       + '<th data-sort="num" class="num">Minutes</th>'
+       + '<th data-sort="num" class="num">Hours added</th><th>Each break</th>'
+       + '</tr></thead><tbody>';
     d.breaks.forEach(b=>{
-      h += '<tr><td>'+esc(b.employeeName)+'</td><td class="num">'+b.totalMinutes+'</td>'
-         + '<td class="num">'+hrs(b.totalMinutes/60)+'</td><td>'
+      h += '<tr><td>'+esc(b.employeeName)+'</td>'
+         + numTd(b.totalMinutes, b.totalMinutes)
+         + numTd(hrs(b.totalMinutes/60), b.totalMinutes/60)
+         + '<td>'
          + b.breaks.map(x=>'<span class="daychip">'+x.date.slice(5)+' · '+x.minutes+'m · '+esc(x.salonNum)+'</span>').join('')
          + '</td></tr>';
     });
     h += '</tbody></table></div>';
   }
   h += '</div></div>';
-
-  // ── Everyone ──
-  h += '<div class="card"><h2>All employees <span class="sub">'+d.employees.length+'</span></h2>'
-     + '<div class="body" style="padding:0;"><div class="scroll"><table><thead><tr>'
-     + '<th>Employee</th><th>Salons</th><th class="num">Floor hrs</th><th class="num">Hrs worked</th>'
-     + '<th class="num">OT</th><th class="num">6-day</th><th class="num">Breaks</th><th>Other earnings</th>'
-     + '</tr></thead><tbody>';
-  d.employees.forEach(e=>{
-    h += '<tr><td>'+esc(e.employeeName)+(e.isFloater?' <span class="pill jade">floater</span>':'')+'</td>'
-       + '<td class="muted">'+esc(e.salons.join(', '))+'</td>'
-       + '<td class="num">'+hrs(e.floorHours)+'</td>'
-       + '<td class="num">'+hrs(e.totalHoursWorked)+'</td>'
-       + '<td class="num">'+(e.overtimePay?money(e.overtimePay):'—')+'</td>'
-       + '<td class="num">'+(e.sixDayAmount?money(e.sixDayAmount):'—')+'</td>'
-       + '<td class="num">'+(e.breakMinutes?e.breakMinutes+'m':'—')+'</td>'
-       + '<td class="muted">'+(e.extraEarnings.length
-           ? e.extraEarnings.map(x=>esc(x.label)+' '+money(x.amount)).join('<br>') : '—')+'</td></tr>';
-  });
-  h += '</tbody></table></div></div></div>';
 
   $('build-out').innerHTML = h;
 }
@@ -512,6 +551,112 @@ function bigstat(k,v,n,delta){
        + '<div class="v" style="color:'+c+';font-size:24px;">'+esc(v)+'</div>'
        + '<div class="n">'+esc(n||'')+'</div></div>';
 }
+// Salon-by-salon, each row expanding to the people in it. Employees are filed
+// under their biggest salon, but a floater's HOURS and COST are charged to the
+// salon that actually had them — so the salon totals stay true to the P&L even
+// though the person appears once.
+function salonBreakdownHtml(d){
+  const salons = (d.salonTotals||[]).slice();
+  if(!salons.length) return '';
+  const byS = {};
+  (d.employees||[]).forEach(e=>{ (byS[e.salonNum]||(byS[e.salonNum]=[])).push(e); });
+
+  let h = '<div class="card"><h2>By salon <span class="sub">'
+    + 'click a salon for its people \u00b7 click any heading to sort</span></h2>'
+    + '<div class="body" style="padding:0;"><div class="scroll"><table><thead><tr>'
+    + '<th data-sort="text">Salon</th>'
+    + '<th data-sort="num" class="num">Staff</th>'
+    + '<th data-sort="num" class="num">Hours</th>'
+    + '<th data-sort="num" class="num">Payroll cost</th>'
+    + '<th data-sort="num" class="num">Tips</th>'
+    + '<th data-sort="num" class="num">Overtime</th>'
+    + '<th data-sort="num" class="num">6-day net</th>'
+    + '<th data-sort="num" class="num">Breaks</th>'
+    + '</tr></thead><tbody>';
+
+  salons.forEach((t,i)=>{
+    const staff = (byS[t.salonNum]||[]).slice().sort((a,b)=>b.grossPay-a.grossPay);
+    h += '<tr class="salon-row" onclick="toggleSalon(this)" data-i="'+i+'">'
+      + '<td><span class="twisty">\u25B6</span> <b>'+esc(salonDisplayNum(t.salonNum))+'</b></td>'
+      + numTd(t.employees, t.employees)
+      + numTd(hrs(t.hours), t.hours)
+      + numTd(money(t.grossPay), t.grossPay)
+      + numTd(money(t.tips), t.tips)
+      + numTd(t.overtimePay?money(t.overtimePay):'\u2014', t.overtimePay)
+      + numTd(t.sixDayDelta?(t.sixDayDelta>0?'+':'')+money(t.sixDayDelta):'\u2014', t.sixDayDelta,
+              t.sixDayDelta<0?'#b3261e':(t.sixDayDelta>0?'#1a5c0a':''))
+      + numTd(t.breakMinutes?Math.round(t.breakMinutes)+'m':'\u2014', t.breakMinutes)
+      + '</tr>';
+    if(!staff.length){
+      h += '<tr class="sub-row" data-p="'+i+'"><td colspan="8" class="muted">No employees filed here.</td></tr>';
+    }
+    staff.forEach(e=>{
+      h += '<tr class="sub-row" data-p="'+i+'">'
+        + '<td>'+esc(e.employeeName)+(e.isFloater
+            ? ' <span class="pill jade">also '+esc(e.salons.filter(x=>x!==t.salonNum).join(', '))+'</span>' : '')+'</td>'
+        + '<td></td>'
+        + numTd(hrs(e.paidHours), e.paidHours)
+        + numTd(money(e.grossPay), e.grossPay)
+        + numTd(money(e.tips), e.tips)
+        + numTd(e.overtimePay?money(e.overtimePay):'\u2014', e.overtimePay)
+        + numTd(e.sixDayAmount?money(e.sixDayAmount):'\u2014', e.sixDayAmount)
+        + numTd(e.breakMinutes?Math.round(e.breakMinutes)+'m':'\u2014', e.breakMinutes)
+        + '</tr>';
+    });
+  });
+  h += '</tbody></table></div></div></div>';
+  return h;
+}
+// data-v keeps the raw number so sorting ignores the "$" and commas.
+function numTd(text, raw, color){
+  return '<td class="num" data-v="'+(Number(raw)||0)+'"'
+    + (color?' style="color:'+color+';font-weight:600;"':'')+'>'+esc(text)+'</td>';
+}
+function salonDisplayNum(n){ return String(n||'').trim(); }
+function toggleSalon(tr){
+  const i = tr.dataset.i;
+  const open = tr.classList.toggle('open');
+  tr.querySelector('.twisty').textContent = open ? '\u25BC' : '\u25B6';
+  document.querySelectorAll('.sub-row[data-p="'+i+'"]').forEach(r=>r.classList.toggle('open', open));
+}
+
+// ── History ───────────────────────────────────────────────────
+function loadHistory(){
+  fetch('/api/office/payroll/history?limit=52').then(r=>r.json()).then(d=>{
+    if(!d.success){ $('history-out').innerHTML = '<div class="banner err" style="margin:14px;">'+esc(d.error)+'</div>'; return; }
+    if(!d.history.length){
+      $('history-out').innerHTML = '<div class="body muted" style="padding:14px;">'
+        + 'No weeks downloaded yet. The first ADP file you download will appear here.</div>';
+      return;
+    }
+    let h = '<div class="scroll"><table><thead><tr>'
+      + '<th data-sort="text">Week ending</th><th data-sort="text">Pay date</th>'
+      + '<th data-sort="num" class="num">Staff</th><th data-sort="num" class="num">Hours</th>'
+      + '<th data-sort="num" class="num">Payroll cost</th><th data-sort="num" class="num">Tips</th>'
+      + '<th data-sort="num" class="num">Overtime</th><th data-sort="num" class="num">6-day net</th>'
+      + '<th data-sort="num" class="num">Breaks</th><th data-sort="text">Downloaded</th>'
+      + '</tr></thead><tbody>';
+    d.history.forEach(r=>{
+      h += '<tr>'
+        + '<td><b>'+esc(r.weekEnd)+'</b>'+(r.forced?' <span class="pill err">forced</span>':'')+'</td>'
+        + '<td class="muted">'+esc(r.payDate)+'</td>'
+        + numTd(r.employees, r.employees)
+        + numTd(hrs(r.paidHours), r.paidHours)
+        + numTd(money(r.grossPay), r.grossPay)
+        + numTd(money(r.tips), r.tips)
+        + numTd(money(r.overtimePay), r.overtimePay)
+        + numTd((r.sixDayDelta>0?'+':'')+money(r.sixDayDelta), r.sixDayDelta,
+                r.sixDayDelta<0?'#b3261e':(r.sixDayDelta>0?'#1a5c0a':''))
+        + numTd(Math.round(r.breakMinutes)+'m', r.breakMinutes)
+        + '<td class="muted">'+esc((r.downloadedAt||'').slice(0,10))+'<br>'
+        + '<span style="font-size:11px;">'+esc(r.downloadedBy||'')+'</span></td>'
+        + '</tr>';
+    });
+    h += '</tbody></table></div>';
+    $('history-out').innerHTML = h;
+  }).catch(e=>{ $('history-out').innerHTML = '<div class="banner err" style="margin:14px;">'+esc(e.message)+'</div>'; });
+}
+
 function stat(k,v,n){
   return '<div class="stat"><div class="k">'+esc(k)+'</div><div class="v">'+esc(v)+'</div>'
        + '<div class="n">'+esc(n||'')+'</div></div>';

@@ -57,6 +57,7 @@ export async function GET(request: Request) {
       exceptions: result.exceptions,
       canExport: blocking.length === 0,
       employees: result.employees,
+      salonTotals: result.salonTotals,
       sixDay: result.sixDay,
       breaks: result.breaks,
       fileName: result.upload.fileName,
