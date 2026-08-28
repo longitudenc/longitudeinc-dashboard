@@ -129,6 +129,9 @@ export interface PunchSegment {
   absent: boolean
 }
 
+/** What produced an extra earnings line — keeps the totals from double-counting. */
+export type EarningKind = 'sixDay' | 'break' | 'bonus' | 'manual'
+
 /** A bonus or hand-keyed earning to place on the upload. */
 export interface ExtraEarning {
   payId: string
@@ -139,6 +142,8 @@ export interface ExtraEarning {
   amount: number
   /** Shown in the preview and exception messages. */
   label: string
+  /** Defaults to 'manual' when the caller doesn't say. */
+  kind?: EarningKind
 }
 
 // ── Outputs ─────────────────────────────────────────────────────────────
@@ -195,7 +200,7 @@ export interface EmployeeSummary {
   sixDayAmount: number
   breakMinutes: number
   breakHours: number
-  extraEarnings: { label: string; code: string; amount: number }[]
+  extraEarnings: { label: string; code: string; amount: number; kind: EarningKind }[]
 }
 
 export interface AdpUpload {
@@ -651,8 +656,8 @@ export function computeShortBreaks(
 interface UploadRowValues {
   /** field key → amount for the 15 fixed pairs */
   fixed: Map<string, number>
-  /** additional (code, amount, label) triples for the spare Earnings 4 pairs */
-  extras: { code: string; amount: number; label: string }[]
+  /** additional lines for the spare Earnings 4 pairs */
+  extras: { code: string; amount: number; label: string; kind: EarningKind }[]
   coCode: string
   batchId: string
   fileNum: string
@@ -673,7 +678,11 @@ export function buildPayroll(input: {
   settings: AdpSettings
   weekStart: string
   weekEnd: string
-  /** Bonus lines for this week (already filtered to the bonus week by caller). */
+  /**
+   * Bonus lines to place on this week. The CALLER decides whether this is the
+   * bonus week — `isBonusWeek` in the result says what the rule would pick, so
+   * the office can hold or advance a bonus without the engine second-guessing.
+   */
   bonuses?: ExtraEarning[]
   /** Hand-keyed earnings (referral, sign-on, guarantee, manager cell, …). */
   manual?: ExtraEarning[]
@@ -753,7 +762,7 @@ export function buildPayroll(input: {
     const shares = allocate(d.amount, group.map(r => r.floorHours))
     group.forEach((r, i) => {
       if (shares[i] === 0) return
-      values.get(r)!.extras.push({ code: sixDayCode, amount: shares[i], label: '6-day pay' })
+      values.get(r)!.extras.push({ code: sixDayCode, amount: shares[i], label: '6-day pay', kind: 'sixDay' })
     })
   }
 
@@ -791,15 +800,15 @@ export function buildPayroll(input: {
         } else {
           const amount = round2(hours * target.baseWage)
           if (amount > 0) {
-            v.extras.push({ code: breakCode, amount, label: `paid breaks (${minutes} min)` })
+            v.extras.push({ code: breakCode, amount, label: `paid breaks (${minutes} min)`, kind: 'break' })
           }
         }
       }
     }
   }
 
-  // ── Bonuses (bonus week only) and hand-keyed earnings ──
-  const extraLines: ExtraEarning[] = [...(bonusWeek ? bonuses : []), ...manual]
+  // ── Bonuses and hand-keyed earnings ──
+  const extraLines: ExtraEarning[] = [...bonuses, ...manual]
   for (const line of extraLines) {
     if (!(line.amount !== 0)) continue
     const group = rowsFor(line.payId)
@@ -827,6 +836,7 @@ export function buildPayroll(input: {
       code: line.code,
       amount: round2(line.amount),
       label: line.label,
+      kind: line.kind ?? 'manual',
     })
   }
 
@@ -916,7 +926,7 @@ export function buildPayroll(input: {
       sixDayAmount: sd?.amount ?? 0,
       breakMinutes: bd?.totalMinutes ?? 0,
       breakHours: bd ? round2(bd.totalMinutes / 60) : 0,
-      extraEarnings: extras.map(e => ({ label: e.label, code: e.code, amount: e.amount })),
+      extraEarnings: extras.map(e => ({ label: e.label, code: e.code, amount: e.amount, kind: e.kind })),
     })
   }
   employees.sort((a, b) => a.employeeName.localeCompare(b.employeeName))
@@ -941,8 +951,13 @@ export function buildPayroll(input: {
       sixDayPay: round2(sixDay.reduce((s, d) => s + d.amount, 0)),
       breakMinutes: round2(breaks.reduce((s, d) => s + d.totalMinutes, 0)),
       breakPayHours: round2(breaks.reduce((s, d) => s + d.totalMinutes, 0) / 60),
+      // Bonuses + hand-keyed lines only. 6-day pay and short breaks have their
+      // own totals above, so counting them here too would overstate the week.
       extraEarnings: round2(
-        [...values.values()].reduce((s, v) => s + v.extras.reduce((t, e) => t + e.amount, 0), 0)
+        [...values.values()].reduce(
+          (s, v) => s + v.extras.reduce((t, e) => t + (e.kind === 'bonus' || e.kind === 'manual' ? e.amount : 0), 0),
+          0
+        )
       ),
     },
   }

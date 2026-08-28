@@ -3020,6 +3020,7 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
       </div>
     </div>
     <a href="/market.html" title="CLT Market Compare" style="font-size:12px;color:#fff;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.28);padding:5px 12px;border-radius:20px;text-decoration:none;">🗺 Market</a>
+    <a href="/office.html" id="office-link" title="Office Tools — payroll upload for ADP" style="display:none;font-size:12px;color:#fff;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.28);padding:5px 12px;border-radius:20px;text-decoration:none;">🧾 Payroll</a>
     <div class="user-chip" id="user-chip" title="Click to sign out" onclick="if(confirm('Sign out?')) logout();" style="cursor:pointer;">Loading...</div>
   </div>
 </header>
@@ -4583,6 +4584,12 @@ function startDashboard(){
       return;
     }
 
+    // Office Tools (the ADP payroll upload) — same roles requireOffice() allows.
+    if(['owner','admin','office'].includes(SESSION.role)){
+      const ol = document.getElementById('office-link');
+      if(ol) ol.style.display = 'inline-block';
+    }
+
     if(SESSION.role === 'office' || SESSION.role === 'maintenance'){
       // Focused login for back-office (Laura/Brandy) and the handyman: skip the
       // salon dataset they don't need and land straight on their jobs.
@@ -4854,6 +4861,9 @@ function setupSidebar(){
     if(isAdminRole()){
       html += `<button class="am-btn" onclick="switchToAdmin()" id="btn-admin">
         <div class="am-avatar" style="background:#eee;color:#555;">⚙</div>Admin / Upload
+      </button>`;
+      html += `<button class="am-btn" onclick="window.location.href='/office.html'" id="btn-office">
+        <div class="am-avatar" style="background:#eee;color:#555;">🧾</div>Office / Payroll
       </button>`;
     }
   } else if(isAMRole()){

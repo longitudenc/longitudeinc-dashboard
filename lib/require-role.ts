@@ -40,6 +40,12 @@ export function requireOwner() {
   return requireRoles(['owner'])
 }
 
+// Owner, admin, or the back-office staff who actually run payroll. Gates
+// everything under /api/office — the ADP upload builder and its settings.
+export function requireOffice() {
+  return requireRoles(['owner', 'admin', 'office'])
+}
+
 // Any signed-in person with a real role — for reads that still need a session.
 export function requireSignedIn() {
   return requireRoles(['owner', 'admin', 'viewer', 'area_manager', 'manager', 'stylist', 'office', 'maintenance'])

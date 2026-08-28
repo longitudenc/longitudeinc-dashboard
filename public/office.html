@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Office Tools — Payroll · Longitude Inc</title>
+<link rel="icon" type="image/png" href="longitude-badge.png?v=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --primary:#048667; --primary-dark:#03654e; --accent:#9acb3a; --accent-light:#eaf5d8;
+    --border:#dfe3df; --bg:#f2f2f2; --text:#1a1a1a; --text-muted:#6b6b6b; --text-light:#999;
+    --wrn-bg:#fbe8e8; --wrn-text:#8a1a1a; --wrn-border:#e8a0a0;
+    --cau-bg:#fdf6e0; --cau-text:#7a5a00; --cau-border:#f0d060;
+    --ok-bg:#e6f4e0; --ok-text:#1a5c0a; --ok-border:#a8d890;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'Poppins','Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;}
+
+  .app-header{background:var(--primary);color:#fff;padding:0 1.5rem;display:flex;align-items:center;gap:14px;height:56px;position:sticky;top:0;z-index:100;}
+  .app-header h1{font-size:15px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap;}
+  .app-header .spacer{flex:1;}
+  .user-chip{font-size:12px;color:#dff3ea;background:rgba(255,255,255,.12);padding:4px 10px;border-radius:20px;}
+  .back-link{color:#cdeee2;font-size:13px;text-decoration:none;border:1px solid rgba(255,255,255,.35);padding:5px 11px;border-radius:8px;white-space:nowrap;}
+  .back-link:hover{background:rgba(255,255,255,.15);}
+
+  .tabs{background:#fff;border-bottom:1px solid var(--border);padding:0 1.5rem;display:flex;gap:2px;position:sticky;top:56px;z-index:99;}
+  .tab{border:none;background:none;padding:12px 18px;font-family:inherit;font-size:13.5px;font-weight:500;color:var(--text-muted);cursor:pointer;border-bottom:3px solid transparent;}
+  .tab:hover{color:var(--text);background:#fafbfa;}
+  .tab.active{color:var(--primary);font-weight:600;border-bottom-color:var(--accent);}
+
+  .content{padding:1.5rem;max-width:1400px;margin:0 auto;}
+  .panel{display:none;} .panel.active{display:block;}
+
+  .card{background:#fff;border:1px solid var(--border);border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.05);margin-bottom:1.25rem;overflow:hidden;}
+  .card > h2{font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:#fff;background:var(--primary);padding:10px 14px;font-weight:600;display:flex;align-items:center;gap:10px;}
+  .card > h2 .sub{font-weight:400;text-transform:none;letter-spacing:0;color:#bfe9d8;font-size:11.5px;margin-left:auto;}
+  .card .body{padding:14px;}
+
+  label.fld{display:flex;flex-direction:column;gap:5px;font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);}
+  select,input[type=text],input[type=number]{font-family:inherit;font-size:13.5px;padding:7px 10px;border-radius:8px;border:1px solid var(--border);background:#fff;color:var(--text);}
+  select:focus,input:focus{outline:2px solid var(--accent);outline-offset:-1px;}
+  .controls{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;}
+  .btn{font-family:inherit;font-size:13.5px;font-weight:600;padding:8px 16px;border-radius:8px;border:1px solid var(--primary);background:var(--primary);color:#fff;cursor:pointer;white-space:nowrap;}
+  .btn:hover:not(:disabled){background:var(--primary-dark);}
+  .btn:disabled{opacity:.45;cursor:not-allowed;}
+  .btn.ghost{background:#fff;color:var(--primary);}
+  .btn.ghost:hover:not(:disabled){background:var(--accent-light);}
+  .btn.small{font-size:12px;padding:5px 11px;}
+  .btn.danger{border-color:#b3261e;background:#fff;color:#b3261e;}
+  .btn.danger:hover:not(:disabled){background:#fbe8e8;}
+  .check{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--text);text-transform:none;letter-spacing:0;font-weight:400;}
+
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1px;background:var(--border);}
+  .stat{background:#fff;padding:12px 14px;}
+  .stat .k{font-size:10px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--text-muted);}
+  .stat .v{font-size:21px;font-weight:700;color:var(--primary);line-height:1.3;font-variant-numeric:tabular-nums;}
+  .stat .n{font-size:11px;color:var(--text-light);}
+
+  .banner{padding:11px 14px;border-radius:9px;font-size:13px;margin-bottom:12px;border:1px solid;}
+  .banner.err{background:var(--wrn-bg);color:var(--wrn-text);border-color:var(--wrn-border);}
+  .banner.warn{background:var(--cau-bg);color:var(--cau-text);border-color:var(--cau-border);}
+  .banner.ok{background:var(--ok-bg);color:var(--ok-text);border-color:var(--ok-border);}
+  .banner.info{background:#eef4f8;color:#20496b;border-color:#bcd4e6;}
+  .banner b{font-weight:600;}
+
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th{background:#f7f9f8;text-align:left;padding:8px 10px;font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--text-muted);border-bottom:1px solid var(--border);position:sticky;top:0;white-space:nowrap;}
+  td{padding:7px 10px;border-bottom:1px solid #f1f3f1;vertical-align:top;}
+  tr:last-child td{border-bottom:none;}
+  tbody tr:hover{background:#fafcfa;}
+  .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}
+  .muted{color:var(--text-muted);}
+  .scroll{max-height:60vh;overflow:auto;}
+  .pill{display:inline-block;font-size:10.5px;font-weight:600;padding:1px 8px;border-radius:20px;background:#eef2f0;color:var(--text-muted);}
+  .pill.jade{background:var(--accent-light);color:#3d6b0a;}
+  .pill.warn{background:var(--cau-bg);color:var(--cau-text);}
+  .pill.err{background:var(--wrn-bg);color:var(--wrn-text);}
+  .daychip{display:inline-block;font-size:10.5px;padding:1px 6px;border-radius:5px;margin:1px 2px 1px 0;background:#eef2f0;color:var(--text-muted);font-variant-numeric:tabular-nums;}
+  .daychip.on{background:var(--accent-light);color:#3d6b0a;font-weight:600;}
+  .exc{display:flex;gap:9px;padding:8px 10px;border-bottom:1px solid #f1f3f1;font-size:13px;align-items:baseline;}
+  .exc:last-child{border-bottom:none;}
+  .loading{padding:40px;text-align:center;color:var(--text-muted);font-size:14px;}
+  .hint{font-size:11.5px;color:var(--text-light);margin-top:5px;line-height:1.5;}
+  .codegrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;}
+  .codegrid label.fld input{width:100%;}
+  .rulegrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;}
+  @media(max-width:700px){ .content{padding:1rem .75rem;} .app-header{padding:0 .9rem;} .tabs{padding:0 .5rem;} }
+</style>
+</head>
+<body>
+
+<div class="app-header">
+  <h1>Office Tools — Payroll</h1>
+  <span class="spacer"></span>
+  <span class="user-chip" id="user-chip">…</span>
+  <a class="back-link" href="/dashboard.html">← Dashboard</a>
+</div>
+
+<div class="tabs" id="tabs" style="display:none;">
+  <button class="tab active" data-panel="build" onclick="showPanel('build')">Build Upload</button>
+  <button class="tab" data-panel="manual" onclick="showPanel('manual')">Manual Earnings</button>
+  <button class="tab" data-panel="settings" onclick="showPanel('settings')">Settings</button>
+</div>
+
+<div class="content">
+  <div id="gate" class="loading">Checking access…</div>
+
+  <!-- ── Build Upload ─────────────────────────────────────────── -->
+  <div class="panel" id="panel-build">
+    <div class="card">
+      <h2>Pay week <span class="sub" id="week-sub"></span></h2>
+      <div class="body">
+        <div class="controls">
+          <label class="fld">Week ending (Friday)
+            <select id="week-select" onchange="onWeekChange()"></select>
+          </label>
+          <label class="fld">Clock punches
+            <select id="punch-select">
+              <option value="sheet">Nightly scrape (fast)</option>
+              <option value="live">Pull live from SD3</option>
+            </select>
+          </label>
+          <label class="fld">Bonuses
+            <select id="bonus-select">
+              <option value="">Auto — 3rd paycheck only</option>
+              <option value="1">Include this week</option>
+              <option value="0">Exclude this week</option>
+            </select>
+          </label>
+          <button class="btn" id="build-btn" onclick="build()">Build upload</button>
+          <button class="btn ghost" id="dl-btn" onclick="download()" disabled>Download ADP file</button>
+        </div>
+        <div class="hint">
+          Pulls the Payroll Consolidated report straight from SD3 for the Saturday–Friday week —
+          the same report you used to download by hand — then applies cross-salon overtime,
+          6-day pay and paid short breaks before writing the ADP file.
+        </div>
+      </div>
+    </div>
+
+    <div id="build-out"></div>
+  </div>
+
+  <!-- ── Manual Earnings ──────────────────────────────────────── -->
+  <div class="panel" id="panel-manual">
+    <div class="card">
+      <h2>Hand-keyed earnings <span class="sub" id="manual-week-sub"></span></h2>
+      <div class="body">
+        <div class="hint" style="margin-top:0;margin-bottom:12px;">
+          Lines SD3 doesn't know about — referral and sign-on bonuses, guarantees, manager cell,
+          tuition, retro pay. They're saved against the pay week, so rebuilding the upload keeps them.
+          Payroll ID is the <b>File #</b> ADP uses; the code is the ADP earnings code.
+        </div>
+        <div class="scroll">
+          <table id="manual-table">
+            <thead><tr>
+              <th style="width:130px;">Payroll ID</th><th style="width:110px;">Salon #</th>
+              <th style="width:100px;">Code</th><th style="width:120px;">Amount</th>
+              <th>Description</th><th style="width:50px;"></th>
+            </tr></thead>
+            <tbody id="manual-body"></tbody>
+          </table>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:12px;">
+          <button class="btn ghost small" onclick="addManualRow()">+ Add line</button>
+          <button class="btn small" onclick="saveManual()">Save lines</button>
+          <span id="manual-msg" style="font-size:12.5px;align-self:center;"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Settings ─────────────────────────────────────────────── -->
+  <div class="panel" id="panel-settings">
+    <div id="settings-out" class="loading">Loading settings…</div>
+  </div>
+</div>
+
+<script>
+'use strict';
+let SESSION = { email:'', role:'none' };
+let CAN_EDIT_SETTINGS = false;
+let LAST_BUILD = null;
+let SETTINGS = null;
+let MANUAL_LINES = [];
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+  ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+const money = n => '$' + (Number(n)||0).toFixed(2);
+const hrs = n => (Number(n)||0).toFixed(2);
+
+// ── Access ────────────────────────────────────────────────────
+// The API routes enforce this server-side; the check here just avoids showing
+// a payroll screen to someone whose calls would all come back 403.
+const ALLOWED = ['owner','admin','office'];
+
+fetch('/api/auth/me').then(r=>r.json()).then(me=>{
+  if(!me || !me.access){
+    $('gate').innerHTML = 'Please <a href="/dashboard.html">sign in</a> to continue.';
+    return;
+  }
+  SESSION = { email: me.email||'', role: (me.access.role||'none') };
+  $('user-chip').textContent = SESSION.email || 'Unknown';
+  if(!ALLOWED.includes(SESSION.role)){
+    $('gate').innerHTML =
+      '<div class="banner err">Office Tools is limited to the office and administrators. '
+      + 'Your account is signed in as <b>' + esc(SESSION.role) + '</b>.</div>';
+    return;
+  }
+  $('gate').style.display = 'none';
+  $('tabs').style.display = 'flex';
+  $('panel-build').classList.add('active');
+  buildWeekOptions();
+  loadSettings();
+}).catch(()=>{ $('gate').innerHTML = 'Could not verify your session. <a href="/dashboard.html">Sign in</a>.'; });
+
+function showPanel(name){
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.panel===name));
+  $('panel-'+name).classList.add('active');
+  if(name==='manual') loadManual();
+}
+
+// ── Week list ─────────────────────────────────────────────────
+// Fiscal weeks run Saturday → Friday. Offer the last completed week first,
+// then back through the year.
+function lastCompletedFriday(){
+  const now = new Date();
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const dow = d.getUTCDay();               // 0 Sun … 5 Fri … 6 Sat
+  const back = dow === 5 ? 7 : (dow === 6 ? 1 : dow + 2);
+  d.setUTCDate(d.getUTCDate() - back);
+  return d;
+}
+function iso(d){ return d.toISOString().slice(0,10); }
+function fmtWeek(fridayIso){
+  const fri = new Date(fridayIso+'T00:00:00Z');
+  const sat = new Date(fri.getTime() - 6*86400000);
+  const f = dt => (dt.getUTCMonth()+1)+'/'+dt.getUTCDate();
+  return f(sat)+' – '+f(fri)+'/'+String(fri.getUTCFullYear()).slice(2);
+}
+function buildWeekOptions(){
+  const sel = $('week-select');
+  const d = lastCompletedFriday();
+  let html = '';
+  for(let i=0;i<52;i++){
+    const v = iso(d);
+    html += '<option value="'+v+'">'+fmtWeek(v)+'</option>';
+    d.setUTCDate(d.getUTCDate()-7);
+  }
+  sel.innerHTML = html;
+  onWeekChange();
+}
+function onWeekChange(){
+  $('dl-btn').disabled = true;
+  LAST_BUILD = null;
+  $('build-out').innerHTML = '';
+  $('week-sub').textContent = 'week ending ' + $('week-select').value;
+}
+
+// ── Build ─────────────────────────────────────────────────────
+function buildQuery(){
+  const p = new URLSearchParams();
+  p.set('weekEnd', $('week-select').value);
+  p.set('punches', $('punch-select').value);
+  const b = $('bonus-select').value;
+  if(b !== '') p.set('bonuses', b);
+  return p;
+}
+
+function build(){
+  const btn = $('build-btn');
+  btn.disabled = true; btn.textContent = 'Building…';
+  $('dl-btn').disabled = true;
+  $('build-out').innerHTML = '<div class="loading">Pulling the payroll report from SD3 and calculating…</div>';
+
+  fetch('/api/office/payroll/preview?'+buildQuery().toString())
+    .then(r=>r.json())
+    .then(d=>{
+      if(!d.success){
+        $('build-out').innerHTML = '<div class="banner err"><b>Build failed.</b> '+esc(d.error||'Unknown error')+'</div>';
+        return;
+      }
+      LAST_BUILD = d;
+      renderBuild(d);
+      $('dl-btn').disabled = false;
+    })
+    .catch(e=>{ $('build-out').innerHTML = '<div class="banner err"><b>Build failed.</b> '+esc(e.message)+'</div>'; })
+    .finally(()=>{ btn.disabled = false; btn.textContent = 'Build upload'; });
+}
+
+function download(){
+  if(!LAST_BUILD) return;
+  const p = buildQuery();
+  if(!LAST_BUILD.canExport){
+    const n = LAST_BUILD.exceptions.filter(e=>e.severity==='blocking').length;
+    if(!confirm(
+      n + ' blocking issue' + (n===1?'':'s') + ' would send pay to the wrong place or drop it entirely.\n\n'
+      + 'Download the file anyway?')) return;
+    p.set('force','1');
+  }
+  window.location.href = '/api/office/payroll/export?'+p.toString();
+}
+
+function renderBuild(d){
+  const blocking = d.exceptions.filter(e=>e.severity==='blocking');
+  const warnings = d.exceptions.filter(e=>e.severity!=='blocking');
+  let h = '';
+
+  // ── Banners ──
+  if(blocking.length){
+    h += '<div class="banner err"><b>'+blocking.length+' blocking issue'+(blocking.length===1?'':'s')
+       + '.</b> Pay would land on the wrong code or the wrong person. Resolve these before sending to ADP.</div>';
+  } else {
+    h += '<div class="banner ok"><b>Ready.</b> '+d.totals.rows+' rows across '
+       + d.meta.salonsInReport.length+' salons — no blocking issues.</div>';
+  }
+  if(d.meta.punchSegments === 0){
+    h += '<div class="banner warn"><b>No clock punches for this week.</b> '
+       + '6-day pay and paid short breaks cannot be calculated without them. '
+       + 'Try switching the punch source to “Pull live from SD3”.</div>';
+  }
+  h += '<div class="banner info">Pay date <b>'+esc(d.payDate)+'</b> — the <b>'+ordinal(d.paycheckOfMonth)
+     + '</b> paycheck of the month. '
+     + (d.isBonusWeek ? 'This is the bonus week.' : 'Not the bonus week.')
+     + (d.meta.bonusPeriod ? ' Paying bonuses for <b>'+esc(d.meta.bonusPeriod)+'</b> ('+d.meta.bonusLines+' employees).' : '')
+     + ' Punches from <b>'+(d.meta.punchSource==='live'?'a live SD3 pull':'the nightly scrape')+'</b> ('
+     + d.meta.punchSegments+' segments).</div>';
+
+  // ── Totals ──
+  h += '<div class="card"><h2>This week <span class="sub">'+esc(d.weekStart)+' → '+esc(d.weekEnd)
+     + ' · file '+esc(d.fileName)+'</span></h2><div class="stats">'
+     + stat('Employees', d.totals.employees, d.totals.floaters+' across multiple salons')
+     + stat('Floor hours', hrs(d.totals.floorHours), '')
+     + stat('Overtime', money(d.totals.overtimePay), 'blended, cross-salon')
+     + stat('6-day pay', money(d.totals.sixDayPay), d.sixDay.filter(s=>s.qualifies).length+' qualified')
+     + stat('Paid breaks', d.totals.breakMinutes+' min', hrs(d.totals.breakPayHours)+' hrs added')
+     + stat('Other earnings', money(d.totals.extraEarnings), 'bonuses + manual')
+     + '</div></div>';
+
+  // ── Exceptions ──
+  if(d.exceptions.length){
+    h += '<div class="card"><h2>Review <span class="sub">'+blocking.length+' blocking · '
+       + warnings.length+' to check</span></h2><div class="body" style="padding:0;"><div class="scroll">';
+    blocking.concat(warnings).forEach(e=>{
+      h += '<div class="exc"><span class="pill '+(e.severity==='blocking'?'err':'warn')+'">'
+         + (e.severity==='blocking'?'BLOCKING':'CHECK')+'</span><span>'+esc(e.message)+'</span></div>';
+    });
+    h += '</div></div></div>';
+  }
+
+  // ── 6-day pay ──
+  const six = d.sixDay.filter(s=>s.qualifies);
+  const near = d.sixDay.filter(s=>!s.qualifies && (s.qualifyingDays>=5 || s.weekFloorHours>=30));
+  h += '<div class="card"><h2>6-day pay <span class="sub">'
+     + '6+ floor days at '+d.rules.sixDayMinShiftHours+'+ hrs, '+d.rules.sixDayMinFloorHours
+     + '+ floor hrs → $'+d.rules.sixDayRate+'/floor hr</span></h2><div class="body" style="padding:0;">';
+  if(!six.length && !near.length){
+    h += '<div class="body muted">Nobody qualified this week.</div>';
+  } else {
+    h += '<div class="scroll"><table><thead><tr><th>Employee</th><th class="num">Floor days</th>'
+       + '<th class="num">Floor hrs</th><th class="num">Pays</th><th>Days worked</th></tr></thead><tbody>';
+    six.concat(near).forEach(s=>{
+      h += '<tr'+(s.qualifies?'':' class="muted"')+'><td>'+esc(s.employeeName)
+         + (s.qualifies?'':' <span class="pill">'+esc(s.reason)+'</span>')+'</td>'
+         + '<td class="num">'+s.qualifyingDays+'</td>'
+         + '<td class="num">'+hrs(s.weekFloorHours)+'</td>'
+         + '<td class="num">'+(s.qualifies?'<b>'+money(s.amount)+'</b>':'—')+'</td>'
+         + '<td>'+s.days.map(x=>'<span class="daychip'+(x.counted?' on':'')+'" title="'+esc(x.date)+'">'
+             + x.date.slice(5)+' · '+hrs(x.floorHours)+'</span>').join('')+'</td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+  h += '</div></div>';
+
+  // ── Short breaks ──
+  h += '<div class="card"><h2>Paid short breaks <span class="sub">under '
+     + d.rules.breakMaxMinutes+' minutes · '
+     + (d.rules.breakMode==='foldFloorHours' ? 'added to Floor Hours at base rate'
+        : d.rules.breakMode==='separateCode' ? 'own earnings code' : 'report only, not paid')
+     + '</span></h2><div class="body" style="padding:0;">';
+  if(!d.breaks.length){
+    h += '<div class="body muted">No breaks under '+d.rules.breakMaxMinutes+' minutes this week.</div>';
+  } else {
+    h += '<div class="scroll"><table><thead><tr><th>Employee</th><th class="num">Minutes</th>'
+       + '<th class="num">Hours added</th><th>Each break</th></tr></thead><tbody>';
+    d.breaks.forEach(b=>{
+      h += '<tr><td>'+esc(b.employeeName)+'</td><td class="num">'+b.totalMinutes+'</td>'
+         + '<td class="num">'+hrs(b.totalMinutes/60)+'</td><td>'
+         + b.breaks.map(x=>'<span class="daychip">'+x.date.slice(5)+' · '+x.minutes+'m · '+esc(x.salonNum)+'</span>').join('')
+         + '</td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+  h += '</div></div>';
+
+  // ── Everyone ──
+  h += '<div class="card"><h2>All employees <span class="sub">'+d.employees.length+'</span></h2>'
+     + '<div class="body" style="padding:0;"><div class="scroll"><table><thead><tr>'
+     + '<th>Employee</th><th>Salons</th><th class="num">Floor hrs</th><th class="num">Hrs worked</th>'
+     + '<th class="num">OT</th><th class="num">6-day</th><th class="num">Breaks</th><th>Other earnings</th>'
+     + '</tr></thead><tbody>';
+  d.employees.forEach(e=>{
+    h += '<tr><td>'+esc(e.employeeName)+(e.isFloater?' <span class="pill jade">floater</span>':'')+'</td>'
+       + '<td class="muted">'+esc(e.salons.join(', '))+'</td>'
+       + '<td class="num">'+hrs(e.floorHours)+'</td>'
+       + '<td class="num">'+hrs(e.totalHoursWorked)+'</td>'
+       + '<td class="num">'+(e.overtimePay?money(e.overtimePay):'—')+'</td>'
+       + '<td class="num">'+(e.sixDayAmount?money(e.sixDayAmount):'—')+'</td>'
+       + '<td class="num">'+(e.breakMinutes?e.breakMinutes+'m':'—')+'</td>'
+       + '<td class="muted">'+(e.extraEarnings.length
+           ? e.extraEarnings.map(x=>esc(x.label)+' '+money(x.amount)).join('<br>') : '—')+'</td></tr>';
+  });
+  h += '</tbody></table></div></div></div>';
+
+  $('build-out').innerHTML = h;
+}
+
+function stat(k,v,n){
+  return '<div class="stat"><div class="k">'+esc(k)+'</div><div class="v">'+esc(v)+'</div>'
+       + '<div class="n">'+esc(n||'')+'</div></div>';
+}
+function ordinal(n){
+  const s = ['th','st','nd','rd'], v = n % 100;
+  return n + (s[(v-20)%10] || s[v] || s[0]);
+}
+
+// ── Manual earnings ───────────────────────────────────────────
+function loadManual(){
+  const weekEnd = $('week-select').value;
+  $('manual-week-sub').textContent = 'week ending ' + weekEnd;
+  $('manual-msg').textContent = '';
+  fetch('/api/office/payroll/manual?weekEnd='+encodeURIComponent(weekEnd))
+    .then(r=>r.json())
+    .then(d=>{ MANUAL_LINES = (d.success && d.lines) ? d.lines : []; renderManual(); })
+    .catch(()=>{ MANUAL_LINES = []; renderManual(); });
+}
+function renderManual(){
+  if(!MANUAL_LINES.length) MANUAL_LINES = [{ payId:'', salonNum:'', code:'', amount:'', label:'' }];
+  $('manual-body').innerHTML = MANUAL_LINES.map((l,i)=>
+    '<tr>'
+    + '<td><input type="text" style="width:100%" value="'+esc(l.payId)+'" oninput="setManual('+i+',\'payId\',this.value)"></td>'
+    + '<td><input type="text" style="width:100%" value="'+esc(l.salonNum||'')+'" oninput="setManual('+i+',\'salonNum\',this.value)"></td>'
+    + '<td><input type="text" style="width:100%" value="'+esc(l.code)+'" oninput="setManual('+i+',\'code\',this.value)"></td>'
+    + '<td><input type="number" step="0.01" style="width:100%" value="'+esc(l.amount)+'" oninput="setManual('+i+',\'amount\',this.value)"></td>'
+    + '<td><input type="text" style="width:100%" value="'+esc(l.label)+'" oninput="setManual('+i+',\'label\',this.value)"></td>'
+    + '<td><button class="btn danger small" onclick="dropManual('+i+')">×</button></td>'
+    + '</tr>').join('');
+}
+function setManual(i,k,v){ MANUAL_LINES[i][k] = v; }
+function dropManual(i){ MANUAL_LINES.splice(i,1); renderManual(); }
+function addManualRow(){ MANUAL_LINES.push({ payId:'', salonNum:'', code:'', amount:'', label:'' }); renderManual(); }
+function saveManual(){
+  const weekEnd = $('week-select').value;
+  const lines = MANUAL_LINES.filter(l=>String(l.payId).trim() && Number(l.amount));
+  $('manual-msg').textContent = 'Saving…';
+  fetch('/api/office/payroll/manual', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ weekEnd, lines })
+  }).then(r=>r.json()).then(d=>{
+    $('manual-msg').textContent = d.success
+      ? 'Saved ' + d.saved + ' line' + (d.saved===1?'':'s') + '. Rebuild the upload to include them.'
+      : 'Save failed: ' + (d.error||'unknown');
+    $('manual-msg').style.color = d.success ? '#1a5c0a' : '#b3261e';
+  }).catch(e=>{ $('manual-msg').textContent = 'Save failed: '+e.message; $('manual-msg').style.color='#b3261e'; });
+}
+
+// ── Settings ──────────────────────────────────────────────────
+function loadSettings(){
+  fetch('/api/office/payroll/settings').then(r=>r.json()).then(d=>{
+    if(!d.success){ $('settings-out').innerHTML = '<div class="banner err">'+esc(d.error)+'</div>'; return; }
+    SETTINGS = d.settings; CAN_EDIT_SETTINGS = !!d.canEdit;
+    renderSettings(d);
+  }).catch(e=>{ $('settings-out').innerHTML = '<div class="banner err">'+esc(e.message)+'</div>'; });
+}
+
+function renderSettings(d){
+  const s = d.settings, ro = CAN_EDIT_SETTINGS ? '' : ' disabled';
+  const missing = Object.entries(s.codes).filter(([,v])=>!v).map(([k])=>k);
+  let h = '';
+
+  if(!CAN_EDIT_SETTINGS){
+    h += '<div class="banner info">These settings are read-only for the office role. '
+       + 'An owner or admin can change them — one wrong earnings code misroutes everyone\'s pay.</div>';
+  }
+  if(missing.length){
+    h += '<div class="banner warn"><b>'+missing.length+' earnings code'+(missing.length===1?'':'s')
+       + ' not assigned yet:</b> '+missing.map(esc).join(', ')+'. '
+       + 'Any pay that lands on an unassigned code blocks the upload rather than disappearing into ADP. '
+       + 'The original workbook left these as “TBD”.</div>';
+  }
+
+  // Codes
+  h += '<div class="card"><h2>ADP earnings codes</h2><div class="body"><div class="codegrid">';
+  d.fields.forEach(f=>{
+    h += codeInput(f.key, f.label + (f.isHours?' (hours)':''), s.codes[f.key], ro);
+  });
+  h += codeInput('sixDay','6-day pay', s.codes.sixDay, ro);
+  h += codeInput('shortBreak','Short-break pay', s.codes.shortBreak, ro);
+  h += codeInput('stylistBonus','Stylist bonus', s.codes.stylistBonus, ro);
+  h += '</div><div class="hint">Blank means “not assigned”. Short-break pay needs a code only when '
+     + 'the break mode below is “own earnings code”.</div></div></div>';
+
+  // Rules
+  h += '<div class="card"><h2>Rules</h2><div class="body"><div class="rulegrid">'
+     + ruleInput('sixDayRate','6-day $ per floor hour', s.rules.sixDayRate, ro, '0.01')
+     + ruleInput('sixDayMinDays','6-day — days required', s.rules.sixDayMinDays, ro, '1')
+     + ruleInput('sixDayMinShiftHours','6-day — min hours/day', s.rules.sixDayMinShiftHours, ro, '0.25')
+     + ruleInput('sixDayMinFloorHours','6-day — min floor hrs/week', s.rules.sixDayMinFloorHours, ro, '0.5')
+     + ruleInput('breakMaxMinutes','Paid break under (minutes)', s.rules.breakMaxMinutes, ro, '1')
+     + '<label class="fld">Break handling<select id="set-breakMode"'+ro+'>'
+     + ['foldFloorHours','separateCode','reportOnly'].map(m=>'<option value="'+m+'"'
+        + (s.rules.breakMode===m?' selected':'')+'>'
+        + ({foldFloorHours:'Add to Floor Hours (base rate)',separateCode:'Own earnings code',reportOnly:'Report only — do not pay'})[m]
+        + '</option>').join('')+'</select></label>'
+     + ruleInput('otThresholdHours','Overtime after (hours/week)', s.rules.otThresholdHours, ro, '0.5')
+     + ruleInput('bonusPaycheckOfMonth','Bonus on paycheck #', s.rules.bonusPaycheckOfMonth, ro, '1')
+     + ruleInput('payDateOffsetDays','Days from week end to pay day', s.rules.payDateOffsetDays, ro, '1')
+     + '</div>'
+     + '<div class="hint">Pay day is week-ending Friday plus the offset — 6 days lands on Thursday. '
+     + '“Bonus on paycheck #3” means the 3rd Thursday of the calendar month.</div>';
+  if(CAN_EDIT_SETTINGS){
+    h += '<div style="margin-top:14px;display:flex;gap:10px;align-items:center;">'
+       + '<button class="btn" onclick="saveSettings()">Save settings</button>'
+       + '<span id="settings-msg" style="font-size:12.5px;"></span></div>';
+  }
+  h += '</div></div>';
+
+  // Salon table
+  h += '<div class="card"><h2>Salons <span class="sub">'+Object.keys(s.salons).length+' mapped</span></h2>'
+     + '<div class="body" style="padding:0;"><div class="scroll"><table><thead><tr>'
+     + '<th>Salon #</th><th>Co Code</th><th>Batch Id</th><th>Temp Dept</th></tr></thead><tbody>';
+  Object.keys(s.salons).sort().forEach(k=>{
+    h += '<tr><td>'+esc(k)+'</td><td>'+esc(s.salons[k].coCode)+'</td><td>'+esc(s.salons[k].batchId)
+       + '</td><td class="muted">'+esc(k)+'00</td></tr>';
+  });
+  h += '</tbody></table></div></div></div>';
+
+  $('settings-out').innerHTML = h;
+}
+
+function codeInput(key,label,val,ro){
+  return '<label class="fld">'+esc(label)
+       + '<input type="text" id="code-'+esc(key)+'" value="'+esc(val||'')+'" placeholder="not assigned"'+ro+'></label>';
+}
+function ruleInput(key,label,val,ro,step){
+  return '<label class="fld">'+esc(label)
+       + '<input type="number" step="'+step+'" id="set-'+esc(key)+'" value="'+esc(val)+'"'+ro+'></label>';
+}
+
+function saveSettings(){
+  const codes = {}, rules = {};
+  document.querySelectorAll('[id^="code-"]').forEach(el=>{ codes[el.id.slice(5)] = el.value.trim(); });
+  document.querySelectorAll('[id^="set-"]').forEach(el=>{ rules[el.id.slice(4)] = el.value; });
+  const msg = $('settings-msg');
+  msg.textContent = 'Saving…'; msg.style.color = '';
+  fetch('/api/office/payroll/settings', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ codes, rules })
+  }).then(r=>r.json()).then(d=>{
+    if(d.success){ SETTINGS = d.settings; msg.textContent = 'Saved.'; msg.style.color = '#1a5c0a'; }
+    else { msg.textContent = 'Save failed: '+(d.error||'unknown'); msg.style.color = '#b3261e'; }
+  }).catch(e=>{ msg.textContent = 'Save failed: '+e.message; msg.style.color = '#b3261e'; });
+}
+</script>
+</body>
+</html>
