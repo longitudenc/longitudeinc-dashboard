@@ -750,6 +750,42 @@ console.log('\nCost and salon roll-up')
     cn.salonNum === '3062' && cn.salons.length === 2,
     `${cn.salonNum} / ${cn.salons.join(',')}`
   )
+  // The combined figure on screen has to be exactly the two parts, and the
+  // per-person line breakdown has to add back up to the person's own cheque —
+  // otherwise the drill-down explains a number that isn't the one being paid.
+  check(
+    'total pay is payroll cost plus tips, to the cent',
+    Math.abs(plain.totals.totalPay - (plain.totals.grossPay + plain.totals.tips)) < 0.02 &&
+      Math.abs(plain.salonTotals.reduce((s, t) => s + t.totalPay, 0) - plain.totals.totalPay) < 0.02,
+    `${plain.totals.totalPay} vs ${round2(plain.totals.grossPay + plain.totals.tips)}`
+  )
+  {
+    const bad = plain.employees.filter(e => {
+      const wage = e.lines.filter(l => l.kind === 'wage').reduce((s, l) => s + l.amount, 0)
+      const tips = e.lines.filter(l => l.kind === 'tips').reduce((s, l) => s + l.amount, 0)
+      return Math.abs(wage - e.grossPay) > 0.03 || Math.abs(tips - e.tips) > 0.02 ||
+        Math.abs(e.totalPay - (e.grossPay + e.tips)) > 0.02
+    })
+    check(
+      'every employee\u2019s pay lines add up to their own gross pay and tips',
+      bad.length === 0,
+      bad.slice(0, 3).map(e => e.employeeName).join('; ')
+    )
+    const hoursBad = plain.employees.filter(e => {
+      const h = e.lines.reduce((s, l) => s + (l.hours ?? 0), 0)
+      return Math.abs(h - e.paidHours) > 0.03
+    })
+    check(
+      'the hour lines add up to the employee\u2019s paid hours',
+      hoursBad.length === 0,
+      hoursBad.slice(0, 3).map(e => e.employeeName).join('; ')
+    )
+    check(
+      'a floater\u2019s two salons are merged into one line each',
+      cn.lines.length > 0 && new Set(cn.lines.map(l => l.code + '|' + l.label)).size === cn.lines.length,
+      cn.lines.map(l => l.label).join(', ')
+    )
+  }
   check(
     'every employee appears in exactly one salon bucket',
     plain.salonTotals.reduce((s, t) => s + t.employees, 0) >= plain.employees.length,

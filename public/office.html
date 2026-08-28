@@ -90,6 +90,24 @@
   tr.sub-row{display:none;background:#fbfcfb;}
   tr.sub-row.open{display:table-row;}
   tr.sub-row td{font-size:12.5px;color:var(--text-muted);padding-left:26px;}
+  tr.emp-row{cursor:pointer;}
+  tr.emp-row.expanded td{color:var(--text);font-weight:600;}
+  /* A stylist's line-by-line detail: open only when its salon AND its own row are. */
+  tr.sub-row.det-row{display:none;}
+  tr.sub-row.det-row.open.det-open{display:table-row;}
+  tr.det-row>td{padding:0 10px 12px 40px;background:#fbfcfb;}
+  .det{border:1px solid var(--border);border-radius:8px;background:#fff;overflow:hidden;max-width:640px;}
+  .det-h{padding:7px 10px;background:var(--accent-light);font-size:11px;font-weight:600;
+         letter-spacing:.04em;text-transform:uppercase;color:var(--primary);}
+  table.det-t{width:100%;border-collapse:collapse;}
+  table.det-t td{padding:5px 10px;border-bottom:1px solid #f1f3f1;font-size:12.5px;color:var(--text);}
+  table.det-t tr:last-child td{border-bottom:none;}
+  table.det-t tr.sum td{font-weight:700;background:#fafbfa;}
+  table.det-t tr.tips-line td{color:var(--text-muted);}
+  .code{display:inline-block;margin-left:6px;padding:0 5px;border-radius:4px;background:var(--accent-light);
+        font-size:10px;font-weight:600;color:var(--text-muted);vertical-align:1px;}
+  .det-note{padding:6px 10px;font-size:11.5px;color:var(--text-muted);background:#fafbfa;
+            border-top:1px solid #f1f3f1;}
   .twisty{display:inline-block;width:12px;color:var(--text-muted);font-size:10px;}
   .exc{display:flex;gap:9px;padding:8px 10px;border-bottom:1px solid #f1f3f1;font-size:13px;align-items:baseline;}
   .exc:last-child{border-bottom:none;}
@@ -408,6 +426,8 @@ function renderBuild(d){
      + bigstat('Total payroll cost', money(d.totals.grossPay),
          'wages + overtime + incentives', 0)
      + stat('Tips', money(d.totals.tips), 'paid through, not a wage cost')
+     + bigstat('Payroll + tips', money(d.totals.totalPay),
+         'everything the cheques carry', 0)
      + stat('Paid hours', hrs(d.totals.paidHours), 'every hour type in the file')
      + stat('Employees', d.totals.employees, d.totals.floaters+' across multiple salons')
      + stat('Salons', (d.salonTotals||[]).length, '')
@@ -569,6 +589,7 @@ function salonBreakdownHtml(d){
     + '<th data-sort="num" class="num">Hours</th>'
     + '<th data-sort="num" class="num">Payroll cost</th>'
     + '<th data-sort="num" class="num">Tips</th>'
+    + '<th data-sort="num" class="num">Payroll + tips</th>'
     + '<th data-sort="num" class="num">Overtime</th>'
     + '<th data-sort="num" class="num">6-day net</th>'
     + '<th data-sort="num" class="num">Breaks</th>'
@@ -582,30 +603,84 @@ function salonBreakdownHtml(d){
       + numTd(hrs(t.hours), t.hours)
       + numTd(money(t.grossPay), t.grossPay)
       + numTd(money(t.tips), t.tips)
+      + numTd(money(t.totalPay), t.totalPay)
       + numTd(t.overtimePay?money(t.overtimePay):'\u2014', t.overtimePay)
       + numTd(t.sixDayDelta?(t.sixDayDelta>0?'+':'')+money(t.sixDayDelta):'\u2014', t.sixDayDelta,
               t.sixDayDelta<0?'#b3261e':(t.sixDayDelta>0?'#1a5c0a':''))
       + numTd(t.breakMinutes?Math.round(t.breakMinutes)+'m':'\u2014', t.breakMinutes)
       + '</tr>';
     if(!staff.length){
-      h += '<tr class="sub-row" data-p="'+i+'"><td colspan="8" class="muted">No employees filed here.</td></tr>';
+      h += '<tr class="sub-row" data-p="'+i+'"><td colspan="9" class="muted">No employees filed here.</td></tr>';
     }
     staff.forEach(e=>{
-      h += '<tr class="sub-row" data-p="'+i+'">'
-        + '<td>'+esc(e.employeeName)+(e.isFloater
+      h += '<tr class="sub-row emp-row" data-p="'+i+'" onclick="toggleEmp(this)">'
+        + '<td><span class="twisty">\u25B6</span> '+esc(e.employeeName)+(e.isFloater
             ? ' <span class="pill jade">also '+esc(e.salons.filter(x=>x!==t.salonNum).join(', '))+'</span>' : '')+'</td>'
         + '<td></td>'
         + numTd(hrs(e.paidHours), e.paidHours)
         + numTd(money(e.grossPay), e.grossPay)
         + numTd(money(e.tips), e.tips)
+        + numTd(money(e.totalPay), e.totalPay)
         + numTd(e.overtimePay?money(e.overtimePay):'\u2014', e.overtimePay)
         + numTd(e.sixDayAmount?money(e.sixDayAmount):'\u2014', e.sixDayAmount)
         + numTd(e.breakMinutes?Math.round(e.breakMinutes)+'m':'\u2014', e.breakMinutes)
-        + '</tr>';
+        + '</tr>'
+        + '<tr class="sub-row det-row" data-p="'+i+'"><td colspan="9">'+payLinesHtml(e, d)+'</td></tr>';
     });
   });
   h += '</tbody></table></div></div></div>';
   return h;
+}
+// What one person is being paid for, line by line, straight out of the file
+// that goes to ADP. Hour lines show both the hours and what they cost at the
+// person's base wage; tips are listed but kept out of the payroll subtotal.
+function payLinesHtml(e, d){
+  const lines = e.lines || [];
+  if(!lines.length) return '<div class="det"><div class="det-h">Nothing on this cheque</div></div>';
+  const codeOf = c => c ? '<span class="code">'+esc(c)+'</span>' : '';
+  let h = '<div class="det"><div class="det-h">What '+esc(firstName(e.employeeName))
+        + ' is paid for \u00b7 base wage '+money(e.baseWage)+'/hr</div><table class="det-t">';
+  lines.filter(l=>l.kind!=='tips').forEach(l=>{
+    h += '<tr><td>'+esc(l.label)+codeOf(l.code)+'</td>'
+      + '<td class="num">'+(l.hours==null?'':hrs(l.hours)+' hrs')+'</td>'
+      + '<td class="num">'+money(l.amount)+'</td></tr>';
+  });
+  h += '<tr class="sum"><td>Payroll cost</td><td class="num">'+hrs(e.paidHours)
+     + ' hrs</td><td class="num">'+money(e.grossPay)+'</td></tr>';
+  const tipLines = lines.filter(l=>l.kind==='tips');
+  tipLines.forEach(l=>{
+    h += '<tr class="tips-line"><td>'+esc(l.label)+codeOf(l.code)+'</td><td></td>'
+      + '<td class="num">'+money(l.amount)+'</td></tr>';
+  });
+  h += '<tr class="sum"><td>Payroll + tips</td><td></td><td class="num">'+money(e.totalPay)+'</td></tr>';
+  h += '</table>';
+
+  // The three things this file changed for this person, spelled out — the rest
+  // of the lines above are SD3's own numbers passed straight through.
+  const notes = [];
+  if(Math.abs(e.overtimeDelta||0) >= 0.005){
+    notes.push('Overtime includes ' + money(e.overtimeDelta) + ' SD3 missed \u2014 '
+      + hrs(e.totalHoursWorked) + ' hrs across ' + e.salons.length + ' salons, over '
+      + d.rules.otThresholdHours + '.');
+  }
+  const sd = (d.sixDay||[]).find(s=>s.payId===e.payId);
+  if(sd && Math.abs(sd.delta) >= 0.005){
+    notes.push('6-day pay ' + (sd.delta>0?'added ':'clawed back ') + money(Math.abs(sd.delta))
+      + ' \u2014 SD3 paid ' + money(sd.sd3Paid) + ', earned ' + money(sd.amount)
+      + (sd.reason ? ' (' + esc(sd.reason) + ')' : '') + '.');
+  } else if(sd && sd.amount > 0){
+    notes.push('6-day pay of ' + money(sd.amount) + ' \u2014 SD3 already paid it, nothing to correct.');
+  }
+  if(e.breakMinutes){
+    notes.push(Math.round(e.breakMinutes) + ' min of breaks under ' + d.rules.breakMaxMinutes
+      + ' min are paid \u2014 folded into Floor Hours as ' + hrs(e.breakHours) + ' hrs.');
+  }
+  notes.forEach(n=>{ h += '<div class="det-note">'+n+'</div>'; });
+  return h + '</div>';
+}
+function firstName(n){
+  const parts = String(n||'').split(',');
+  return (parts[1] || parts[0] || '').trim().split(/\s+/)[0] || String(n||'');
 }
 // data-v keeps the raw number so sorting ignores the "$" and commas.
 function numTd(text, raw, color){
@@ -618,6 +693,15 @@ function toggleSalon(tr){
   const open = tr.classList.toggle('open');
   tr.querySelector('.twisty').textContent = open ? '\u25BC' : '\u25B6';
   document.querySelectorAll('.sub-row[data-p="'+i+'"]').forEach(r=>r.classList.toggle('open', open));
+}
+// One stylist's line-by-line detail sits in the row right after theirs.
+function toggleEmp(tr){
+  const det = tr.nextElementSibling;
+  if(!det || !det.classList.contains('det-row')) return;
+  // Never touch .open here — that is the salon's own show/hide flag.
+  const open = det.classList.toggle('det-open');
+  tr.classList.toggle('expanded', open);
+  tr.querySelector('.twisty').textContent = open ? '\u25BC' : '\u25B6';
 }
 
 // ── History ───────────────────────────────────────────────────

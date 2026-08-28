@@ -217,6 +217,23 @@ export interface BreakDetail {
   bySalon: Record<string, number>
 }
 
+/**
+ * One line of a person's cheque, as it appears in the finished file. Hour lines
+ * carry both the hours and what they cost at base wage; dollar lines carry the
+ * amount alone. Tips are marked so they can be shown without being counted as a
+ * wage cost.
+ */
+export interface PayLine {
+  label: string
+  /** ADP earnings code, so a line can be traced back into the upload. */
+  code: string
+  /** Hours for an hour line; null for a dollar line. */
+  hours: number | null
+  /** What the line adds to the cheque. */
+  amount: number
+  kind: 'wage' | 'tips'
+}
+
 export interface EmployeeSummary {
   payId: string
   employeeName: string
@@ -241,7 +258,11 @@ export interface EmployeeSummary {
   /** Hours × base wage + every dollar line except tips. */
   grossPay: number
   tips: number
+  /** grossPay + tips — what the cheque is worth to the person. */
+  totalPay: number
   salonNum: string
+  /** Every line of the finished file for this person, merged across salons. */
+  lines: PayLine[]
   extraEarnings: { label: string; code: string; amount: number; kind: EarningKind }[]
 }
 
@@ -253,6 +274,8 @@ export interface SalonTotal {
   /** Hours × base wage + every dollar line except tips. What the week costs. */
   grossPay: number
   tips: number
+  /** grossPay + tips — everything the salon's cheques carry this week. */
+  totalPay: number
   overtimePay: number
   sixDayDelta: number
   breakMinutes: number
@@ -286,6 +309,7 @@ export interface PayrollBuildResult {
     paidHours: number
     grossPay: number
     tips: number
+    totalPay: number
     overtimePay: number
     overtimeSd3Paid: number
     overtimeDelta: number
@@ -1149,6 +1173,36 @@ export function buildPayroll(input: {
     }
   }
 
+  // The same file, read line by line: what each person is being paid FOR.
+  // Merged by code+label so a floater's two salons show as one line, and taken
+  // from `values` (not the source report) so netting and folded break hours are
+  // already in it.
+  const payLinesFor = (group: PayConsolRow[]): PayLine[] => {
+    const baseWage = group[0].baseWage
+    const lines: PayLine[] = []
+    for (const f of ADP_FIELDS) {
+      const total = group.reduce((s, r) => s + (values.get(r)!.fixed.get(f.key) || 0), 0)
+      if (Math.abs(total) < 0.005) continue
+      const isTips = f.key === 'cashCheckTips' || f.key === 'chargeTips'
+      lines.push({
+        label: f.label,
+        code: codes[f.key] || '',
+        hours: f.isHours ? round2(total) : null,
+        amount: round2(f.isHours ? total * baseWage : total),
+        kind: isTips ? 'tips' : 'wage',
+      })
+    }
+    const merged = new Map<string, PayLine>()
+    for (const e of group.flatMap(r => values.get(r)!.extras)) {
+      const key = e.code + '|' + e.label
+      const at = merged.get(key)
+      if (at) at.amount = round2(at.amount + e.amount)
+      else merged.set(key, { label: e.label, code: e.code, hours: null, amount: round2(e.amount), kind: 'wage' })
+    }
+    for (const l of merged.values()) if (Math.abs(l.amount) >= 0.005) lines.push(l)
+    return lines
+  }
+
   // ── Per-employee summary for the review screen ──
   const sixDayByPay = new Map(sixDay.map(d => [d.payId, d]))
   const breakByPay = new Map(breaks.map(d => [d.payId, d]))
@@ -1178,6 +1232,8 @@ export function buildPayroll(input: {
       paidHours: round2(group.reduce((s, r) => s + costOf(r).hours, 0)),
       grossPay: round2(group.reduce((s, r) => s + costOf(r).grossPay, 0)),
       tips: round2(group.reduce((s, r) => s + costOf(r).tips, 0)),
+      totalPay: round2(group.reduce((s, r) => s + costOf(r).grossPay + costOf(r).tips, 0)),
+      lines: payLinesFor(group),
       // Where to file them in the salon breakdown: their biggest salon.
       salonNum: group.slice().sort((a, b) => b.floorHours - a.floorHours)[0].salonNum,
       extraEarnings: extras.map(e => ({ label: e.label, code: e.code, amount: e.amount, kind: e.kind })),
@@ -1196,13 +1252,14 @@ export function buildPayroll(input: {
     if (!t) {
       salonMap.set(r.salonNum, (t = {
         salonNum: r.salonNum, employees: 0, hours: 0, grossPay: 0,
-        tips: 0, overtimePay: 0, sixDayDelta: 0, breakMinutes: 0,
+        tips: 0, totalPay: 0, overtimePay: 0, sixDayDelta: 0, breakMinutes: 0,
       }))
       salonStaff.set(r.salonNum, new Set())
     }
     t.hours = round2(t.hours + c.hours)
     t.grossPay = round2(t.grossPay + c.grossPay)
     t.tips = round2(t.tips + c.tips)
+    t.totalPay = round2(t.totalPay + c.grossPay + c.tips)
     t.overtimePay = round2(t.overtimePay + r.overtimePay)
     if (r.payId) salonStaff.get(r.salonNum)!.add(r.payId)
   }
@@ -1256,6 +1313,8 @@ export function buildPayroll(input: {
       /** What the week costs in wages: hours at base wage plus every dollar line. */
       grossPay: round2(salonTotals.reduce((s, t) => s + t.grossPay, 0)),
       tips: round2(salonTotals.reduce((s, t) => s + t.tips, 0)),
+      /** Payroll cost plus tips — the whole value of the week's cheques. */
+      totalPay: round2(salonTotals.reduce((s, t) => s + t.totalPay, 0)),
       overtimePay: round2(rows.reduce((s, r) => s + r.overtimePay, 0)),
       /** What SD3 paid in overtime, one salon at a time. */
       overtimeSd3Paid: round2(rows.reduce((s, r) => s + (sd3OtByRow.get(r) ?? 0), 0)),
