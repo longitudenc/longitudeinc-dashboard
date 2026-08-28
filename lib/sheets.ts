@@ -58,6 +58,20 @@ async function withRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
 // second guarantee. The cache is per serverless instance (no external service),
 // which is exactly enough to absorb the bursts that trip the rate limit.
 const READ_CACHE_TTL_MS = 15000
+
+// Scrape-only tabs. Nothing in the app writes these during a request -- they
+// change once a night -- so a 15s TTL just means re-reading the same rows over
+// and over as somebody clicks between days. Five minutes is still far shorter
+// than the interval at which they actually change.
+//
+// The cost of being wrong is bounded: right after a nightly scrape an instance
+// can serve up to 5-minute-old rows. Writers call invalidateReadCache, and
+// anything needing certainty (the health check) passes { fresh: true }.
+const NIGHTLY_TABS = new Set<string>([
+  'SD_DAILY', 'SD_EMP_DAILY', 'SD_DEMAND', 'SD_SHIFTS', 'SD_CHKINOUT', 'SD_HALFHOUR',
+])
+const NIGHTLY_TTL_MS = 5 * 60 * 1000
+const ttlFor = (tab: string) => (NIGHTLY_TABS.has(tab) ? NIGHTLY_TTL_MS : READ_CACHE_TTL_MS)
 const NO_CACHE_TABS = new Set<string>([
   // home content — edited via the page, must appear the instant it's saved
   'Announcements', 'ImportantDates', 'HomeLinks', 'HomeData',
@@ -91,7 +105,7 @@ export async function readSheet(sheetName: string, range?: string, opts?: { fres
       })
     )
     const data = response.data.values || []
-    if (cacheable) readCache.set(key, { data, expires: Date.now() + READ_CACHE_TTL_MS })
+    if (cacheable) readCache.set(key, { data, expires: Date.now() + ttlFor(sheetName) })
     return data
   } catch (error) {
     console.error(`Error reading sheet ${sheetName}:`, error)

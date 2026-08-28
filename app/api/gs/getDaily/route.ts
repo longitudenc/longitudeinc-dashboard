@@ -54,10 +54,15 @@ export async function GET(request: Request) {
     // are no longer consumed by the UI, so they are never read either way.
     const light = url.searchParams.get('light') === '1'
 
-    const raw = await getDailyRange(start, end, { skipEmp: light })
-    const rawShifts = light ? { shifts: [] as any[] } : await getShiftsRange(start, end)
-    const rawDemand = light ? { demand: [] as any[] } : await getDemandRange(start, end)
-    const rawChk = light ? { chkinout: [] as any[] } : await getChkInOutRange(start, end)
+    // These four are independent, so they overlap. Awaiting them one after
+    // another cost the SUM of four round trips (~4-5s) rather than the slowest
+    // one, which is most of what a Day view used to spend waiting.
+    const [raw, rawShifts, rawDemand, rawChk] = await Promise.all([
+      getDailyRange(start, end, { skipEmp: light }),
+      light ? Promise.resolve({ shifts: [] as any[] })   : getShiftsRange(start, end),
+      light ? Promise.resolve({ demand: [] as any[] })   : getDemandRange(start, end),
+      light ? Promise.resolve({ chkinout: [] as any[] }) : getChkInOutRange(start, end),
+    ])
     const { salonDaily, empDaily, shifts, halfHour, demand, chkinout } =
       scopeDaily(raw.salonDaily, raw.empDaily, rawShifts.shifts, [], rawDemand.demand, rawChk.chkinout, gate.access)
 
