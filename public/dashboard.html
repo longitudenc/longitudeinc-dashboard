@@ -3282,6 +3282,14 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
         <div class="card-title">Admin — Data Management</div>
         <div class="admin-sections">
 
+          <!-- Metric Thresholds (the 4/3/2/1 bands) -->
+          <div style="margin-bottom:1.2rem;">
+            <div style="font-weight:700;font-size:13px;color:#03654e;margin-bottom:6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">&#128200; Metric Thresholds <span style="font-weight:400;font-size:11px;color:var(--text-muted);">The 4/3/2/1 bands every figure is coloured against &middot; effective-dated, so past weeks keep the bands they were graded under</span></div>
+            <div style="background:#f8f7f4;border:1px solid var(--border);border-radius:8px;padding:10px;">
+              <div id="thresholds-editor"><div style="color:var(--text-muted);font-size:12px;">Loading&hellip;</div></div>
+            </div>
+          </div>
+
           <!-- Disciplinary Points editor -->
           <div style="margin-bottom:1.2rem;">
             <div style="font-weight:700;font-size:13px;color:#03654e;margin-bottom:6px;display:flex;align-items:center;gap:6px;">⚠ Disciplinary Points <span style="font-weight:400;font-size:11px;color:var(--text-muted);">Each entry is one dated event · active points roll off after 12 months · 4+ blocks bonus, 6+ blocks raise</span></div>
@@ -3712,15 +3720,86 @@ function payrollTargets(cc){
 }
 
 // ── Tier functions ────────────────────────────────────────────
-function tierNR(v)    { v=Math.round(v*10)/10; return v>=26?'c4':v>=24?'c3':v>=21?'c2':'c1'; }
-function tierRR(v)    { v=Math.round(v*10)/10; return v>=77?'c4':v>=73.9?'c3':v>=70.9?'c2':'c1'; }
-function tierCC(v)    { v=Math.round(v); return v>=520?'c4':v>=420?'c3':v>=320?'c2':'c1'; }
-function tierCCG(v)   { v=Math.round(v*10)/10; return v>=5?'c4':v>=3?'c3':v>=1?'c2':'c1'; }
-function tierSGR(v)   { v=Math.round(v*10)/10; return v>=5?'c4':v>=3?'c3':v>=1?'c2':'c1'; }
-function tierWaits(v) { v=Math.round(v*10)/10; return v<=15?'c4':v<=19?'c3':v<=23?'c2':'c1'; }
-function tierMBC(v)   { v=Math.round(v*10)/10; return v<=2.0?'c4':v<=2.5?'c3':v<=3.0?'c2':'c1'; }
-function tierProd(v)  { v=Math.round(v*10)/10; return v>=6?'c4':v>=4.0?'c3':v>=2.5?'c2':'c1'; }
-function tierHC(v)    { v=Math.round(v*10)/10; if(v>=12&&v<=15)return'c4'; if((v>=11&&v<12)||(v>15&&v<=17))return'c3'; if(v>17&&v<=18)return'c2'; return'c1'; }
+// == Metric thresholds (the 4/3/2/1 bands) ====================================
+// Bands come from the MetricThresholds tab via getAllData and are EFFECTIVE
+// DATED, so each week is graded with the bands that were in force that week --
+// raising a bar today does not silently re-grade last year's scorecards.
+// Edited in Admin > Metric Thresholds. Server-side twin: lib/thresholds.ts.
+// If the tab is missing or a metric has no row, TIER_DEFAULTS below apply, and
+// those are exactly the numbers these functions were hard-coded with before.
+let METRIC_THRESHOLDS = [];
+const TIER_DEFAULTS = {
+  cc:    {direction:'higher', v4:520, v3:420,  v2:320, dec:0},
+  ccg:   {direction:'higher', v4:5,   v3:3,    v2:1,   dec:1},
+  sgr:   {direction:'higher', v4:5,   v3:3,    v2:1,   dec:1},
+  prod:  {direction:'higher', v4:6,   v3:4,    v2:2.5, dec:1},
+  nr:    {direction:'higher', v4:26,  v3:24,   v2:21,  dec:1},
+  rr:    {direction:'higher', v4:77,  v3:73.9, v2:70.9,dec:1},
+  mbc:   {direction:'lower',  v4:2.0, v3:2.5,  v2:3.0, dec:1},
+  waits: {direction:'lower',  v4:15,  v3:19,   v2:23,  dec:1},
+  hc:    {direction:'band',   v4:12,  v3:11,   v2:null, v4hi:15, v3hi:17, v2hi:18, dec:1},
+};
+let _tierMemo = {};
+// Which date the bands are resolved against. The selected week is the honest
+// answer for week/day/month views; falls back to today before data loads.
+function tierGradingDate(){ return S.currentWeek || _sdTodayIso(); }
+function resolveTiersFor(asOf){
+  if(_tierMemo[asOf]) return _tierMemo[asOf];
+  const out = {};
+  Object.keys(TIER_DEFAULTS).forEach(k=>{ out[k] = TIER_DEFAULTS[k]; });
+  const best = {};
+  (METRIC_THRESHOLDS||[]).forEach(r=>{
+    const m = String(r.metric||'').trim().toLowerCase();
+    if(!m) return;
+    const ef = String(r.effectiveFrom||'');
+    if(asOf && ef && ef > asOf) return;                 // not in force yet
+    if(best[m]===undefined || ef >= best[m]){
+      best[m] = ef;
+      out[m] = {direction:String(r.direction||'higher').toLowerCase(),
+                v4:r.v4, v3:r.v3, v2:r.v2, v4hi:r.v4hi, v3hi:r.v3hi, v2hi:r.v2hi,
+                dec:(TIER_DEFAULTS[m] ? TIER_DEFAULTS[m].dec : 1)};
+    }
+  });
+  _tierMemo[asOf] = out;
+  return out;
+}
+function activeTiers(){ return resolveTiersFor(tierGradingDate()); }
+function gradeBy(metric, val){
+  const t = activeTiers()[metric];
+  if(!t) return '';
+  const n = parseFloat(val);
+  if(!isFinite(n)) return '';
+  const f = Math.pow(10, (t.dec==null?1:t.dec)), v = Math.round(n*f)/f;
+  const has = x => x!==null && x!==undefined && x!=='';
+  if(t.direction==='band'){
+    if(has(t.v4)  && has(t.v4hi) && v>=t.v4   && v<=t.v4hi) return 'c4';
+    if(has(t.v3)  && has(t.v4)   && v>=t.v3   && v< t.v4)   return 'c3';
+    if(has(t.v3hi)&& has(t.v4hi) && v> t.v4hi && v<=t.v3hi) return 'c3';
+    if(has(t.v2hi)&& has(t.v3hi) && v> t.v3hi && v<=t.v2hi) return 'c2';
+    return 'c1';
+  }
+  if(t.direction==='lower'){
+    if(has(t.v4) && v<=t.v4) return 'c4';
+    if(has(t.v3) && v<=t.v3) return 'c3';
+    if(has(t.v2) && v<=t.v2) return 'c2';
+    return 'c1';
+  }
+  if(has(t.v4) && v>=t.v4) return 'c4';
+  if(has(t.v3) && v>=t.v3) return 'c3';
+  if(has(t.v2) && v>=t.v2) return 'c2';
+  return 'c1';
+}
+// Payroll % and CPH are NOT here: they slide by the salon's customer count via
+// PAYROLL_MAP rather than using fixed bands, so they keep their own functions.
+function tierNR(v)    { return gradeBy('nr', v); }
+function tierRR(v)    { return gradeBy('rr', v); }
+function tierCC(v)    { return gradeBy('cc', v); }
+function tierCCG(v)   { return gradeBy('ccg', v); }
+function tierSGR(v)   { return gradeBy('sgr', v); }
+function tierWaits(v) { return gradeBy('waits', v); }
+function tierMBC(v)   { return gradeBy('mbc', v); }
+function tierProd(v)  { return gradeBy('prod', v); }
+function tierHC(v)    { return gradeBy('hc', v); }
 function tierPayroll(v,cc){ v=Math.round(v*10)/10; const t=payrollTargets(cc); return v<=t.exc?'c4':v<=t.grw?'c3':'c1'; }
 function tierCPH(v,cc)    { const t=payrollTargets(cc); return v>=t.cph?'c4':'c1'; }
 function tierToScore(t)   { return t==='c4'?2:t==='c3'?1:0; }
@@ -4635,6 +4714,10 @@ function onDataLoaded(data){
     // Used to mark inactive employees in bonus views and exclude them from the
     // ADP export. No PII — email stays server-side.
     INACTIVE_MAP = data.inactiveMap || {};
+    // Effective-dated 4/3/2/1 bands. Memo is keyed by grading date, so simply
+    // clearing it on load is enough -- switching weeks re-resolves on its own.
+    METRIC_THRESHOLDS = data.metricThresholds || [];
+    _tierMemo = {};
     console.log('[ROSTER] ' + ROSTER.length + ' rows — ' +
       ROSTER.filter(r=>(r.status||'active')==='active').length + ' active, ' +
       ROSTER.filter(r=>r.status==='sold').length + ' sold, ' +
@@ -5214,6 +5297,7 @@ function switchToAdmin(){
   document.getElementById('page-admin').classList.add('active');
   const mainEl = document.querySelector('.content');
   if(mainEl) mainEl.scrollTop = 0;
+  loadThresholds();
   renderManagerTable();
   populateWaiverDropdowns();
   renderWaiverTable();
@@ -9948,6 +10032,160 @@ function removeAMAssignment(idx){
 
 // ── Manager Assignment Admin Panel ────────────────────────────
 let _homeEmployees = [];  // cache of home file employees for dropdown
+
+// == Metric Thresholds admin ==================================================
+// Edits the 4/3/2/1 bands. A save writes one dated SET (all metrics stamped with
+// the same effective-from), so grading a past week still resolves the bands that
+// were in force then instead of silently re-grading history.
+const TIER_META = [
+  {m:'cc',    label:'Customer Count', unit:''},
+  {m:'ccg',   label:'CC Growth',      unit:'%'},
+  {m:'sgr',   label:'Sales Growth',   unit:'%'},
+  {m:'prod',  label:'Product %',      unit:'%'},
+  {m:'nr',    label:'NR %',           unit:'%'},
+  {m:'rr',    label:'RR %',           unit:'%'},
+  {m:'mbc',   label:'MBC',            unit:''},
+  {m:'waits', label:'Waits %',        unit:'%'},
+  {m:'hc',    label:'HC Time',        unit:''},
+];
+let THRESH_ROWS = null;   // every dated row on the tab
+let THRESH_DATE = '';     // the effective-from currently being edited
+
+function loadThresholds(){
+  fetch('/api/gs/saveThresholds').then(r=>r.json()).then(r=>{
+    THRESH_ROWS = (r && r.success) ? (r.rows||[]) : [];
+    if(!THRESH_DATE) THRESH_DATE = _sdTodayIso();
+    renderThresholdEditor();
+  }).catch(()=>{ THRESH_ROWS=[]; renderThresholdEditor(); });
+}
+function setThreshDate(v){ THRESH_DATE = v || _sdTodayIso(); renderThresholdEditor(); }
+
+// The bands in force on THRESH_DATE, resolved exactly the way the dashboard
+// grades, so the editor opens showing what is actually applied -- not a blank
+// form and not the raw sheet row.
+function threshInForce(){
+  const savedRows = METRIC_THRESHOLDS, savedMemo = _tierMemo;
+  METRIC_THRESHOLDS = THRESH_ROWS || [];
+  _tierMemo = {};
+  const out = resolveTiersFor(THRESH_DATE);
+  METRIC_THRESHOLDS = savedRows; _tierMemo = savedMemo;
+  return out;
+}
+function _tnum(v){ return (v===null||v===undefined||v==='') ? '' : v; }
+function _tin(metric, key, val){
+  return '<input type="number" step="any" id="th-'+metric+'-'+key+'" value="'+_tnum(val)+'" '
+       + 'style="width:74px;font-size:12px;padding:4px 6px;border:1px solid var(--border);border-radius:6px;text-align:right;">';
+}
+function renderThresholdEditor(){
+  const host = document.getElementById('thresholds-editor');
+  if(!host) return;
+  if(THRESH_ROWS===null){ host.innerHTML='<div style="color:var(--text-muted);font-size:12px;">Loading&hellip;</div>'; return; }
+  const t = threshInForce();
+  const dates = [...new Set((THRESH_ROWS||[]).map(r=>String(r.effectiveFrom||'')).filter(Boolean))].sort().reverse();
+  const isNew = !dates.includes(THRESH_DATE);
+
+  let rows='';
+  TIER_META.forEach(meta=>{
+    const b = t[meta.m] || {};
+    const dir = b.direction || 'higher';
+    const arrow = dir==='higher' ? 'higher is better' : dir==='lower' ? 'lower is better' : 'ideal range';
+    let c4,c3,c2;
+    if(dir==='band'){
+      c4 = _tin(meta.m,'v4',b.v4)+' <span style="color:var(--text-muted);">to</span> '+_tin(meta.m,'v4hi',b.v4hi);
+      c3 = _tin(meta.m,'v3',b.v3)+' <span style="color:var(--text-muted);">to</span> '+_tin(meta.m,'v3hi',b.v3hi);
+      c2 = '<span style="color:var(--text-muted);">up to</span> '+_tin(meta.m,'v2hi',b.v2hi);
+    } else {
+      const op = dir==='lower' ? '&le;' : '&ge;';
+      c4 = op+' '+_tin(meta.m,'v4',b.v4);
+      c3 = op+' '+_tin(meta.m,'v3',b.v3);
+      c2 = op+' '+_tin(meta.m,'v2',b.v2);
+    }
+    const unitTxt = meta.unit ? ' <span style="color:var(--text-muted);font-weight:400;">('+meta.unit+')</span>' : '';
+    rows += '<tr style="border-bottom:1px solid #f0efec;">'
+      + '<td style="padding:5px 8px;font-weight:600;white-space:nowrap;">'+meta.label+unitTxt+'</td>'
+      + '<td style="padding:5px 8px;color:var(--text-muted);font-size:11px;white-space:nowrap;">'+arrow+'</td>'
+      + '<td class="c4" style="padding:5px 8px;text-align:right;white-space:nowrap;">'+c4+'</td>'
+      + '<td class="c3" style="padding:5px 8px;text-align:right;white-space:nowrap;">'+c3+'</td>'
+      + '<td class="c2" style="padding:5px 8px;text-align:right;white-space:nowrap;">'+c2
+      + '<input type="hidden" id="th-'+meta.m+'-dir" value="'+dir+'"></td>'
+      + '</tr>';
+  });
+
+  let history='';
+  if(dates.length){
+    dates.forEach(d=>{
+      const n = (THRESH_ROWS||[]).filter(r=>String(r.effectiveFrom||'')===d).length;
+      const cur = d===THRESH_DATE ? 'font-weight:700;color:var(--primary);' : '';
+      history += '<tr>'
+        + '<td style="padding:3px 8px;'+cur+'">'+d+'</td>'
+        + '<td style="padding:3px 8px;color:var(--text-muted);">'+n+' metric'+(n===1?'':'s')+'</td>'
+        + '<td style="padding:3px 8px;"><a href="javascript:void(0)" onclick="setThreshDate(\'' + d + '\')" style="font-size:11px;">Edit</a></td>'
+        + '<td style="padding:3px 8px;"><a href="javascript:void(0)" onclick="removeThresholdSet(\'' + d + '\')" style="color:#9C0006;font-size:11px;">Remove</a></td>'
+        + '</tr>';
+    });
+  } else {
+    history = '<tr><td colspan="4" style="padding:4px 8px;color:var(--text-muted);font-size:12px;">No saved sets yet &mdash; the built-in defaults are in force.</td></tr>';
+  }
+
+  const th = (label,align) => '<th style="padding:5px 8px;text-align:'+align+';font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);">'+label+'</th>';
+  host.innerHTML =
+      '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">'
+    +   '<label style="font-size:12px;font-weight:600;">Effective from</label>'
+    +   '<input type="date" id="th-date" value="'+THRESH_DATE+'" onchange="setThreshDate(this.value)" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;">'
+    +   '<span style="font-size:11px;color:var(--text-muted);">'+(isNew?'New set &mdash; weeks before this date keep their current bands.':'Editing the set saved for this date.')+'</span>'
+    + '</div>'
+    + '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;">'
+    +   '<thead><tr style="background:#f0efec;">'+th('Metric','left')+th('Direction','left')+th('Excellence (4)','right')+th('Growth (3)','right')+th('Minimum (2)','right')+'</tr></thead>'
+    +   '<tbody>'+rows+'</tbody></table></div>'
+    + '<div style="font-size:11px;color:var(--text-muted);margin-top:6px;line-height:1.5;">'
+    +   'Anything below the Minimum band scores 1 (Warning). <strong>Waits %</strong> covers Waits, S/S Waits and Non-OCI Waits. '
+    +   '<strong>Payroll %</strong> and <strong>CPH</strong> are not here &mdash; they slide by each salon&rsquo;s customer count.'
+    + '</div>'
+    + '<div style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'
+    +   '<button class="btn btn-primary btn-sm" onclick="saveThresholds()">Save Thresholds</button>'
+    +   '<button class="btn btn-secondary btn-sm" onclick="THRESH_DATE=\'\';loadThresholds();">Reset</button>'
+    +   '<span id="th-status" style="font-size:12px;color:var(--text-muted);"></span>'
+    + '</div>'
+    + '<div style="margin-top:12px;">'
+    +   '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:3px;">Saved sets</div>'
+    +   '<table style="border-collapse:collapse;font-size:12px;"><tbody>'+history+'</tbody></table>'
+    + '</div>';
+}
+function saveThresholds(){
+  const st = document.getElementById('th-status');
+  const val = id => { const el=document.getElementById(id); if(!el) return null; const v=String(el.value).trim(); return v===''?null:Number(v); };
+  const rows = TIER_META.map(meta=>{
+    const dirEl = document.getElementById('th-'+meta.m+'-dir');
+    return { metric:meta.m, direction:dirEl?dirEl.value:'higher',
+      v4:val('th-'+meta.m+'-v4'), v3:val('th-'+meta.m+'-v3'), v2:val('th-'+meta.m+'-v2'),
+      v4hi:val('th-'+meta.m+'-v4hi'), v3hi:val('th-'+meta.m+'-v3hi'), v2hi:val('th-'+meta.m+'-v2hi') };
+  });
+  const dateEl = document.getElementById('th-date');
+  const date = (dateEl && dateEl.value) ? dateEl.value : THRESH_DATE;
+  if(st){ st.textContent='Saving…'; st.style.color='var(--text-muted)'; }
+  fetch('/api/gs/saveThresholds',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({effectiveFrom:date, rows:rows})})
+    .then(r=>r.json()).then(r=>{
+      if(!r.success){ if(st){ st.textContent='✗ '+(r.error||'Save failed'); st.style.color='#9C0006'; } return; }
+      if(st){ st.textContent='✓ Saved — effective '+r.effectiveFrom; st.style.color='#2a7a4a'; }
+      THRESH_DATE = r.effectiveFrom;
+      // Re-pull so the rest of the dashboard grades with the new bands without
+      // needing a page reload.
+      fetch('/api/gs/getAllData').then(x=>x.json()).then(d=>{
+        METRIC_THRESHOLDS = d.metricThresholds || []; _tierMemo = {};
+      }).catch(()=>{});
+      loadThresholds();
+    })
+    .catch(e=>{ if(st){ st.textContent='✗ '+e.message; st.style.color='#9C0006'; } });
+}
+function removeThresholdSet(date){
+  if(!confirm('Remove the threshold set effective '+date+'?\n\nWeeks graded under it fall back to the previous set, or to the built-in defaults.')) return;
+  fetch('/api/gs/saveThresholds?effectiveFrom='+encodeURIComponent(date),{method:'DELETE'})
+    .then(r=>r.json()).then(r=>{
+      if(!r.success){ alert(r.error||'Remove failed'); return; }
+      THRESH_DATE=''; loadThresholds();
+    }).catch(e=>alert(e.message));
+}
 
 function renderManagerTable(){
   const el = document.getElementById('manager-table-container');

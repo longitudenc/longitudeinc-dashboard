@@ -4,6 +4,7 @@ import { getDashboardWeeks } from '@/lib/dashboard-data'
 import { AMS } from '@/lib/config'
 import { requireSignedIn } from '@/lib/require-role'
 import { scopeAllData } from '@/lib/scope-filter'
+import { getThresholdRows } from '@/lib/thresholds'
 
 const SALON_ROSTER_TAB = 'SalonRoster'
 
@@ -19,14 +20,18 @@ export async function GET() {
     if (cache && Date.now() - cache.timestamp < CACHE_TTL) {
       full = cache.data
     } else {
-      const [raw, scrapedWeeks, rosterRows, inactiveMap] = await Promise.all([
+      const [raw, scrapedWeeks, rosterRows, inactiveMap, thresholdRows] = await Promise.all([
         getAllDashboardData(),
         getDashboardWeeks(),
         fetchSalonRoster(),
         fetchInactiveMap(),
+        getThresholdRows(),
       ])
       const data: any = formatAllData(raw, scrapedWeeks, rosterRows)
       data.inactiveMap = inactiveMap
+      // 4/3/2/1 bands, effective-dated. Raw rows: the client resolves which set
+      // applies to the period being viewed (resolveTiersFor in dashboard.html).
+      data.metricThresholds = thresholdRows
       // PII-safe: hire/rehire dates only (no email/address) for the profile header.
       data.profileMap = Object.fromEntries(
         Object.entries(inactiveMap).map(([gid, v]: any) => [gid, { dateOfHire: v.dateOfHire || '', rehireDate: v.rehireDate || '' }])
