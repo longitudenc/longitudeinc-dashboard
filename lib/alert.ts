@@ -1,7 +1,11 @@
 // lib/alert.ts
 // Best-effort operational alerting. NOTHING here may throw into a caller — a
-// failed alert must never break a scrape or a cron run. Both functions no-op
-// silently if their env vars are unset, so the app runs fine before setup.
+// failed alert must never break a scrape or a cron run.
+//
+// It no longer fails MUTELY, though. sendAlert returns what happened, because a
+// broken alerting path looks exactly like "nothing was wrong" and is therefore
+// worse than having no alerts at all. Callers may ignore the result and behave
+// exactly as before.
 
 import { Resend } from 'resend'
 
@@ -14,19 +18,35 @@ function recipients(): string[] {
     .filter(Boolean)
 }
 
-/** Email an operational alert. No-op if RESEND_API_KEY or ALERT_EMAIL is unset. */
-export async function sendAlert(subject: string, html: string): Promise<void> {
+export type AlertResult = { sent: boolean; reason?: string; recipients?: number; from?: string }
+
+/** Email an operational alert. Never throws; reports why it did not send. */
+export async function sendAlert(subject: string, html: string): Promise<AlertResult> {
   try {
     const to = recipients()
-    if (!process.env.RESEND_API_KEY || to.length === 0) {
-      console.warn('[alert] skipped — RESEND_API_KEY or ALERT_EMAIL not set')
-      return
+    if (!process.env.RESEND_API_KEY) {
+      console.warn('[alert] skipped: RESEND_API_KEY not set')
+      return { sent: false, reason: 'RESEND_API_KEY is not set' }
+    }
+    if (to.length === 0) {
+      console.warn('[alert] skipped: ALERT_EMAIL not set')
+      return { sent: false, reason: 'ALERT_EMAIL is not set, or not visible to this deployment' }
     }
     const resend = new Resend(process.env.RESEND_API_KEY)
-    await resend.emails.send({ from: FROM, to, subject, html })
+    const res: any = await resend.emails.send({ from: FROM, to, subject, html })
+    // Resend RESOLVES with { data, error } rather than rejecting, so an
+    // unverified sender domain or a bad key would otherwise vanish here.
+    if (res && res.error) {
+      const reason = String(res.error.message || res.error.name || JSON.stringify(res.error))
+      console.error('[alert] rejected by Resend:', reason)
+      return { sent: false, reason, recipients: to.length, from: FROM }
+    }
     console.log(`[alert] sent: ${subject}`)
-  } catch (e) {
-    console.error('[alert] send failed:', e)
+    return { sent: true, recipients: to.length, from: FROM }
+  } catch (e: any) {
+    const reason = String(e?.message || e)
+    console.error('[alert] send failed:', reason)
+    return { sent: false, reason }
   }
 }
 

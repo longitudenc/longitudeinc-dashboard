@@ -75,12 +75,15 @@ export async function GET(request: Request) {
 
   const missing = feeds.filter(f => !f.ok)
   const ok = missing.length === 0
+  // Surfaced in the response so a broken alerting path is visible rather than
+  // silent. An alert nobody receives is indistinguishable from no problem.
+  let alert: any = { sent: false, reason: 'not needed, nothing missing' }
 
   if (!ok) {
     const list = missing
       .map(f => `<li><b>${f.label}</b> (${f.tab}) — ${f.rows} rows, expected at least ${f.min}</li>`)
       .join('')
-    await sendAlert(
+    alert = await sendAlert(
       `[Longitude] Nightly data MISSING for ${date}`,
       `<p>${missing.length} feed(s) have no usable data for <b>${date}</b>:</p><ul>${list}</ul>` +
       `<p>Re-run a single day with:<br><code>/api/scrape/&lt;name&gt;?secret=…&amp;start=${date}&amp;end=${date}</code></p>`
@@ -91,6 +94,7 @@ export async function GET(request: Request) {
     ok,
     date,
     checked: feeds.length,
+    alert,
     missing: missing.map(f => f.tab),
     feeds: feeds.map(f => ({ tab: f.tab, label: f.label, rows: f.rows, ok: f.ok })),
     ...(ok ? {} : { error: `No data for ${date} in: ${missing.map(f => f.tab).join(', ')}` }),
