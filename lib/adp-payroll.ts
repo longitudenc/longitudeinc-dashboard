@@ -12,6 +12,13 @@
 //                       of those days at least 4 floor hours, and at least 34
 //                       floor hours for the week. Floaters are one person: days
 //                       and hours are counted across every salon they worked.
+//
+//                       SD3 ALREADY PAYS a 6-day amount, inside All Other
+//                       Incentives, on a looser rule of its own: per salon, no
+//                       minimum shift length, threshold on TOTAL hours. So it
+//                       pays people who don't qualify and misses floaters who
+//                       do. The file therefore carries the DIFFERENCE, which is
+//                       exactly the correction the office made by hand.
 //   2. SHORT BREAKS   — any break under 20 minutes is paid time. SD3 records a
 //                       break as `breakTime` minutes on the punch segment that
 //                       PRECEDES it (the gap to the next check-in), so each
@@ -189,6 +196,11 @@ export interface SixDayDetail {
   punchFloorHours: number
   /** Which feed supplied the per-day hours: the daily report, or clock punches. */
   source: 'daily' | 'punch' | 'none'
+  /** What SD3 already paid inside All Other Incentives, per salon and in total. */
+  sd3Paid: number
+  sd3PaidBySalon: Record<string, number>
+  /** amount − sd3Paid: what the file actually has to move. Can be negative. */
+  delta: number
   amount: number
   /** Why it did not qualify, when it didn't. */
   reason: string
@@ -247,6 +259,8 @@ export interface PayrollBuildResult {
     floorHours: number
     overtimePay: number
     sixDayPay: number
+    sixDaySd3Paid: number
+    sixDayDelta: number
     breakMinutes: number
     breakPayHours: number
     extraEarnings: number
@@ -544,7 +558,10 @@ export function computeSixDay(
   settings: AdpSettings,
   dailyFloor: DailyFloorRow[] = []
 ): { details: SixDayDetail[]; exceptions: PayrollException[] } {
-  const { sixDayRate, sixDayMinDays, sixDayMinShiftHours, sixDayMinFloorHours } = settings.rules
+  const {
+    sixDayRate, sixDayMinDays, sixDayMinShiftHours, sixDayMinFloorHours,
+    sd3SixDayMinDays, sd3SixDayMinTotalHours,
+  } = settings.rules
   const details: SixDayDetail[] = []
   const exceptions: PayrollException[] = []
 
@@ -573,6 +590,21 @@ export function computeSixDay(
     if (!byDate) floorByKeyDate.set(key, (byDate = new Map()))
     byDate.set(p.date, (byDate.get(p.date) || 0) + hrs)
   }
+
+  // Days worked PER SALON, for modelling SD3's own (per-salon) rule.
+  const daysByPayIdSalon = new Map<string, Set<string>>()
+  for (const d of dailyFloor) {
+    const payId = String(d.payId || '').trim()
+    if (!payId || !d.date || !(Number(d.floorHours) > 0)) continue
+    const k = `${payId}|${String(d.salonNum || '').trim()}`
+    let set = daysByPayIdSalon.get(k)
+    if (!set) daysByPayIdSalon.set(k, (set = new Set()))
+    set.add(d.date)
+  }
+  // NOTE: modelling SD3's side needs days PER SALON keyed by Payroll ID, which
+  // only the daily feed carries. Punches identify people by name and cannot be
+  // attributed to a Payroll ID here, so a week with punches but no daily feed
+  // leaves sd3Paid at zero and is reported rather than guessed at.
 
   const byPay = groupBy(rows.filter(r => r.payId), r => r.payId)
   for (const [payId, group] of byPay) {
@@ -603,6 +635,7 @@ export function computeSixDay(
       details.push({
         payId, employeeName, qualifies: false, qualifyingDays: 0, days: [],
         weekFloorHours, punchFloorHours: 0, amount: 0, source: 'none',
+        sd3Paid: 0, sd3PaidBySalon: {}, delta: 0,
         reason: 'no day-level hours found for this employee',
       })
       continue
@@ -632,6 +665,24 @@ export function computeSixDay(
       reason = `${weekFloorHours} of ${sixDayMinFloorHours} floor hours`
     }
 
+    // ── What SD3 already paid ──
+    // SD3 evaluates each SALON separately and uses TOTAL hours worked there,
+    // with no minimum shift length. That is why it pays people who don't meet
+    // the real rule, and misses floaters who do.
+    const sd3PaidBySalon: Record<string, number> = {}
+    for (const r of group) {
+      const salonDays = daysByPayIdSalon.get(`${payId}|${r.salonNum}`)
+      // With no day-level data we cannot tell whether SD3 paid; leave it at zero
+      // and let the reconciliation below flag the row rather than guess.
+      if (!salonDays) continue
+      if (salonDays.size < sd3SixDayMinDays) continue
+      if (r.totalHoursWorked < sd3SixDayMinTotalHours) continue
+      const paid = round2(r.floorHours * sixDayRate)
+      if (paid > 0) sd3PaidBySalon[r.salonNum] = paid
+    }
+    const sd3Paid = round2(Object.values(sd3PaidBySalon).reduce((s, v) => s + v, 0))
+    const amount = qualifies ? round2(weekFloorHours * sixDayRate) : 0
+
     details.push({
       payId,
       employeeName,
@@ -641,7 +692,10 @@ export function computeSixDay(
       weekFloorHours,
       punchFloorHours,
       source,
-      amount: qualifies ? round2(weekFloorHours * sixDayRate) : 0,
+      sd3Paid,
+      sd3PaidBySalon,
+      delta: round2(amount - sd3Paid),
+      amount,
       reason,
     })
   }
@@ -803,29 +857,80 @@ export function buildPayroll(input: {
   const rowsFor = (payId: string): PayConsolRow[] =>
     (byPay.get(payId) ?? []).slice().sort((a, b) => b.floorHours - a.floorHours)
 
-  // ── 6-day pay: split across the employee's salons by floor hours ──
+  // ── 6-day pay ──
+  //
+  // SD3 ALREADY pays 6-day inside All Other Incentives, on a looser rule of its
+  // own: per salon, no minimum shift length, threshold on total hours. So the
+  // file must carry the DIFFERENCE, not the whole amount —
+  //   • subtract where SD3 paid someone who doesn't meet the real rule
+  //   • add where SD3 missed a floater who qualifies only on merged hours
+  // Netting into All Other Incentives is exactly what the office does by hand,
+  // and needs no new earnings code.
   const sixDayCode = codes.sixDay || ''
-  for (const d of sixDay) {
-    if (!d.qualifies || d.amount <= 0) continue
-    const group = rowsFor(d.payId)
-    if (group.length === 0) continue
-    if (!sixDayCode) {
-      exceptions.push({
-        severity: 'blocking',
-        kind: 'missing-code',
-        message:
-          `${d.employeeName} earned $${d.amount.toFixed(2)} of 6-day pay but no ADP earnings ` +
-          `code is set for it (Settings → 6-day pay code)`,
-        employeeName: d.employeeName,
-        payId: d.payId,
+  if (rules.sixDayMode !== 'reportOnly') {
+    for (const d of sixDay) {
+      const group = rowsFor(d.payId)
+      if (group.length === 0) continue
+
+      if (rules.sixDayMode === 'net') {
+        // 1) Remove what SD3 paid, on the row it was paid on.
+        for (const [salonNum, paid] of Object.entries(d.sd3PaidBySalon)) {
+          const target = group.find(r => r.salonNum === salonNum)
+          if (!target || !(paid > 0)) continue
+          const v = values.get(target)!
+          const have = v.fixed.get('allOtherIncentives') || 0
+          if (paid > have + 0.005) {
+            // Our model of SD3's rule says it paid, but the money isn't in the
+            // column. Rather than drive the line negative, leave it and say so.
+            exceptions.push({
+              severity: 'warning',
+              kind: 'sixday-mismatch',
+              message:
+                `${d.employeeName} (salon ${salonNum}): expected SD3's 6-day pay of ` +
+                `$${paid.toFixed(2)} inside All Other Incentives, but that column holds only ` +
+                `$${have.toFixed(2)} — left unchanged, check this one by hand`,
+              employeeName: d.employeeName,
+              salonNum,
+              payId: d.payId,
+            })
+            continue
+          }
+          v.fixed.set('allOtherIncentives', round2(have - paid))
+        }
+
+        // 2) Add what they are actually owed, split across salons by floor hours.
+        if (d.amount > 0) {
+          const shares = allocate(d.amount, group.map(r => r.floorHours))
+          group.forEach((r, i) => {
+            if (shares[i] === 0) return
+            const v = values.get(r)!
+            v.fixed.set('allOtherIncentives', round2((v.fixed.get('allOtherIncentives') || 0) + shares[i]))
+          })
+        }
+        continue
+      }
+
+      // 'add' mode: SD3 is treated as paying nothing, so the full amount goes on
+      // its own earnings code.
+      if (!d.qualifies || d.amount <= 0) continue
+      if (!sixDayCode) {
+        exceptions.push({
+          severity: 'blocking',
+          kind: 'missing-code',
+          message:
+            `${d.employeeName} earned $${d.amount.toFixed(2)} of 6-day pay but no ADP earnings ` +
+            `code is set for it (Settings → 6-day pay code)`,
+          employeeName: d.employeeName,
+          payId: d.payId,
+        })
+        continue
+      }
+      const shares = allocate(d.amount, group.map(r => r.floorHours))
+      group.forEach((r, i) => {
+        if (shares[i] === 0) return
+        values.get(r)!.extras.push({ code: sixDayCode, amount: shares[i], label: '6-day pay', kind: 'sixDay' })
       })
-      continue
     }
-    const shares = allocate(d.amount, group.map(r => r.floorHours))
-    group.forEach((r, i) => {
-      if (shares[i] === 0) return
-      values.get(r)!.extras.push({ code: sixDayCode, amount: shares[i], label: '6-day pay', kind: 'sixDay' })
-    })
   }
 
   // ── Short breaks: paid at the employee's own rate ──
@@ -1010,7 +1115,12 @@ export function buildPayroll(input: {
       rows: uploadRows.length,
       floorHours: round2(rows.reduce((s, r) => s + r.floorHours, 0)),
       overtimePay: round2(rows.reduce((s, r) => s + r.overtimePay, 0)),
+      /** What the employees are owed in total under the real rule. */
       sixDayPay: round2(sixDay.reduce((s, d) => s + d.amount, 0)),
+      /** What SD3 already paid inside All Other Incentives. */
+      sixDaySd3Paid: round2(sixDay.reduce((s, d) => s + d.sd3Paid, 0)),
+      /** The net movement this file makes — negative when SD3 over-paid. */
+      sixDayDelta: round2(sixDay.reduce((s, d) => s + d.delta, 0)),
       breakMinutes: round2(breaks.reduce((s, d) => s + d.totalMinutes, 0)),
       breakPayHours: round2(breaks.reduce((s, d) => s + d.totalMinutes, 0) / 60),
       // Bonuses + hand-keyed lines only. 6-day pay and short breaks have their

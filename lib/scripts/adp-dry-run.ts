@@ -282,8 +282,12 @@ async function main() {
   console.log('\nTotals')
   console.log(`  Floor hours        ${padL(result.totals.floorHours, 10)}`)
   console.log(`  Overtime           ${padL(money(result.totals.overtimePay), 10)}`)
-  console.log(`  6-day pay          ${padL(money(result.totals.sixDayPay), 10)}   ` +
+  console.log(`  6-day owed         ${padL(money(result.totals.sixDayPay), 10)}   ` +
     `${result.sixDay.filter(s => s.qualifies).length} qualified`)
+  console.log(`  6-day SD3 paid     ${padL(money(result.totals.sixDaySd3Paid), 10)}   ` +
+    `already inside All Other Incentives`)
+  console.log(`  6-day NET change   ${padL(money(result.totals.sixDayDelta), 10)}   ` +
+    `what this file moves`)
   console.log(`  Paid short breaks  ${padL(result.totals.breakMinutes + ' min', 10)}   ` +
     `${round2(result.totals.breakPayHours)} hrs added`)
   console.log(`  Bonuses + manual   ${padL(money(result.totals.extraEarnings), 10)}`)
@@ -327,6 +331,21 @@ async function main() {
     `${padL(money(round2(tot.ot)), 10)}${padL(money(round2(tot.six)), 10)}`)
 
   // ── 6-day detail ──
+  // The corrections — the rows the office used to find and key by hand.
+  const moved = result.sixDay.filter(s => Math.abs(s.delta) >= 0.005)
+    .sort((a, b) => a.delta - b.delta)
+  if (moved.length) {
+    console.log('\n6-day corrections (compare with the "6 Day" rows in your summary sheet)')
+    console.log(`  ${pad('Employee', 30)}${padL('owed', 10)}${padL('SD3 paid', 11)}${padL('NET', 10)}  why`)
+    for (const s of moved) {
+      const why = s.delta < 0
+        ? `SD3 paid but ${s.reason || 'does not qualify'}`
+        : (s.sd3Paid === 0 ? 'qualifies but SD3 paid nothing (floater)' : 'SD3 underpaid')
+      console.log(`  ${pad(s.employeeName, 30)}${padL(money(s.amount), 10)}` +
+        `${padL(money(s.sd3Paid), 11)}${padL(money(s.delta), 10)}  ${why}`)
+    }
+  }
+
   const qualified = result.sixDay.filter(s => s.qualifies)
   if (qualified.length) {
     console.log('\n6-day pay — who qualified')

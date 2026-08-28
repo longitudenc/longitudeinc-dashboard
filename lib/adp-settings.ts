@@ -127,6 +127,24 @@ export interface AdpRules {
   sixDayMinShiftHours: number
   /** Minimum floor hours for the whole week. */
   sixDayMinFloorHours: number
+  /**
+   * How 6-day pay reaches the file.
+   *   'net'        — SD3 ALREADY pays 6-day inside All Other Incentives, using
+   *                  its own looser rule, so the file carries only the
+   *                  difference: subtract where SD3 over-paid, add where it
+   *                  missed a floater. Default, and what the office does by hand.
+   *   'add'        — treat SD3 as paying nothing and add the full amount.
+   *   'reportOnly' — calculate and show it, write nothing.
+   */
+  sixDayMode: 'net' | 'add' | 'reportOnly'
+
+  // ── SD3's OWN 6-day rule, which is looser than ours ──
+  // SD3 pays $1 per floor hour once someone worked this many days at a salon
+  // and reached this many TOTAL hours there — it does not check the 4-hour
+  // minimum shift, does not use floor hours for the threshold, and evaluates
+  // each salon separately (so floaters get missed entirely).
+  sd3SixDayMinDays: number
+  sd3SixDayMinTotalHours: number
 
   // ── Short breaks ──
   /** Breaks strictly under this many minutes must be paid. */
@@ -155,6 +173,9 @@ const DEFAULT_RULES: AdpRules = {
   sixDayMinDays: 6,
   sixDayMinShiftHours: 4,
   sixDayMinFloorHours: 34,
+  sixDayMode: 'net',
+  sd3SixDayMinDays: 6,
+  sd3SixDayMinTotalHours: 34,
   breakMaxMinutes: 20,
   breakMode: 'foldFloorHours',
   otThresholdHours: 40,
@@ -239,6 +260,11 @@ export async function loadAdpSettings(): Promise<AdpSettings> {
         case 'sixDayMinDays': settings.rules.sixDayMinDays = toNum(raw, DEFAULT_RULES.sixDayMinDays); break
         case 'sixDayMinShiftHours': settings.rules.sixDayMinShiftHours = toNum(raw, DEFAULT_RULES.sixDayMinShiftHours); break
         case 'sixDayMinFloorHours': settings.rules.sixDayMinFloorHours = toNum(raw, DEFAULT_RULES.sixDayMinFloorHours); break
+        case 'sd3SixDayMinDays': settings.rules.sd3SixDayMinDays = toNum(raw, DEFAULT_RULES.sd3SixDayMinDays); break
+        case 'sd3SixDayMinTotalHours': settings.rules.sd3SixDayMinTotalHours = toNum(raw, DEFAULT_RULES.sd3SixDayMinTotalHours); break
+        case 'sixDayMode':
+          if (raw === 'net' || raw === 'add' || raw === 'reportOnly') settings.rules.sixDayMode = raw
+          break
         case 'breakMaxMinutes': settings.rules.breakMaxMinutes = toNum(raw, DEFAULT_RULES.breakMaxMinutes); break
         case 'breakMode':
           if (raw === 'foldFloorHours' || raw === 'separateCode' || raw === 'reportOnly') {

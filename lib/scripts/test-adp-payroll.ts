@@ -257,11 +257,13 @@ check(
   !sd4.qualifies && sd4.qualifyingDays === 0
 )
 
-// The dollars follow the hours back to each salon, to the cent.
+// In 'add' mode (SD3 treated as paying nothing) the amount goes on its own
+// earnings code, and the dollars follow the hours back to each salon.
+const addSettings = { ...settings, rules: { ...settings.rules, sixDayMode: 'add' as const } }
 const sixDayBuild = buildPayroll({
   rows: toPayConsolRows(objects).filter(r => r.employeeName.startsWith('CHONG NEWMAN')),
   punches,
-  settings: { ...settings, codes: { ...settings.codes, sixDay: '11' } },
+  settings: { ...addSettings, codes: { ...settings.codes, sixDay: '11' } },
   weekStart: '2026-08-15',
   weekEnd: '2026-08-21',
 })
@@ -273,13 +275,14 @@ check(
   JSON.stringify(sixDayLines)
 )
 
-// With no code assigned it must block, never quietly drop the pay.
+// In 'add' mode the pay needs a code, and an unassigned one must block rather
+// than quietly drop it. ('net' mode needs no code — it moves All Other Incentives.)
 const noCode = buildPayroll({
   rows: toPayConsolRows(objects).filter(r => r.employeeName.startsWith('CHONG NEWMAN')),
-  punches, settings, weekStart: '2026-08-15', weekEnd: '2026-08-21',
+  punches, settings: addSettings, weekStart: '2026-08-15', weekEnd: '2026-08-21',
 })
 check(
-  'unassigned earnings code blocks rather than dropping the pay',
+  'add mode: unassigned earnings code blocks rather than dropping the pay',
   noCode.exceptions.some(e => e.severity === 'blocking' && e.kind === 'missing-code')
 )
 
@@ -320,6 +323,108 @@ check(
     const d = computeSixDay(empRows, [], settings, []).details[0]
     return d.source === 'none' && !d.qualifies && d.reason.includes('no day-level hours')
   })()
+)
+
+// ── 4b) Netting against what SD3 already paid ────────────────────────────
+// SD3 pays 6-day itself, inside All Other Incentives, on a looser rule: per
+// salon, no minimum shift length, threshold on TOTAL hours. The office then
+// corrects it by hand. For w/e 2026-08-21 the Weekly Payroll Summary recorded:
+//     -32.80 (1304)  -30.79 (3027)  -35.90 (3043)  -35.62 (3045)   and  +38.59
+// This reproduces those exact figures from the payroll report alone.
+console.log('\nNetting against SD3 (reproducing the hand corrections for this week)')
+
+/** Build day rows for one employee-salon: `n` days of `hours` floor time each. */
+const dayRows = (payId: string, salonNum: string, hours: number[], from = '2026-08-15'): DailyFloorRow[] =>
+  hours.map((h, i) => ({
+    date: addDaysIso(from, i), payId, salonNum, floorHours: h,
+  }))
+function addDaysIso(iso: string, n: number): string {
+  const d = new Date(iso + 'T00:00:00Z')
+  d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().slice(0, 10)
+}
+
+const findRow = (name: string) => rows.find(r => r.employeeName.startsWith(name))!
+
+// Six days, every one over 4 hours — so only the 34-FLOOR-HOUR test can fail.
+const sixEven = (total: number) => Array(6).fill(round2(total / 6))
+// Six days with a short one — fails OUR rule on shift length, not on hours.
+const sixWithShort = (total: number) =>
+  [round2((total - 2) / 5), round2((total - 2) / 5), round2((total - 2) / 5),
+   round2((total - 2) / 5), round2(total - 2 - 4 * round2((total - 2) / 5)), 2]
+
+const netCases: DailyFloorRow[] = [
+  // Under 34 FLOOR hours, but over 34 TOTAL hours → SD3 paid, we should not.
+  ...dayRows(findRow('MOORE, ALISHA').payId, '1304', sixEven(32.80)),
+  ...dayRows(findRow('MORGAN, JAMIE').payId, '3027', sixEven(30.79)),
+  // Over 34 floor hours but a day under the minimum shift → SD3 paid, we should not.
+  ...dayRows(findRow('TOMBERLIN').payId, '3043', sixWithShort(35.90)),
+  ...dayRows(findRow('LATTIMORE').payId, '3045', sixWithShort(35.62)),
+  // A floater: 6 qualifying days across two salons, neither salon enough alone.
+  ...dayRows(findRow('CHONG NEWMAN').payId, '3043', [5.09]),
+  ...dayRows(findRow('CHONG NEWMAN').payId, '3062', [6.7, 6.7, 6.7, 6.7, 6.7], '2026-08-16'),
+  // Genuinely qualifies — SD3 paid exactly the right amount, so nothing moves.
+  ...dayRows(findRow('BLAKENEY').payId, '9689', sixEven(37.97)),
+]
+
+const netted = buildPayroll({
+  rows: toPayConsolRows(objects),
+  punches: [], settings, weekStart: '2026-08-15', weekEnd: '2026-08-21',
+  dailyFloor: netCases,
+})
+const six = (name: string) => netted.sixDay.find(d => d.employeeName.startsWith(name))!
+
+for (const [name, expected] of [
+  ['MOORE, ALISHA', -32.80], ['MORGAN, JAMIE', -30.79],
+  ['TOMBERLIN', -35.90], ['LATTIMORE', -35.62],
+  ['CHONG NEWMAN', 38.59], ['BLAKENEY', 0],
+] as [string, number][]) {
+  const d = six(name)
+  check(
+    `${name.padEnd(14)} delta ${expected >= 0 ? '+' : ''}${expected.toFixed(2)}`,
+    Math.abs(d.delta - expected) < 0.005,
+    `got ${d.delta} (owed ${d.amount}, SD3 paid ${d.sd3Paid}, qualifies=${d.qualifies}, reason="${d.reason}")`
+  )
+}
+
+// The correction has to land in the file, not just the report.
+const aoCol = (payId: string, salon: string) => {
+  const i = netted.upload.header.indexOf('Temp Dept')
+  const row = netted.upload.rows.find(r => String(r[2]) === payId && String(r[i]) === salon + '00')!
+  // All Other Incentives is the 13th of the 15 fixed pairs → amount at 4 + 13*2
+  return Number(row[4 + 13 * 2 - 1] || 0)
+}
+check(
+  'MOORE: All Other Incentives 45.02 → 12.22 (SD3 6-day removed, other incentives kept)',
+  Math.abs(aoCol(findRow('MOORE, ALISHA').payId, '1304') - 12.22) < 0.005,
+  `got ${aoCol(findRow('MOORE, ALISHA').payId, '1304')}`
+)
+check(
+  'TOMBERLIN: All Other Incentives 35.90 → 0 (it was 6-day and nothing else)',
+  Math.abs(aoCol(findRow('TOMBERLIN').payId, '3043')) < 0.005,
+  `got ${aoCol(findRow('TOMBERLIN').payId, '3043')}`
+)
+check(
+  'BLAKENEY: All Other Incentives unchanged at 37.97 (SD3 got it right)',
+  Math.abs(aoCol(findRow('BLAKENEY').payId, '9689') - 37.97) < 0.005,
+  `got ${aoCol(findRow('BLAKENEY').payId, '9689')}`
+)
+check(
+  'CHONG NEWMAN: the floater gains 38.59 across his two salons',
+  Math.abs(
+    (aoCol(findRow('CHONG NEWMAN').payId, '3043') + aoCol(findRow('CHONG NEWMAN').payId, '3062')) -
+    (15.27 + 38.59)
+  ) < 0.02,
+  `got ${aoCol(findRow('CHONG NEWMAN').payId, '3043')} + ${aoCol(findRow('CHONG NEWMAN').payId, '3062')}`
+)
+check(
+  'netting needs no new earnings code — nothing blocks',
+  netted.exceptions.filter(e => e.kind === 'missing-code').length === 0
+)
+check(
+  `week nets ${netted.totals.sixDayDelta >= 0 ? '+' : ''}$${netted.totals.sixDayDelta.toFixed(2)}`,
+  Math.abs(netted.totals.sixDayDelta - (-32.80 - 30.79 - 35.90 - 35.62 + 38.59)) < 0.02,
+  `got ${netted.totals.sixDayDelta}`
 )
 
 // ── 5) Short breaks ──

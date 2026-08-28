@@ -337,7 +337,8 @@ function renderBuild(d){
      + stat('Employees', d.totals.employees, d.totals.floaters+' across multiple salons')
      + stat('Floor hours', hrs(d.totals.floorHours), '')
      + stat('Overtime', money(d.totals.overtimePay), 'blended, cross-salon')
-     + stat('6-day pay', money(d.totals.sixDayPay), d.sixDay.filter(s=>s.qualifies).length+' qualified')
+     + stat('6-day owed', money(d.totals.sixDayPay), d.sixDay.filter(s=>s.qualifies).length+' qualified')
+     + stat('6-day net change', money(d.totals.sixDayDelta), 'SD3 already paid '+money(d.totals.sixDaySd3Paid))
      + stat('Paid breaks', d.totals.breakMinutes+' min', hrs(d.totals.breakPayHours)+' hrs added')
      + stat('Other earnings', money(d.totals.extraEarnings), 'bonuses + manual')
      + '</div></div>';
@@ -356,6 +357,32 @@ function renderBuild(d){
   // ── 6-day pay ──
   const six = d.sixDay.filter(s=>s.qualifies);
   const near = d.sixDay.filter(s=>!s.qualifies && (s.qualifyingDays>=5 || s.weekFloorHours>=30));
+  // SD3 pays 6-day itself on a looser rule, so what matters most is the
+  // CORRECTIONS — the rows the office used to hunt down and key by hand.
+  const moved = d.sixDay.filter(s=>Math.abs(s.delta)>=0.005).sort((a,b)=>a.delta-b.delta);
+  h += '<div class="card"><h2>6-day corrections <span class="sub">'
+     + 'SD3 pays this itself on a looser rule — the file carries only the difference'
+     + '</span></h2><div class="body" style="padding:0;">';
+  if(!moved.length){
+    h += '<div class="body muted">Nothing to correct — SD3 paid exactly what everyone is owed.</div>';
+  } else {
+    h += '<div class="scroll"><table><thead><tr><th>Employee</th><th class="num">Owed</th>'
+       + '<th class="num">SD3 paid</th><th class="num">Net change</th><th>Why</th></tr></thead><tbody>';
+    moved.forEach(s=>{
+      const why = s.delta<0
+        ? 'SD3 paid, but '+esc(s.reason||'does not qualify')
+        : (s.sd3Paid===0 ? 'qualifies, but SD3 paid nothing (floater across salons)' : 'SD3 underpaid');
+      h += '<tr><td>'+esc(s.employeeName)+'</td>'
+         + '<td class="num">'+money(s.amount)+'</td>'
+         + '<td class="num">'+money(s.sd3Paid)+'</td>'
+         + '<td class="num" style="font-weight:600;color:'+(s.delta<0?'#b3261e':'#1a5c0a')+'">'
+         + (s.delta>0?'+':'')+money(s.delta)+'</td>'
+         + '<td class="muted">'+why+'</td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+  h += '</div></div>';
+
   h += '<div class="card"><h2>6-day pay <span class="sub">'
      + '6+ floor days at '+d.rules.sixDayMinShiftHours+'+ hrs, '+d.rules.sixDayMinFloorHours
      + '+ floor hrs → $'+d.rules.sixDayRate+'/floor hr</span></h2><div class="body" style="padding:0;">';
@@ -511,6 +538,12 @@ function renderSettings(d){
      + ruleInput('sixDayMinDays','6-day — days required', s.rules.sixDayMinDays, ro, '1')
      + ruleInput('sixDayMinShiftHours','6-day — min hours/day', s.rules.sixDayMinShiftHours, ro, '0.25')
      + ruleInput('sixDayMinFloorHours','6-day — min floor hrs/week', s.rules.sixDayMinFloorHours, ro, '0.5')
+     + ruleInput('sd3SixDayMinDays','SD3\u2019s rule — days', s.rules.sd3SixDayMinDays, ro, '1')
+     + ruleInput('sd3SixDayMinTotalHours','SD3\u2019s rule — min TOTAL hrs', s.rules.sd3SixDayMinTotalHours, ro, '0.5')
+     + '<label class="fld">6-day handling<select id="set-sixDayMode"'+ro+'>'
+     + [['net','Net against what SD3 paid'],['add','Add full amount on its own code'],['reportOnly','Report only — do not pay']]
+        .map(([m,lbl])=>'<option value="'+m+'"'+(s.rules.sixDayMode===m?' selected':'')+'>'+lbl+'</option>').join('')
+     + '</select></label>'
      + ruleInput('breakMaxMinutes','Paid break under (minutes)', s.rules.breakMaxMinutes, ro, '1')
      + '<label class="fld">Break handling<select id="set-breakMode"'+ro+'>'
      + ['foldFloorHours','separateCode','reportOnly'].map(m=>'<option value="'+m+'"'
@@ -522,7 +555,10 @@ function renderSettings(d){
      + ruleInput('payDateOffsetDays','Days from week end to pay day', s.rules.payDateOffsetDays, ro, '1')
      + '</div>'
      + '<div class="hint">Pay day is week-ending Friday plus the offset — 6 days lands on Thursday. '
-     + '“Bonus on paycheck #3” means the 3rd Thursday of the calendar month.</div>';
+     + '“Bonus on paycheck #3” means the 3rd Thursday of the calendar month.<br>'
+     + '<b>SD3’s rule</b> is what SD3 itself uses when it adds 6-day pay into All Other Incentives: '
+     + 'per salon, no minimum shift length, and a threshold on TOTAL hours rather than floor hours. '
+     + 'The file carries the difference between that and your real rule.</div>';
   if(CAN_EDIT_SETTINGS){
     h += '<div style="margin-top:14px;display:flex;gap:10px;align-items:center;">'
        + '<button class="btn" onclick="saveSettings()">Save settings</button>'
