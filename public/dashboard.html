@@ -4543,7 +4543,7 @@ function scoreTierLabel(total){ if(total>=24)return{label:'Performance Excellenc
 
 // ── Init ──────────────────────────────────────────────────────
 // Real per-user identity, set from /api/auth/me after sign-in.
-let SESSION = { email: '', role: 'none', globalId: '', salons: [], name: '' };
+let SESSION = { email: '', role: 'none', globalId: '', salons: [], name: '', viewingAs: '', realEmail: '' };
 
 function init(){
   // Ask the server who's signed in. No valid session → show login.
@@ -4557,8 +4557,12 @@ function init(){
       role: me.access.role || 'none',
       globalId: me.access.globalId || '',
       salons: me.access.salons || [],
-      name: me.access.name || ''
+      name: me.access.name || '',
+      // Set only while an owner is viewing as someone else.
+      viewingAs: me.viewingAs || '',
+      realEmail: me.realEmail || ''
     };
+    renderViewAsBanner();
     startDashboard();
   }).catch(()=>{ showLogin(); });
 }
@@ -10264,7 +10268,7 @@ function _accHead(cols){
 }
 
 function _accRow(e, roles){
-  e = e || { email:'', role:'viewer', name:'', globalId:'', amId:'', salons:[] };
+  e = e || { email:'', role:'viewer', name:'', salons:[] };
   const opts = (roles || []).map(function(r){
     return '<option value="' + _accEsc(r) + '"' + (r === e.role ? ' selected' : '') + '>' + _accEsc(r) + '</option>';
   }).join('');
@@ -10272,10 +10276,10 @@ function _accRow(e, roles){
     + '<td style="' + _ACC_TD + '"><input class="acc-email" style="' + _ACC_INP + '" value="' + _accEsc(e.email) + '" placeholder="name@example.com"></td>'
     + '<td style="' + _ACC_TD + '"><select class="acc-role" style="' + _ACC_INP + '">' + opts + '</select></td>'
     + '<td style="' + _ACC_TD + '"><input class="acc-name" style="' + _ACC_INP + '" value="' + _accEsc(e.name) + '"></td>'
-    + '<td style="' + _ACC_TD + '"><input class="acc-gid" style="' + _ACC_INP + '" value="' + _accEsc(e.globalId) + '"></td>'
-    + '<td style="' + _ACC_TD + '"><input class="acc-amid" style="' + _ACC_INP + '" value="' + _accEsc(e.amId) + '" placeholder="e.g. kayla"></td>'
     + '<td style="' + _ACC_TD + '"><input class="acc-salons" style="' + _ACC_INP + '" value="' + _accEsc((e.salons || []).join(' ')) + '" placeholder="e.g. 3058 7728"></td>'
-    + '<td style="' + _ACC_TD + '"><button class="btn btn-sm" title="Remove" onclick="accRemoveRow(this)">&#10005;</button></td>'
+    + '<td style="' + _ACC_TD + '" nowrap>'
+    + (e.email ? '<button class="btn btn-sm" title="View the site as this person" data-email="' + _accEsc(e.email) + '" onclick="accViewAsClick(this)">&#128065;</button> ' : '')
+    + '<button class="btn btn-sm" title="Remove" onclick="accRemoveRow(this)">&#10005;</button></td>'
     + '</tr>';
 }
 
@@ -10309,7 +10313,7 @@ function renderAccessPanel(){
   html += '<div style="font-size:12px;font-weight:700;margin:10px 0 4px;">Assigned roles'
         + '<span style="font-weight:400;color:var(--text-muted);"> &mdash; the Users tab. Checked first, so a person listed here keeps this role whatever the employee tables say.</span></div>';
   html += '<div style="overflow-x:auto;"><table id="access-users-table" style="width:100%;border-collapse:collapse;font-size:12px;">'
-        + _accHead(['Email','Role','Name','Global ID','AM ID','Salons','']) + '<tbody>'
+        + _accHead(['Email','Role','Name','Salons','']) + '<tbody>'
         + manual.map(function(e){ return _accRow(e, roles); }).join('')
         + '</tbody></table></div>';
   html += '<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'
@@ -10320,7 +10324,7 @@ function renderAccessPanel(){
   html += '<div style="font-size:12px;font-weight:700;margin:16px 0 4px;">Derived roles'
         + '<span style="font-weight:400;color:var(--text-muted);"> &mdash; computed from the employee tables. Change one by changing the assignment (AM, manager, profile), not here.</span></div>';
   html += '<div style="overflow-x:auto;max-height:320px;overflow-y:auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;">'
-        + _accHead(['Name','Email','Role','Sees','Where it comes from']) + '<tbody>'
+        + _accHead(['Name','Email','Role','Sees','Where it comes from','']) + '<tbody>'
         + derived.map(function(e){
             const scope = (e.salons && e.salons.length) ? e.salons.join(', ')
                         : (e.role === 'stylist' ? 'Only themselves' : '—');
@@ -10330,6 +10334,7 @@ function renderAccessPanel(){
               + '<td style="' + _ACC_TD + '"><b>' + _accEsc(e.role) + '</b></td>'
               + '<td style="' + _ACC_TD + '">' + _accEsc(scope) + '</td>'
               + '<td style="' + _ACC_TD + 'color:var(--text-muted);">' + _accEsc(e.why) + '</td>'
+              + '<td style="' + _ACC_TD + '"><button class="btn btn-sm" title="View the site as this person" data-email="' + _accEsc(e.email) + '" onclick="accViewAsClick(this)">&#128065;</button></td>'
               + '</tr>';
           }).join('')
         + '</tbody></table></div>';
@@ -10362,8 +10367,6 @@ async function saveUsersTab(){
       email:    val(tr, '.acc-email'),
       role:     val(tr, '.acc-role'),
       name:     val(tr, '.acc-name'),
-      globalId: val(tr, '.acc-gid'),
-      amId:     val(tr, '.acc-amid'),
       salons:   val(tr, '.acc-salons')
     };
   }).filter(function(r){ return r.email || r.role; });
@@ -10385,6 +10388,69 @@ async function saveUsersTab(){
   }catch(e){
     setMsg(String(e.message || e), false);
   }
+}
+
+
+// == View As =================================================================
+// Owner-only, read-only, resolved SERVER-side: the cookie swaps the Access that
+// every API guard enforces, so the APIs really do withhold data. A client-side
+// version that just flipped SESSION.role would render a convincing stylist
+// dashboard while the endpoints kept returning everything -- which would prove
+// nothing about what is actually enforced.
+//
+// A full reload on enter/exit is deliberate: the whole app re-bootstraps from
+// /api/auth/me under the new access, so nothing can be left over from the
+// previous identity in a module-level cache.
+
+function accViewAsClick(btn){
+  const em = btn && btn.getAttribute ? btn.getAttribute('data-email') : '';
+  if(em) startViewAs(em);
+}
+
+async function startViewAs(email){
+  try{
+    const r = await fetch('/api/admin/view-as', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email })
+    }).then(function(x){ return x.json(); });
+    if(!r || !r.success) throw new Error((r && r.error) || 'could not start');
+    location.reload();
+  }catch(e){
+    alert('Could not view as ' + email + '\n\n' + (e.message || e));
+  }
+}
+
+async function exitViewAs(){
+  try{ await fetch('/api/admin/view-as', { method: 'DELETE' }); }catch(e){}
+  location.reload();
+}
+
+// A loud, permanent bar. The failure mode of this feature is forgetting you are
+// in it and then misreading what you see as your own view.
+function renderViewAsBanner(){
+  let bar = document.getElementById('viewas-bar');
+  if(!SESSION.viewingAs){
+    if(bar) bar.remove();
+    document.body.style.paddingTop = '';
+    return;
+  }
+  if(!bar){
+    bar = document.createElement('div');
+    bar.id = 'viewas-bar';
+    bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#9acb3a;'
+      + 'color:#0b2b22;font-size:13px;font-weight:700;padding:8px 14px;display:flex;'
+      + 'align-items:center;gap:14px;justify-content:center;flex-wrap:wrap;'
+      + 'box-shadow:0 2px 8px rgba(0,0,0,.25);';
+    document.body.appendChild(bar);
+  }
+  bar.innerHTML = '<span>&#128065; Viewing as <b>' + _accEsc(SESSION.viewingAs) + '</b>'
+    + ' &middot; role <b>' + _accEsc(SESSION.role) + '</b>'
+    + ' &middot; read-only</span>'
+    + '<button onclick="exitViewAs()" style="background:#0b2b22;color:#fff;border:0;'
+    + 'border-radius:14px;padding:4px 14px;font-size:12px;font-weight:700;cursor:pointer;">'
+    + 'Stop viewing as</button>';
+  document.body.style.paddingTop = (bar.offsetHeight || 34) + 'px';
 }
 
 // == Admin: is everything up to date? ========================================

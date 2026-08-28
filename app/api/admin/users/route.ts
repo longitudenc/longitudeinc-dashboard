@@ -30,7 +30,13 @@ const VALID_ROLES: Role[] = [
 
 // The columns the panel edits. Any OTHER column already on the tab is preserved
 // as-is, so a note or a column someone added by hand does not get wiped by a save.
-const CANON = ['email', 'role', 'name', 'globalId', 'amId', 'salons'] as const
+// globalId and amId are deliberately ABSENT. Neither is read anywhere:
+// resolveAccess never returns amId, and USER_AM_ID is derived client-side from
+// SESSION.globalId against the AMS constant. An editable field for a value
+// nothing consumes just invites someone to set it and expect an effect.
+// Existing cells (Kayla has amId=kayla) survive via the preserve-unknown-
+// columns path below, which copies any column the panel does not know about.
+const CANON = ['email', 'role', 'name', 'salons'] as const
 
 const norm = (s: unknown) => String(s ?? '').trim().toLowerCase()
 const str = (s: unknown) => String(s ?? '').trim()
@@ -41,8 +47,6 @@ function headerIndex(header: string[], field: string): number {
     email: ['email', 'e-mail', 'emailaddress', 'email address'],
     role: ['role', 'access', 'tier'],
     name: ['name', 'full name', 'fullname', 'display name', 'displayname'],
-    globalId: ['globalid', 'global id', 'globalemployeekey'],
-    amId: ['amid', 'am id', 'am'],
     salons: ['salons', 'salon', 'salonnums'],
   }
   const want = aliases[field] || [field]
@@ -89,8 +93,6 @@ export async function POST(req: NextRequest) {
         email,
         role,
         name: str(r?.name),
-        globalId: str(r?.globalId),
-        amId: str(r?.amId),
         salons: Array.isArray(r?.salons) ? r.salons.join(' ') : str(r?.salons),
       })
     }
