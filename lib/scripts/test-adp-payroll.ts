@@ -539,6 +539,26 @@ for (const name of ['BLAKENEY', 'BURNETT', 'WYNN', 'ORTIZ', 'SLIGH', 'STATON', '
 }
 
 // Two the office did NOT catch — real money, found by running the rule properly.
+// No rounding, no tolerance: 33.95 floor hours is under 34 and does not
+// qualify, however close it lands. Confirmed by the owner.
+check(
+  '33.95 floor hours does NOT qualify — the threshold is not rounded to',
+  !realSix('BROOM').qualifies && realSix('BROOM').weekFloorHours === 33.95
+)
+check(
+  '33.99 still does not qualify; 34.00 exactly does',
+  (() => {
+    const at = (fh: number) => {
+      const one = toPayConsolRows(objects)
+        .filter(r => r.employeeName.startsWith('BROOM'))
+        .map(r => ({ ...r, floorHours: fh }))
+      return computeSixDay(one, [], settings,
+        detailFx.dailyFloor.filter(d => d.payId === realSix('BROOM').payId)
+          .map(d => ({ ...d, floorHours: fh / 6 })), []).details[0].qualifies
+    }
+    return at(33.99) === false && at(34.00) === true
+  })()
+)
 check(
   'BROOM, SABRINA  -33.95 — 33.95 floor hours, 0.05 under the threshold',
   Math.abs(realSix('BROOM').delta - -33.95) < 0.005,
