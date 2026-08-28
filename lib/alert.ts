@@ -18,7 +18,18 @@ function recipients(): string[] {
     .filter(Boolean)
 }
 
-export type AlertResult = { sent: boolean; reason?: string; recipients?: number; from?: string }
+export type AlertResult = { sent: boolean; reason?: string; recipients?: number; from?: string; to?: string[] }
+
+/**
+ * Local part masked, domain kept. Enough to spot a typo'd or wrong-domain
+ * recipient from the health endpoint without printing anybody's address in
+ * full. A malformed value reports its shape rather than its content.
+ */
+function maskEmail(e: string): string {
+  const at = e.indexOf('@')
+  if (at < 1) return '(malformed: ' + e.length + ' chars, no @)'
+  return e.slice(0, Math.min(2, at)) + '***' + e.slice(at)
+}
 
 /** Email an operational alert. Never throws; reports why it did not send. */
 export async function sendAlert(subject: string, html: string): Promise<AlertResult> {
@@ -39,10 +50,10 @@ export async function sendAlert(subject: string, html: string): Promise<AlertRes
     if (res && res.error) {
       const reason = String(res.error.message || res.error.name || JSON.stringify(res.error))
       console.error('[alert] rejected by Resend:', reason)
-      return { sent: false, reason, recipients: to.length, from: FROM }
+      return { sent: false, reason, recipients: to.length, from: FROM, to: to.map(maskEmail) }
     }
     console.log(`[alert] sent: ${subject}`)
-    return { sent: true, recipients: to.length, from: FROM }
+    return { sent: true, recipients: to.length, from: FROM, to: to.map(maskEmail) }
   } catch (e: any) {
     const reason = String(e?.message || e)
     console.error('[alert] send failed:', reason)
