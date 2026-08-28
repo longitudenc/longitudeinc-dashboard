@@ -3290,26 +3290,6 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
             </div>
           </div>
 
-          <!-- Disciplinary Points editor -->
-          <div style="margin-bottom:1.2rem;">
-            <div style="font-weight:700;font-size:13px;color:#03654e;margin-bottom:6px;display:flex;align-items:center;gap:6px;">⚠ Disciplinary Points <span style="font-weight:400;font-size:11px;color:var(--text-muted);">Each entry is one dated event · active points roll off after 12 months · 4+ blocks bonus, 6+ blocks raise</span></div>
-            <div style="background:#f8f7f4;border:1px solid var(--border);border-radius:8px;padding:10px;">
-              <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
-                <select id="disc-emp" style="font-size:12px;padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:white;min-width:200px;">
-                  <option value="">— Select employee —</option>
-                </select>
-                <input type="number" id="disc-points" min="1" max="20" step="1" placeholder="Points" style="font-size:12px;padding:5px 8px;border-radius:6px;border:1px solid var(--border);width:80px;">
-                <input type="date" id="disc-date" style="font-size:12px;padding:5px 8px;border-radius:6px;border:1px solid var(--border);">
-                <input type="text" id="disc-reason" placeholder="Reason (optional)" style="font-size:12px;padding:5px 8px;border-radius:6px;border:1px solid var(--border);width:200px;">
-                <button class="btn btn-primary btn-sm" onclick="addDiscEvent()">+ Add Points</button>
-              </div>
-              <div id="disc-table-container">
-                <div style="color:var(--text-muted);font-size:12px;">No disciplinary points on record.</div>
-              </div>
-              <span id="disc-save-status" style="display:block;margin-top:6px;font-size:11px;color:var(--text-muted);"></span>
-            </div>
-          </div>
-
           <!-- Manager Assignments -->
           <div style="margin-bottom:1.2rem;">
             <div style="font-weight:700;font-size:13px;color:#03654e;margin-bottom:6px;display:flex;align-items:center;gap:6px;">👤 Manager Assignments <span style="font-weight:400;font-size:11px;color:var(--text-muted);">Map each salon to its current manager</span></div>
@@ -3409,11 +3389,7 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
         <div style="padding:1rem 1.25rem;" id="weeks-list">
           <div class="no-data">Loading…</div>
         </div>
-        <div style="padding:0 1.25rem 1.25rem;">
-          <div style="font-weight:700;font-size:13px;margin-bottom:6px;">📝 Scrape / Load Notes <span style="font-weight:400;font-size:11px;color:var(--text-muted);">Jot anything off about a scrape or load — saved in this browser</span></div>
-          <textarea id="data-notes" oninput="saveDataNotes()" placeholder="e.g. 6/28 — monthly ran, but June bonuses still need processing" style="width:100%;min-height:84px;font:inherit;font-size:13px;padding:9px 11px;border:1px solid var(--border);border-radius:8px;resize:vertical;"></textarea>
-          <span id="data-notes-status" style="display:block;margin-top:5px;font-size:11px;color:var(--text-muted);"></span>
-        </div>
+        <div style="padding:0 1.25rem 1.25rem;" id="scrape-status"></div>
       </div>
     </div>
 
@@ -4802,7 +4778,7 @@ function onDataLoaded(data){
         showPage('noaccess');
         document.getElementById('no-access-email').textContent = USER_EMAIL;
       }
-      if(isAdminRole()){ renderWeeksList(); loadDataNotes(); }
+      if(isAdminRole()){ renderWeeksList(); }
       if(S_deepReq) openRequestDeepLink(S_deepReq);
       hideLoading();
     }, 100);
@@ -5301,10 +5277,11 @@ function switchToAdmin(){
   renderManagerTable();
   populateWaiverDropdowns();
   renderWaiverTable();
-  populateDiscControls();
-  loadDiscPoints(()=>renderDiscTable());
   populateAMAssignControls();
   renderAMAssignTable();
+  renderWeeksList();
+  renderScrapeStatus();
+  initAdminCollapse();   // after the sections exist, and it self-guards on re-entry
 }
 
 // ── Day of Week (Company sub-tab) — each weekday compared across a window ─────
@@ -8808,15 +8785,6 @@ function renderWeeksList(){
     </details>`;
 }
 
-function saveDataNotes(){
-  try{
-    localStorage.setItem('li_data_notes', document.getElementById('data-notes').value);
-    const s=document.getElementById('data-notes-status'); if(s){ s.textContent='Saved'; setTimeout(()=>{ if(s) s.textContent=''; },1200); }
-  }catch(e){}
-}
-function loadDataNotes(){
-  try{ const v=localStorage.getItem('li_data_notes'); const t=document.getElementById('data-notes'); if(t&&v!=null) t.value=v; }catch(e){}
-}
 
 // ── Bonus Module ─────────────────────────────────────────────
 let S_bonusPeriods = [];      // all loaded bonus periods
@@ -10185,6 +10153,128 @@ function removeThresholdSet(date){
       if(!r.success){ alert(r.error||'Remove failed'); return; }
       THRESH_DATE=''; loadThresholds();
     }).catch(e=>alert(e.message));
+}
+
+// == Admin: collapsible sections =============================================
+// The panel has grown enough that everything being open at once is the problem.
+// Deliberately structure-agnostic: it takes each direct child of
+// .admin-sections, treats that child's first element as the header, and folds
+// everything after it. A new section needs no wiring here. Sections start
+// closed; open/closed is remembered per browser.
+function _adminKey(title){ return 'adminOpen:' + String(title||'').slice(0,40); }
+function initAdminCollapse(){
+  const host = document.querySelector('.admin-sections');
+  if(!host || host.dataset.collapseInit) return;
+  host.dataset.collapseInit = '1';
+  [...host.children].forEach(sec=>{
+    const header = sec.firstElementChild;
+    if(!header) return;
+    // Everything after the header becomes the collapsible body.
+    const body = document.createElement('div');
+    while(header.nextSibling) body.appendChild(header.nextSibling);
+    sec.appendChild(body);
+
+    const title = (header.textContent||'').trim();
+    let open = false;
+    try{ open = localStorage.getItem(_adminKey(title)) === '1'; }catch(e){}
+
+    // Caret goes at the START of the header: several headers are not flex
+    // containers, so anything relying on margin-left:auto would sit wrong.
+    const caret = document.createElement('span');
+    caret.style.cssText = 'display:inline-block;width:12px;margin-right:4px;color:var(--text-muted);';
+    header.insertBefore(caret, header.firstChild);
+    header.style.cursor = 'pointer';
+    header.style.userSelect = 'none';
+
+    const apply = ()=>{ body.style.display = open ? '' : 'none'; caret.textContent = open ? '▾' : '▸'; };
+    header.addEventListener('click', ()=>{
+      open = !open; apply();
+      try{ localStorage.setItem(_adminKey(title), open ? '1' : '0'); }catch(e){}
+    });
+    apply();
+  });
+}
+
+// == Admin: is everything up to date? ========================================
+// Replaces the old free-text "Scrape / Load Notes" box, which was a place to
+// write down what the program can just tell you. Every row is derived from the
+// data actually loaded, so it reports what the dashboard is really reading --
+// not what the scrape claimed it did.
+function _lastCompletedFriday(){
+  const d = new Date();
+  d.setDate(d.getDate() - 1);                 // yesterday at the latest
+  while(d.getDay() !== 5) d.setDate(d.getDate() - 1);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function renderScrapeStatus(){
+  const host = document.getElementById('scrape-status');
+  if(!host) return;
+
+  const fmtP = k => (typeof formatBonusPeriod==='function' ? formatBonusPeriod(k) : k);
+  const weeks = [...(S.weekHistory||[])].map(w=>w.weekEnding).filter(Boolean).sort();
+  const lastWeek = weeks.length ? weeks[weeks.length-1] : '';
+  const wantWeek = _lastCompletedFriday();
+
+  // The most recently CLOSED fiscal month is the one before the month we are in.
+  const curKey  = periodKeyFromWeekEnd(_sdTodayIso());
+  const wantMon = periodKeyFromSort(periodSortKey(curKey) - 1);
+  const lastOf  = arr => (arr && arr.length) ? arr[arr.length-1].periodKey : '';
+
+  const rows = [
+    {feed:'Weekly salon data', got:lastWeek, want:wantWeek, ok:!!lastWeek && lastWeek >= wantWeek,
+     fmt:v=>v?fmtWeek(v):'—', note:'week ending'},
+    {feed:'Monthly salon summary', got:lastOf(S_salonSummaryPeriods), want:wantMon,
+     ok:periodSortKey(lastOf(S_salonSummaryPeriods)) >= periodSortKey(wantMon), fmt:fmtP, note:'period'},
+    {feed:'Bonus periods', got:lastOf(S_bonusPeriods), want:wantMon,
+     ok:periodSortKey(lastOf(S_bonusPeriods)) >= periodSortKey(wantMon), fmt:fmtP, note:'period'},
+    {feed:'Payroll consolidated', got:lastOf(S_payrollConsolidated), want:wantMon,
+     ok:periodSortKey(lastOf(S_payrollConsolidated)) >= periodSortKey(wantMon), fmt:fmtP, note:'period'},
+  ];
+
+  let html = '<div style="font-weight:700;font-size:13px;margin-bottom:2px;">Feed status</div>'
+    + '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">'
+    + 'Derived from what this dashboard actually loaded, so it reflects the data rather than the scrape log. '
+    + 'The nightly run fires at 08:00 UTC (~4&nbsp;AM ET).</div>'
+    + '<table style="width:100%;border-collapse:collapse;font-size:12px;">'
+    + '<thead><tr style="color:var(--text-muted);text-align:left;">'
+    + '<th style="padding:4px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;">Feed</th>'
+    + '<th style="padding:4px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;">Through</th>'
+    + '<th style="padding:4px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;">Expected</th>'
+    + '<th style="padding:4px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;">Status</th>'
+    + '</tr></thead><tbody>';
+
+  rows.forEach(r=>{
+    const pill = r.ok
+      ? '<span style="background:var(--exc-bg);color:var(--exc-text);border-radius:10px;padding:2px 9px;font-size:11px;font-weight:700;">Current</span>'
+      : '<span style="background:var(--grw-bg);color:var(--grw-text);border-radius:10px;padding:2px 9px;font-size:11px;font-weight:700;">Behind</span>';
+    html += '<tr style="border-top:1px solid #f0efec;">'
+      + '<td style="padding:5px 8px;font-weight:600;">'+r.feed+'</td>'
+      + '<td style="padding:5px 8px;">'+(r.got ? r.fmt(r.got) : '<span style="color:#bbb;">none</span>')+'</td>'
+      + '<td style="padding:5px 8px;color:var(--text-muted);">'+r.fmt(r.want)+'</td>'
+      + '<td style="padding:5px 8px;">'+pill+'</td>'
+      + '</tr>';
+  });
+
+  // Reference counts. No date to compare against, so they are stated, not graded.
+  const counts = [
+    ['Salons on roster', (ROSTER||[]).filter(r=>(r.status||'active')==='active').length],
+    ['Employee profiles', Object.keys(INACTIVE_MAP||{}).length],
+    ['Home salon rows', S.homeCount || 0],
+  ];
+  html += '</tbody></table><div style="font-size:11px;color:var(--text-muted);margin-top:8px;">'
+    + counts.map(c=>c[0]+': <strong style="color:var(--text);">'+c[1]+'</strong>').join(' &nbsp;&middot;&nbsp; ')
+    + '</div>';
+
+  const behind = rows.filter(r=>!r.ok);
+  if(behind.length){
+    html += '<div style="margin-top:8px;padding:8px 12px;background:#fff0f0;border:1px solid #f0c0c0;border-radius:8px;font-size:12px;color:#9C0006;">'
+      + '<b>' + behind.length + ' feed' + (behind.length>1?'s are':' is') + ' behind:</b> ' + behind.map(r=>r.feed).join(', ')
+      + '. Check the latest <em>SD3 Nightly Scrape</em> run in the repo&rsquo;s Actions tab.</div>';
+  } else {
+    html += '<div style="margin-top:8px;padding:8px 12px;background:var(--exc-bg);border:1px solid var(--exc-border);border-radius:8px;font-size:12px;color:var(--exc-text);">'
+      + 'Everything is up to date.</div>';
+  }
+  host.innerHTML = html;
 }
 
 function renderManagerTable(){
@@ -13101,101 +13191,9 @@ function loadDiscPoints(cb){
 }
 
 // ── Disciplinary Points admin editor ──────────────────────────
-function populateDiscControls(){
-  const sel = document.getElementById('disc-emp');
-  if(!sel) return;
-  // Build the list from EVERY source so anyone on record can receive points — not
-  // just stylists with a recent weekly row. homeDataMap is the full roster
-  // (globalId → payrollName/homeSalon); week history and bonus employees fill any
-  // gaps. This is what brings managers / low-activity staff into the picker.
-  const byId = {};
-  const add = (gid,name,salon)=>{
-    gid = String(gid||'').trim(); if(!gid) return;
-    const nm = String(name||'').trim(), sn = String(salon||'').trim();
-    if(!byId[gid]) byId[gid] = { name: nm||gid, salon: sn };
-    else { if((!byId[gid].name||byId[gid].name===gid)&&nm) byId[gid].name=nm; if(!byId[gid].salon&&sn) byId[gid].salon=sn; }
-  };
-  Object.entries(S.homeDataMap||{}).forEach(([gid,r])=>add(gid, r&&r.payrollName, r&&r.homeSalon));
-  (S.weekHistory||[]).forEach(w=>(w.emps||[]).forEach(e=>add(e.globalId, e.empName||e.employeeName, e.salonNum)));
-  (S_bonusPeriods||[]).forEach(p=>(p.employees||[]).forEach(e=>add(e.globalId, e.empName, e.salonNum)));
-  Object.entries(S_managerTable||{}).forEach(([sn,m])=>add(m&&m.globalId, m&&m.name, sn)); // managers (e.g. non-cutting) absent from the above
-  Object.entries(INACTIVE_MAP||{}).forEach(([gid,r])=>add(gid, r&&r.name, r&&r.homeSalon)); // full profile roster (names); inactive + nameless are filtered out below
-  const opts = Object.entries(byId)
-    .filter(([gid,o])=> o.name && o.name!==gid && !isInactive(gid))   // active + identifiable only — no bare-globalId rows, no termed staff
-    .sort((a,b)=>fmtName(a[1].name).localeCompare(fmtName(b[1].name)))
-    .map(([gid,o])=>`<option value="${gid}" data-name="${String(o.name).replace(/"/g,'')}">${fmtName(o.name)}${o.salon?` (${o.salon})`:''}</option>`)
-    .join('');
-  sel.innerHTML = '<option value="">— Select employee —</option>' + opts;
-  // default date to today
-  const d = document.getElementById('disc-date');
-  if(d && !d.value) d.value = new Date().toISOString().slice(0,10);
-}
 
-function renderDiscTable(){
-  const el = document.getElementById('disc-table-container');
-  if(!el) return;
-  if(!_discEvents.length){
-    el.innerHTML = '<div style="color:var(--text-muted);font-size:12px;">No disciplinary points on record.</div>';
-    return;
-  }
-  // Group by employee, newest first, with active-as-of-today total
-  const curPeriod = periodKeyFromWeekEnd(new Date().toISOString());
-  const byEmp = {};
-  _discEvents.forEach(e=>{ (byEmp[e.globalId] ||= []).push(e); });
-  const blocks = Object.entries(byEmp).map(([gid,evs])=>{
-    evs.sort((a,b)=>(b.date||'').localeCompare(a.date||''));
-    const active = activeDiscPoints(gid, curPeriod);
-    const name = evs[0].employeeName || gid;
-    const flag = active>=6?'<span style="color:#9C0006;font-weight:700;"> · raise+bonus ineligible</span>':active>=4?'<span style="color:#843C0C;font-weight:700;"> · bonus ineligible</span>':'';
-    const rows = evs.map(e=>{
-      const mk = discMonthKey(e.date), ek = periodSortKey(curPeriod);
-      const expired = mk===null || (ek-mk)>12;
-      return `<tr style="${expired?'opacity:.45;':''}">
-        <td style="padding:3px 8px;">${e.date}</td>
-        <td style="padding:3px 8px;font-weight:700;">${e.points}</td>
-        <td style="padding:3px 8px;color:var(--text-muted);">${e.reason||''}${expired?' (expired)':''}</td>
-        <td style="padding:3px 8px;"><a href="javascript:void(0)" onclick="removeDiscEvent('${e.eventId}')" style="color:#9C0006;font-size:11px;">✕</a></td>
-      </tr>`;
-    }).join('');
-    return `<div style="margin-bottom:10px;">
-      <div style="font-size:12px;font-weight:700;margin-bottom:2px;">${name} — <span style="color:${active>=4?'#9C0006':'#2a7a4a'};">${active} active</span>${flag}</div>
-      <table style="font-size:12px;border-collapse:collapse;"><tbody>${rows}</tbody></table>
-    </div>`;
-  });
-  el.innerHTML = blocks.join('');
-}
 
-function addDiscEvent(){
-  const sel = document.getElementById('disc-emp');
-  const gid = sel.value;
-  const name = sel.options[sel.selectedIndex]?.getAttribute('data-name') || '';
-  const points = parseInt(document.getElementById('disc-points').value,10);
-  const date = document.getElementById('disc-date').value;
-  const reason = document.getElementById('disc-reason').value.trim();
-  if(!gid || !points || points<1 || !date){ alert('Select an employee, a points value (1+), and a date.'); return; }
-  const status = document.getElementById('disc-save-status');
-  if(status){ status.textContent='Saving...'; status.style.color='var(--text-muted)'; }
-  fetch('/api/gs/saveDiscPoints',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({action:'add', event:{globalId:gid, employeeName:name, points, date, reason}})
-  }).then(r=>r.json()).then(r=>{
-    if(!r.success){ if(status){status.textContent='✗ '+r.error;status.style.color='#9C0006';} return; }
-    if(status){ status.textContent='✓ Added'; status.style.color='#2a7a4a'; }
-    document.getElementById('disc-points').value='';
-    document.getElementById('disc-reason').value='';
-    loadDiscPoints(()=>{ renderDiscTable(); });
-  }).catch(e=>{ if(status){status.textContent='✗ '+e;status.style.color='#9C0006';} });
-}
 
-function removeDiscEvent(eventId){
-  if(!confirm('Remove this disciplinary point entry?')) return;
-  const status = document.getElementById('disc-save-status');
-  fetch('/api/gs/saveDiscPoints',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({action:'remove', eventId})
-  }).then(r=>r.json()).then(r=>{
-    if(status){ status.textContent = r.success?'✓ Removed':'✗ '+r.error; status.style.color = r.success?'#2a7a4a':'#9C0006'; }
-    loadDiscPoints(()=>{ renderDiscTable(); });
-  });
-}
 
 const REVIEW_RAISE = {11:.20,12:.25,13:.30,14:.35,15:.40,16:.45,17:.50,18:.55,19:.60,20:.70};
 const REVIEW_MIN_PTS = 11;
