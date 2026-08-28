@@ -129,3 +129,22 @@ export function scopeDaily(
   }
   return { salonDaily: [], empDaily: [], shifts: [], halfHour: [], demand: [], chkinout: [] } // manager / stylist
 }
+
+/**
+ * Scope raw daily rows (each already carrying salonNum) to what `access` may
+ * receive. Same policy as scopeDaily above, for readers that hand back a flat
+ * row list rather than the six-bucket shape.
+ *
+ * Manager and stylist get [] here, matching scopeDaily and today's UI, which
+ * offers Day-of-Week to canSeeAllSalons() || isAMRole() only. Widening this to
+ * "a manager sees their own store" is a deliberate ACCESS EXPANSION and belongs
+ * with the capability model — not in a change whose job is closing holes.
+ */
+export function scopeSalonRows<T extends { salonNum?: any }>(rows: T[], access: Access): T[] {
+  if (seesEverything(access)) return rows
+  if (access.role === 'area_manager') {
+    const salons = amSalonSet(access)
+    return (rows || []).filter(r => salons.has(String(r.salonNum || '').trim()))
+  }
+  return []
+}

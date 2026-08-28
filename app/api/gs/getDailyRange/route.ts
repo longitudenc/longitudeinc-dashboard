@@ -1,25 +1,25 @@
 // app/api/gs/getDailyRange/route.ts
 //
-// Read-only reader: returns raw SD_DAILY rows for an arbitrary date range.
+// Read-only reader: returns SD_DAILY rows for an arbitrary date range.
 // Powers the Day-of-Week view (which needs 6wk / YTD / Rolling-12 / All windows,
 // well past the 14-day cap on /api/gs/getDaily).
 //
-// This endpoint does NOT write, does NOT touch auth/payroll logic, and does NOT
-// transform the data — it hands back SD_DAILY rows as objects keyed by header.
-// storeId is left intact; the client maps storeId -> salonNum via SalonRoster.
+// AUTHENTICATED AND SCOPED — it was neither until 2026-08-28. It had no session
+// check at all, so it returned every salon's daily numbers to anyone who knew
+// the URL, signed in or not. The UI hid the Day-of-Week view from most roles;
+// this endpoint answered regardless. If you add another reader here, it needs
+// BOTH the gate and the scope call below — a filter applied in the browser is
+// not a filter.
+//
+// The scoping policy itself lives in lib/scope-filter.ts, shared with
+// /api/gs/getDaily, so the two daily readers cannot drift apart.
 //
 // GET /api/gs/getDailyRange?start=YYYY-MM-DD&end=YYYY-MM-DD
-//
-// ── VERIFY ON YOUR STACK (two things) ───────────────────────────────────────
-// 1. The import below assumes `readSheet(tabName)` from '@/lib/sheets' returns the
-//    raw Google Sheets `values` (a 2-D string array, header row first) — same shape
-//    your other readers consume. If yours returns objects already, drop the
-//    header-mapping block and return rows directly.
-// 2. SD_DAILY's date column is named `date` and is ISO 'YYYY-MM-DD'. If your tab
-//    stores it differently (e.g. M/D/YYYY), normalize in `inRange()` below.
 
 import { NextResponse } from 'next/server'
-import { readSheet } from '@/lib/sheets'
+import { readSheet, getSalonRoster } from '@/lib/sheets'
+import { requireSignedIn } from '@/lib/require-role'
+import { scopeSalonRows } from '@/lib/scope-filter'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -34,6 +34,9 @@ function inRange(iso: string, start: string, end: string): boolean {
 }
 
 export async function GET(req: Request) {
+  const gate = await requireSignedIn()
+  if (!gate.ok) return gate.response
+
   try {
     const url = new URL(req.url)
     const start = (url.searchParams.get('start') || '').slice(0, 10)
@@ -42,13 +45,27 @@ export async function GET(req: Request) {
       return NextResponse.json({ ok: false, error: 'start and end (YYYY-MM-DD) required' }, { status: 400 })
     }
 
-    const values = (await readSheet(SD_DAILY_TAB)) as any[][]
+    const [values, roster] = await Promise.all([
+      readSheet(SD_DAILY_TAB) as Promise<any[][]>,
+      getSalonRoster(),
+    ])
     if (!values || values.length < 2) {
       return NextResponse.json({ ok: true, start, end, count: 0, rows: [] })
     }
 
+    // SD_DAILY keys on storeId only, but every scoping rule is written in terms
+    // of salonNum, so attach it here — the same join lib/sheets.ts does. Rows
+    // whose store is missing from SalonRoster get salonNum '' and are therefore
+    // dropped for a scoped role, which is the safe direction to fail.
+    const salonNumByStore: Record<string, string> = {}
+    for (const r of roster) {
+      const sid = String((r as any).storeId || '').trim()
+      if (sid) salonNumByStore[sid] = String((r as any).salonNum || '').trim()
+    }
+
     const header: string[] = values[0].map((h) => String(h).trim())
     const dateIdx = header.indexOf('date')
+    const storeIdx = header.indexOf('storeId')
 
     const rows: Record<string, any>[] = []
     for (let i = 1; i < values.length; i++) {
@@ -57,10 +74,14 @@ export async function GET(req: Request) {
       if (dateIdx >= 0 && !inRange(raw[dateIdx], start, end)) continue
       const obj: Record<string, any> = {}
       for (let c = 0; c < header.length; c++) obj[header[c]] = raw[c] ?? ''
+      // Additive: the client still maps storeId -> salonNum itself via
+      // SalonRoster, so nothing downstream depends on this field.
+      obj.salonNum = storeIdx >= 0 ? (salonNumByStore[String(raw[storeIdx] ?? '').trim()] || '') : ''
       rows.push(obj)
     }
 
-    return NextResponse.json({ ok: true, start, end, count: rows.length, rows })
+    const scoped = scopeSalonRows(rows, gate.access)
+    return NextResponse.json({ ok: true, start, end, count: scoped.length, rows: scoped })
   } catch (err: any) {
     return NextResponse.json({ ok: false, error: String(err?.message || err) }, { status: 500 })
   }
