@@ -331,17 +331,58 @@ function renderBuild(d){
      + ' Punches from <b>'+(d.meta.punchSource==='live'?'a live SD3 pull':'the nightly scrape')+'</b> ('
      + d.meta.punchSegments+' segments).</div>';
 
+  // ── The three things this file fixes that SD3 gets wrong ──
+  // Everything else in the upload is SD3's own numbers passed straight through,
+  // so these are what actually need reviewing.
+  const otFloaters = d.employees.filter(e=>Math.abs(e.overtimeDelta||0)>=0.005);
+  const sixMoved   = d.sixDay.filter(s=>Math.abs(s.delta)>=0.005);
+  h += '<div class="card"><h2>What this file corrects '
+     + '<span class="sub">everything else is SD3\u2019s own figures, unchanged</span></h2>'
+     + '<div class="stats">'
+     + bigstat('Floater overtime', money(d.totals.overtimeDelta), otFloaters.length
+         + ' worked across salons \u2014 SD3 paid ' + money(d.totals.overtimeSd3Paid), d.totals.overtimeDelta)
+     + bigstat('6-day pay', money(d.totals.sixDayDelta), sixMoved.length
+         + ' corrected \u2014 SD3 paid ' + money(d.totals.sixDaySd3Paid), d.totals.sixDayDelta)
+     + bigstat('Breaks under '+d.rules.breakMaxMinutes+' min', money(0) === money(0) && d.totals.breakMinutes
+         ? d.totals.breakMinutes+' min' : 'none', d.breaks.length
+         + ' people \u2014 ' + hrs(d.totals.breakPayHours) + ' hrs paid back', d.totals.breakMinutes)
+     + '</div></div>';
+
   // ── Totals ──
   h += '<div class="card"><h2>This week <span class="sub">'+esc(d.weekStart)+' → '+esc(d.weekEnd)
      + ' · file '+esc(d.fileName)+'</span></h2><div class="stats">'
      + stat('Employees', d.totals.employees, d.totals.floaters+' across multiple salons')
      + stat('Floor hours', hrs(d.totals.floorHours), '')
-     + stat('Overtime', money(d.totals.overtimePay), 'blended, cross-salon')
+     + stat('Overtime total', money(d.totals.overtimePay), 'blended, cross-salon')
      + stat('6-day owed', money(d.totals.sixDayPay), d.sixDay.filter(s=>s.qualifies).length+' qualified')
-     + stat('6-day net change', money(d.totals.sixDayDelta), 'SD3 already paid '+money(d.totals.sixDaySd3Paid))
-     + stat('Paid breaks', d.totals.breakMinutes+' min', hrs(d.totals.breakPayHours)+' hrs added')
-     + stat('Other earnings', money(d.totals.extraEarnings), 'bonuses + manual')
+     + stat('Bonuses + manual', money(d.totals.extraEarnings), '')
      + '</div></div>';
+
+  // ── 1) Floater overtime ──
+  h += '<div class="card"><h2>1 \u00b7 Floater overtime <span class="sub">'
+     + 'SD3 counts each salon separately, so hours over '+d.rules.otThresholdHours
+     + ' across salons are missed</span></h2><div class="body" style="padding:0;">';
+  if(!otFloaters.length){
+    h += '<div class="body muted">No cross-salon overtime this week \u2014 nobody passed '
+       + d.rules.otThresholdHours + ' hours once their salons were merged.</div>';
+  } else {
+    h += '<div class="scroll"><table><thead><tr><th>Employee</th><th>Salons</th>'
+       + '<th class="num">Hrs worked</th><th class="num">OT hrs</th>'
+       + '<th class="num">SD3 paid</th><th class="num">Owed</th><th class="num">Difference</th>'
+       + '</tr></thead><tbody>';
+    otFloaters.sort((a,b)=>b.overtimeDelta-a.overtimeDelta).forEach(e=>{
+      h += '<tr><td>'+esc(e.employeeName)+(e.isFloater?' <span class="pill jade">floater</span>':'')+'</td>'
+         + '<td class="muted">'+esc(e.salons.join(', '))+'</td>'
+         + '<td class="num">'+hrs(e.totalHoursWorked)+'</td>'
+         + '<td class="num">'+hrs(e.overtimeHours)+'</td>'
+         + '<td class="num">'+money(e.sd3OvertimePay)+'</td>'
+         + '<td class="num">'+money(e.overtimePay)+'</td>'
+         + '<td class="num" style="font-weight:600;color:'+(e.overtimeDelta<0?'#b3261e':'#1a5c0a')+'">'
+         + (e.overtimeDelta>0?'+':'')+money(e.overtimeDelta)+'</td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+  h += '</div></div>';
 
   // ── Exceptions ──
   if(d.exceptions.length){
@@ -360,7 +401,7 @@ function renderBuild(d){
   // SD3 pays 6-day itself on a looser rule, so what matters most is the
   // CORRECTIONS — the rows the office used to hunt down and key by hand.
   const moved = d.sixDay.filter(s=>Math.abs(s.delta)>=0.005).sort((a,b)=>a.delta-b.delta);
-  h += '<div class="card"><h2>6-day corrections <span class="sub">'
+  h += '<div class="card"><h2>2 \u00b7 6-day corrections <span class="sub">'
      + 'SD3 pays this itself on a looser rule — the file carries only the difference'
      + '</span></h2><div class="body" style="padding:0;">';
   if(d.meta && d.meta.sixDaySource === 'modelled'){
@@ -416,13 +457,18 @@ function renderBuild(d){
   h += '</div></div>';
 
   // ── Short breaks ──
-  h += '<div class="card"><h2>Paid short breaks <span class="sub">under '
+  h += '<div class="card"><h2>3 \u00b7 Paid short breaks <span class="sub">under '
      + d.rules.breakMaxMinutes+' minutes · '
      + (d.rules.breakMode==='foldFloorHours' ? 'added to Floor Hours at base rate'
         : d.rules.breakMode==='separateCode' ? 'own earnings code' : 'report only, not paid')
      + '</span></h2><div class="body" style="padding:0;">';
   if(!d.breaks.length){
-    h += '<div class="body muted">No breaks under '+d.rules.breakMaxMinutes+' minutes this week.</div>';
+    h += d.meta.punchSegments === 0
+      ? '<div class="body"><div class="banner warn" style="margin:0;"><b>Not evaluated.</b> '
+        + 'Short breaks are read from clock punches, and none were loaded for this week. '
+        + 'Switch the punch source to \u201cPull live from SD3\u201d and build again.</div></div>'
+      : '<div class="body muted">No breaks under '+d.rules.breakMaxMinutes
+        + ' minutes this week, across '+d.meta.punchSegments+' punch segments.</div>';
   } else {
     h += '<div class="scroll"><table><thead><tr><th>Employee</th><th class="num">Minutes</th>'
        + '<th class="num">Hours added</th><th>Each break</th></tr></thead><tbody>';
@@ -458,6 +504,14 @@ function renderBuild(d){
   $('build-out').innerHTML = h;
 }
 
+// A correction tile: green when it adds pay, red when it claws back, grey at zero.
+function bigstat(k,v,n,delta){
+  const c = (Number(delta)||0) === 0 ? 'var(--text-muted)'
+          : (Number(delta) < 0 ? '#b3261e' : '#1a5c0a');
+  return '<div class="stat" style="padding:14px;"><div class="k">'+esc(k)+'</div>'
+       + '<div class="v" style="color:'+c+';font-size:24px;">'+esc(v)+'</div>'
+       + '<div class="n">'+esc(n||'')+'</div></div>';
+}
 function stat(k,v,n){
   return '<div class="stat"><div class="k">'+esc(k)+'</div><div class="v">'+esc(v)+'</div>'
        + '<div class="n">'+esc(n||'')+'</div></div>';

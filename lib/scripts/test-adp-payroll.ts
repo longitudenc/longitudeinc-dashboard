@@ -212,6 +212,28 @@ check(
   )
 }
 
+// The review screen needs to show what SD3 missed, so the original figure has
+// to survive the recompute.
+{
+  const claudiaSum = result.employees.find(e => e.employeeName.startsWith('HERNANDEZ'))!
+  check(
+    'floater overtime records what SD3 paid (nothing) and what it missed ($11.44)',
+    claudiaSum.sd3OvertimePay === 0 && Math.abs(claudiaSum.overtimeDelta - 11.44) < 0.02,
+    `SD3 $${claudiaSum.sd3OvertimePay}, delta $${claudiaSum.overtimeDelta}`
+  )
+  const dawnSum = result.employees.find(e => e.employeeName.startsWith('BOWERSOX'))!
+  check(
+    'single-salon overtime shows no adjustment — SD3 had it right',
+    Math.abs(dawnSum.sd3OvertimePay - 24.1) < 0.005 && dawnSum.overtimeDelta === 0,
+    `SD3 $${dawnSum.sd3OvertimePay}, delta $${dawnSum.overtimeDelta}`
+  )
+  check(
+    `the week's overtime that SD3 missed: $${result.totals.overtimeDelta.toFixed(2)}`,
+    Math.abs(result.totals.overtimeDelta - 25.94) < 0.05,
+    `got ${result.totals.overtimeDelta}`
+  )
+}
+
 // ── 3) Exceptions (the workbook's CheckPay) ──
 console.log('\nException report')
 const kinds = new Map<string, number>()

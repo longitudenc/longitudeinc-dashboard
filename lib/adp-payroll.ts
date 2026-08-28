@@ -227,6 +227,10 @@ export interface EmployeeSummary {
   totalHoursWorked: number
   overtimeHours: number
   overtimePay: number
+  /** What SD3 paid in overtime, before the cross-salon week was recomputed. */
+  sd3OvertimePay: number
+  /** overtimePay − sd3OvertimePay: overtime SD3 missed by looking one salon at a time. */
+  overtimeDelta: number
   /** true when SD3 split this person across more than one salon. */
   isFloater: boolean
   sixDayAmount: number
@@ -260,6 +264,8 @@ export interface PayrollBuildResult {
     rows: number
     floorHours: number
     overtimePay: number
+    overtimeSd3Paid: number
+    overtimeDelta: number
     sixDayPay: number
     sixDaySd3Paid: number
     sixDayDelta: number
@@ -831,6 +837,11 @@ export function buildPayroll(input: {
 
   const exceptions: PayrollException[] = validateRows(rows, settings)
 
+  // Snapshot SD3's own overtime BEFORE recomputing, so the review screen can
+  // show what it missed by evaluating each salon separately.
+  const sd3OtByRow = new Map<PayConsolRow, number>()
+  for (const r of rows) sd3OtByRow.set(r, r.overtimePay)
+
   // Cross-salon overtime, in place, before anything reads overtimePay.
   applyFloaterOvertime(rows, rules.otThresholdHours)
 
@@ -1111,6 +1122,10 @@ export function buildPayroll(input: {
       totalHoursWorked: round2(group.reduce((s, r) => s + r.totalHoursWorked, 0)),
       overtimeHours: round2(Math.max(0, group.reduce((s, r) => s + r.totalHoursWorked, 0) - rules.otThresholdHours)),
       overtimePay: round2(group.reduce((s, r) => s + r.overtimePay, 0)),
+      sd3OvertimePay: round2(group.reduce((s, r) => s + (sd3OtByRow.get(r) ?? 0), 0)),
+      overtimeDelta: round2(
+        group.reduce((s, r) => s + r.overtimePay - (sd3OtByRow.get(r) ?? 0), 0)
+      ),
       isFloater: group.length > 1,
       sixDayAmount: sd?.amount ?? 0,
       breakMinutes: bd?.totalMinutes ?? 0,
@@ -1137,6 +1152,12 @@ export function buildPayroll(input: {
       rows: uploadRows.length,
       floorHours: round2(rows.reduce((s, r) => s + r.floorHours, 0)),
       overtimePay: round2(rows.reduce((s, r) => s + r.overtimePay, 0)),
+      /** What SD3 paid in overtime, one salon at a time. */
+      overtimeSd3Paid: round2(rows.reduce((s, r) => s + (sd3OtByRow.get(r) ?? 0), 0)),
+      /** Overtime SD3 missed because it never merged the salons. */
+      overtimeDelta: round2(
+        rows.reduce((s, r) => s + r.overtimePay - (sd3OtByRow.get(r) ?? 0), 0)
+      ),
       /** What the employees are owed in total under the real rule. */
       sixDayPay: round2(sixDay.reduce((s, d) => s + d.amount, 0)),
       /** What SD3 already paid inside All Other Incentives. */
