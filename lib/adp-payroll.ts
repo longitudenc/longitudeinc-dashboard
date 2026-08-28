@@ -99,6 +99,8 @@ export interface PayConsolRow {
   totalHours: number
   overtimeHours: number
   totalHoursPay: number
+  /** SD3's own line total: hours pay + overtime, before incentives and tips. */
+  subTotalPay: number
   overtimePay: number
   productivityIncentive: number
   productIncentive: number
@@ -320,6 +322,7 @@ export function toPayConsolRows(objects: Record<string, string>[]): PayConsolRow
       totalHours: num(o['Total Hours']),
       overtimeHours: num(o['Overtime Hours']),
       totalHoursPay: num(o['Total Hours Pay']),
+      subTotalPay: num(o['Sub-Total Pay']),
       overtimePay: num(o['Overtime Hours Pay']),
       productivityIncentive: num(o['Productivity Incentive']),
       productIncentive: num(o['Product Incentive']),
