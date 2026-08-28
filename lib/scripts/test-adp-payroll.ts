@@ -819,15 +819,35 @@ check(
   JSON.stringify(brk?.bySalon)
 )
 
-// Folded into Floor Hours, the minutes reach ADP at the employee's base rate,
-// on the row for the salon where the break was taken.
+// Short breaks are OFF by default so the file matches what the office already
+// sends to ADP. Turned on, the minutes are folded into Floor Hours and reach
+// ADP at the employee's base rate, on the row for the salon where the break
+// was taken.
+const breakSettings = {
+  ...settings,
+  rules: { ...settings.rules, breakMode: 'foldFloorHours' as const },
+}
 const withBreaks = buildPayroll({
+  rows: toPayConsolRows(objects).filter(r => r.employeeName.startsWith('CHONG NEWMAN')),
+  punches: breakPunches,
+  settings: breakSettings,
+  weekStart: '2026-08-15',
+  weekEnd: '2026-08-21',
+})
+const breaksOff = buildPayroll({
   rows: toPayConsolRows(objects).filter(r => r.employeeName.startsWith('CHONG NEWMAN')),
   punches: breakPunches,
   settings,
   weekStart: '2026-08-15',
   weekEnd: '2026-08-21',
 })
+check(
+  'breaks are off by default \u2014 nothing calculated, nothing in the file',
+  breaksOff.breaks.length === 0 && breaksOff.totals.breakMinutes === 0 &&
+    breaksOff.employees.every(e => e.breakMinutes === 0) &&
+    breaksOff.employees.every(e => e.lines.every(l => !/break/i.test(l.label))),
+  `${breaksOff.breaks.length} break rows, ${breaksOff.totals.breakMinutes} minutes`
+)
 const floorCol = withBreaks.upload.header.indexOf('Hours 4 Amount')
 const floorTotal = round2(
   withBreaks.upload.rows.reduce((s, r) => s + Number(r[floorCol] || 0), 0)

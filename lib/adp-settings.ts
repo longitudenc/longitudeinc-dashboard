@@ -110,8 +110,8 @@ const DEFAULT_CODES: Record<string, string> = {
   cashCheckTips: 'T',
   chargeTips: 'CT',
   // Lines this tool adds. sixDay and stylistBonus have no assigned code yet;
-  // shortBreak defaults to folding into Floor Hours (see breakMode) so it needs
-  // no code at all.
+  // shortBreak is unused while breakMode is 'off', and needs a code only if
+  // breaks are ever turned back on in 'separateCode' mode.
   sixDay: '',
   shortBreak: '',
   stylistBonus: '',
@@ -150,12 +150,15 @@ export interface AdpRules {
   /** Breaks strictly under this many minutes must be paid. */
   breakMaxMinutes: number
   /**
+   * 'off' skips short breaks entirely — nothing is calculated, nothing reaches
+   *   the file, and the review screen never mentions them. Default, so a week
+   *   built here lines up with the weeks the office already sent to ADP.
    * 'foldFloorHours' adds the minutes to the Floor Hours line, so ADP pays them
-   *   at the employee's own base rate with no new earnings code. Default.
+   *   at the employee's own base rate with no new earnings code.
    * 'separateCode' emits them on their own code (requires code.shortBreak).
    * 'reportOnly' calculates and shows them but writes nothing to the file.
    */
-  breakMode: 'foldFloorHours' | 'separateCode' | 'reportOnly'
+  breakMode: 'off' | 'foldFloorHours' | 'separateCode' | 'reportOnly'
 
   // ── Overtime ──
   /** Weekly hours after which the half-time premium applies. */
@@ -177,7 +180,7 @@ const DEFAULT_RULES: AdpRules = {
   sd3SixDayMinDays: 6,
   sd3SixDayMinTotalHours: 34,
   breakMaxMinutes: 20,
-  breakMode: 'foldFloorHours',
+  breakMode: 'off',
   otThresholdHours: 40,
   bonusPaycheckOfMonth: 3,
   payDateOffsetDays: 6,
@@ -267,7 +270,7 @@ export async function loadAdpSettings(): Promise<AdpSettings> {
           break
         case 'breakMaxMinutes': settings.rules.breakMaxMinutes = toNum(raw, DEFAULT_RULES.breakMaxMinutes); break
         case 'breakMode':
-          if (raw === 'foldFloorHours' || raw === 'separateCode' || raw === 'reportOnly') {
+          if (raw === 'off' || raw === 'foldFloorHours' || raw === 'separateCode' || raw === 'reportOnly') {
             settings.rules.breakMode = raw
           }
           break

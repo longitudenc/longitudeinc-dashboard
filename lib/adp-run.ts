@@ -206,7 +206,7 @@ async function buildPayIdByPk(rows: { globalId: string; payId: string }[]): Prom
 
 /** Punches from the nightly scrape. Cheap — one Sheets read for the week. */
 async function punchesFromSheet(weekStart: string, weekEnd: string): Promise<PunchSegment[]> {
-  // fresh: this feeds 6-day pay and short breaks, so it must never come from a
+  // fresh: this feeds 6-day pay, so it must never come from a
   // cached read. The scrape-only tabs are cached for minutes at a time for the
   // dashboard's benefit; payroll opts out of that.
   const { chkinout } = await getChkInOutRange(weekStart, weekEnd, { fresh: true })
@@ -233,7 +233,7 @@ async function punchesFromSheet(weekStart: string, weekEnd: string): Promise<Pun
  * Punches come from the nightly SD_CHKINOUT scrape by default; if that has
  * nothing for the week (the scrape hasn't run, or the week is older than the
  * retained window) it falls back to pulling them live from SD3, because 6-day
- * pay and short breaks are silently wrong without them.
+ * pay is silently wrong without them.
  */
 export async function runPayrollBuild(opts: RunOptions = {}): Promise<RunResult> {
   const startedAt = Date.now()

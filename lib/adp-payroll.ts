@@ -895,7 +895,9 @@ export function buildPayroll(input: {
   const { details: sixDay, exceptions: sixDayExceptions } =
     computeSixDay(rows, punches, settings, input.dailyFloor ?? [], input.sd3SixDay)
   exceptions.push(...sixDayExceptions)
-  const breaks = computeShortBreaks(rows, punches, settings)
+  // Short breaks are off by default, so a week built here matches the weeks the
+  // office already sent to ADP. Set breakMode in ADP_SETTINGS to turn them on.
+  const breaks = rules.breakMode === 'off' ? [] : computeShortBreaks(rows, punches, settings)
 
   const payDate = payDateFor(weekEnd, rules.payDateOffsetDays)
   const paycheckOfMonth = occurrenceInMonth(payDate)
@@ -1018,7 +1020,7 @@ export function buildPayroll(input: {
   // wage with no new earnings code — the one option that works before ADP
   // assigns a dedicated code. Attribution is per salon, from the punch record.
   const breakCode = codes.shortBreak || ''
-  if (rules.breakMode !== 'reportOnly') {
+  if (rules.breakMode !== 'reportOnly' && rules.breakMode !== 'off') {
     for (const d of breaks) {
       const group = rowsFor(d.payId)
       if (group.length === 0) continue
