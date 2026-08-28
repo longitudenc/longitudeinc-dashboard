@@ -30,7 +30,7 @@ const VALID_ROLES: Role[] = [
 
 // The columns the panel edits. Any OTHER column already on the tab is preserved
 // as-is, so a note or a column someone added by hand does not get wiped by a save.
-const CANON = ['email', 'role', 'name', 'globalId', 'salons'] as const
+const CANON = ['email', 'role', 'name', 'globalId', 'amId', 'salons'] as const
 
 const norm = (s: unknown) => String(s ?? '').trim().toLowerCase()
 const str = (s: unknown) => String(s ?? '').trim()
@@ -42,6 +42,7 @@ function headerIndex(header: string[], field: string): number {
     role: ['role', 'access', 'tier'],
     name: ['name', 'full name', 'fullname', 'display name', 'displayname'],
     globalId: ['globalid', 'global id', 'globalemployeekey'],
+    amId: ['amid', 'am id', 'am'],
     salons: ['salons', 'salon', 'salonnums'],
   }
   const want = aliases[field] || [field]
@@ -89,6 +90,7 @@ export async function POST(req: NextRequest) {
         role,
         name: str(r?.name),
         globalId: str(r?.globalId),
+        amId: str(r?.amId),
         salons: Array.isArray(r?.salons) ? r.salons.join(' ') : str(r?.salons),
       })
     }

@@ -164,6 +164,15 @@ export function employeeAccessFor(email: string, t: AccessTables): Access | null
   }
   const globalId = String(profile.globalId).trim()
 
+  // 1b) DEPARTED? The profile scrape does NOT remove leavers -- it keeps the
+  //     row and flips `inactive` to true. Without this check a former employee
+  //     keeps a working magic link forever: on 2026-08-28 that was 118 people,
+  //     every one of them with a usable email, going back to January 2025.
+  //     Deliberately explicit-true only. If the column were ever dropped by an
+  //     upstream change this reverts to the old behaviour rather than locking
+  //     out all 127 active employees at once.
+  if (norm(profile.inactive) === 'true') return null
+
   // 2) Area manager FIRST -- an active AM (with at least one current, un-ended
   //    assignment) resolves as area_manager EVEN IF they are also the listed
   //    manager of one of their salons (e.g. Cassi manages 3058, Dana manages

@@ -30,6 +30,7 @@ export interface AccessEntry {
   why: string           // plain-English derivation, shown in the panel
   salons: string[]
   globalId: string
+  amId: string          // Users-tab column the client reads as USER_AM_ID
   editable: boolean     // only Users-tab rows can be changed from the panel
 }
 
@@ -37,6 +38,8 @@ export interface AccessAudit {
   entries: AccessEntry[]
   /** Employees with no email on file — they simply cannot sign in. */
   noEmail: { name: string; globalId: string; salon: string }[]
+  /** Departed employees, flagged inactive and therefore refused. */
+  inactiveDenied: number
   counts: Record<string, number>
 }
 
@@ -85,12 +88,14 @@ export async function listAllAccess(): Promise<AccessAudit> {
       why: 'Listed on the Users tab. This is checked first, so it overrides any role the employee tables would give.',
       salons: salons ? salons.split(/[,\s]+/).filter(Boolean) : [],
       globalId: pick(u, 'globalId', 'global id', 'globalemployeekey'),
+      amId: pick(u, 'amId', 'am id', 'am'),
       editable: true,
     })
   }
 
   // 2) Everyone else resolves through the employee cascade.
   const noEmail: AccessAudit['noEmail'] = []
+  let inactiveDenied = 0
   for (const p of tables.profiles) {
     const email = norm(pick(p, 'email'))
     const globalId = pick(p, 'globalId', 'global id', 'globalemployeekey')
@@ -102,6 +107,10 @@ export async function listAllAccess(): Promise<AccessAudit> {
     }
     if (seen.has(email)) continue     // Users tab already won
     seen.add(email)
+
+    // Counted before resolving, so the panel can SAY these are refused rather
+    // than just omitting them -- "not listed" and "blocked" look identical.
+    if (norm(pick(p, 'inactive')) === 'true') { inactiveDenied++; continue }
 
     const access: Access | null = employeeAccessFor(email, tables)
     if (!access) continue             // no globalId -> cannot sign in
@@ -124,6 +133,7 @@ export async function listAllAccess(): Promise<AccessAudit> {
       why,
       salons: access.salons || [],
       globalId: access.globalId || globalId,
+      amId: '',
       editable: false,
     })
   }
@@ -134,5 +144,5 @@ export async function listAllAccess(): Promise<AccessAudit> {
   const counts: Record<string, number> = {}
   for (const e of entries) counts[e.role] = (counts[e.role] || 0) + 1
 
-  return { entries, noEmail, counts }
+  return { entries, noEmail, inactiveDenied, counts }
 }

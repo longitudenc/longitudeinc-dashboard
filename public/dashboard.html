@@ -10264,7 +10264,7 @@ function _accHead(cols){
 }
 
 function _accRow(e, roles){
-  e = e || { email:'', role:'viewer', name:'', globalId:'', salons:[] };
+  e = e || { email:'', role:'viewer', name:'', globalId:'', amId:'', salons:[] };
   const opts = (roles || []).map(function(r){
     return '<option value="' + _accEsc(r) + '"' + (r === e.role ? ' selected' : '') + '>' + _accEsc(r) + '</option>';
   }).join('');
@@ -10273,7 +10273,8 @@ function _accRow(e, roles){
     + '<td style="' + _ACC_TD + '"><select class="acc-role" style="' + _ACC_INP + '">' + opts + '</select></td>'
     + '<td style="' + _ACC_TD + '"><input class="acc-name" style="' + _ACC_INP + '" value="' + _accEsc(e.name) + '"></td>'
     + '<td style="' + _ACC_TD + '"><input class="acc-gid" style="' + _ACC_INP + '" value="' + _accEsc(e.globalId) + '"></td>'
-    + '<td style="' + _ACC_TD + '"><input class="acc-salons" style="' + _ACC_INP + '" value="' + _accEsc((e.salons || []).join(' ')) + '" placeholder="3058 7728"></td>'
+    + '<td style="' + _ACC_TD + '"><input class="acc-amid" style="' + _ACC_INP + '" value="' + _accEsc(e.amId) + '" placeholder="e.g. kayla"></td>'
+    + '<td style="' + _ACC_TD + '"><input class="acc-salons" style="' + _ACC_INP + '" value="' + _accEsc((e.salons || []).join(' ')) + '" placeholder="e.g. 3058 7728"></td>'
     + '<td style="' + _ACC_TD + '"><button class="btn btn-sm" title="Remove" onclick="accRemoveRow(this)">&#10005;</button></td>'
     + '</tr>';
 }
@@ -10308,7 +10309,7 @@ function renderAccessPanel(){
   html += '<div style="font-size:12px;font-weight:700;margin:10px 0 4px;">Assigned roles'
         + '<span style="font-weight:400;color:var(--text-muted);"> &mdash; the Users tab. Checked first, so a person listed here keeps this role whatever the employee tables say.</span></div>';
   html += '<div style="overflow-x:auto;"><table id="access-users-table" style="width:100%;border-collapse:collapse;font-size:12px;">'
-        + _accHead(['Email','Role','Name','Global ID','Salons','']) + '<tbody>'
+        + _accHead(['Email','Role','Name','Global ID','AM ID','Salons','']) + '<tbody>'
         + manual.map(function(e){ return _accRow(e, roles); }).join('')
         + '</tbody></table></div>';
   html += '<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'
@@ -10333,6 +10334,13 @@ function renderAccessPanel(){
           }).join('')
         + '</tbody></table></div>';
 
+  if(d.inactiveDenied){
+    html += '<div style="font-size:11px;color:var(--text-muted);margin-top:12px;">'
+          + '<b>' + d.inactiveDenied + '</b> former employee' + (d.inactiveDenied === 1 ? ' is' : 's are')
+          + ' flagged inactive on their profile and are refused at sign-in. They keep their'
+          + ' EmployeeProfile row &mdash; the scrape flags leavers rather than deleting them.</div>';
+  }
+
   const ne = d.noEmail || [];
   if(ne.length){
     html += '<div style="font-size:11px;color:var(--text-muted);margin-top:12px;">'
@@ -10355,6 +10363,7 @@ async function saveUsersTab(){
       role:     val(tr, '.acc-role'),
       name:     val(tr, '.acc-name'),
       globalId: val(tr, '.acc-gid'),
+      amId:     val(tr, '.acc-amid'),
       salons:   val(tr, '.acc-salons')
     };
   }).filter(function(r){ return r.email || r.role; });

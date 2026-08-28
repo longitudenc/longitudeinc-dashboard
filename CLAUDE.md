@@ -78,6 +78,12 @@ as its own request, so every job gets a fresh 60s Hobby budget. Saturday weekly 
 dedicated Vercel cron (`/api/cron/weekly`). Profile scraper runs nightly and captures
 `dateOfHire`, `birthday` (**month-day only**) and `phone`.
 
+> **Departed employees are NOT removed from `EmployeeProfile`.** The scrape keeps the
+> row and flips `inactive` to `true` — 118 of 245 rows on 2026-08-28, going back to
+> Jan 2025. `resolveAccess` refuses them (it did not until 2026-08-28, so every leaver
+> had a working magic link). Anything else reading that tab must filter `inactive`
+> too, or it is counting leavers: that is why the roster looked like 227 stylists.
+
 > **To add a nightly data point:** build the `/api/scrape/<name>` endpoint, then add one
 > line to the matching group in `lib/scrape-plan.ts`. The workflow picks it up
 > automatically — never edit the YAML to add a scrape.
