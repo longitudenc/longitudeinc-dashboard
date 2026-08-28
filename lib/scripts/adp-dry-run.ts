@@ -26,9 +26,10 @@
 //   --week YYYY-MM-DD   week-ending Friday (default: last completed week)
 //   --csv PATH          Payroll Consolidated CSV instead of pulling from SD3
 //   --punches PATH      punches JSON (as saved by a previous --save run)
-//   --detail PATH       SD3 "Payroll Detail Report - Weekly" CSV. BEST source:
-//                       gives floor hours per DAY and SD3's own "Six Day" line,
-//                       so nothing about SD3's rule has to be inferred.
+//   --detail PATH       SD3 "Payroll Detail Report - Weekly" CSV. A fallback for
+//                       offline runs: gives floor hours per DAY and SD3's own
+//                       "Six Day" line. The live path reads the same figures
+//                       from payrollweekresult and needs no download.
 //   --daily PATH        Employee Performance CSV covering the week, one row per
 //                       employee PER DAY. This is the 6-day day-count source and
 //                       joins on Pay ID, so no name matching is involved.
@@ -44,7 +45,7 @@ import { config as loadEnv } from 'dotenv'
 import { defaultSettings } from '../adp-settings'
 import { parseCsv, rowsToObjectsAt } from '../csv'
 import { fiscalWeekContaining, lastCompletedFiscalWeek, todayET } from '../fiscal'
-import { parsePayrollDetail, type Sd3SixDayRow } from '../adp-payroll-detail'
+import { parsePayrollDetail, parsePayrollWeekResult, type Sd3SixDayRow } from '../adp-payroll-detail'
 import {
   buildPayroll,
   toPayConsolRows,
@@ -159,7 +160,8 @@ async function main() {
   } else {
     // Imported lazily so the offline path needs no credentials at all.
     const { authenticate, fetchSalons, fetchPayrollCsv, fetchEmpChkInOut,
-            fetchEmployeePerformanceCsv, batchMap } = await import('../sd3')
+            fetchEmployeePerformanceCsv, fetchPayrollWeekResult,
+            fetchEmployeeReporting, batchMap } = await import('../sd3')
     if (!process.env.SD3_USERNAME || !process.env.SD3_PASSWORD) {
       console.error(
         '\nSD3_USERNAME / SD3_PASSWORD are not set.\n' +
@@ -190,21 +192,66 @@ async function main() {
     })
     punches = perStore.flat()
 
-    // Per-day floor hours: SD3's employee report, pulled one day at a time so
-    // each row is a single date. Keyed by Pay ID, so it joins to payroll exactly.
-    console.log('Daily hours    : pulling 7 days live from SD3…')
-    const days: string[] = []
-    for (let d = weekStart; d <= weekEnd; d = addDaysIso(d, 1)) days.push(d)
-    const perDay = await batchMap(days, 3, async (d: string) => {
+    // SD3's own payroll line items: per-day floor hours (line 1) AND the
+    // "SIX DAY BONUS" it already paid (line 8). This is what makes the 6-day
+    // netting exact. Records key on employeepk, so build the map from SD3's
+    // own employee feed — no Google Sheets needed for a dry run.
+    console.log('Payroll lines  : pulling payrollweekresult + employee ids from SD3…')
+    const payIdByPk: Record<string, string> = {}
+    try {
+      const payIdByGid: Record<string, string> = {}
+      for (const r of toPayConsolRows(rowsToObjectsAt(parseCsv(csvText), 0))) {
+        if (r.globalId && r.payId) payIdByGid[r.globalId] = r.payId
+      }
+      const reporting = await fetchEmployeeReporting(
+        session, salons.map(s => s.storeId), weekStart, weekEnd
+      ) as any[]
+      for (const e of Array.isArray(reporting) ? reporting : []) {
+        const gid = String(e?.globalEmployeeKey ?? '').trim()
+        const pk = String(e?.objectId?.idSnapshot?.employeepk ?? e?.employeepk ?? '').trim()
+        if (gid && pk && payIdByGid[gid]) payIdByPk[pk] = payIdByGid[gid]
+      }
+    } catch (e) {
+      console.warn(`  ! employee id map: ${e instanceof Error ? e.message : e}`)
+    }
+
+    const perStoreLines = await batchMap(salons, 4, async s => {
       try {
-        const csv = await fetchEmployeePerformanceCsv(session, salons.map(s => s.storeId), d, d)
-        return dailyRowsFromCsv(csv, d)
+        const recs = await fetchPayrollWeekResult(session, s.storeId, weekStart, weekEnd)
+        return parsePayrollWeekResult(recs, s.salonNum, weekStart, payIdByPk)
       } catch (e) {
-        console.warn(`  ! ${d}: ${e instanceof Error ? e.message : e}`)
-        return [] as DailyFloorRow[]
+        console.warn(`  ! salon ${s.salonNum}: ${e instanceof Error ? e.message : e}`)
+        return null
       }
     })
-    dailyFloor = perDay.flat()
+    const okLines = perStoreLines.filter(Boolean) as NonNullable<(typeof perStoreLines)[number]>[]
+    if (okLines.length > 0) {
+      sd3SixDay = okLines.flatMap(p => p.sd3SixDay)
+      dailyFloor = okLines.flatMap(p => p.dailyFloor)
+      console.log(`                 ${okLines.length}/${salons.length} salons · ` +
+        `${dailyFloor.length} employee-days · ${sd3SixDay.length} with a SIX DAY BONUS line · ` +
+        `${Object.keys(payIdByPk).length} employees mapped to a Payroll ID`)
+      for (const w of okLines.flatMap(p => p.warnings)) console.log(`  ! ${w}`)
+    }
+
+    // Fallback: if the line-item feed gave nothing, fall back to the per-day
+    // employee report for day counts. SD3's own six-day figure stays unknown,
+    // and the run says so rather than pretending otherwise.
+    if (dailyFloor.length === 0) {
+      console.log('Daily hours    : payrollweekresult empty — falling back to the daily report…')
+      const days: string[] = []
+      for (let d = weekStart; d <= weekEnd; d = addDaysIso(d, 1)) days.push(d)
+      const perDay = await batchMap(days, 3, async (d: string) => {
+        try {
+          const csv = await fetchEmployeePerformanceCsv(session, salons.map(s => s.storeId), d, d)
+          return dailyRowsFromCsv(csv, d)
+        } catch (e) {
+          console.warn(`  ! ${d}: ${e instanceof Error ? e.message : e}`)
+          return [] as DailyFloorRow[]
+        }
+      })
+      dailyFloor = perDay.flat()
+    }
   }
 
   if (punchPath) {
@@ -247,6 +294,7 @@ async function main() {
     writeFileSync(join(outDir, `payroll-${weekEnd}.csv`), csvText)
     writeFileSync(join(outDir, `punches-${weekEnd}.json`), JSON.stringify(punches))
     writeFileSync(join(outDir, `daily-${weekEnd}.json`), JSON.stringify(dailyFloor))
+    writeFileSync(join(outDir, `sixday-${weekEnd}.json`), JSON.stringify(sd3SixDay ?? []))
     console.log(`Saved raw inputs to ${outDir}/ for offline replay`)
   }
 
