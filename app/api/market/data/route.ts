@@ -10,7 +10,7 @@
 
 import { NextResponse } from 'next/server'
 import { readSheet, rowsToObjects } from '@/lib/sheets'
-import { requireOffice } from '@/lib/require-role'
+import { requireMarketView } from '@/lib/require-role'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -78,8 +78,8 @@ async function load() {
 
 export async function GET(request: Request) {
   // MarketWeekly is MARKET-WIDE: it covers salons we do not operate.
-  // Owner / admin / office only. Was open to the internet until 2026-08-28.
-  const gate = await requireOffice()
+  // Owner / admin / viewer / office. Was open to the internet until 2026-08-28.
+  const gate = await requireMarketView()
   if (!gate.ok) return gate.response
   try {
     const { rows, weeks, ratingHistory: hist } = await load()

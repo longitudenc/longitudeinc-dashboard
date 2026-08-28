@@ -51,6 +51,14 @@ export function requireSignedIn() {
   return requireRoles(['owner', 'admin', 'viewer', 'area_manager', 'manager', 'stylist', 'office', 'maintenance'])
 }
 
+// Market-wide data (MarketWeekly, which covers salons we do not operate).
+// The office roles PLUS viewer, which sees everything else in the app.
+// Kept separate from requireOffice() on purpose: that gates the ADP payroll
+// builder under /api/office/*, and viewer has no business there.
+export function requireMarketView() {
+  return requireRoles(['owner', 'admin', 'viewer', 'office'])
+}
+
 // Owner, admin, viewer, AM, manager, office — everyone entitled to a
 // salon-level view of our own salons (Google ratings, CAQ). Excludes stylist,
 // who sees only themselves, and maintenance, a scoped requests-only login.

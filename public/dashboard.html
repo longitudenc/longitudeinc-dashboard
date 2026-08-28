@@ -4584,11 +4584,14 @@ function startDashboard(){
       return;
     }
 
-    // Office Tools (ADP payroll) and Market Compare — both gated to the roles
-    // requireOffice() allows. MarketWeekly covers salons we do not operate.
+    // Office Tools (the ADP payroll upload) — the roles requireOffice() allows.
     if(['owner','admin','office'].includes(SESSION.role)){
       const ol = document.getElementById('office-link');
       if(ol) ol.style.display = 'inline-block';
+    }
+
+    // Market Compare — requireMarketView(): the office roles plus viewer.
+    if(['owner','admin','viewer','office'].includes(SESSION.role)){
       const ml = document.getElementById('market-link');
       if(ml) ml.style.display = 'inline-block';
     }

@@ -121,8 +121,9 @@ is a separate path used only by `/api/cron/weekly` and `/api/report/payroll-pace
   `lib/scope-filter.ts`. Four routes shipped with no gate at all and served company-wide
   data to the open internet until 2026-08-28 (`/api/gs/getDailyRange` was the live one).
   **A filter applied in `dashboard.html` is not a filter.** Market-wide data
-  (`MarketWeekly`, other operators' salons) is `requireOffice`; our own salons' ratings
-  and CAQ are `requireSalonView` (manager and up).
+  (`MarketWeekly`, other operators' salons) is `requireMarketView` (owner/admin/viewer/
+  office — deliberately NOT `requireOffice`, which gates the ADP payroll builder); our own
+  salons' ratings and CAQ are `requireSalonView` (manager and up).
 
 ---
 
