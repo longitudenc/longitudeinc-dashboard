@@ -7,20 +7,36 @@
 // workflow fetches this plan and loops over whatever it returns, so the
 // schedule is code (reviewable, testable) instead of shell in a YAML file.
 //
-// Everything is computed in UTC, matching the workflow this replaced (it used
-// `date -u` throughout). The job ORDER is deliberate and load-bearing:
+// TWO DESIGN RULES, both learned the hard way:
+//
+//   1. NEVER pull only yesterday. The day-scrapes re-pull a rolling window of
+//      the last LOOKBACK_DAYS days, as one job PER DAY. Upserts are idempotent,
+//      so re-pulling costs a little time and nothing else — and a night that is
+//      missed entirely repairs itself on the next run instead of leaving a
+//      permanent hole. Two consecutive nights were lost this way before the
+//      window existed.
+//   2. VERIFY THE OUTCOME. The plan ends with /api/health/daily-check, which
+//      looks at the sheet and fails the run when a feed gained no rows. A job
+//      reporting {"ok":true} is not evidence that data arrived: SD_HALFHOUR
+//      answered ok:true for 70 days while writing nothing.
+//
+// One job per day rather than one ranged job on purpose: each HTTP request gets
+// its own 60s Vercel budget, and demand alone takes ~21s for a single day.
+//
+// Everything is computed in UTC, matching the workflow this replaced. The job
+// ORDER is deliberate and load-bearing:
 //
 //   1. EXPIRING source first. /rest/invoice is a rolling ~5-week window
 //      upstream, so a day not captured before it ages out is lost forever.
-//      These run before anything that could burn the budget.
 //   2. Core daily feed, then the access-control refresh.
 //   3. Saturday: the weekly finalizer.
 //   4. Tuesday: re-pull the week that closed last Friday, because SD3's payroll
 //      only settles the Tuesday after a week ends.
 //   5. Month-end: monthly aggregates + that month's bonus period.
-//   6. Recoverable detail last. These re-run nightly over a week-to-date
-//      window, so a hiccup here self-heals on the next run.
+//   6. Recoverable detail. These already default to week-to-date, so they
+//      self-heal within the week without a window.
 //   7. Wednesday: the payroll-pace email, after the data it reads has landed.
+//   8. Always last: did any of it actually arrive?
 
 export interface PlannedJob {
   name: string
@@ -29,6 +45,14 @@ export interface PlannedJob {
 }
 
 const scrape = (name: string, query = ''): PlannedJob => ({ name, path: `/api/scrape/${name}`, query })
+
+/**
+ * How many days each nightly run re-pulls, counting back from yesterday.
+ * 4 means a run can be missed three nights running and still self-heal.
+ * Raising it costs roughly (21s + 4s + 13s) per extra day, spread over
+ * separate requests.
+ */
+export const LOOKBACK_DAYS = 4
 
 // ── UTC date helpers ────────────────────────────────────────────────────────
 // String in, string out. Everything is YYYY-MM-DD so a lexicographic compare is
@@ -64,25 +88,40 @@ export function todayUtc(): string {
   return new Date().toISOString().slice(0, 10)
 }
 
+/** Yesterday back to yesterday-(n-1), OLDEST FIRST so gaps fill in order. */
+export function lookbackDays(today: string, n = LOOKBACK_DAYS): string[] {
+  const out: string[] = []
+  for (let i = n; i >= 1; i--) out.push(addDaysUtc(today, -i))
+  return out
+}
+
 /**
  * The ordered jobs to run for `todayIso` (UTC, defaults to now).
  *
- * `today` is the day the workflow fires; `y` is yesterday, the completed day
- * most scrapes actually pull.
+ * `today` is the day the workflow fires; `y` is yesterday, the most recent
+ * completed day.
  */
 export function planForDate(todayIso?: string): PlannedJob[] {
   const today = todayIso && /^\d{4}-\d{2}-\d{2}$/.test(todayIso) ? todayIso : todayUtc()
   const y = addDaysUtc(today, -1)
   const dow = dowUtc(today)
+  const window = lookbackDays(today)
   const jobs: PlannedJob[] = []
 
-  // 1. EXPIRING SOURCE — a missed day is unrecoverable, so these go first.
-  jobs.push(scrape('demand',   `&start=${y}&end=${y}`))
-  jobs.push(scrape('halfhour', `&start=${y}&end=${y}`))
+  // 1. EXPIRING SOURCE — a day lost here is unrecoverable, so it leads and gets
+  //    the full window. One job per day: ~21s each, well inside 60s.
+  for (const d of window) jobs.push(scrape('demand', `&start=${d}&end=${d}`))
 
-  // 2. Core daily feed + access-control refresh (both default to yesterday).
+  // NOTE: `halfhour` is deliberately absent. SD3 has returned an empty response
+  // for every store since 2026-06-19, nothing in the dashboard reads SD_HALFHOUR,
+  // and the job answered ok:true throughout. Re-add one line here if SD3 starts
+  // serving it again and something needs it.
+
+  // 2. Core daily feed, windowed for the same reason.
   //    ADD A PLAIN NIGHTLY SCRAPE HERE.
-  jobs.push(scrape('daily'))
+  for (const d of window) jobs.push(scrape('daily', `&start=${d}&end=${d}`))
+
+  // Access control: departed employees drop out of EmployeeProfile within a day.
   jobs.push(scrape('profile'))
 
   // 3. SATURDAY — weekly finalizer.
@@ -113,18 +152,26 @@ export function planForDate(todayIso?: string): PlannedJob[] {
     jobs.push(scrape('bonus-period', `&year=${yearOf(y)}&month=${monthOf(y)}`))
   }
 
-  // 6. RECOVERABLE detail last — week-to-date, fills in place, self-heals.
-  jobs.push(scrape('employee-daily'))
+  // 6. Per-employee daily detail, windowed like the rest.
+  for (const d of window) jobs.push(scrape('employee-daily', `&start=${d}&end=${d}`))
+
+  // Shifts and clock-in/out already default to a week-to-date pull, so they
+  // recover a missed night on their own and need no window.
   jobs.push(scrape('shifts'))
   jobs.push(scrape('chkinout'))
 
   // 7. WEDNESDAY — the payroll-pace email. Not a scrape: it reads what the runs
-  //    above have landed, so it goes last. This used to hang off /api/cron/run,
-  //    which nothing scheduled after the workflow took over, so it had silently
-  //    stopped sending. Same secret as the scrape routes.
+  //    above have landed, so it goes near the end. This used to hang off
+  //    /api/cron/run, which nothing scheduled after the workflow took over, so
+  //    it had silently stopped sending.
   if (dow === 3) {
     jobs.push({ name: 'payroll-pace', path: '/api/report/payroll-pace', query: '' })
   }
+
+  // 8. ALWAYS LAST — verify the data actually arrived. Deliberately takes no
+  //    date: it checks yesterday in EASTERN time, which is the day the scrape
+  //    endpoints themselves target, so the check and the scrape always agree.
+  jobs.push({ name: 'daily-check', path: '/api/health/daily-check', query: '' })
 
   return jobs
 }
