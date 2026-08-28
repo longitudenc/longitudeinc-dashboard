@@ -33,6 +33,17 @@ export async function GET(request: Request) {
         '[Longitude] Payroll pace did NOT send',
         `<p>sendPayrollPace returned sent=false (salons=${r.count}). Check that PAYROLL_PACE_EMAIL is set and that there is week-to-date data.</p>`
       )
+      // Report FAILURE, not success. This used to answer ok:true, so a run in
+      // which nobody was emailed still went green -- and sendAlert above is no
+      // help when it is ALERT_EMAIL that is missing. The nightly workflow keys
+      // on "ok":false, so this now turns the run red.
+      return NextResponse.json({
+        ...r,
+        ok: false,
+        error: r.count === 0
+          ? 'No week-to-date salon data to report on.'
+          : 'Built the report but sent nothing — PAYROLL_PACE_EMAIL (or RESEND_API_KEY) is not set in Vercel.',
+      })
     }
     return NextResponse.json({ ok: true, ...r })
   } catch (e: any) {
