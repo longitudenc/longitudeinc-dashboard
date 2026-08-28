@@ -273,11 +273,12 @@ export async function readRowsInDateRange(
   tab: string,
   start: string,
   end: string,
-  opts?: { dateHeader?: string }
+  opts?: { dateHeader?: string; fresh?: boolean }
 ): Promise<any[][]> {
   const wanted = (opts?.dateHeader || 'date').toLowerCase()
+  const fresh = !!opts?.fresh
   try {
-    const headerRows = (await readSheet(tab, 'A1:ZZ1')) as any[][]
+    const headerRows = (await readSheet(tab, 'A1:ZZ1', { fresh })) as any[][]
     const header = headerRows[0] || []
     if (!header.length) return []
 
@@ -288,7 +289,7 @@ export async function readRowsInDateRange(
     }
 
     const L = colLetter(dateIdx)
-    const col = (await readSheet(tab, `${L}2:${L}`)) as any[][]
+    const col = (await readSheet(tab, `${L}2:${L}`, { fresh })) as any[][]
 
     // Sheet row numbers (1-based, header is row 1, so data starts at row 2).
     const runs: Array<[number, number]> = []
@@ -323,11 +324,12 @@ export async function readRowsInDateRange(
   }
 }
 
-export async function getDailyRange(start: string, end: string, opts?: { skipEmp?: boolean }) {
+export async function getDailyRange(start: string, end: string, opts?: { skipEmp?: boolean; fresh?: boolean }) {
   const skipEmp = !!opts?.skipEmp
+  const fresh = !!opts?.fresh
   const [salonRaw, empRaw, rosterRaw] = await Promise.all([
-    readRowsInDateRange('SD_DAILY', start, end),
-    skipEmp ? Promise.resolve([] as any[]) : readRowsInDateRange('SD_EMP_DAILY', start, end),
+    readRowsInDateRange('SD_DAILY', start, end, { fresh }),
+    skipEmp ? Promise.resolve([] as any[]) : readRowsInDateRange('SD_EMP_DAILY', start, end, { fresh }),
     readSheet('SalonRoster'),
   ])
   const inRange = (d: string) => d >= start && d <= end
@@ -374,8 +376,8 @@ export async function getDemandRange(start: string, end: string) {
 }
 
 /** Read SD_CHKINOUT rows (actual clock punches) in a date window. */
-export async function getChkInOutRange(start: string, end: string) {
-  const raw = await readRowsInDateRange('SD_CHKINOUT', start, end)
+export async function getChkInOutRange(start: string, end: string, opts?: { fresh?: boolean }) {
+  const raw = await readRowsInDateRange('SD_CHKINOUT', start, end, { fresh: !!opts?.fresh })
   const inRange = (d: string) => d >= start && d <= end
   const chkinout = rowsToObjects(raw).filter(r => inRange(String(r.date || '')))
   return { chkinout }

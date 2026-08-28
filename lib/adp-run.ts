@@ -166,7 +166,8 @@ export async function loadManualLines(weekEnd: string): Promise<(ExtraEarning & 
  * report totals. Empty is fine — the engine falls back to clock punches.
  */
 async function dailyFloorFromSheet(weekStart: string, weekEnd: string): Promise<DailyFloorRow[]> {
-  const { empDaily } = await getDailyRange(weekStart, weekEnd)
+  // fresh: the 6-day day-count source, for the same reason as the punches.
+  const { empDaily } = await getDailyRange(weekStart, weekEnd, { fresh: true })
   const out: DailyFloorRow[] = []
   for (const r of empDaily) {
     const payId = String(r.payId || '').trim()
@@ -205,7 +206,10 @@ async function buildPayIdByPk(rows: { globalId: string; payId: string }[]): Prom
 
 /** Punches from the nightly scrape. Cheap — one Sheets read for the week. */
 async function punchesFromSheet(weekStart: string, weekEnd: string): Promise<PunchSegment[]> {
-  const { chkinout } = await getChkInOutRange(weekStart, weekEnd)
+  // fresh: this feeds 6-day pay and short breaks, so it must never come from a
+  // cached read. The scrape-only tabs are cached for minutes at a time for the
+  // dashboard's benefit; payroll opts out of that.
+  const { chkinout } = await getChkInOutRange(weekStart, weekEnd, { fresh: true })
   return chkinout.map(r => ({
     date: String(r.date || ''),
     salonNum: String(r.salonNum || '').trim(),
