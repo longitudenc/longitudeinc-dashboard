@@ -323,7 +323,7 @@ export function toPayConsolRows(objects: Record<string, string>[]): PayConsolRow
       employeeName: name,
       salonNum,
       globalId: (o['Global Employee ID'] || '').trim(),
-      payId: (o['Payroll ID'] || '').trim(),
+      payId: normalizePayId(o['Payroll ID']),
       baseWage: num(o['Base Wage']),
       weekEnding: normalizeDate(o['Week Ending']),
       floorHours: num(o['Floor Hours']),
@@ -351,6 +351,23 @@ export function toPayConsolRows(objects: Record<string, string>[]): PayConsolRow
     })
   })
   return out
+}
+
+/**
+ * ADP's File # is the Payroll ID WITHOUT leading zeros.
+ *
+ * SD3 emits some ids zero-padded ("0422", "000273"). The macro workbook dropped
+ * the padding by accident — it loaded the CSV into Excel, which read the field
+ * as a number — and that is the form ADP has been accepting for years. So strip
+ * them deliberately here rather than sending a form ADP has never seen.
+ *
+ * Stripping at parse time also keeps the employee grouping consistent: "0631"
+ * and "631" are one person, and must not split into two.
+ */
+export function normalizePayId(v: unknown): string {
+  const raw = String(v ?? '').trim()
+  if (!/^0\d+$/.test(raw)) return raw          // not zero-padded, or not numeric
+  return raw.replace(/^0+/, '') || '0'
 }
 
 /** Accept YYYY-MM-DD, M/D/YYYY and Excel-ish date text; emit YYYY-MM-DD. */
