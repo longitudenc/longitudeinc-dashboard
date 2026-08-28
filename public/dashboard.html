@@ -10276,7 +10276,10 @@ const HUB_GROUPS = {
     title: 'Performance',
     sub: 'How the salons are doing',
     cards: [
-      { t:'All Salons',     d:'Every salon for the selected period, with tier colouring.',
+      // view.company on every card that lands on the Company page: the sidebar
+      // only ever showed Company Overview to canSeeAllSalons(), so omitting it
+      // here would hand managers and stylists a page they never had.
+      { t:'All Salons',     d:'Every salon for the selected period, with tier colouring.', cap:'view.company',
         go:function(){ switchToCompany(); } },
       { t:'Scorecards',     d:'Area manager rankings and per-AM performance.', cap:'view.company',
         go:function(){ switchToCompany(); showCompanyTab('ams'); } },
@@ -10294,7 +10297,7 @@ const HUB_GROUPS = {
     cards: [
       { t:'Bonuses',   d:'Stylist, manager and area manager bonus detail.', cap:'view.company',
         go:function(){ switchToCompany(); showCompanyTab('bonus'); } },
-      { t:'Standouts', d:'Monthly recognition across the company.',
+      { t:'Standouts', d:'Monthly recognition across the company.', cap:'view.company',
         go:function(){ switchToCompany(); showCompanyTab('standouts'); } },
       { t:'Payroll',   d:'Build and review the ADP upload for a week.', cap:'view.payroll',
         href:'/office.html' },
@@ -10304,11 +10307,16 @@ const HUB_GROUPS = {
     title: 'People',
     sub: 'The team, their reviews and their records',
     cards: [
-      { t:'Team',                d:'Everyone, sortable, with hours and performance.',
+      { t:'Team',                d:'Everyone, sortable, with hours and performance.', cap:'view.company',
         go:function(){ switchToCompany(); showCompanyTab('team'); } },
-      { t:'Reviews',             d:'Stylist and manager reviews.',
+      { t:'Reviews',             d:'Stylist and manager reviews.', cap:'view.company',
         go:function(){ switchToCompany(); showCompanyTab('reviews'); } },
+      // No capability for this one yet -- see lib/capabilities.ts. `show` mirrors
+      // the reveal rule on the #ftb-points tab exactly, so the card appears for
+      // precisely the people who already had it. Swap to cap:'view.points' once
+      // something enforces it server-side.
       { t:'Disciplinary points', d:'Active points, flags and per-person history.',
+        show:function(){ return isAdminRole() || isAMRole(); },
         go:function(){ switchToForms(); showFormsTab('points'); } },
     ],
   },
@@ -10318,7 +10326,14 @@ const HUB_GROUPS = {
 // so the two never fight over the highlight.
 let S_topNav = '';
 
-function _tnAllowed(card){ return !card.cap || hasCap(card.cap); }
+// A card shows when its capability allows it AND any extra client-side
+// predicate does. `show` exists for gates that are not capabilities yet; it
+// must MIRROR the existing rule, never invent a looser one.
+function _tnAllowed(card){
+  if(card.cap && !hasCap(card.cap)) return false;
+  if(card.show && !card.show()) return false;
+  return true;
+}
 
 function renderTopNav(){
   const nav = document.getElementById('topnav');
