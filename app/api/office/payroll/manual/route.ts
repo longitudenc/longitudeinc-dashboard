@@ -64,9 +64,11 @@ export async function POST(request: Request) {
     // Read every week, rewrite the tab with this week's lines replaced. The tab
     // is small (a handful of lines per week) so a whole-tab rewrite is simpler
     // and safer than a keyed upsert against rows the office may have deleted.
+    // Read FRESH: this is a read-modify-write, and the 15s read cache would let
+    // two people saving different weeks inside the same window clobber each other.
     let others: Record<string, any>[] = []
     try {
-      others = rowsToObjects(await readSheet(ADP_MANUAL_TAB))
+      others = rowsToObjects(await readSheet(ADP_MANUAL_TAB, undefined, { fresh: true }))
         .filter(r => String(r.weekEnd || '').trim() !== weekEnd)
     } catch {
       others = []

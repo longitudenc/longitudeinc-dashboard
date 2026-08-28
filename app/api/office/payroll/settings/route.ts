@@ -69,9 +69,11 @@ export async function POST(request: Request) {
 
   try {
     // ── key/value tab: read what's there, merge, write back whole ──
+    // Read FRESH — see the manual route: a cached read here would silently drop
+    // a setting someone else saved in the last few seconds.
     let existing: Record<string, string> = {}
     try {
-      for (const r of rowsToObjects(await readSheet(ADP_SETTINGS_TAB))) {
+      for (const r of rowsToObjects(await readSheet(ADP_SETTINGS_TAB, undefined, { fresh: true }))) {
         const k = String(r.key ?? '').trim()
         if (k) existing[k] = String(r.value ?? '')
       }
