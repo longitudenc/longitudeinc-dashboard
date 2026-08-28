@@ -268,7 +268,12 @@ function marketAvg(k){ const vs=ROWS.filter(r=>hasVal(r,k)).map(r=>num(r[k])); r
 
 // ── Load once ─────────────────────────────────────────────────
 async function loadAll(){
-  const r=await fetch('/api/market/data?all=1').then(x=>x.json());
+  const res=await fetch('/api/market/data?all=1');
+  // Market Compare is owner/admin/office only. Without this, a refusal shows
+  // as a generic load failure, which reads like an outage rather than a rule.
+  if(res.status===401) throw new Error('Please sign in on the dashboard first, then reopen this page.');
+  if(res.status===403) throw new Error('Market Compare is limited to owners, admins and office staff.');
+  const r=await res.json();
   if(!r||!r.success) throw new Error('market data load failed');
   ALLROWS=r.rows||[]; WEEKS=(r.weeks||[]).slice().sort(); WEEKSET=new Set(WEEKS);
   BYWEEK={}; ALLROWS.forEach(x=>{ (BYWEEK[x.weekEnding]=BYWEEK[x.weekEnding]||[]).push(x); });

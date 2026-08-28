@@ -3019,7 +3019,7 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
         <div id="week-dropdown-items"><div class="week-dropdown-item" style="color:var(--text-muted);font-style:italic;">Loading...</div></div>
       </div>
     </div>
-    <a href="/market.html" title="CLT Market Compare" style="font-size:12px;color:#fff;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.28);padding:5px 12px;border-radius:20px;text-decoration:none;">🗺 Market</a>
+    <a href="/market.html" id="market-link" title="CLT Market Compare" style="display:none;font-size:12px;color:#fff;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.28);padding:5px 12px;border-radius:20px;text-decoration:none;">🗺 Market</a>
     <a href="/office.html" id="office-link" title="Office Tools — payroll upload for ADP" style="display:none;font-size:12px;color:#fff;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.28);padding:5px 12px;border-radius:20px;text-decoration:none;">🧾 Payroll</a>
     <div class="user-chip" id="user-chip" title="Click to sign out" onclick="if(confirm('Sign out?')) logout();" style="cursor:pointer;">Loading...</div>
   </div>
@@ -4584,10 +4584,13 @@ function startDashboard(){
       return;
     }
 
-    // Office Tools (the ADP payroll upload) — same roles requireOffice() allows.
+    // Office Tools (ADP payroll) and Market Compare — both gated to the roles
+    // requireOffice() allows. MarketWeekly covers salons we do not operate.
     if(['owner','admin','office'].includes(SESSION.role)){
       const ol = document.getElementById('office-link');
       if(ol) ol.style.display = 'inline-block';
+      const ml = document.getElementById('market-link');
+      if(ml) ml.style.display = 'inline-block';
     }
 
     if(SESSION.role === 'office' || SESSION.role === 'maintenance'){
