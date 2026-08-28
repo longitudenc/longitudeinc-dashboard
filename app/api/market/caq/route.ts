@@ -7,12 +7,13 @@
 //   ytd = mean of that salon's monthly % Good for the latest year present
 //         (calendar year-to-date average).
 //
-// Public GET + 5-min cache, mirroring /api/market/ratings-data. Reads SalonCAQData,
+// Owner/admin/viewer/AM/manager/office + 5-min cache. Reads SalonCAQData,
 // the tab written by /api/market/ingest/address-quality. Joins to the dashboard's
 // salon tables by salonNum (string).
 
 import { NextResponse } from 'next/server'
 import { readSheet, rowsToObjects } from '@/lib/sheets'
+import { requireSalonView } from '@/lib/require-role'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -44,6 +45,9 @@ function periodYear(pk: string): number {
 }
 
 export async function GET() {
+  // Our own salons' address quality. Manager and up; not stylists.
+  const gate = await requireSalonView()
+  if (!gate.ok) return gate.response
   try {
     if (cache && Date.now() - cache.timestamp < CACHE_TTL) {
       return NextResponse.json({ success: true, caq: cache.caq, cached: true })

@@ -50,3 +50,12 @@ export function requireOffice() {
 export function requireSignedIn() {
   return requireRoles(['owner', 'admin', 'viewer', 'area_manager', 'manager', 'stylist', 'office', 'maintenance'])
 }
+
+// Owner, admin, viewer, AM, manager, office — everyone entitled to a
+// salon-level view of our own salons (Google ratings, CAQ). Excludes stylist,
+// who sees only themselves, and maintenance, a scoped requests-only login.
+// NOT for market-wide data: MarketWeekly covers other operators' salons and is
+// gated to requireOffice().
+export function requireSalonView() {
+  return requireRoles(['owner', 'admin', 'viewer', 'area_manager', 'manager', 'office'])
+}

@@ -115,6 +115,14 @@ is a separate path used only by `/api/cron/weekly` and `/api/report/payroll-pace
   tabs), e.g. `fetch('/api/forms/import-discipline', {method:'POST'}).then(r=>r.json()).then(console.log)`.
 - **Owner/admin logins have no `globalId`** (they're Users-tab rows, not roster employees).
   Code that matches "mine"/an employee must also match by email, not just globalId.
+- **Every data route needs a guard, and reads need scoping.** `lib/require-role.ts`
+  exports `requireOwner` / `requireAdmin` / `requireOffice` / `requireSalonView` /
+  `requireSignedIn`; anything returning salon or employee rows must ALSO scope through
+  `lib/scope-filter.ts`. Four routes shipped with no gate at all and served company-wide
+  data to the open internet until 2026-08-28 (`/api/gs/getDailyRange` was the live one).
+  **A filter applied in `dashboard.html` is not a filter.** Market-wide data
+  (`MarketWeekly`, other operators' salons) is `requireOffice`; our own salons' ratings
+  and CAQ are `requireSalonView` (manager and up).
 
 ---
 
@@ -137,6 +145,9 @@ is a separate path used only by `/api/cron/weekly` and `/api/report/payroll-pace
 - **Favorites → Quick Links:** let each person pin views to a personal shortcuts strip
   (needs small per-user storage, e.g. a `Favorites` tab keyed by login).
 - **"View as":** admin toggle to render the dashboard as a given role/person (impersonation).
+  Must be resolved SERVER-side (swap the Access that `resolveAccess` returns), not by
+  faking the role in the client — a client-only version proves nothing about whether the
+  APIs actually withhold data, which is the main reason to want it.
 - **Supabase migration:** move high-volume tables (sd_demand, sd_halfhour, sd_daily,
   sd_shifts, sd_chkinout) off Sheets; everything else stays.
 - Newsletter automation, market-compare resolver overrides (salons 4138/5770/9085).

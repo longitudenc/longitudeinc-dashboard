@@ -2,10 +2,11 @@
 //
 // Lightweight ratings map for the dashboard's salon tables:
 //   { "ratings": { "3015": { "rating": 4.3, "reviews": 245, "status": "OPERATIONAL" }, ... } }
-// Public GET + 5-min cache, mirroring /api/data. Reads the GooglePlaces tab.
+// Owner/admin/viewer/AM/manager/office + 5-min cache. Reads the GooglePlaces tab.
 
 import { NextResponse } from 'next/server'
 import { readSheet, rowsToObjects } from '@/lib/sheets'
+import { requireSalonView } from '@/lib/require-role'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -17,6 +18,11 @@ let cache: { ratings: Record<string, any>; timestamp: number } | null = null
 const toNum = (v: any) => { if (v === '' || v == null || v === '***') return null; const n = typeof v === 'number' ? v : parseFloat(String(v)); return Number.isFinite(n) ? n : null }
 
 export async function GET() {
+  // Our own salons' Google ratings. Manager and up; not stylists.
+  // The dashboard reads this as GRATINGS=(rd&&rd.ratings)||{}, so a refusal
+  // degrades to "no ratings shown" rather than breaking the page.
+  const gate = await requireSalonView()
+  if (!gate.ok) return gate.response
   try {
     if (cache && Date.now() - cache.timestamp < CACHE_TTL) {
       return NextResponse.json({ success: true, ratings: cache.ratings, cached: true })

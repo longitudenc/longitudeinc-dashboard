@@ -1,6 +1,6 @@
 // app/api/market/data/route.ts
 //
-// Serves MarketWeekly for the market view (public GET + 5-min cache). Joins each
+// Serves MarketWeekly for the market view (5-min cache). Joins each
 // salon's current Google rating / reviews / status from GooglePlaces, and on
 // ?all=1 also returns the monthly RatingHistory time series for rating trends.
 //
@@ -10,6 +10,7 @@
 
 import { NextResponse } from 'next/server'
 import { readSheet, rowsToObjects } from '@/lib/sheets'
+import { requireOffice } from '@/lib/require-role'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -76,6 +77,10 @@ async function load() {
 }
 
 export async function GET(request: Request) {
+  // MarketWeekly is MARKET-WIDE: it covers salons we do not operate.
+  // Owner / admin / office only. Was open to the internet until 2026-08-28.
+  const gate = await requireOffice()
+  if (!gate.ok) return gate.response
   try {
     const { rows, weeks, ratingHistory: hist } = await load()
     if (weeks.length === 0) return NextResponse.json({ success: true, weeks: [], week: null, rows: [], ratingHistory: [] })
