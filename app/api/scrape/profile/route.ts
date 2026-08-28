@@ -16,8 +16,9 @@
 //
 // This route returns counts only — never the underlying data.
 //
-// Cadence: monthly (hire/rehire/home-store changes rarely). Wired into the
-// cron's month-end branch; this route exists for manual/ad-hoc runs.
+// Cadence: NIGHTLY. .github/workflows/scrape.yml calls this at 08:00 UTC
+// (~4 AM ET) on every run, so a birthday or hire date corrected in SD3 shows
+// up the next morning with no manual step. This route also serves ad-hoc runs.
 //
 // Manual override:
 //   ?start=YYYY-MM-DD&end=YYYY-MM-DD   pulls that specific range
