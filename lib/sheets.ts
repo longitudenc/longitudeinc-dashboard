@@ -221,11 +221,99 @@ export async function getTrackerData() {
  * SD_DAILY is keyed by storeId only, so we join SalonRoster to attach salonNum
  * to each salon-day row, making the response self-contained for the UI.
  */
+/** 0-based column index to an A1 letter: 0 -> A, 25 -> Z, 26 -> AA. */
+function colLetter(index: number): string {
+  let n = index, out = ''
+  while (n >= 0) {
+    out = String.fromCharCode(65 + (n % 26)) + out
+    n = Math.floor(n / 26) - 1
+  }
+  return out
+}
+
+// Above this many separate row-blocks for one query, stop being clever and read
+// the whole tab. Normally a day's rows are ONE block because each nightly run
+// appends them together; only a heavily interleaved backfill would fragment it.
+const MAX_ROW_RUNS = 60
+
+/**
+ * Read ONLY the rows whose date column falls inside [start, end].
+ *
+ * The daily tabs are the biggest in the sheet (SD_EMP_DAILY alone is ~49k rows
+ * / ~930k cells) and every Day view used to pull all of them just to display
+ * one day. This reads the date column, works out which sheet rows are wanted,
+ * and fetches just those blocks:
+ *
+ *   1. header row          - to find the date column by NAME, not by position
+ *   2. that column only    - ~20x fewer cells than the whole tab
+ *   3. batchGet the blocks - normally a single contiguous range
+ *
+ * Returns [headerRow, ...matchingRows] so callers can keep using
+ * rowsToObjects() untouched.
+ *
+ * Degrades to a full read whenever anything is unexpected (no date column, too
+ * many fragments, a failed batchGet), so the worst case is today's behaviour
+ * and never something wrong.
+ */
+export async function readRowsInDateRange(
+  tab: string,
+  start: string,
+  end: string,
+  opts?: { dateHeader?: string }
+): Promise<any[][]> {
+  const wanted = (opts?.dateHeader || 'date').toLowerCase()
+  try {
+    const headerRows = (await readSheet(tab, 'A1:ZZ1')) as any[][]
+    const header = headerRows[0] || []
+    if (!header.length) return []
+
+    const dateIdx = header.findIndex((h: any) => String(h ?? '').trim().toLowerCase() === wanted)
+    if (dateIdx < 0) {
+      console.warn(`[sheets] ${tab}: no "${wanted}" column, falling back to a full read`)
+      return (await readSheet(tab)) as any[][]
+    }
+
+    const L = colLetter(dateIdx)
+    const col = (await readSheet(tab, `${L}2:${L}`)) as any[][]
+
+    // Sheet row numbers (1-based, header is row 1, so data starts at row 2).
+    const runs: Array<[number, number]> = []
+    for (let i = 0; i < col.length; i++) {
+      const d = String((col[i] && col[i][0]) || '').slice(0, 10)
+      if (!d || d < start || d > end) continue
+      const row = i + 2
+      const last = runs[runs.length - 1]
+      if (last && last[1] === row - 1) last[1] = row
+      else runs.push([row, row])
+    }
+
+    if (runs.length === 0) return [header]
+    if (runs.length > MAX_ROW_RUNS) {
+      console.warn(`[sheets] ${tab}: ${runs.length} row-blocks for ${start}..${end}, falling back to a full read`)
+      return (await readSheet(tab)) as any[][]
+    }
+
+    const sheets = sheetsClient()
+    const ranges = runs.map(([a, b]) => `${tab}!${a}:${b}`)
+    const res = await withRetry(`batchRead ${tab}`, () =>
+      sheets.spreadsheets.values.batchGet({ spreadsheetId: SHEET_ID, ranges })
+    )
+    const out: any[][] = [header]
+    for (const vr of res.data.valueRanges || []) {
+      for (const row of vr.values || []) out.push(row)
+    }
+    return out
+  } catch (error) {
+    console.error(`[sheets] ${tab}: ranged read failed, falling back to a full read:`, error)
+    return (await readSheet(tab)) as any[][]
+  }
+}
+
 export async function getDailyRange(start: string, end: string, opts?: { skipEmp?: boolean }) {
   const skipEmp = !!opts?.skipEmp
   const [salonRaw, empRaw, rosterRaw] = await Promise.all([
-    readSheet('SD_DAILY'),
-    skipEmp ? Promise.resolve([] as any[]) : readSheet('SD_EMP_DAILY'),
+    readRowsInDateRange('SD_DAILY', start, end),
+    skipEmp ? Promise.resolve([] as any[]) : readRowsInDateRange('SD_EMP_DAILY', start, end),
     readSheet('SalonRoster'),
   ])
   const inRange = (d: string) => d >= start && d <= end
@@ -249,7 +337,7 @@ export async function getDailyRange(start: string, end: string, opts?: { skipEmp
  * (tagged at scrape time), so no roster join is needed here.
  */
 export async function getShiftsRange(start: string, end: string) {
-  const raw = await readSheet('SD_SHIFTS')
+  const raw = await readRowsInDateRange('SD_SHIFTS', start, end)
   const inRange = (d: string) => d >= start && d <= end
   const shifts = rowsToObjects(raw).filter(r => inRange(String(r.date || '')))
   return { shifts }
@@ -265,7 +353,7 @@ export async function getHalfHourRange(start: string, end: string) {
 
 /** Read SD_DEMAND rows (real per-half-hour arrivals/waits) in a date window. */
 export async function getDemandRange(start: string, end: string) {
-  const raw = await readSheet('SD_DEMAND')
+  const raw = await readRowsInDateRange('SD_DEMAND', start, end)
   const inRange = (d: string) => d >= start && d <= end
   const demand = rowsToObjects(raw).filter(r => inRange(String(r.date || '')))
   return { demand }
@@ -273,7 +361,7 @@ export async function getDemandRange(start: string, end: string) {
 
 /** Read SD_CHKINOUT rows (actual clock punches) in a date window. */
 export async function getChkInOutRange(start: string, end: string) {
-  const raw = await readSheet('SD_CHKINOUT')
+  const raw = await readRowsInDateRange('SD_CHKINOUT', start, end)
   const inRange = (d: string) => d >= start && d <= end
   const chkinout = rowsToObjects(raw).filter(r => inRange(String(r.date || '')))
   return { chkinout }
