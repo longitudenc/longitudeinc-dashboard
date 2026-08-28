@@ -491,6 +491,44 @@ check(
   `got ${netted.totals.sixDayDelta}`
 )
 
+// A salon's 6-day column is the money moved ON THAT SALON'S ROWS, which for a
+// floater is not the same as the person's total: CHONG NEWMAN is rostered at
+// 3062 but worked 5.09 of his 38.59 floor hours at 3043, so 3043 gets that
+// share while his row appears under 3062. The columns must still add up.
+{
+  const bySalonSum = (d: typeof netted.sixDay[number]) =>
+    round2(Object.values(d.deltaBySalon).reduce((s, v) => s + v, 0))
+  const skipped = new Set(
+    netted.exceptions.filter(e => e.kind === 'sixday-mismatch').map(e => e.payId)
+  )
+  const off = netted.sixDay.filter(d => !skipped.has(d.payId) && Math.abs(bySalonSum(d) - d.delta) > 0.02)
+  check(
+    'each correction splits across salons without losing a cent',
+    off.length === 0,
+    off.slice(0, 3).map(d => `${d.employeeName} ${bySalonSum(d)} vs ${d.delta}`).join('; ')
+  )
+  const cn = netted.sixDay.find(d => d.employeeName.startsWith('CHONG NEWMAN'))!
+  check(
+    'a floater\u2019s 6-day is charged by floor hours: 5.09 to 3043, 33.50 to 3062',
+    Math.abs((cn.deltaBySalon['3043'] || 0) - 5.09) < 0.02 &&
+      Math.abs((cn.deltaBySalon['3062'] || 0) - 33.50) < 0.02,
+    JSON.stringify(cn.deltaBySalon)
+  )
+  const s3043 = netted.salonTotals.find(t => t.salonNum === '3043')!
+  check(
+    'salon 3043 nets -35.90 (TOMBERLIN) + 5.09 (CHONG NEWMAN\u2019s share) = -30.81',
+    Math.abs(s3043.sixDayDelta - (-30.81)) < 0.02,
+    `got ${s3043.sixDayDelta}`
+  )
+  check(
+    'the salon columns add up to the week\u2019s net movement',
+    Math.abs(
+      netted.salonTotals.reduce((s, t) => s + t.sixDayDelta, 0) - netted.totals.sixDayDelta
+    ) < 0.05,
+    `${round2(netted.salonTotals.reduce((s, t) => s + t.sixDayDelta, 0))} vs ${netted.totals.sixDayDelta}`
+  )
+}
+
 // ── 4b2) The detail-report parser ─────────────────────────────────────────
 console.log('\nPayroll Detail report parser')
 {
@@ -784,6 +822,28 @@ console.log('\nCost and salon roll-up')
       'a floater\u2019s two salons are merged into one line each',
       cn.lines.length > 0 && new Set(cn.lines.map(l => l.code + '|' + l.label)).size === cn.lines.length,
       cn.lines.map(l => l.label).join(', ')
+    )
+  }
+  // The "By salon" table is a reconciliation tool, so every column under a
+  // salon has to add up to the salon's own row — which means a floater is
+  // listed under each salon that had them, with that salon's share.
+  {
+    const bad: string[] = []
+    for (const t of plain.salonTotals) {
+      const parts = plain.employees.flatMap(e => e.bySalon.filter(b => b.salonNum === t.salonNum))
+      const sum = (k: 'paidHours' | 'grossPay' | 'tips' | 'totalPay') =>
+        round2(parts.reduce((s, b) => s + b[k], 0))
+      if (Math.abs(sum('paidHours') - t.hours) > 0.02) bad.push(`${t.salonNum} hours ${sum('paidHours')} vs ${t.hours}`)
+      if (Math.abs(sum('grossPay') - t.grossPay) > 0.05) bad.push(`${t.salonNum} pay ${sum('grossPay')} vs ${t.grossPay}`)
+      if (Math.abs(sum('tips') - t.tips) > 0.02) bad.push(`${t.salonNum} tips ${sum('tips')} vs ${t.tips}`)
+      if (Math.abs(sum('totalPay') - t.totalPay) > 0.05) bad.push(`${t.salonNum} total ${sum('totalPay')} vs ${t.totalPay}`)
+    }
+    check('every salon column is the sum of the people listed under it', bad.length === 0, bad.slice(0, 4).join('; '))
+    check(
+      'a floater is listed under each salon that had them',
+      cn.bySalon.length === 2 && cn.bySalon.map(b => b.salonNum).sort().join() === '3043,3062' &&
+        Math.abs(round2(cn.bySalon.reduce((s, b) => s + b.grossPay, 0)) - cn.grossPay) < 0.02,
+      JSON.stringify(cn.bySalon.map(b => [b.salonNum, b.grossPay]))
     )
   }
   check(

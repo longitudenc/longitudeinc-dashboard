@@ -201,6 +201,15 @@ export interface SixDayDetail {
   sd3PaidBySalon: Record<string, number>
   /** amount − sd3Paid: what the file actually has to move. Can be negative. */
   delta: number
+  /**
+   * The delta split across the salons the file actually moves it on: money is
+   * taken off the salon SD3 paid it at and added back across every salon the
+   * person worked, by floor hours. For a floater those are different salons, so
+   * this is what a salon's 6-day column is built from — never the person's
+   * total, which sits on one salon's roster but is charged to several.
+   * Filled in as the netting happens, so it reflects the finished file.
+   */
+  deltaBySalon: Record<string, number>
   /** 'stated' = SD3's own Six Day line; 'modelled' = inferred from its rule. */
   sd3Source: 'stated' | 'modelled'
   amount: number
@@ -234,6 +243,18 @@ export interface PayLine {
   kind: 'wage' | 'tips'
 }
 
+/** One employee's share of one salon's week. */
+export interface EmployeeSalonSplit {
+  salonNum: string
+  paidHours: number
+  grossPay: number
+  tips: number
+  totalPay: number
+  overtimePay: number
+  /** This salon's slice of the 6-day correction — see SixDayDetail.deltaBySalon. */
+  sixDayDelta: number
+}
+
 export interface EmployeeSummary {
   payId: string
   employeeName: string
@@ -261,6 +282,13 @@ export interface EmployeeSummary {
   /** grossPay + tips — what the cheque is worth to the person. */
   totalPay: number
   salonNum: string
+  /**
+   * The same week split by salon — one entry per salon they actually worked,
+   * costed on that salon's own rows. The "By salon" table is built from these,
+   * so a floater appears under each salon that had them and every column adds
+   * up to the salon's own total.
+   */
+  bySalon: EmployeeSalonSplit[]
   /** Every line of the finished file for this person, merged across salons. */
   lines: PayLine[]
   extraEarnings: { label: string; code: string; amount: number; kind: EarningKind }[]
@@ -696,7 +724,7 @@ export function computeSixDay(
       details.push({
         payId, employeeName, qualifies: false, qualifyingDays: 0, days: [],
         weekFloorHours, punchFloorHours: 0, amount: 0, source: 'none',
-        sd3Paid: 0, sd3PaidBySalon: {}, delta: 0,
+        sd3Paid: 0, sd3PaidBySalon: {}, delta: 0, deltaBySalon: {},
         sd3Source: sd3SixDay ? 'stated' : 'modelled',
         reason: 'no day-level hours found for this employee',
       })
@@ -765,6 +793,8 @@ export function computeSixDay(
       sd3PaidBySalon,
       sd3Source: sd3SixDay ? 'stated' : 'modelled',
       delta: round2(amount - sd3Paid),
+      // Filled in by buildPayroll as it writes the netting into the file.
+      deltaBySalon: {},
       amount,
       reason,
     })
@@ -949,6 +979,11 @@ export function buildPayroll(input: {
   // Netting into All Other Incentives is exactly what the office does by hand,
   // and needs no new earnings code.
   const sixDayCode = codes.sixDay || ''
+  /** Book the movement against the salon whose row it was actually written on. */
+  const bookSixDay = (d: SixDayDetail, salonNum: string, amount: number) => {
+    if (!salonNum || amount === 0) return
+    d.deltaBySalon[salonNum] = round2((d.deltaBySalon[salonNum] || 0) + amount)
+  }
   if (rules.sixDayMode !== 'reportOnly') {
     for (const d of sixDay) {
       const group = rowsFor(d.payId)
@@ -978,6 +1013,7 @@ export function buildPayroll(input: {
             continue
           }
           v.fixed.set('allOtherIncentives', round2(have - paid))
+          bookSixDay(d, salonNum, -paid)
         }
 
         // 2) Add what they are actually owed, split across salons by floor hours.
@@ -987,6 +1023,7 @@ export function buildPayroll(input: {
             if (shares[i] === 0) return
             const v = values.get(r)!
             v.fixed.set('allOtherIncentives', round2((v.fixed.get('allOtherIncentives') || 0) + shares[i]))
+            bookSixDay(d, r.salonNum, shares[i])
           })
         }
         continue
@@ -1011,6 +1048,7 @@ export function buildPayroll(input: {
       group.forEach((r, i) => {
         if (shares[i] === 0) return
         values.get(r)!.extras.push({ code: sixDayCode, amount: shares[i], label: '6-day pay', kind: 'sixDay' })
+        bookSixDay(d, r.salonNum, shares[i])
       })
     }
   }
@@ -1235,6 +1273,20 @@ export function buildPayroll(input: {
       grossPay: round2(group.reduce((s, r) => s + costOf(r).grossPay, 0)),
       tips: round2(group.reduce((s, r) => s + costOf(r).tips, 0)),
       totalPay: round2(group.reduce((s, r) => s + costOf(r).grossPay + costOf(r).tips, 0)),
+      bySalon: group
+        .map(r => {
+          const c = costOf(r)
+          return {
+            salonNum: r.salonNum,
+            paidHours: c.hours,
+            grossPay: c.grossPay,
+            tips: c.tips,
+            totalPay: round2(c.grossPay + c.tips),
+            overtimePay: round2(r.overtimePay),
+            sixDayDelta: round2(sd?.deltaBySalon[r.salonNum] ?? 0),
+          }
+        })
+        .sort((a, b) => b.grossPay - a.grossPay),
       lines: payLinesFor(group),
       // Where to file them in the salon breakdown: their biggest salon.
       salonNum: group.slice().sort((a, b) => b.floorHours - a.floorHours)[0].salonNum,
@@ -1265,20 +1317,14 @@ export function buildPayroll(input: {
     t.overtimePay = round2(t.overtimePay + r.overtimePay)
     if (r.payId) salonStaff.get(r.salonNum)!.add(r.payId)
   }
+  // Straight from what the netting wrote, so a salon's 6-day column is exactly
+  // the money this file moves on that salon's rows — including a floater's
+  // share, which lands here even though the person is rostered elsewhere, and
+  // excluding a clawback that was skipped because the money wasn't there.
   for (const d of sixDay) {
-    if (Math.abs(d.delta) < 0.005) continue
-    // The correction lands where SD3 paid it and where the hours were worked.
-    for (const [salonNum, paid] of Object.entries(d.sd3PaidBySalon)) {
+    for (const [salonNum, amount] of Object.entries(d.deltaBySalon)) {
       const t = salonMap.get(salonNum)
-      if (t) t.sixDayDelta = round2(t.sixDayDelta - paid)
-    }
-    if (d.amount > 0) {
-      const g = rowsFor(d.payId)
-      const shares = allocate(d.amount, g.map(r => r.floorHours))
-      g.forEach((r, i) => {
-        const t = salonMap.get(r.salonNum)
-        if (t) t.sixDayDelta = round2(t.sixDayDelta + shares[i])
-      })
+      if (t) t.sixDayDelta = round2(t.sixDayDelta + amount)
     }
   }
   for (const b of breaks) {

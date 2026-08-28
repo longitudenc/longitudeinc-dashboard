@@ -539,18 +539,22 @@ function bigstat(k,v,n,delta){
        + '<div class="v" style="color:'+c+';font-size:24px;">'+esc(v)+'</div>'
        + '<div class="n">'+esc(n||'')+'</div></div>';
 }
-// Salon-by-salon, each row expanding to the people in it. Employees are filed
-// under their biggest salon, but a floater's HOURS and COST are charged to the
-// salon that actually had them — so the salon totals stay true to the P&L even
-// though the person appears once.
+// Salon-by-salon, each row expanding to the people in it. Every figure is that
+// salon's OWN — a floater is listed under each salon that had them, carrying
+// only the hours, cost and 6-day correction charged there — so each column adds
+// up to the salon row above it. Their whole week is in the drill-down.
 function salonBreakdownHtml(d){
   const salons = (d.salonTotals||[]).slice();
   if(!salons.length) return '';
+  // salon → [{ emp, split }], biggest cost first.
   const byS = {};
-  (d.employees||[]).forEach(e=>{ (byS[e.salonNum]||(byS[e.salonNum]=[])).push(e); });
+  (d.employees||[]).forEach(e=>{
+    (e.bySalon||[]).forEach(b=>{ (byS[b.salonNum]||(byS[b.salonNum]=[])).push({e:e, b:b}); });
+  });
+  Object.keys(byS).forEach(k=>byS[k].sort((x,y)=>y.b.grossPay-x.b.grossPay));
 
   let h = '<div class="card"><h2>By salon <span class="sub">'
-    + 'click a salon for its people \u00b7 click any heading to sort</span></h2>'
+    + 'each salon\u2019s own hours and cost \u00b7 click a salon for its people</span></h2>'
     + '<div class="body" style="padding:0;"><div class="scroll"><table><thead><tr>'
     + '<th data-sort="text">Salon</th>'
     + '<th data-sort="num" class="num">Staff</th>'
@@ -563,7 +567,7 @@ function salonBreakdownHtml(d){
     + '</tr></thead><tbody>';
 
   salons.forEach((t,i)=>{
-    const staff = (byS[t.salonNum]||[]).slice().sort((a,b)=>b.grossPay-a.grossPay);
+    const staff = byS[t.salonNum] || [];
     h += '<tr class="salon-row" onclick="toggleSalon(this)" data-i="'+i+'">'
       + '<td><span class="twisty">\u25B6</span> <b>'+esc(salonDisplayNum(t.salonNum))+'</b></td>'
       + numTd(t.employees, t.employees)
@@ -572,29 +576,36 @@ function salonBreakdownHtml(d){
       + numTd(money(t.tips), t.tips)
       + numTd(money(t.totalPay), t.totalPay)
       + numTd(t.overtimePay?money(t.overtimePay):'\u2014', t.overtimePay)
-      + numTd(t.sixDayDelta?(t.sixDayDelta>0?'+':'')+money(t.sixDayDelta):'\u2014', t.sixDayDelta,
-              t.sixDayDelta<0?'#b3261e':(t.sixDayDelta>0?'#1a5c0a':''))
+      + signedTd(t.sixDayDelta)
       + '</tr>';
     if(!staff.length){
-      h += '<tr class="sub-row" data-p="'+i+'"><td colspan="8" class="muted">No employees filed here.</td></tr>';
+      h += '<tr class="sub-row" data-p="'+i+'"><td colspan="8" class="muted">Nobody worked here this week.</td></tr>';
     }
-    staff.forEach(e=>{
+    staff.forEach(x=>{
+      const e = x.e, b = x.b;
+      const others = (e.salons||[]).filter(sn=>sn!==t.salonNum);
       h += '<tr class="sub-row emp-row" data-p="'+i+'" onclick="toggleEmp(this)">'
-        + '<td><span class="twisty">\u25B6</span> '+esc(e.employeeName)+(e.isFloater
-            ? ' <span class="pill jade">also '+esc(e.salons.filter(x=>x!==t.salonNum).join(', '))+'</span>' : '')+'</td>'
+        + '<td><span class="twisty">\u25B6</span> '+esc(e.employeeName)
+            + (others.length ? ' <span class="pill jade">also '+esc(others.join(', '))+'</span>' : '')+'</td>'
         + '<td></td>'
-        + numTd(hrs(e.paidHours), e.paidHours)
-        + numTd(money(e.grossPay), e.grossPay)
-        + numTd(money(e.tips), e.tips)
-        + numTd(money(e.totalPay), e.totalPay)
-        + numTd(e.overtimePay?money(e.overtimePay):'\u2014', e.overtimePay)
-        + sixDayTd(e, d)
+        + numTd(hrs(b.paidHours), b.paidHours)
+        + numTd(money(b.grossPay), b.grossPay)
+        + numTd(money(b.tips), b.tips)
+        + numTd(money(b.totalPay), b.totalPay)
+        + numTd(b.overtimePay?money(b.overtimePay):'\u2014', b.overtimePay)
+        + signedTd(b.sixDayDelta)
         + '</tr>'
         + '<tr class="sub-row det-row" data-p="'+i+'"><td colspan="8">'+payLinesHtml(e, d)+'</td></tr>';
     });
   });
   h += '</tbody></table></div></div></div>';
   return h;
+}
+// A correction: signed and coloured, dash at zero.
+function signedTd(v){
+  const n = Number(v)||0;
+  if(Math.abs(n) < 0.005) return numTd('\u2014', 0);
+  return numTd((n>0?'+':'')+money(n), n, n<0?'#b3261e':'#1a5c0a');
 }
 // What one person is being paid for, line by line, straight out of the file
 // that goes to ADP. Hour lines show both the hours and what they cost at the
@@ -603,8 +614,11 @@ function payLinesHtml(e, d){
   const lines = e.lines || [];
   if(!lines.length) return '<div class="det"><div class="det-h">Nothing on this cheque</div></div>';
   const codeOf = c => c ? '<span class="code">'+esc(c)+'</span>' : '';
+  const many = (e.bySalon||[]).length > 1;
   let h = '<div class="det"><div class="det-h">What '+esc(firstName(e.employeeName))
-        + ' is paid for \u00b7 base wage '+money(e.baseWage)+'/hr</div><table class="det-t">';
+        + ' is paid for \u00b7 base wage '+money(e.baseWage)+'/hr'
+        + (many ? ' \u00b7 whole week, '+e.bySalon.length+' salons' : '')
+        + '</div><table class="det-t">';
   lines.filter(l=>l.kind!=='tips').forEach(l=>{
     h += '<tr><td>'+esc(l.label)+codeOf(l.code)+'</td>'
       + '<td class="num">'+(l.hours==null?'':hrs(l.hours)+' hrs')+'</td>'
@@ -618,6 +632,15 @@ function payLinesHtml(e, d){
       + '<td class="num">'+money(l.amount)+'</td></tr>';
   });
   h += '<tr class="sum"><td>Payroll + tips</td><td></td><td class="num">'+money(e.totalPay)+'</td></tr>';
+  // A floater's cheque is one thing; the salon rows above split it up. Show the
+  // split here so the two views visibly tie together.
+  if(many){
+    e.bySalon.forEach(b=>{
+      h += '<tr class="tips-line"><td>\u00b7 charged to salon '+esc(salonDisplayNum(b.salonNum))+'</td>'
+        + '<td class="num">'+hrs(b.paidHours)+' hrs</td>'
+        + '<td class="num">'+money(b.totalPay)+'</td></tr>';
+    });
+  }
   h += '</table>';
 
   // The three things this file changed for this person, spelled out — the rest
@@ -642,19 +665,6 @@ function payLinesHtml(e, d){
 function firstName(n){
   const parts = String(n||'').split(',');
   return (parts[1] || parts[0] || '').trim().split(/\s+/)[0] || String(n||'');
-}
-// The 6-day cell on a stylist's row. It shows the CORRECTION, signed and
-// coloured, so a clawback lands on the person it came off — matching the salon
-// row above it, which is the sum of these. When SD3 already paid the right
-// amount there is nothing to move, so the earned figure shows plain instead.
-function sixDayTd(e, d){
-  const sd = (d.sixDay||[]).find(s=>s.payId===e.payId);
-  const delta = sd ? Number(sd.delta)||0 : 0;
-  if(Math.abs(delta) >= 0.005){
-    return numTd((delta>0?'+':'')+money(delta), delta, delta<0?'#b3261e':'#1a5c0a');
-  }
-  const earned = sd ? Number(sd.amount)||0 : (Number(e.sixDayAmount)||0);
-  return numTd(earned?money(earned):'\u2014', 0);
 }
 // data-v keeps the raw number so sorting ignores the "$" and commas.
 function numTd(text, raw, color){
