@@ -8,7 +8,7 @@
 
 import { NextResponse } from 'next/server'
 import { requireSignedIn } from '@/lib/require-role'
-import { getAnnouncements, getImportantDates, getHomeLinks, getCelebrations, homeSalonForGlobalId, todayIsoET } from '@/lib/home'
+import { getAnnouncements, getImportantDates, getHomeLinks, getCelebrations, todayIsoET } from '@/lib/home'
 
 // Phone numbers on the Home celebration hover go to back-office roles only.
 // Enforced here, server-side: for anyone else getCelebrations is called without
@@ -26,31 +26,17 @@ export async function GET(req: Request) {
 
     const role = gate.access.role
 
-    // WHOSE celebrations. Owner/admin/viewer carry no salon list and see the
-    // whole company. A stylist carries none either, which meant they saw the
-    // whole company too -- scope them to their own salon instead.
-    let celebScope = gate.access.salons
-    if ((!celebScope || !celebScope.length) && role === 'stylist' && gate.access.globalId) {
-      const home = await homeSalonForGlobalId(gate.access.globalId)
-      if (home) celebScope = [home]   // unknown salon -> leave as before rather than blank the section
-    }
-
-    // HOW FAR OUT. 14 days suits 127 people company-wide (8 items today), but
-    // a 4-salon AM sees 0-4 and EVERY single-salon manager sees 0 -- the window
-    // is right for the company and far too short for a small scope. Scoped
-    // viewers get a wider window and a smaller cap, so everyone gets roughly
-    // "the next handful" rather than an empty section.
-    //   measured: AMs 0/3/0/4 at 14d -> 3/8/7/10 at 60d.
-    const scoped = !!(celebScope && celebScope.length)
-    const celebOpts = scoped
-      ? { horizon: 60, newHireDays: 60, cap: 8,  includePhone: PHONE_ROLES.has(role) }
-      : { horizon: 14, newHireDays: 14, cap: 16, includePhone: PHONE_ROLES.has(role) }
+    // Celebrations are COMPANY-WIDE for everyone, deliberately: birthdays and
+    // anniversaries are the part of this page meant to be shared, and scoping
+    // them left every single-salon manager staring at an empty section.
+    // The PHONE NUMBER is the only piece that is restricted (PHONE_ROLES), and
+    // it is withheld server-side rather than hidden by the client.
 
     const [announcements, dates, links, celebrations] = await Promise.all([
       getAnnouncements(role),
       getImportantDates(role, horizon),
       getHomeLinks(role),
-      getCelebrations(celebScope, celebOpts).catch(() => []),
+      getCelebrations(undefined, { includePhone: PHONE_ROLES.has(role) }).catch(() => []),
     ])
     // Auto celebrations sit alongside curated dates in "Coming up".
     const allDates = [...celebrations, ...dates].sort((a, b) => a.date.localeCompare(b.date))

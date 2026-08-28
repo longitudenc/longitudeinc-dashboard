@@ -227,20 +227,6 @@ function displayName(name: string): string {
 function monthDay(iso: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || '')); return m ? `${m[2]}-${m[3]}` : ''
 }
-/**
- * The salon a person is homed at, for scoping someone whose Access carries no
- * salon list. Returns '' when unknown.
- */
-export async function homeSalonForGlobalId(globalId: string): Promise<string> {
-  const gid = String(globalId || '').trim()
-  if (!gid) return ''
-  try {
-    const profs = await getEmployeeProfiles()
-    const p = profs.find((r: any) => String(r.globalId || '').trim() === gid)
-    return String(p?.homeStoreNum || '').trim()
-  } catch { return '' }
-}
-
 export async function getCelebrations(
   salons?: string[],
   opts: { horizon?: number; newHireDays?: number; cap?: number; includePhone?: boolean } = {}

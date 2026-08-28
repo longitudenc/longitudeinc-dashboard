@@ -10889,7 +10889,73 @@ function renderScrapeStatus(){
     html += '<div style="margin-top:8px;padding:8px 12px;background:var(--exc-bg);border:1px solid var(--exc-border);border-radius:8px;font-size:12px;color:var(--exc-text);">'
       + 'Everything is up to date.</div>';
   }
+  // The five DAILY feeds are not represented above -- they are checked
+  // against the sheet itself, asynchronously, by renderDailyHealth().
+  html += '<div id="daily-health"></div>';
   host.innerHTML = html;
+  renderDailyHealth();
+}
+
+
+// == Admin: daily feed health ================================================
+// The Feed status table above is derived from what the dashboard LOADED, which
+// covers the weekly and monthly feeds but says nothing about the five daily
+// ones (SD_DAILY, SD_EMP_DAILY, SD_DEMAND, SD_SHIFTS, SD_CHKINOUT). Those are
+// exactly the feeds that went missing two nights running, and the ones
+// SD_HALFHOUR quietly stopped filling for 70 days while reporting ok:true.
+//
+// This asks the server the same question the nightly run asks -- did rows
+// actually land for yesterday -- rather than inferring it. Reading it here does
+// NOT send an alert email; only the nightly run does that.
+function renderDailyHealth(){
+  const host = document.getElementById('daily-health');
+  if(!host) return;
+  host.innerHTML = '<div style="font-size:11px;color:var(--text-muted);">Checking daily feeds&hellip;</div>';
+
+  fetch('/api/health/daily-check').then(function(r){ return r.json(); }).then(function(d){
+    if(!d || !Array.isArray(d.feeds)){
+      host.innerHTML = '<div style="font-size:11px;color:var(--text-muted);">Daily feed check unavailable'
+        + (d && d.error ? ': ' + _accEsc(d.error) : '') + '</div>';
+      return;
+    }
+    const pill = function(ok){
+      return ok
+        ? '<span style="background:var(--exc-bg);color:var(--exc-text);border-radius:10px;padding:2px 9px;font-size:11px;font-weight:700;">Landed</span>'
+        : '<span style="background:var(--grw-bg);color:var(--grw-text);border-radius:10px;padding:2px 9px;font-size:11px;font-weight:700;">Missing</span>';
+    };
+    const th = 'padding:4px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;';
+    let html = '<div style="font-weight:700;font-size:13px;margin:16px 0 2px;">Daily feeds</div>'
+      + '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">'
+      + 'Rows actually written for <b>' + _accEsc(d.date) + '</b> (yesterday, Eastern). '
+      + 'Read straight from the sheet, so a job that reported success without writing anything still shows as missing.</div>'
+      + '<table style="width:100%;border-collapse:collapse;font-size:12px;">'
+      + '<thead><tr style="color:var(--text-muted);text-align:left;">'
+      + '<th style="' + th + '">Feed</th><th style="' + th + '">Rows</th><th style="' + th + '">Status</th>'
+      + '</tr></thead><tbody>';
+    d.feeds.forEach(function(f){
+      html += '<tr style="border-top:1px solid #f0efec;">'
+        + '<td style="padding:5px 8px;font-weight:600;">' + _accEsc(f.label) + '</td>'
+        + '<td style="padding:5px 8px;">' + _accEsc(f.rows) + '</td>'
+        + '<td style="padding:5px 8px;">' + pill(f.ok) + '</td>'
+        + '</tr>';
+    });
+    html += '</tbody></table>';
+
+    if(d.ok){
+      html += '<div style="margin-top:8px;padding:8px 12px;background:var(--exc-bg);border:1px solid var(--exc-border);border-radius:8px;font-size:12px;color:var(--exc-text);">'
+        + 'All five daily feeds landed for ' + _accEsc(d.date) + '.</div>';
+    } else {
+      const miss = (d.missing || []).join(', ');
+      html += '<div style="margin-top:8px;padding:8px 12px;background:#fff0f0;border:1px solid #f0c0c0;border-radius:8px;font-size:12px;color:#9C0006;">'
+        + '<b>No data for ' + _accEsc(d.date) + ' in:</b> ' + _accEsc(miss) + '.<br>'
+        + 'Every run re-pulls the last 7 days, so the next one should repair it on its own. '
+        + 'If it does not, check the latest <em>SD3 Nightly Scrape</em> run in the Actions tab.</div>';
+    }
+    host.innerHTML = html;
+  }).catch(function(e){
+    host.innerHTML = '<div style="font-size:11px;color:var(--text-muted);">Daily feed check failed: '
+      + _accEsc(e && e.message ? e.message : e) + '</div>';
+  });
 }
 
 function renderManagerTable(){
