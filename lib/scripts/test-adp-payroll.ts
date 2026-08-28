@@ -18,7 +18,7 @@
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { defaultSettings } from '../adp-settings'
-import { parsePayrollDetail } from '../adp-payroll-detail'
+import { parsePayrollDetail, parsePayrollWeekResult } from '../adp-payroll-detail'
 import {
   buildPayroll,
   toPayConsolRows,
@@ -513,6 +513,52 @@ console.log('\nPayroll Detail report parser')
     'the SALON TOTALS section is not absorbed into the employee',
     parsed.dailyFloor.every(d => d.floorHours < 20),
     `max day = ${Math.max(...parsed.dailyFloor.map(d => d.floorHours))}`
+  )
+}
+
+// ── 4b3) The payrollweekresult feed ───────────────────────────────────────
+// The same figures as the Detail report but as DATA, so no weekly download.
+// Fixture is real records from SD3 for salon 1304, week ending 2026-08-21.
+console.log('\npayrollweekresult feed (SD3 line items)')
+{
+  const wr = JSON.parse(readFileSync(join(__dirname, 'adp-weekresult-fixture.json'), 'utf8'))
+  // employeepk → Payroll ID. In production this comes from EmployeeProfile.
+  const pkMap = { '858423': '7784', '1205208': '2812' }
+  const parsed = parsePayrollWeekResult(wr, '1304', '2026-08-15', pkMap)
+
+  check(
+    "SIX DAY BONUS is read straight off line 8 — Moore's $32.80",
+    parsed.sd3SixDay.length === 1 &&
+      parsed.sd3SixDay[0].payId === '2812' &&
+      parsed.sd3SixDay[0].amount === 32.8,
+    JSON.stringify(parsed.sd3SixDay)
+  )
+  check(
+    'FLOOR HRS line gives the per-day hours; Moore worked 5 floor days',
+    parsed.dailyFloor.filter(d => d.payId === '2812').length === 5,
+    JSON.stringify(parsed.dailyFloor.filter(d => d.payId === '2812').map(d => d.floorHours))
+  )
+  check(
+    'ADMIN HRS and Bank Incentive lines are ignored, not counted as floor time',
+    parsed.dailyFloor.every(d => d.floorHours !== 2.32 && d.floorHours !== 12.22)
+  )
+  check(
+    'the second employee is parsed too, keyed by their own Payroll ID',
+    parsed.dailyFloor.filter(d => d.payId === '7784').length === 4
+  )
+  // Anyone without a Payroll ID mapping must be reported, never dropped quietly.
+  const noMap = parsePayrollWeekResult(wr, '1304', '2026-08-15', { '858423': '7784' })
+  check(
+    'an unmapped employeepk is reported rather than silently skipped',
+    noMap.unmappedEmployeePks.includes('1205208') &&
+      noMap.warnings.some(w => w.includes('no Payroll ID mapping')),
+    JSON.stringify(noMap.warnings)
+  )
+  check(
+    'both sources agree — the feed reproduces the Detail report for Moore',
+    parsed.sd3SixDay[0].amount ===
+      (JSON.parse(readFileSync(join(__dirname, 'adp-detail-fixture.json'), 'utf8'))
+        .sd3SixDay.find((x: any) => x.payId === '2812')?.amount)
   )
 }
 

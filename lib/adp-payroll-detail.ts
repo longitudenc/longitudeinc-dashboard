@@ -175,3 +175,105 @@ export function parsePayrollDetail(csvText: string, weekStart: string): PayrollD
 function normalizeId(raw: string): string {
   return /^0\d+$/.test(raw) ? (raw.replace(/^0+/, '') || '0') : raw
 }
+
+// ── SD3's payrollweekresult line items ──────────────────────────────────────
+//
+// The same numbers as the Payroll Detail report, but as DATA — so the weekly
+// report download goes away entirely. Each record is one payroll line for one
+// employee at one store, day1..day7 = Sat→Fri, day8 = the week total:
+//
+//   lineNum 1  FLOOR HRS       per-day floor hours  → 6-day qualifying days
+//   lineNum 8  SIX DAY BONUS   totalPay             → what SD3 already paid
+//
+// Records identify the person by `employeepk`, never by Payroll ID, so the
+// caller supplies the employeepk → Payroll ID map. Anyone missing from it is
+// reported rather than silently dropped: a missing person is a missing 6-day
+// correction, which is exactly the kind of quiet wrong answer to avoid.
+
+/** Line numbers, matched alongside the name so a renamed line still resolves. */
+const LINE_FLOOR = '1'
+const LINE_SIX_DAY = '8'
+
+function lineNumOf(r: Record<string, unknown>): string {
+  const raw = String(r.lineNumString ?? r.lineNum ?? '').trim()
+  return raw.replace(/\.0+$/, '')
+}
+
+function nameOf(r: Record<string, unknown>): string {
+  return String(r.name ?? '').trim().toUpperCase()
+}
+
+function employeePkOf(r: Record<string, unknown>): string {
+  const pk = (r as any)?.employee?.objectId?.idSnapshot?.employeepk
+  return pk == null ? '' : String(pk)
+}
+
+export interface WeekResultParse extends PayrollDetailParse {
+  /** employeepk values with no Payroll ID — their 6-day cannot be corrected. */
+  unmappedEmployeePks: string[]
+}
+
+/**
+ * Turn payrollweekresult records into the same shape the Detail report parser
+ * produces, so the engine takes either source unchanged.
+ *
+ * @param rows       records for ONE store (the endpoint is per store)
+ * @param salonNum   that store's salon number
+ * @param weekStart  the Saturday — day1..day7 are positional, like the report
+ * @param payIdByPk  employeepk → Payroll ID
+ */
+export function parsePayrollWeekResult(
+  rows: Array<Record<string, unknown>>,
+  salonNum: string,
+  weekStart: string,
+  payIdByPk: Record<string, string>
+): WeekResultParse {
+  const warnings: string[] = []
+  const dailyFloor: DailyFloorRow[] = []
+  const sd3SixDay: Sd3SixDayRow[] = []
+  const unmapped = new Set<string>()
+  const seen = new Set<string>()
+
+  const dates: string[] = []
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(weekStart + 'T00:00:00Z')
+    d.setUTCDate(d.getUTCDate() + i)
+    dates.push(d.toISOString().slice(0, 10))
+  }
+
+  for (const r of rows) {
+    const pk = employeePkOf(r)
+    if (!pk) continue
+    const payId = payIdByPk[pk]
+    if (!payId) { unmapped.add(pk); continue }
+    seen.add(pk)
+
+    const line = lineNumOf(r)
+    const name = nameOf(r)
+
+    if (line === LINE_FLOOR || name === 'FLOOR HRS') {
+      for (let d = 0; d < 7; d++) {
+        const hours = num(r[`day${d + 1}`])
+        if (hours > 0) dailyFloor.push({ date: dates[d], payId, salonNum, floorHours: hours })
+      }
+    } else if (line === LINE_SIX_DAY || name.includes('SIX DAY')) {
+      // totalPay is the dollars; day8 is the hours it was computed from. At
+      // $1/hour they agree, but totalPay is the figure that was actually paid.
+      const amount = num(r.totalPay) || num(r.day8)
+      if (amount > 0) sd3SixDay.push({ payId, salonNum, amount })
+    }
+  }
+
+  if (unmapped.size > 0) {
+    warnings.push(
+      `${unmapped.size} employee(s) at salon ${salonNum} have no Payroll ID mapping ` +
+      `(employeepk ${[...unmapped].slice(0, 5).join(', ')}${unmapped.size > 5 ? ', …' : ''}) — ` +
+      `their 6-day pay cannot be corrected`
+    )
+  }
+
+  return {
+    dailyFloor, sd3SixDay, blocks: seen.size, salons: [salonNum],
+    warnings, unmappedEmployeePks: [...unmapped],
+  }
+}

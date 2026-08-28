@@ -493,6 +493,48 @@ export async function fetchEmpChkInOut(
 }
 
 /**
+ * Payroll week-result LINE ITEMS for one store and week.
+ *
+ * This is the feed behind the Payroll Detail report, and the only place SD3
+ * exposes its incentive breakdown as data. Each record is one payroll line for
+ * one employee, with day1..day7 covering Sat→Fri and day8 the week total:
+ *
+ *   lineNum 1  "FLOOR HRS"       hours per day  ← 6-day qualifying days
+ *   lineNum 2  "ADMIN HRS"       hours per day
+ *   lineNum 8  "SIX DAY BONUS"   totalPay = what SD3 ALREADY paid  ← the netting
+ *   lineNum 9  "PRODUCTIVITY", 6 "PRODUCT BONUS", 30 "Bank Incentive", …
+ *
+ * The Payroll Consolidated report merges lines 8, 11 and 30 into a single "All
+ * Other Incentives" figure, which is why the 6-day amount could not be
+ * recovered from it. Here it is stated outright.
+ *
+ * NOTE: records identify the person by employeepk and a per-store employeeId —
+ * NOT by Payroll ID. Callers map employeepk → globalId → payId to join to the
+ * payroll report.
+ *
+ * lineNum!=10 mirrors the report's own filter.
+ */
+export async function fetchPayrollWeekResult(
+  session: SD3Session,
+  storeId: number,
+  weekStart: string,
+  weekEnd: string
+): Promise<Array<Record<string, unknown>>> {
+  // Path-segment store scoping, like empchkinout — NOT a storeConfig query param.
+  const url =
+    `${SD3_BASE}/rest/storeconfig/${storeId}/payrollweekresult` +
+    `?lineNum!=10&weekEnding>=${weekStart}&weekEnding<=${weekEnd}`
+
+  const res = await fetch(url, { headers: jsonHeaders(session.token) })
+  if (!res.ok) {
+    throw new Error(
+      `payrollweekresult failed for storeId=${storeId}: ${res.status} ${res.statusText}`
+    )
+  }
+  return asRowArray(await res.json())
+}
+
+/**
  * Employee incentive records for ONE store over a date range.
  *
  * This is the feed behind the Payroll Detail report's itemised incentive lines

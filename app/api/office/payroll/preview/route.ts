@@ -64,6 +64,10 @@ export async function GET(request: Request) {
       rules: result.settings.rules,
       codes: result.settings.codes,
       meta: result.meta,
+      // Which feed decided SD3's side. 'payrollweekresult' = SD3's own stated
+      // figure; 'modelled' = inferred, which is never exact — see
+      // lib/adp-payroll-detail.ts for why.
+      sixDaySource: result.meta.sixDaySource,
       upload: wantRows ? { header: result.upload.header, rows: result.upload.rows } : undefined,
     })
   } catch (err) {

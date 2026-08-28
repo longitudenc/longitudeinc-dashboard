@@ -363,6 +363,17 @@ function renderBuild(d){
   h += '<div class="card"><h2>6-day corrections <span class="sub">'
      + 'SD3 pays this itself on a looser rule — the file carries only the difference'
      + '</span></h2><div class="body" style="padding:0;">';
+  if(d.meta && d.meta.sixDaySource === 'modelled'){
+    h += '<div class="body"><div class="banner warn" style="margin:0;">'
+       + '<b>SD3\u2019s 6-day figure could not be read.</b> It is being estimated from '
+       + 'its rule, which is not exact \u2014 check these corrections by hand this week.'
+       + ((d.meta.sixDayWarnings||[]).length ? '<br><span style="font-size:12px;">'
+          + esc(d.meta.sixDayWarnings.slice(0,3).join(' \u00b7 ')) + '</span>' : '')
+       + '</div></div>';
+  } else if(d.meta && (d.meta.sixDayWarnings||[]).length){
+    h += '<div class="body"><div class="banner warn" style="margin:0;">'
+       + esc(d.meta.sixDayWarnings.slice(0,3).join(' \u00b7 ')) + '</div></div>';
+  }
   if(!moved.length){
     h += '<div class="body muted">Nothing to correct — SD3 paid exactly what everyone is owed.</div>';
   } else {

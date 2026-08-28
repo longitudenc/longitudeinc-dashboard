@@ -9,14 +9,20 @@
 //
 // Inputs gathered here:
 //   • Payroll Consolidated CSV — live from SD3, the identical report/date range
-//   • Per-day floor hours      — SD_EMP_DAILY, keyed by Payroll ID (6-day pay)
+//   • Six-day + per-day hours  — SD3's payrollweekresult line items, which state
+//                                what SD3 already paid instead of inferring it
+//   • Per-day floor hours      — SD_EMP_DAILY, fallback when the above is absent
 //   • Clock punches            — SD_CHKINOUT (scraped nightly), or live on request
 //   • Settings                 — ADP_SETTINGS / ADP_SALONS, or built-in defaults
 //   • Bonuses                  — BonusData, on the 3rd-paycheck week only
 //   • Manual earnings          — ADP_MANUAL, whatever the office keyed for the week
 // ---------------------------------------------------------------------------
 
-import { authenticate, fetchSalons, fetchPayrollCsv, fetchEmpChkInOut, batchMap } from '@/lib/sd3'
+import {
+  authenticate, fetchSalons, fetchPayrollCsv, fetchEmpChkInOut,
+  fetchPayrollWeekResult, batchMap,
+} from '@/lib/sd3'
+import { parsePayrollWeekResult, type Sd3SixDayRow } from '@/lib/adp-payroll-detail'
 import { parseCsv, rowsToObjectsAt } from '@/lib/csv'
 import { readSheet, rowsToObjects, getChkInOutRange, getDailyRange } from '@/lib/sheets'
 import { loadAdpSettings, type AdpSettings } from '@/lib/adp-settings'
@@ -65,6 +71,10 @@ export interface RunResult extends PayrollBuildResult {
     punchSegments: number
     /** Per-day floor-hour rows found for the week (the 6-day day-count source). */
     dailyFloorRows: number
+    /** Where SD3's own 6-day figure came from. */
+    sixDaySource: 'payrollweekresult' | 'modelled'
+    /** Employees whose 6-day could not be corrected for want of a Payroll ID. */
+    sixDayWarnings: string[]
     payrollRows: number
     salonsInReport: string[]
     bonusPeriod: string | null
@@ -168,6 +178,31 @@ async function dailyFloorFromSheet(weekStart: string, weekEnd: string): Promise<
   return out
 }
 
+/**
+ * employeepk → Payroll ID, for joining SD3's payroll line items to the payroll
+ * report. Two hops, both already maintained: EmployeeProfile holds
+ * employeepk ↔ globalId, and the payroll report carries globalId + Payroll ID.
+ */
+async function buildPayIdByPk(rows: { globalId: string; payId: string }[]): Promise<Record<string, string>> {
+  const payIdByGid: Record<string, string> = {}
+  for (const r of rows) {
+    if (r.globalId && r.payId) payIdByGid[r.globalId.trim()] = r.payId.trim()
+  }
+  const out: Record<string, string> = {}
+  try {
+    for (const p of rowsToObjects(await readSheet('EmployeeProfile'))) {
+      const pk = String((p as any).employeepk ?? '').trim()
+      const gid = String((p as any).globalId ?? '').trim()
+      if (!pk || !gid) continue
+      const payId = payIdByGid[gid]
+      if (payId) out[pk] = payId
+    }
+  } catch {
+    // EmployeeProfile unavailable → no map; the caller falls back and reports.
+  }
+  return out
+}
+
 /** Punches from the nightly scrape. Cheap — one Sheets read for the week. */
 async function punchesFromSheet(weekStart: string, weekEnd: string): Promise<PunchSegment[]> {
   const { chkinout } = await getChkInOutRange(weekStart, weekEnd)
@@ -211,12 +246,49 @@ export async function runPayrollBuild(opts: RunOptions = {}): Promise<RunResult>
   const csvText = await fetchPayrollCsv(session, storeIds, weekStart, weekEnd)
   const rows = toPayConsolRows(rowsToObjectsAt(parseCsv(csvText), 0))
 
-  // ── Per-day floor hours (6-day pay) ──
-  let dailyFloor: DailyFloorRow[] = []
+  // ── SD3's own six-day figures, from its payroll line items ──
+  //
+  // This is what makes the 6-day netting exact rather than inferred. Records
+  // key on employeepk, so they are joined through EmployeeProfile's
+  // employeepk → globalId map and the payroll report's globalId → Payroll ID.
+  // A failure here is NOT fatal: the run falls back to modelling SD3's rule and
+  // says so, rather than producing a file with no 6-day correction at all.
+  let sd3SixDay: Sd3SixDayRow[] | undefined
+  let sixDayDailyFloor: DailyFloorRow[] = []
+  const sixDayWarnings: string[] = []
   try {
-    dailyFloor = await dailyFloorFromSheet(weekStart, weekEnd)
-  } catch {
-    dailyFloor = []
+    const payIdByPk = await buildPayIdByPk(rows)
+    const perStore = await batchMap(salons, 4, async s => {
+      try {
+        const recs = await fetchPayrollWeekResult(session, s.storeId, weekStart, weekEnd)
+        return parsePayrollWeekResult(recs, s.salonNum, weekStart, payIdByPk)
+      } catch (e) {
+        sixDayWarnings.push(
+          `salon ${s.salonNum}: ${e instanceof Error ? e.message : String(e)}`
+        )
+        return null
+      }
+    })
+    const ok = perStore.filter(Boolean) as NonNullable<(typeof perStore)[number]>[]
+    if (ok.length > 0) {
+      sd3SixDay = ok.flatMap(p => p.sd3SixDay)
+      sixDayDailyFloor = ok.flatMap(p => p.dailyFloor)
+      for (const p of ok) sixDayWarnings.push(...p.warnings)
+    }
+  } catch (e) {
+    sixDayWarnings.push(e instanceof Error ? e.message : String(e))
+  }
+
+  // ── Per-day floor hours (6-day pay) ──
+  // Prefer the line-item feed: same measure SD3 used for its own six-day line,
+  // so the days and the dollars come from one place.
+  let dailyFloor: DailyFloorRow[] = sixDayDailyFloor
+  if (dailyFloor.length === 0) {
+    try {
+      dailyFloor = await dailyFloorFromSheet(weekStart, weekEnd)
+    } catch {
+      dailyFloor = []
+    }
   }
 
   // ── Punches ──
@@ -277,6 +349,7 @@ export async function runPayrollBuild(opts: RunOptions = {}): Promise<RunResult>
     weekStart,
     weekEnd,
     dailyFloor,
+    sd3SixDay,
     bonuses,
     manual,
   })
@@ -292,6 +365,8 @@ export async function runPayrollBuild(opts: RunOptions = {}): Promise<RunResult>
       punchSource,
       punchSegments: punches.length,
       dailyFloorRows: dailyFloor.length,
+      sixDaySource: sd3SixDay ? 'payrollweekresult' : 'modelled',
+      sixDayWarnings,
       payrollRows: rows.length,
       salonsInReport: [...new Set(rows.map(r => r.salonNum))].sort(),
       bonusPeriod,
