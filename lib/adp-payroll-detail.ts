@@ -26,6 +26,33 @@
 // The salon-totals and performance-summary sections reuse row labels like
 // "Floor Hrs", so parsing MUST stop at them — otherwise a salon's 190-hour
 // total lands on whichever employee happened to be last.
+//
+// ── WHY THIS REPORT IS REQUIRED ─────────────────────────────────────────────
+//
+// Two cheaper routes to SD3's Six Day figure were tried against the real week
+// ending 2026-08-21 (140 employee-salon rows, 18 of them paid) and BOTH failed.
+// Recorded here so neither is attempted again:
+//
+// 1. /rest/empincentive is NOT the Six Day feed. It is a manual adjustment
+//    table — additionalHours, bonusCentsPerHour, flatBonus, approved — and
+//    returned a single record for an entire salon-week, with no amount
+//    resembling any Six Day figure. Six Day is computed, not stored there.
+//
+// 2. SD3's qualification rule cannot be modelled reliably. Best fits over all
+//    140 rows:
+//      • 6+ days with FLOOR hours, 34+ total hours  → 4 wrong
+//      • 6+ days with ANY hours, 34+ total hours    → 3 wrong
+//      • …+ threshold on hours WORKED (excluding vacation) → 1 wrong
+//    That last residual (one stylist with 5 floor days, 6 worked days and 37.15
+//    hours worked, whom SD3 did NOT pay) has no explanation in any field the
+//    other feeds expose. 139/140 is a fine hit rate for an estimate and an
+//    unacceptable one for payroll: each miss is a whole person's 6-day pay,
+//    roughly $35, moving the wrong way.
+//
+// So the amount is READ from this report rather than inferred. If SD3 ever
+// exposes the breakdown as data, the JSON behind the report
+// (payrollweekresult?lineNum!=10&weekEnding>=…) is the place to look next —
+// the lineNum filter hints at per-line incentive items.
 // ---------------------------------------------------------------------------
 
 import { parseCsv } from '@/lib/csv'
