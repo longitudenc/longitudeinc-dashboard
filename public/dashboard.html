@@ -3282,6 +3282,13 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
       <div class="admin-panel">
         <div class="card-title">Admin — Data Management</div>
         <div class="admin-sections">
+          <!-- Users & Access (owner only; the API enforces it independently) -->
+          <div id="access-section" style="margin-bottom:1.2rem;display:none;">
+            <div style="font-weight:700;font-size:13px;color:#03654e;margin-bottom:6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">&#128272; Users &amp; Access <span style="font-weight:400;font-size:11px;color:var(--text-muted);">Every login the app accepts &middot; what each person sees &middot; where their role comes from</span></div>
+            <div style="background:#f8f7f4;border:1px solid var(--border);border-radius:8px;padding:10px;">
+              <div id="access-panel"><div style="color:var(--text-muted);font-size:12px;">Loading&hellip;</div></div>
+            </div>
+          </div>
 
           <!-- Metric Thresholds (the 4/3/2/1 bands) -->
           <div style="margin-bottom:1.2rem;">
@@ -5297,6 +5304,7 @@ function switchToAdmin(){
   renderAMAssignTable();
   renderWeeksList();
   renderScrapeStatus();
+  loadAccessPanel();
   initAdminCollapse();   // after the sections exist, and it self-guards on re-entry
 }
 
@@ -10209,6 +10217,165 @@ function initAdminCollapse(){
     });
     apply();
   });
+}
+
+// == Admin: Users & Access ===================================================
+// Owner-only. Lists EVERY login the app will accept, not just the Users tab.
+// Most roles are DERIVED (area_manager / manager / stylist) rather than
+// assigned, so a screen showing only the manual tab would imply nobody else can
+// sign in. The "where it comes from" column is the actual point of this panel.
+//
+// Hiding the section is cosmetic -- /api/admin/users is requireOwner() on its
+// own and refuses regardless of what the client chooses to render.
+let ACCESS_DATA = null;
+
+// Escapes the four characters that matter inside double-quoted attributes and
+// text nodes. Names and emails come from a spreadsheet people type into.
+function _accEsc(s){
+  return String(s == null ? '' : s)
+    .split('&').join('&amp;')
+    .split('<').join('&lt;')
+    .split('>').join('&gt;')
+    .split('"').join('&quot;');
+}
+
+async function loadAccessPanel(){
+  const sec = document.getElementById('access-section');
+  if(!sec) return;
+  if(String((SESSION && SESSION.role) || '') !== 'owner'){ sec.style.display = 'none'; return; }
+  sec.style.display = '';
+  const host = document.getElementById('access-panel');
+  try{
+    const r = await fetch('/api/admin/users').then(function(x){ return x.json(); });
+    if(!r || !r.success) throw new Error((r && r.error) || 'load failed');
+    ACCESS_DATA = r;
+    renderAccessPanel();
+  }catch(e){
+    if(host) host.innerHTML = '<div style="color:#b3261e;font-size:12px;">Could not load the access list: ' + _accEsc(e.message || e) + '</div>';
+  }
+}
+
+const _ACC_TD  = 'padding:3px 6px;border-bottom:1px solid var(--border);vertical-align:top;';
+const _ACC_INP = 'width:100%;box-sizing:border-box;font-size:12px;padding:3px 5px;border:1px solid var(--border);border-radius:4px;';
+const _ACC_TH  = 'text-align:left;padding:4px 6px;border-bottom:1px solid var(--border);font-size:11px;color:var(--text-muted);white-space:nowrap;';
+
+function _accHead(cols){
+  return '<thead><tr>' + cols.map(function(h){ return '<th style="' + _ACC_TH + '">' + _accEsc(h) + '</th>'; }).join('') + '</tr></thead>';
+}
+
+function _accRow(e, roles){
+  e = e || { email:'', role:'viewer', name:'', globalId:'', salons:[] };
+  const opts = (roles || []).map(function(r){
+    return '<option value="' + _accEsc(r) + '"' + (r === e.role ? ' selected' : '') + '>' + _accEsc(r) + '</option>';
+  }).join('');
+  return '<tr>'
+    + '<td style="' + _ACC_TD + '"><input class="acc-email" style="' + _ACC_INP + '" value="' + _accEsc(e.email) + '" placeholder="name@example.com"></td>'
+    + '<td style="' + _ACC_TD + '"><select class="acc-role" style="' + _ACC_INP + '">' + opts + '</select></td>'
+    + '<td style="' + _ACC_TD + '"><input class="acc-name" style="' + _ACC_INP + '" value="' + _accEsc(e.name) + '"></td>'
+    + '<td style="' + _ACC_TD + '"><input class="acc-gid" style="' + _ACC_INP + '" value="' + _accEsc(e.globalId) + '"></td>'
+    + '<td style="' + _ACC_TD + '"><input class="acc-salons" style="' + _ACC_INP + '" value="' + _accEsc((e.salons || []).join(' ')) + '" placeholder="3058 7728"></td>'
+    + '<td style="' + _ACC_TD + '"><button class="btn btn-sm" title="Remove" onclick="accRemoveRow(this)">&#10005;</button></td>'
+    + '</tr>';
+}
+
+function accRemoveRow(btn){
+  const tr = (btn && btn.closest) ? btn.closest('tr') : null;
+  if(tr) tr.remove();
+}
+
+function accAddRow(){
+  const tb = document.querySelector('#access-users-table tbody');
+  if(!tb) return;
+  tb.insertAdjacentHTML('beforeend', _accRow(null, (ACCESS_DATA && ACCESS_DATA.validRoles) || []));
+}
+
+function renderAccessPanel(){
+  const host = document.getElementById('access-panel');
+  if(!host || !ACCESS_DATA) return;
+  const d = ACCESS_DATA;
+  const roles = d.validRoles || [];
+  const manual  = (d.entries || []).filter(function(e){ return e.editable; });
+  const derived = (d.entries || []).filter(function(e){ return !e.editable; });
+
+  let counts = '';
+  Object.keys(d.counts || {}).sort().forEach(function(k){
+    counts += '<span style="display:inline-block;background:#fff;border:1px solid var(--border);border-radius:12px;padding:2px 9px;margin:0 4px 4px 0;font-size:11px;">'
+            + _accEsc(k) + ' <b>' + d.counts[k] + '</b></span>';
+  });
+
+  let html = '<div style="margin-bottom:8px;">' + counts + '</div>';
+
+  html += '<div style="font-size:12px;font-weight:700;margin:10px 0 4px;">Assigned roles'
+        + '<span style="font-weight:400;color:var(--text-muted);"> &mdash; the Users tab. Checked first, so a person listed here keeps this role whatever the employee tables say.</span></div>';
+  html += '<div style="overflow-x:auto;"><table id="access-users-table" style="width:100%;border-collapse:collapse;font-size:12px;">'
+        + _accHead(['Email','Role','Name','Global ID','Salons','']) + '<tbody>'
+        + manual.map(function(e){ return _accRow(e, roles); }).join('')
+        + '</tbody></table></div>';
+  html += '<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'
+        + '<button class="btn btn-sm" onclick="accAddRow()">+ Add person</button>'
+        + '<button class="btn btn-primary btn-sm" onclick="saveUsersTab()">&#128190; Save access list</button>'
+        + '<span id="access-msg" style="font-size:11px;color:var(--text-muted);"></span></div>';
+
+  html += '<div style="font-size:12px;font-weight:700;margin:16px 0 4px;">Derived roles'
+        + '<span style="font-weight:400;color:var(--text-muted);"> &mdash; computed from the employee tables. Change one by changing the assignment (AM, manager, profile), not here.</span></div>';
+  html += '<div style="overflow-x:auto;max-height:320px;overflow-y:auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;">'
+        + _accHead(['Name','Email','Role','Sees','Where it comes from']) + '<tbody>'
+        + derived.map(function(e){
+            const scope = (e.salons && e.salons.length) ? e.salons.join(', ')
+                        : (e.role === 'stylist' ? 'Only themselves' : '—');
+            return '<tr>'
+              + '<td style="' + _ACC_TD + '">' + _accEsc(e.name || '—') + '</td>'
+              + '<td style="' + _ACC_TD + 'color:var(--text-muted);">' + _accEsc(e.email) + '</td>'
+              + '<td style="' + _ACC_TD + '"><b>' + _accEsc(e.role) + '</b></td>'
+              + '<td style="' + _ACC_TD + '">' + _accEsc(scope) + '</td>'
+              + '<td style="' + _ACC_TD + 'color:var(--text-muted);">' + _accEsc(e.why) + '</td>'
+              + '</tr>';
+          }).join('')
+        + '</tbody></table></div>';
+
+  const ne = d.noEmail || [];
+  if(ne.length){
+    html += '<div style="font-size:11px;color:var(--text-muted);margin-top:12px;">'
+          + '<b>' + ne.length + '</b> employee' + (ne.length === 1 ? ' has' : 's have')
+          + ' no email on file and cannot sign in at all. They are on the roster and counted in reports; they just have no way in.</div>';
+  }
+
+  host.innerHTML = html;
+}
+
+async function saveUsersTab(){
+  const setMsg = function(t, ok){
+    const m = document.getElementById('access-msg');
+    if(m){ m.textContent = t; m.style.color = ok ? '#0a5236' : '#b3261e'; }
+  };
+  const val = function(tr, cls){ const el = tr.querySelector(cls); return el ? String(el.value || '').trim() : ''; };
+  const rows = Array.prototype.slice.call(document.querySelectorAll('#access-users-table tbody tr')).map(function(tr){
+    return {
+      email:    val(tr, '.acc-email'),
+      role:     val(tr, '.acc-role'),
+      name:     val(tr, '.acc-name'),
+      globalId: val(tr, '.acc-gid'),
+      salons:   val(tr, '.acc-salons')
+    };
+  }).filter(function(r){ return r.email || r.role; });
+
+  setMsg('Saving…', true);
+  try{
+    const r = await fetch('/api/admin/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rows: rows })
+    }).then(function(x){ return x.json(); });
+    if(!r || !r.success) throw new Error((r && r.error) || 'save failed');
+    ACCESS_DATA = r;
+    renderAccessPanel();
+    // Users stays in the 15s read cache on purpose: resolveAccess reads it on
+    // EVERY request, and making it uncached is what tripped Google's rate limit
+    // before. The write clears this instance; any other expires within 15s.
+    setMsg('Saved ' + r.saved + ' — changes take effect within 15 seconds.', true);
+  }catch(e){
+    setMsg(String(e.message || e), false);
+  }
 }
 
 // == Admin: is everything up to date? ========================================
