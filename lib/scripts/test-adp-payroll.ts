@@ -18,6 +18,7 @@
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { defaultSettings } from '../adp-settings'
+import { parsePayrollDetail } from '../adp-payroll-detail'
 import {
   buildPayroll,
   toPayConsolRows,
@@ -425,6 +426,128 @@ check(
   `week nets ${netted.totals.sixDayDelta >= 0 ? '+' : ''}$${netted.totals.sixDayDelta.toFixed(2)}`,
   Math.abs(netted.totals.sixDayDelta - (-32.80 - 30.79 - 35.90 - 35.62 + 38.59)) < 0.02,
   `got ${netted.totals.sixDayDelta}`
+)
+
+// ── 4b2) The detail-report parser ─────────────────────────────────────────
+console.log('\nPayroll Detail report parser')
+{
+  const mini = [
+    '"Payroll Detail Report - Weekly","Hilltop Plaza #1304","Saturday, 8/15/2026 - Friday, 8/21/2026"',
+    '"SMITH, ANN","Position:","Hire Date:","Global EE ID:","Base Wage:","Pay ID:"',
+    ',"Stylist","4/13/2017","2016-0000-8686","14.41","0742"',
+    '',
+    '"DETAIL","SAT","SUN","MON","TUE","WED","THU","FRI","Weekly #\'s",,"Weekly #s","Computer Pay"',
+    '"Floor Hrs","5.00","0","4.50","6.00","0","6.25","4.75","26.50","Floor","26.50","400.00"',
+    '"Six Day","5.00","0","4.50","6.00","0","6.25","4.75","26.50","Six Day","1.00/hr","26.50"',
+    '"Charge Tips","0","0","0","0","0","0","0","0","Total Tips","","0"',
+    '',
+    // The trap: the salon-totals section reuses "Floor Hrs" with a WEEK total in
+    // the first column. Absorbing it gave one employee 190 hours in a day.
+    '"SALON TOTALS","Hours","","Pay","","Bonus/Incentives","","Tips"',
+    '"Floor Hrs","190.77","Floor Pay","3011.14","Productivity Bonus","339.48","Cash/Check Tips","0.00"',
+    '"Closing Hrs","0.16","Closing Pay","2.45","Six Day Bonus","26.50","",""',
+    '"TOTALS*","195.26","","3096.36","","496.72","","1945.00"',
+  ].join('\n')
+
+  const parsed = parsePayrollDetail(mini, '2026-08-15')
+  check('one employee block, one salon', parsed.blocks === 1 && parsed.salons.join() === '1304')
+  check(
+    'five working days parsed, zero-hour days skipped',
+    parsed.dailyFloor.length === 5,
+    JSON.stringify(parsed.dailyFloor)
+  )
+  check(
+    'SAT maps to the week-start date, FRI to the week end',
+    parsed.dailyFloor[0].date === '2026-08-15' &&
+      parsed.dailyFloor[parsed.dailyFloor.length - 1].date === '2026-08-21'
+  )
+  check(
+    'Pay ID loses its leading zero, matching the payroll report',
+    parsed.dailyFloor.every(d => d.payId === '742')
+  )
+  check('SD3\'s Six Day figure read from the week-total column', 
+    parsed.sd3SixDay.length === 1 && parsed.sd3SixDay[0].amount === 26.50,
+    JSON.stringify(parsed.sd3SixDay))
+  check(
+    'the SALON TOTALS section is not absorbed into the employee',
+    parsed.dailyFloor.every(d => d.floorHours < 20),
+    `max day = ${Math.max(...parsed.dailyFloor.map(d => d.floorHours))}`
+  )
+}
+
+// ── 4c) The real week, end to end ─────────────────────────────────────────
+// adp-detail-fixture.json is the REAL SD3 "Payroll Detail Report - Weekly" for
+// w/e 2026-08-21, reduced to what the engine reads: floor hours per employee
+// per salon per DAY, and SD3's own "Six Day" figures. Run against the real
+// payroll report it must reproduce the corrections the office made by hand.
+console.log('\nReal week, end to end (SD3 Payroll Detail + Payroll Consolidated)')
+
+const detailFx = JSON.parse(
+  readFileSync(join(__dirname, 'adp-detail-fixture.json'), 'utf8')
+) as { dailyFloor: DailyFloorRow[]; sd3SixDay: { payId: string; salonNum: string; amount: number }[]
+       blocks: number; salons: string[] }
+
+check(
+  `detail report covers ${detailFx.blocks} employee-salon blocks across ${detailFx.salons.length} salons`,
+  detailFx.blocks === 140 && detailFx.salons.length === 18
+)
+check(
+  `SD3 states its own Six Day figure for ${detailFx.sd3SixDay.length} people`,
+  detailFx.sd3SixDay.length === 18
+)
+
+const real = buildPayroll({
+  rows: toPayConsolRows(objects),
+  punches: [], settings, weekStart: '2026-08-15', weekEnd: '2026-08-21',
+  dailyFloor: detailFx.dailyFloor,
+  sd3SixDay: detailFx.sd3SixDay,
+})
+const realSix = (name: string) => real.sixDay.find(d => d.employeeName.startsWith(name))!
+
+check(
+  'SD3\'s side is taken from its stated figure, not modelled',
+  real.sixDay.every(d => d.sd3Source === 'stated')
+)
+check(
+  'every employee with floor hours got day-level hours from the detail report',
+  real.sixDay.filter(d => d.weekFloorHours > 0).every(d => d.source === 'daily'),
+  real.sixDay.filter(d => d.weekFloorHours > 0 && d.source !== 'daily')
+    .map(d => `${d.employeeName} (${d.source})`).join(', ')
+)
+
+// The five corrections recorded in the Weekly Payroll Summary for this week.
+for (const [name, expected, why] of [
+  ['MOORE, ALISHA', -32.80, 'worked 5 days'],
+  ['MORGAN, JAMIE', -30.79, 'worked 5 days'],
+  ['TOMBERLIN', -35.90, 'worked 5 days'],
+  ['LATTIMORE', -35.62, 'a day under 4 hours'],
+  ['CHONG NEWMAN', 38.59, 'floater SD3 paid nothing'],
+] as [string, number, string][]) {
+  const d = realSix(name)
+  check(
+    `${name.padEnd(14)} ${expected >= 0 ? '+' : ''}${expected.toFixed(2)} — ${why}`,
+    Math.abs(d.delta - expected) < 0.005,
+    `got ${d.delta} (owed ${d.amount}, SD3 ${d.sd3Paid}, ${d.qualifyingDays} qualifying days, "${d.reason}")`
+  )
+}
+
+// Everyone SD3 got right must be left completely alone.
+for (const name of ['BLAKENEY', 'BURNETT', 'WYNN', 'ORTIZ', 'SLIGH', 'STATON', 'WALKER', 'DART', 'MELTON', 'GORDON', 'LONG', 'MORALES']) {
+  const d = realSix(name)
+  check(`${name.padEnd(14)} untouched — SD3 paid exactly what's owed`, Math.abs(d.delta) < 0.005,
+    `got ${d.delta} (owed ${d.amount}, SD3 ${d.sd3Paid})`)
+}
+
+// Two the office did NOT catch — real money, found by running the rule properly.
+check(
+  'BROOM, SABRINA  -33.95 — 33.95 floor hours, 0.05 under the threshold',
+  Math.abs(realSix('BROOM').delta - -33.95) < 0.005,
+  `got ${realSix('BROOM').delta}`
+)
+check(
+  'HERNANDEZ       +5.34 — floater owed on 39.67 merged hours, SD3 paid 34.33',
+  Math.abs(realSix('HERNANDEZ').delta - 5.34) < 0.005,
+  `got ${realSix('HERNANDEZ').delta}`
 )
 
 // ── 5) Short breaks ──

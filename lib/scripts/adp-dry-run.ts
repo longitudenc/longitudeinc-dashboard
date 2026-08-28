@@ -26,6 +26,9 @@
 //   --week YYYY-MM-DD   week-ending Friday (default: last completed week)
 //   --csv PATH          Payroll Consolidated CSV instead of pulling from SD3
 //   --punches PATH      punches JSON (as saved by a previous --save run)
+//   --detail PATH       SD3 "Payroll Detail Report - Weekly" CSV. BEST source:
+//                       gives floor hours per DAY and SD3's own "Six Day" line,
+//                       so nothing about SD3's rule has to be inferred.
 //   --daily PATH        Employee Performance CSV covering the week, one row per
 //                       employee PER DAY. This is the 6-day day-count source and
 //                       joins on Pay ID, so no name matching is involved.
@@ -41,6 +44,7 @@ import { config as loadEnv } from 'dotenv'
 import { defaultSettings } from '../adp-settings'
 import { parseCsv, rowsToObjectsAt } from '../csv'
 import { fiscalWeekContaining, lastCompletedFiscalWeek, todayET } from '../fiscal'
+import { parsePayrollDetail, type Sd3SixDayRow } from '../adp-payroll-detail'
 import {
   buildPayroll,
   toPayConsolRows,
@@ -67,6 +71,7 @@ const outDir = arg('out') || './payroll-dryrun'
 const csvPath = arg('csv')
 const punchPath = arg('punches')
 const dailyPath = arg('daily')
+const detailPath = arg('detail')
 const comparePath = arg('compare')
 
 if (!/^\d{4}-\d{2}-\d{2}$/.test(weekEnd)) {
@@ -145,6 +150,7 @@ async function main() {
   let csvText: string
   let punches: PunchSegment[] = []
   let dailyFloor: DailyFloorRow[] = []
+  let sd3SixDay: Sd3SixDayRow[] | undefined
   let punchNote = ''
 
   if (csvPath) {
@@ -205,6 +211,17 @@ async function main() {
     punches = JSON.parse(readFileSync(punchPath, 'utf8'))
     console.log(`Clock punches  : ${punchPath}`)
   }
+  if (detailPath) {
+    const parsed = parsePayrollDetail(readFileSync(detailPath, 'utf8'), weekStart)
+    dailyFloor = parsed.dailyFloor
+    sd3SixDay = parsed.sd3SixDay
+    console.log(`Payroll detail : ${detailPath}`)
+    console.log(`                 ${parsed.blocks} employee-salon blocks across ` +
+      `${parsed.salons.length} salons · ${parsed.dailyFloor.length} employee-days · ` +
+      `${parsed.sd3SixDay.length} with an SD3 "Six Day" line`)
+    parsed.warnings.forEach(w => console.log(`  ! ${w}`))
+  }
+
   if (dailyPath) {
     // One Employee Performance CSV covering the week, in Detail mode. Each row
     // must carry a date; SD3's per-day pull is one file per day, so a combined
@@ -235,7 +252,7 @@ async function main() {
 
   // ── Run ──
   const rows = toPayConsolRows(rowsToObjectsAt(parseCsv(csvText), 0))
-  const result = buildPayroll({ rows, punches, settings, weekStart, weekEnd, dailyFloor })
+  const result = buildPayroll({ rows, punches, settings, weekStart, weekEnd, dailyFloor, sd3SixDay })
 
   console.log(`\nRows ${rows.length} · employees ${result.totals.employees} ` +
     `(${result.totals.floaters} across multiple salons) · punch segments ${punches.length}`)
@@ -336,6 +353,8 @@ async function main() {
     .sort((a, b) => a.delta - b.delta)
   if (moved.length) {
     console.log('\n6-day corrections (compare with the "6 Day" rows in your summary sheet)')
+    console.log(`  (SD3's side is ${moved[0].sd3Source === 'stated'
+      ? 'taken from its own "Six Day" line' : 'MODELLED from its rule — supply --detail to use SD3\'s stated figure'})`)
     console.log(`  ${pad('Employee', 30)}${padL('owed', 10)}${padL('SD3 paid', 11)}${padL('NET', 10)}  why`)
     for (const s of moved) {
       const why = s.delta < 0

@@ -201,6 +201,8 @@ export interface SixDayDetail {
   sd3PaidBySalon: Record<string, number>
   /** amount − sd3Paid: what the file actually has to move. Can be negative. */
   delta: number
+  /** 'stated' = SD3's own Six Day line; 'modelled' = inferred from its rule. */
+  sd3Source: 'stated' | 'modelled'
   amount: number
   /** Why it did not qualify, when it didn't. */
   reason: string
@@ -556,7 +558,13 @@ export function computeSixDay(
   rows: PayConsolRow[],
   punches: PunchSegment[],
   settings: AdpSettings,
-  dailyFloor: DailyFloorRow[] = []
+  dailyFloor: DailyFloorRow[] = [],
+  /**
+   * What SD3 says it already paid, from the Payroll Detail report's own
+   * "Six Day" line. When supplied this is AUTHORITATIVE — no need to model
+   * SD3's rule at all. Omitted, the modelled rule is used as a fallback.
+   */
+  sd3SixDay?: { payId: string; salonNum: string; amount: number }[]
 ): { details: SixDayDetail[]; exceptions: PayrollException[] } {
   const {
     sixDayRate, sixDayMinDays, sixDayMinShiftHours, sixDayMinFloorHours,
@@ -636,6 +644,7 @@ export function computeSixDay(
         payId, employeeName, qualifies: false, qualifyingDays: 0, days: [],
         weekFloorHours, punchFloorHours: 0, amount: 0, source: 'none',
         sd3Paid: 0, sd3PaidBySalon: {}, delta: 0,
+        sd3Source: sd3SixDay ? 'stated' : 'modelled',
         reason: 'no day-level hours found for this employee',
       })
       continue
@@ -670,6 +679,13 @@ export function computeSixDay(
     // with no minimum shift length. That is why it pays people who don't meet
     // the real rule, and misses floaters who do.
     const sd3PaidBySalon: Record<string, number> = {}
+    if (sd3SixDay) {
+      // Stated by SD3 — use it verbatim.
+      for (const x of sd3SixDay) {
+        if (String(x.payId).trim() !== payId) continue
+        if (x.amount > 0) sd3PaidBySalon[String(x.salonNum).trim()] = round2(x.amount)
+      }
+    } else
     for (const r of group) {
       const salonDays = daysByPayIdSalon.get(`${payId}|${r.salonNum}`)
       // With no day-level data we cannot tell whether SD3 paid; leave it at zero
@@ -694,6 +710,7 @@ export function computeSixDay(
       source,
       sd3Paid,
       sd3PaidBySalon,
+      sd3Source: sd3SixDay ? 'stated' : 'modelled',
       delta: round2(amount - sd3Paid),
       amount,
       reason,
@@ -794,6 +811,11 @@ export function buildPayroll(input: {
   /** Per-day floor hours by Payroll ID. Preferred over punches for 6-day pay. */
   dailyFloor?: DailyFloorRow[]
   /**
+   * SD3's own "Six Day" figures from the Payroll Detail report. When present
+   * these are used verbatim instead of modelling SD3's qualification rule.
+   */
+  sd3SixDay?: { payId: string; salonNum: string; amount: number }[]
+  /**
    * Bonus lines to place on this week. The CALLER decides whether this is the
    * bonus week — `isBonusWeek` in the result says what the rule would pick, so
    * the office can hold or advance a bonus without the engine second-guessing.
@@ -813,7 +835,7 @@ export function buildPayroll(input: {
   applyFloaterOvertime(rows, rules.otThresholdHours)
 
   const { details: sixDay, exceptions: sixDayExceptions } =
-    computeSixDay(rows, punches, settings, input.dailyFloor ?? [])
+    computeSixDay(rows, punches, settings, input.dailyFloor ?? [], input.sd3SixDay)
   exceptions.push(...sixDayExceptions)
   const breaks = computeShortBreaks(rows, punches, settings)
 
