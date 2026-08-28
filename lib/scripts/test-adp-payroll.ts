@@ -28,6 +28,7 @@ import {
   payDateFor,
   occurrenceInMonth,
   allocate,
+  applyFloaterOvertime,
   round2,
   type DailyFloorRow,
   type PunchSegment,
@@ -170,6 +171,46 @@ check(
   !!dawn && Math.abs(dawn.overtimePay - 24.1) < 0.005,
   `got $${dawn?.overtimePay}, expected $24.10`
 )
+
+// SD3 evaluates a person in STORE ISOLATION, for overtime as well as 6-day.
+// The hard case: SD3 already paid overtime at one salon, and the person ALSO
+// worked a second salon — so the premium it paid is on too few hours, at that
+// salon's rate alone. The whole week has to be recomputed, not topped up.
+{
+  // Incentives feed the blended rate, so zero them here to isolate the overtime
+  // arithmetic — a flat $25/hr across both salons.
+  const base = {
+    ...rows.find(r => r.employeeName.startsWith('BOWERSOX'))!,
+    productivityIncentive: 0, productIncentive: 0, newReturnIncentive: 0,
+    shiftIncentive: 0, allOtherIncentives: 0,
+  }
+  const across = [
+    // 42 hours at one salon: SD3 sees overtime here and pays a premium.
+    { ...base, salonNum: '3071', totalHoursWorked: 42, floorHours: 42,
+      totalHoursPay: 42 * 25, overtimePay: 25, sourceRow: 1 },
+    // 6 more at another salon: SD3 sees 6 hours and no overtime at all.
+    { ...base, salonNum: '1304', totalHoursWorked: 6, floorHours: 6,
+      totalHoursPay: 6 * 25, overtimePay: 0, sourceRow: 2 },
+  ]
+  applyFloaterOvertime(across, 40)
+  const paid = round2(across.reduce((s, r) => s + r.overtimePay, 0))
+  // 48 hours worked → 8 over 40. Blended rate $25 → premium 8 × 25 / 2 = $100.
+  check(
+    'overtime across salons is recomputed on the whole week, not topped up',
+    Math.abs(paid - 100) < 0.005,
+    `got $${paid}, expected $100.00 (8 OT hours × $25 blended ÷ 2)`
+  )
+  check(
+    "SD3's single-salon premium is replaced, not added to",
+    across[0].overtimePay < 100 && paid === 100,
+    `salon shares: ${across.map(r => `${r.salonNum}=${r.overtimePay}`).join(', ')}`
+  )
+  check(
+    'the premium is split across both salons by hours worked',
+    Math.abs(across[0].overtimePay - 87.5) < 0.02 && Math.abs(across[1].overtimePay - 12.5) < 0.02,
+    across.map(r => `${r.salonNum}=${r.overtimePay}`).join(', ')
+  )
+}
 
 // ── 3) Exceptions (the workbook's CheckPay) ──
 console.log('\nException report')
