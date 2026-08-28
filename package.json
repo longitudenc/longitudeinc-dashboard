@@ -5,7 +5,10 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "payroll:test": "tsx lib/scripts/test-adp-payroll.ts",
+    "payroll:dry-run": "tsx lib/scripts/adp-dry-run.ts",
+    "payroll:inspect-incentive": "tsx lib/scripts/inspect-empincentive.ts"
   },
   "dependencies": {
     "@vercel/blob": "^2.8.0",

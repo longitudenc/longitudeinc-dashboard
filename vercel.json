@@ -63,6 +63,12 @@
     },
     "app/api/cron/weekly/route.ts": {
       "maxDuration": 60
+    },
+    "app/api/office/payroll/preview/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/office/payroll/export/route.ts": {
+      "maxDuration": 60
     }
   }
 }
