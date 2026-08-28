@@ -16,11 +16,14 @@
 #     CRON_HEARTBEAT_URL = (optional but recommended) Healthchecks.io ping URL
 #
 # HOW YOU FIND OUT SOMETHING BROKE:
-#   a job errors       -> red run, GitHub emails you; lib/alert.ts also emails
-#                         ALERT_EMAIL from inside the failing request
-#   the run never fires -> the heartbeat below is never pinged and
-#                         Healthchecks.io emails you. This is the case a red-run
-#                         email cannot cover, because there is no run to be red.
+#   a job errors        -> the run goes red and GitHub emails you.
+#   the run never fires -> the heartbeat below is never pinged, and
+#                          Healthchecks.io emails you. This is the case a red-run
+#                          email cannot cover, because there is no run to be red.
+#
+#   Note: lib/alert.ts / ALERT_EMAIL is a SEPARATE path used only by
+#   /api/cron/weekly and /api/report/payroll-pace. The /api/scrape/* routes do
+#   not call it, so the red run above is what covers them.
 
 name: SD3 Nightly Scrape
 
