@@ -1,26 +1,37 @@
 # .github/workflows/scrape.yml
 #
-# Nightly SD3 scrape orchestrator. Replaces the single Vercel cron that was
-# timing out: instead of doing everything in ONE 60s function invocation, this
-# hits each scrape endpoint as its OWN request, so each gets a fresh 60s budget.
-# A GitHub Actions job can run for hours, so total time no longer matters.
+# Nightly SD3 scrape orchestrator.
+#
+# The SCHEDULE ITSELF IS NOT IN THIS FILE. It lives in lib/scrape-plan.ts and is
+# served by /api/cron/plan; this workflow asks for today's job list and runs it.
+# So adding a nightly data point is a one-line change in that file and this
+# workflow never needs editing.
+#
+# Each job is its own HTTP request, so each gets a fresh 60s Vercel budget. A
+# GitHub Actions job can run for ~hours, so total wall time doesn't matter.
 #
 # Setup (one time):
-#   Repo → Settings → Secrets and variables → Actions → New repository secret
-#     CRON_SECRET        = local-dev-secret-not-for-production   (your CRON_SECRET)
-#     CRON_HEARTBEAT_URL = (optional) your Healthchecks.io ping URL
-#   Then remove the daily "/api/cron/run" entry from vercel.json so it doesn't
-#   double-run (leave the monthly market-ratings cron in place).
+#   Repo -> Settings -> Secrets and variables -> Actions -> New repository secret
+#     CRON_SECRET        = the CRON_SECRET from Vercel's env
+#     CRON_HEARTBEAT_URL = (optional but recommended) Healthchecks.io ping URL
 #
-# GitHub emails you automatically whenever this workflow fails, so a broken
-# scrape notifies you with no extra wiring.
+# HOW YOU FIND OUT SOMETHING BROKE:
+#   a job errors       -> red run, GitHub emails you; lib/alert.ts also emails
+#                         ALERT_EMAIL from inside the failing request
+#   the run never fires -> the heartbeat below is never pinged and
+#                         Healthchecks.io emails you. This is the case a red-run
+#                         email cannot cover, because there is no run to be red.
 
 name: SD3 Nightly Scrape
 
 on:
   schedule:
     - cron: '0 8 * * *'      # 08:00 UTC daily (~4 AM ET)
-  workflow_dispatch: {}       # manual "Run workflow" button in the Actions tab
+  workflow_dispatch:
+    inputs:
+      date:
+        description: 'Plan as if it were this date (YYYY-MM-DD, UTC). Blank = today.'
+        required: false
 
 concurrency:                  # never let two runs overlap
   group: sd3-scrape
@@ -34,75 +45,54 @@ jobs:
       BASE: https://longitudeinc-dashboard.vercel.app
       SECRET: ${{ secrets.CRON_SECRET }}
       HEARTBEAT: ${{ secrets.CRON_HEARTBEAT_URL }}
+      PLAN_DATE: ${{ inputs.date }}
     steps:
-      - name: Run scrapes
+      - name: Fetch today's plan
+        run: |
+          set -uo pipefail
+          if [ -z "${SECRET:-}" ]; then
+            echo "::error title=missing secret::CRON_SECRET is not set on this repo"
+            exit 1
+          fi
+          url="$BASE/api/cron/plan?secret=$SECRET"
+          if [ -n "${PLAN_DATE:-}" ]; then url="$url&date=$PLAN_DATE"; fi
+          code=$(curl -s -o plan.json -w '%{http_code}' --max-time 60 "$url" || echo 000)
+          if [ "$code" != "200" ]; then
+            echo "::error title=plan fetch failed::HTTP $code"
+            head -c 400 plan.json 2>/dev/null; echo
+            exit 1
+          fi
+          jq -r '"Plan for \(.date): \(.count) jobs"' plan.json
+          jq -r '.jobs[] | "  - \(.name) \(.query)"' plan.json
+          # Tab-separated so the runner loop never has to parse JSON per job.
+          jq -r '.jobs[] | [.name, .path, .query] | @tsv' plan.json > jobs.tsv
+
+      - name: Run the plan
         run: |
           set -uo pipefail
           FAIL=0
-          Y=$(date -u -d 'yesterday' +%F)     # yesterday, UTC (the completed day)
-          DOW=$(date -u +%u)                   # 1..7  (6 = Saturday)
-
-          hit () {
-            local name="$1"; local extra="${2:-}"
-            local url="$BASE/api/scrape/$name?secret=$SECRET$extra"
+          while IFS=$'\t' read -r name path query; do
+            [ -z "${name:-}" ] && continue
             echo "::group::$name"
-            local code
-            code=$(curl -s -o /tmp/out.json -w '%{http_code}' --max-time 120 "$url" || echo 000)
-            echo "HTTP $code"; head -c 600 /tmp/out.json; echo
-            if [ "$code" != "200" ] || grep -q '"ok":false' /tmp/out.json; then
-              echo "::error title=$name failed::HTTP $code"; FAIL=1
+            code=$(curl -s -o out.json -w '%{http_code}' --max-time 120 \
+                   "$BASE${path}?secret=$SECRET${query:-}" || echo 000)
+            echo "HTTP $code"
+            head -c 600 out.json; echo
+            # An endpoint can answer 200 and still report trouble in the body.
+            if [ "$code" != "200" ] || grep -q '"ok":false' out.json; then
+              echo "::error title=$name failed::HTTP $code"
+              FAIL=1
             fi
             echo "::endgroup::"
-          }
+          done < jobs.tsv
 
-          # 1. EXPIRING SOURCE first — rolling ~5-week invoice window; a missed day
-          #    is lost forever. Own invocation, single-day pull.
-          hit demand   "&start=$Y&end=$Y"
-          hit halfhour "&start=$Y&end=$Y"
-
-          # 2. Core daily feed + access-control refresh.
-          hit daily
-          hit profile
-
-          # 3. Weekly finalizer — only on Saturday.
-          if [ "$DOW" = "6" ]; then
-            hit weekly
-            hit roster
-            hit employee
-            hit employee-weekly-cons
-            hit payroll
-          fi
-
-          # 3b. TUESDAY SETTLE — payroll finalizes the Tuesday after a week closes.
-          #     Re-scrape the week that ended last Friday (Tue -> Fri = 4 days back)
-          #     so SD3's now-settled payroll overwrites Saturday's first-pass figures,
-          #     then recompute that week's month so month-end bonuses reflect the
-          #     finalized payroll. All idempotent upserts.
-          if [ "$DOW" = "2" ]; then
-            FRI=$(date -u -d '4 days ago' +%F)
-            SAT=$(date -u -d "$FRI -6 days" +%F)
-            hit weekly       "&start=$SAT&end=$FRI"
-            hit payroll      "&start=$SAT&end=$FRI"
-            hit employee     "&start=$SAT&end=$FRI"
-            hit bonus-period "&year=$(date -u -d "$FRI" +%Y)&month=$(date -u -d "$FRI" +%-m)"
-          fi
-
-          # 4. Month-end: yesterday was the LAST Friday of its month
-          #    (yesterday is a Friday AND +7 days lands in a new month).
-          if [ "$(date -u -d "$Y" +%u)" = "5" ] && \
-             [ "$(date -u -d "$Y +7 days" +%m)" != "$(date -u -d "$Y" +%m)" ]; then
-            hit monthly
-            hit bonus-period "&year=$(date -u -d "$Y" +%Y)&month=$(date -u -d "$Y" +%-m)"
-          fi
-
-          # 5. Recoverable detail last — re-runs nightly / week-to-date, so a
-          #    hiccup here just fills in on the next run.
-          hit employee-daily
-          hit shifts
-          hit chkinout
-
-          # Dead-man's switch: ping only on a fully clean run.
+          # Dead-man's switch: pinged ONLY on a fully clean run, so a partial
+          # failure surfaces as a missed check as well as a red run.
           if [ "$FAIL" = "0" ] && [ -n "${HEARTBEAT:-}" ]; then
             curl -s -m 10 "$HEARTBEAT" > /dev/null || true
+          else
+            if [ -z "${HEARTBEAT:-}" ]; then
+              echo "::warning title=no heartbeat::CRON_HEARTBEAT_URL is not set, so a run that never fires will go unnoticed"
+            fi
           fi
           exit $FAIL

@@ -1,8 +1,8 @@
 // lib/scrape-runner.ts
 //
 // Shared scrape implementations. Used by:
-//   - /api/scrape/daily,weekly,monthly,manual route handlers
-//   - /api/cron/run dispatcher (in-process, no HTTP)
+//   - the /api/scrape/* route handlers, one HTTP request per job, scheduled by
+//     lib/scrape-plan.ts and driven by .github/workflows/scrape.yml
 //
 // Each function returns a plain JSON-serializable result object.
 

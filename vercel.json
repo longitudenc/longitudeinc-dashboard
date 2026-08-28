@@ -55,9 +55,6 @@
     "app/api/scrape/manual/route.ts": {
       "maxDuration": 60
     },
-    "app/api/cron/run/route.ts": {
-      "maxDuration": 60
-    },
     "app/api/market/ratings/route.ts": {
       "maxDuration": 60
     },

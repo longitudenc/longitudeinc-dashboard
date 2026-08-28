@@ -1,12 +1,13 @@
 // app/api/cron/weekly/route.ts
 //
-// The WEEKLY finalizer, split out of /api/cron/run so it gets its own clean 60s
+// The WEEKLY finalizer, split into its own route so it gets a clean 60s
 // on Vercel Hobby and can never be starved by the daily scrapes. Runs the salon
 // weekly summary FIRST (that's what feeds the scorecard + Company Avg CC), then
 // the weekly-cadence entities.
 //
-// Triggered by a dedicated Saturday Vercel cron (see vercel.json), and also
-// self-invoked by /api/cron/run as a catch-up if a Saturday run was ever missed.
+// Triggered by a dedicated Saturday Vercel cron (see vercel.json). The nightly
+// workflow also hits /api/scrape/weekly on Saturdays via lib/scrape-plan.ts, and
+// both are idempotent upserts, so a doubled run is harmless.
 // Callable manually: /api/cron/weekly?secret=…
 
 import { NextResponse } from 'next/server'
