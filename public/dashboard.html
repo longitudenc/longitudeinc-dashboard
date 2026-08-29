@@ -10404,6 +10404,14 @@ const HUB_GROUPS = {
     cards: [
       { t:'Payroll', d:'Build and review the ADP upload for a week.', cap:'view.payroll',
         href:'/office.html' },
+      // Editing is gated server-side to EDIT_ROLES = owner/admin/office in every
+      // /api/newsletter/* route. `show` MIRRORS that list rather than using a
+      // capability, because no capability is checked there yet -- a toggle the
+      // server ignores would be worse than none. Move both to
+      // requireCapability('edit.newsletter') together.
+      { t:'Newsletter', d:'Build the monthly issue, then publish it for the team to read.',
+        show:function(){ return ['owner','admin','office'].indexOf(String(SESSION.role||'')) >= 0; },
+        href:'/newsletter.html' },
       { t:'Leases', d:'Coming soon — lease terms, renewals and key dates.', cap:'view.payroll',
         soon:true },
     ],
