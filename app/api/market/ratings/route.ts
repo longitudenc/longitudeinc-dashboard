@@ -20,8 +20,22 @@ const TAB = 'GooglePlaces'
 const HIST_TAB = 'RatingHistory'
 const COLS = ['salonNum','salonName','placeId','matchedName','matchedAddress','businessStatus','distanceM','rating','reviews','resolvedAt']
 const HIST_COLS = ['salonNum','month','rating','reviews','businessStatus','snapshotAt']
+// WEEKLY snapshots, separate from the MONTHLY RatingHistory above. Keeping
+// them apart on purpose: /api/market/data reads RatingHistory expecting one
+// row per salon per month, and writing weekly rows into it would give that
+// view four points where it expects one.
+const SNAP_TAB = 'RatingSnapshots'
+const SNAP_COLS = ['salonNum','date','rating','reviews','businessStatus']
+// The captured review archive. Keyed on reviewId so the weekly run ACCUMULATES:
+// Google returns at most 5 reviews per place and cannot be queried
+// retroactively, so the archive can only ever grow forwards from the first
+// capture. Every week not captured is lost permanently.
+const REVIEW_TAB = 'GoogleReviews'
+const REVIEW_COLS = ['reviewId','salonNum','salonName','author','stars','text','publishedAt','capturedAt']
 const DETAILS_URL = 'https://places.googleapis.com/v1/places/'
-const DETAILS_MASK = 'rating,userRatingCount,businessStatus'
+// `reviews` returns up to FIVE, most-relevant-first. That is a hard Places API
+// limit, not a parameter we can raise.
+const DETAILS_MASK = 'rating,userRatingCount,businessStatus,reviews'
 
 function isAuthorized(request: Request): boolean {
   const expected = process.env.CRON_SECRET
@@ -54,7 +68,9 @@ export async function GET(request: Request) {
     const now = new Date()
     const nowIso = now.toISOString()
     const month = nowIso.slice(0, 7)   // YYYY-MM
+    const day = nowIso.slice(0, 10)    // YYYY-MM-DD
     let updated = 0, errored = 0
+    const captured: Record<string, any>[] = []
 
     await mapLimit(withId, 5, async (r: any) => {
       const res = await fetch(DETAILS_URL + encodeURIComponent(String(r.placeId).trim()), {
@@ -68,6 +84,24 @@ export async function GET(request: Request) {
       if (p.businessStatus) r.businessStatus = p.businessStatus
       r.resolvedAt = nowIso
       updated++
+
+      // Reviews. `name` is the stable review resource id, which is what makes
+      // the weekly upsert additive instead of duplicating the same five rows.
+      for (const rv of (Array.isArray(p.reviews) ? p.reviews : [])) {
+        const reviewId = String(rv?.name || '').trim()
+        if (!reviewId) continue
+        captured.push({
+          reviewId,
+          salonNum: r.salonNum ?? '',
+          salonName: r.salonName ?? '',
+          author: String(rv?.authorAttribution?.displayName || '').trim(),
+          stars: typeof rv?.rating === 'number' ? rv.rating : '',
+          // Empty text is still a real captured review, so it is kept.
+          text: String(rv?.text?.text || rv?.originalText?.text || '').trim(),
+          publishedAt: String(rv?.publishTime || '').slice(0, 10),
+          capturedAt: day,
+        })
+      }
     })
 
     // 1) refresh GooglePlaces (full rows, nothing else disturbed)
@@ -85,7 +119,25 @@ export async function GET(request: Request) {
       }))
     await upsertSheet(HIST_TAB, [...HIST_COLS], ['salonNum', 'month'], histRows)
 
-    return NextResponse.json({ ok: true, refreshed: updated, errored, total: withId.length, snapshotMonth: month, snapshotRows: histRows.length })
+    // 3) weekly rating snapshot
+    const snapRows = rows
+      .filter((r: any) => String(r.placeId || '').trim())
+      .map((r: any) => ({
+        salonNum: r.salonNum, date: day,
+        rating: r.rating ?? '', reviews: r.reviews ?? '',
+        businessStatus: r.businessStatus ?? '',
+      }))
+    if (snapRows.length) await upsertSheet(SNAP_TAB, [...SNAP_COLS], ['salonNum', 'date'], snapRows)
+
+    // 4) review archive — additive, keyed on the review id
+    if (captured.length) await upsertSheet(REVIEW_TAB, [...REVIEW_COLS], ['reviewId'], captured)
+
+    return NextResponse.json({
+      ok: true, refreshed: updated, errored, total: withId.length,
+      snapshotMonth: month, snapshotRows: histRows.length,
+      weeklySnapshotDate: day, weeklySnapshotRows: snapRows.length,
+      reviewsCaptured: captured.length,
+    })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('[market/ratings]', msg)

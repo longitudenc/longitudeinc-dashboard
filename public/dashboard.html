@@ -8117,6 +8117,20 @@ const TREND_METRICS = {
          chartType:'line', color:'#4a7a2a' },
 };
 
+// Company-wide trends: the same chart and the same metric list, scoped to
+// every salon instead of one area manager's. switchTab('trends') only calls
+// renderTrends(), so no other AM tab renders against the synthetic scope.
+function openCompanyTrends(){
+  if(!canSeeAllSalons()) return;
+  clearActive();
+  const pg=document.getElementById('page-am'); if(pg) pg.classList.add('active');
+  S.currentAM='company';
+  const nm=document.getElementById('am-name'); if(nm) nm.textContent='Company Trends';
+  const sb=document.getElementById('am-sub'); if(sb) sb.textContent='Every salon · all metrics';
+  const tb=document.getElementById('am-tabbar'); if(tb) tb.style.display='none';
+  switchTab('trends');
+}
+
 function renderTrends(){
   if(!S.currentAM) return;
   selectTrendMetric(S_trendMetric, document.querySelector('.trend-metric-btn.active'));
@@ -8145,7 +8159,13 @@ function selectTrendMetric(key, btn, overrideSalon, hostId, storeView){
     if(allBtns.length) allBtns[0].classList.add('active');
   }
 
-  const am = AMS[S.currentAM], metric = TREND_METRICS[key];
+  // 'company' is a synthetic scope, not a real AM: same chart, same metrics,
+  // every salon. The salon list is filled in below, where allCompanySalons is
+  // already computed for the drill-in case.
+  const am = (S.currentAM === 'company')
+    ? { name:'Company', init:'CO', color:'#03654e', salons:[] }
+    : AMS[S.currentAM];
+  const metric = TREND_METRICS[key];
   if(!metric || !am) return;
 
   const allWeeksSorted = [...S.weekHistory].filter(w=>String(w.weekEnding) < _sdTodayIso()).sort((a,b)=>new Date(a.weekEnding)-new Date(b.weekEnding));
@@ -8187,6 +8207,8 @@ function selectTrendMetric(key, btn, overrideSalon, hostId, storeView){
   )].filter(Boolean);
   let allAMSalons;
   if(drillSalon && canSeeAllSalons()){
+    allAMSalons = allCompanySalons;
+  } else if(S.currentAM==='company'){
     allAMSalons = allCompanySalons;
   } else if(S.currentAM==='kayla'){
     allAMSalons = allCompanySalons.filter(s=>!NAMED.has(s));
@@ -10366,7 +10388,7 @@ const HUB_GROUPS = {
       { t:'Scorecard',   d:'Rankings and scorecard performance.',
         show:_navPerfUser, dest:{ company:_coGo('ams'), am:_amGo('score') }, capCompany:'view.company' },
       { t:'Trends',      d:'Movement over time.',
-        show:_navPerfUser, dest:{ am:_amGo('trends'), salon:_salonGo('trends') } },
+        show:_navPerfUser, dest:{ company:function(){ openCompanyTrends(); }, am:_amGo('trends'), salon:_salonGo('trends') } },
       { t:'Day Review',  d:'A single day, company-wide or for one area manager.', cap:'view.dayreview',
         dest:{ company:_coGo('dayreview'), am:_amGo('dayreview') } },
       { t:'Day of Week', d:'Weekday comparisons across a date window.', cap:'view.dayofweek',
