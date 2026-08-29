@@ -133,6 +133,11 @@ export function planForDate(todayIso?: string, hourUtc?: number): PlannedJob[] {
     jobs.push(scrape('employee'))
     jobs.push(scrape('employee-weekly-cons'))
     jobs.push(scrape('payroll'))
+    // Google ratings. Not an /api/scrape/* route -- it refreshes GooglePlaces
+    // from Place Details and upserts a month row into RatingHistory, so extra
+    // runs are idempotent. It already has a MONTHLY Vercel cron; this makes it
+    // weekly, which is the cadence the review numbers are actually watched at.
+    jobs.push({ name: 'google-ratings', path: '/api/market/ratings', query: '' })
   }
 
   // 4. TUESDAY SETTLE — SD3's payroll finalizes the Tuesday after a week closes,

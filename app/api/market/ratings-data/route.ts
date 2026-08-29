@@ -12,8 +12,9 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const TAB = 'GooglePlaces'
+const HIST_TAB = 'RatingHistory'
 const CACHE_TTL = 5 * 60 * 1000
-let cache: { ratings: Record<string, any>; timestamp: number } | null = null
+let cache: { ratings: Record<string, any>; history: any[]; timestamp: number } | null = null
 
 const toNum = (v: any) => { if (v === '' || v == null || v === '***') return null; const n = typeof v === 'number' ? v : parseFloat(String(v)); return Number.isFinite(n) ? n : null }
 
@@ -25,18 +26,31 @@ export async function GET() {
   if (!gate.ok) return gate.response
   try {
     if (cache && Date.now() - cache.timestamp < CACHE_TTL) {
-      return NextResponse.json({ success: true, ratings: cache.ratings, cached: true })
+      return NextResponse.json({ success: true, ratings: cache.ratings, history: cache.history, cached: true })
     }
+    // RatingHistory is the month-by-month series the ratings refresh appends to.
+    // Shipped alongside the current numbers so the client can show movement
+    // without a second round trip. Tolerant of a missing tab.
+    let history: any[] = []
+    try {
+      history = rowsToObjects((await readSheet(HIST_TAB)) || []).map((r: any) => ({
+        salonNum: String(r.salonNum ?? '').trim(),
+        month: String(r.month ?? '').trim(),
+        rating: toNum(r.rating),
+        reviews: toNum(r.reviews),
+      })).filter((r: any) => r.salonNum && r.month)
+    } catch { history = [] }
+
     const rows = rowsToObjects((await readSheet(TAB)) || [])
     const ratings: Record<string, any> = {}
     for (const r of rows) {
       const sn = String(r.salonNum ?? '').trim(); if (!sn) continue
       ratings[sn] = { rating: toNum(r.rating), reviews: toNum(r.reviews), status: String(r.businessStatus ?? '').trim() }
     }
-    cache = { ratings, timestamp: Date.now() }
-    return NextResponse.json({ success: true, ratings })
+    cache = { ratings, history, timestamp: Date.now() }
+    return NextResponse.json({ success: true, ratings, history })
   } catch (error) {
     console.error('[market/ratings-data]', error)
-    return NextResponse.json({ success: false, ratings: {} }, { status: 200 })
+    return NextResponse.json({ success: false, ratings: {}, history: [] }, { status: 200 })
   }
 }
