@@ -3682,6 +3682,22 @@ function payBlocked(e, periodKey){
 function payablePayout(e, periodKey){
   return payBlocked(e, periodKey) ? 0 : (parseFloat(e.payout)||0);
 }
+
+// Shared bonus vocabulary. These replaced 17 copies of e.position!=='M', 16 of
+// the payout reducer and 9 of the potential reducer.
+//
+// The position test was written TWO ways: the terse e.position!=='M' and a
+// defensive String(...).trim().toUpperCase()!=='M'. Those disagree on 'm' or
+// ' M', so the codebase had two different definitions of "stylist". Checked
+// against 18,955 EmployeeData rows before unifying: positions are exactly
+// S/M/A/N/R and the two forms disagree on ZERO rows, so standardising on the
+// defensive one changes no output today and removes the trap.
+function isStylist(e){ return String((e && e.position) || '').trim().toUpperCase() !== 'M'; }
+function isManagerRow(e){ return !isStylist(e); }
+// Reducers, so a caller reads X.reduce(sumPayout,0) instead of restating the
+// lambda. sumPayout goes through payablePayout, so blocked people stay at 0.
+function sumPayout(s, e){ return s + payablePayout(e); }
+function sumPotential(s, e){ return s + (parseFloat(e.potential)||0); }
 let ACTIVE_SALONS = [...new Set([
   ...Object.values(AMS).flatMap(am=>am.salons||[]),
   ...Object.keys(SALON_NAMES)
@@ -7408,7 +7424,7 @@ function _sdStylistBonusYTD(snum){
   if(!periods.length) return '<div style="color:var(--text-muted);padding:10px;">No completed periods this fiscal year.</div>';
   const byEmp={}, periodTot={};
   periods.forEach(function(pp){ var normLabel=normPeriodLabel(pp.periodLabel); var bp=(S_bonusPeriods||[]).find(p=>p.periodKey===normLabel||p.periodLabel===normLabel); if(!bp) return;
-    (bp.employees||[]).filter(e=>String(e.salonNum||'').trim()===String(snum).trim() && String(e.position||'').trim().toUpperCase()!=='M').forEach(function(e){ var gid=(e.globalId||'').trim()||('name:'+(e.empName||'')); var o=byEmp[gid]||(byEmp[gid]={gid:(e.globalId||'').trim(),name:e.empName,byPk:{},pay:0,pot:0}); var pay=payablePayout(e, bp.periodKey); o.byPk[pp.periodKey]=(o.byPk[pp.periodKey]||0)+pay; o.pay+=pay; o.pot+=parseFloat(e.potential)||0; periodTot[pp.periodKey]=(periodTot[pp.periodKey]||0)+pay; }); });
+    (bp.employees||[]).filter(e=>String(e.salonNum||'').trim()===String(snum).trim() && isStylist(e)).forEach(function(e){ var gid=(e.globalId||'').trim()||('name:'+(e.empName||'')); var o=byEmp[gid]||(byEmp[gid]={gid:(e.globalId||'').trim(),name:e.empName,byPk:{},pay:0,pot:0}); var pay=payablePayout(e, bp.periodKey); o.byPk[pp.periodKey]=(o.byPk[pp.periodKey]||0)+pay; o.pay+=pay; o.pot+=parseFloat(e.potential)||0; periodTot[pp.periodKey]=(periodTot[pp.periodKey]||0)+pay; }); });
   const people=Object.values(byEmp);
   if(!people.length) return '<div style="color:var(--text-muted);padding:10px;">No stylist bonus rows at this salon this fiscal year.</div>';
   people.sort((a,b)=>b.pay-a.pay);
@@ -7427,7 +7443,7 @@ function setSdBonusView(v){ S_sdBonusView=v; sdRender(); }
 function _sdStylistBonus(snum, normLabel){
   const bp=(S_bonusPeriods||[]).find(p=>p.periodKey===normLabel||p.periodLabel===normLabel);
   if(!bp) return '<div style="color:var(--text-muted);padding:10px;">No stylist bonus data for this month.</div>';
-  const stys=(bp.employees||[]).filter(e=>String(e.salonNum||'').trim()===String(snum).trim() && String(e.position||'').trim().toUpperCase()!=='M');
+  const stys=(bp.employees||[]).filter(e=>String(e.salonNum||'').trim()===String(snum).trim() && isStylist(e));
   if(!stys.length) return '<div style="color:var(--text-muted);padding:10px;">No stylists with bonus rows at this salon this month.</div>';
   stys.sort((a,b)=>(parseFloat(b.payout)||0)-(parseFloat(a.payout)||0));
   const rows=stys.map(function(e){ var pot=parseFloat(e.potential)||0; var pay=payablePayout(e, bp.periodKey); var pct=pot>0?(pay/pot*100):0; var nm=fmtName(e.empName||''); var nmSafe=nm.replace(/'/g,''); var gid=(e.globalId||'').trim();
@@ -9094,9 +9110,9 @@ function buildBonusMonth(){
   if(!emps.length) return '<div class="no-data">No bonus data for this period</div>';
 
   const period = S_bonusPeriods.find(p=>p.periodKey===S_bonusPeriod);
-  const stys = emps.filter(e=>e.position!=='M');
-  const totPay = stys.reduce((s,e)=>s+payablePayout(e),0);
-  const totPot = stys.reduce((s,e)=>s+(parseFloat(e.potential)||0),0);
+  const stys = emps.filter(isStylist);
+  const totPay = stys.reduce(sumPayout,0);
+  const totPot = stys.reduce(sumPotential,0);
   const earned = stys.filter(e=>payablePayout(e)>0).length;
   const penalties = stys.filter(e=>e.prodPenalty==='true'||e.prodPenalty===true).length;
   const ineligible = stys.filter(e=>(e.eligible==='false'||e.eligible===false)&&parseFloat(e.potential)>0).length;
@@ -9149,7 +9165,7 @@ function buildBonusMonth(){
       const hc = parseFloat(e.hcTime)||0;
       const avgWkHrs = parseFloat(e.avgWkHrs)||0;
 
-      if(e.position==='M'){
+      if(isManagerRow(e)){
         html += `<tr><td>${stylistLink(e.globalId, e.empName)}</td><td>${fmtN1(avgWkHrs)}</td>
           <td>${fmtPct(prod)}</td><td>${fmtPct(nr)}</td><td>${fmtPct(rr)}</td>
           <td>${fmtN1(mbc)}</td><td>${fmtN1(hc)}</td>
@@ -9218,7 +9234,7 @@ function buildBonusYTD(){
   const empMap = {}; // empName -> {periods: {pk: bonusRow}}
 
   periods.forEach(p=>{
-    const emps = bonusByAM(S.currentAM, p.periodKey).filter(e=>e.position!=='M');
+    const emps = bonusByAM(S.currentAM, p.periodKey).filter(isStylist);
     emps.forEach(e=>{
       if(!empMap[e.empName]) empMap[e.empName] = {salonNum:e.salonNum, periods:{}};
       empMap[e.empName].periods[p.periodKey] = e;
@@ -9265,12 +9281,12 @@ function buildBonusYTD(){
 
   // Totals row
   const grandTotals = periods.map(p=>{
-    const emps = bonusByAM(S.currentAM, p.periodKey).filter(e=>e.position!=='M');
-    return emps.reduce((s,e)=>s+payablePayout(e),0);
+    const emps = bonusByAM(S.currentAM, p.periodKey).filter(isStylist);
+    return emps.reduce(sumPayout,0);
   });
   const grandTotal = grandTotals.reduce((a,b)=>a+b,0);
   const grandPot = periods.reduce((s,p)=>{
-    return s + bonusByAM(S.currentAM, p.periodKey).filter(e=>e.position!=='M').reduce((ss,e)=>ss+(parseFloat(e.potential)||0),0);
+    return s + bonusByAM(S.currentAM, p.periodKey).filter(isStylist).reduce(sumPotential,0);
   },0);
 
   html += `<tr style="background:var(--primary);color:white;font-weight:700;">
@@ -9307,9 +9323,9 @@ function buildBonusSalon(){
   amSalons.forEach(sn=>{
     let ytdPay = 0, ytdPot = 0;
     const cells = S_bonusPeriods.map(p=>{
-      const emps = (p.employees||[]).filter(e=>e.salonNum===sn&&e.position!=='M');
-      const pay = emps.reduce((s,e)=>s+payablePayout(e),0);
-      const pot = emps.reduce((s,e)=>s+(parseFloat(e.potential)||0),0);
+      const emps = (p.employees||[]).filter(e=>e.salonNum===sn&&isStylist(e));
+      const pay = emps.reduce(sumPayout,0);
+      const pot = emps.reduce(sumPotential,0);
       ytdPay+=pay; ytdPot+=pot;
       const pp = pot>0?Math.round(pay/pot*100)+'%':'—';
       const cls = pay>0?(pay/pot<0.5?'bv-yellow':'bv-green'):'bv-red';
@@ -9331,9 +9347,9 @@ function buildBonusSalon(){
   html += `<tr style="background:var(--primary);color:white;font-weight:700;">
     <td>▸ AM Total</td>
     ${S_bonusPeriods.map(p=>{
-      const emps = bonusByAM(S.currentAM, p.periodKey).filter(e=>e.position!=='M');
-      const pay = emps.reduce((s,e)=>s+payablePayout(e),0);
-      const pot = emps.reduce((s,e)=>s+(parseFloat(e.potential)||0),0);
+      const emps = bonusByAM(S.currentAM, p.periodKey).filter(isStylist);
+      const pay = emps.reduce(sumPayout,0);
+      const pot = emps.reduce(sumPotential,0);
       return `<td style="text-align:center;font-size:11px;">${fmtMoney(pay)}</td>`;
     }).join('')}
     <td style="text-align:center;">${fmtMoney(grandYTDPay)}</td>
@@ -11334,15 +11350,15 @@ function renderCompanyStandouts(){
 function buildCompanyBonusMonth(){
   const period = S_bonusPeriods.find(p=>p.periodKey===S_bonusPeriod);
   if(!period) return '<div class="no-data">No data for this period</div>';
-  const stys = period.employees.filter(e=>e.position!=='M');
+  const stys = period.employees.filter(isStylist);
   const _pk = S_bonusPeriod || '';
   const _lbl = formatBonusPeriod(_pk);
   let exportBtns = `<div style="display:flex;gap:8px;margin-bottom:1rem;">
     <button class="btn btn-secondary btn-sm export-bonus" onclick="exportBonusJPEG('${_pk}')">📷 Export Image (${_lbl})</button>
     <button class="btn btn-secondary btn-sm export-bonus" onclick="exportPayrollCSV('${_pk}')">⬇ ADP Payroll CSV (${_lbl})</button>
   </div>`;
-  const totPay = stys.reduce((s,e)=>s+payablePayout(e),0);
-  const totPot = stys.reduce((s,e)=>s+(parseFloat(e.potential)||0),0);
+  const totPay = stys.reduce(sumPayout,0);
+  const totPot = stys.reduce(sumPotential,0);
   const earned = stys.filter(e=>payablePayout(e)>0).length;
 
   // Stats
@@ -11366,10 +11382,10 @@ function buildCompanyBonusMonth(){
     const am = AMS[amId]; if(!am) return;
     const amEmps = period.employees.filter(e=>{
       const salons = amId==='kayla' ? null : (am.salons||[]);
-      return e.position!=='M' && (amId==='kayla' ? !NAMED.has(e.salonNum) : salons.includes(e.salonNum));
+      return isStylist(e) && (amId==='kayla' ? !NAMED.has(e.salonNum) : salons.includes(e.salonNum));
     });
-    const pay = amEmps.reduce((s,e)=>s+payablePayout(e),0);
-    const pot = amEmps.reduce((s,e)=>s+(parseFloat(e.potential)||0),0);
+    const pay = amEmps.reduce(sumPayout,0);
+    const pot = amEmps.reduce(sumPotential,0);
     const earnedN = amEmps.filter(e=>payablePayout(e)>0).length;
     const pp = pot>0?Math.round(pay/pot*100)+'%':'—';
     const cls = pay>0?(pay/pot<0.5?'bv-yellow':'bv-green'):'';
@@ -11411,10 +11427,10 @@ function buildCompanyBonusYTD(){
     const cells = S_bonusPeriods.map(p=>{
       const emps = p.employees.filter(e=>{
         const salons = amId==='kayla'?null:(am.salons||[]);
-        return e.position!=='M'&&(amId==='kayla'?!NAMED.has(e.salonNum):salons.includes(e.salonNum));
+        return isStylist(e)&&(amId==='kayla'?!NAMED.has(e.salonNum):salons.includes(e.salonNum));
       });
-      const pay=emps.reduce((s,e)=>s+payablePayout(e),0);
-      const pot=emps.reduce((s,e)=>s+(parseFloat(e.potential)||0),0);
+      const pay=emps.reduce(sumPayout,0);
+      const pot=emps.reduce(sumPotential,0);
       ytdPay+=pay; ytdPot+=pot;
       const cls=pay>0?(pay/pot<0.5?'bv-yellow':'bv-green'):'bv-red';
       return `<td class="${cls}" style="text-align:center;">${fmtMoney(pay)}</td>`;
@@ -11433,7 +11449,7 @@ function buildCompanyBonusYTD(){
   html+=`<tr style="background:var(--primary);color:white;font-weight:700;">
     <td>▸ Company</td>
     ${S_bonusPeriods.map(p=>{
-      const pay=p.employees.filter(e=>e.position!=='M').reduce((s,e)=>s+payablePayout(e),0);
+      const pay=p.employees.filter(isStylist).reduce(sumPayout,0);
       return `<td style="text-align:center;">${fmtMoney(pay)}</td>`;
     }).join('')}
     <td style="text-align:center;">${fmtMoney(grandPay)}</td>
@@ -11447,7 +11463,7 @@ function buildCompanyBonusYTD(){
 function buildCompanyBonusAll(){
   const period = S_bonusPeriods.find(p=>p.periodKey===S_bonusPeriod);
   if(!period) return '<div class="no-data">No data for this period</div>';
-  const stys = period.employees.filter(e=>e.position!=='M')
+  const stys = period.employees.filter(isStylist)
     .sort((a,b)=>a.empName.localeCompare(b.empName));
 
   const _pk = S_bonusPeriod || '';
@@ -11503,7 +11519,7 @@ function buildCompanyBonusAllYTD(){
   // Build map: empName -> {salonNum, amId, periods: {pk: row}}
   const empMap = {};
   S_bonusPeriods.forEach(p=>{
-    p.employees.filter(e=>e.position!=='M').forEach(e=>{
+    p.employees.filter(isStylist).forEach(e=>{
       const key = e.empName + '|' + e.salonNum;
       if(!empMap[key]) empMap[key] = {empName:e.empName, salonNum:e.salonNum, periods:{}};
       empMap[key].periods[p.periodKey] = e;
@@ -11575,7 +11591,7 @@ function buildCompanyBonusAllYTD(){
   html += `<tr style="background:var(--primary);color:white;font-weight:700;">
     <td colspan="3">▸ Company Total — ${empList.length} stylists · ${grandEarned} earned</td>
     ${S_bonusPeriods.map(p=>{
-      const pay = p.employees.filter(e=>e.position!=='M').reduce((s,e)=>s+payablePayout(e),0);
+      const pay = p.employees.filter(isStylist).reduce(sumPayout,0);
       return `<td style="text-align:center;">${fmtMoney(pay)}</td>`;
     }).join('')}
     <td style="text-align:center;">${fmtMoney(grandPay)}</td>
@@ -12120,7 +12136,7 @@ function buildAdpCsv(periodKey){
   // 1) Stylists — BonusData, code 2, skip disc-ineligible (live, rolling 12mo)
   const bp = S_bonusPeriods.find(p=>p.periodKey===bonusLabel||p.periodLabel===bonusLabel);
   if(bp){
-    (bp.employees||[]).filter(e=>e.position!=='M').forEach(e=>{
+    (bp.employees||[]).filter(isStylist).forEach(e=>{
       if(activeDiscPoints(e.globalId, bonusLabel) >= 4) return; // disc-ineligible
       if(isInactive(e.globalId)) return; // inactive (termed/left) — must be employed at payout
       push(String(e.payId||'').trim(), '2', parseFloat(e.payout)||0, tempDeptForSalon(e.salonNum), (e.empName||'')+' (stylist '+e.salonNum+')');
@@ -12207,7 +12223,7 @@ function exportBonusJPEG(periodKey){
 
   const label = formatBonusPeriod(periodKey);
   const stys = period.employees
-    .filter(e=>e.position!=='M')
+    .filter(isStylist)
     .sort((a,b)=>{ const sA=parseInt(a.salonNum)||0, sB=parseInt(b.salonNum)||0; return sA-sB||a.empName.localeCompare(b.empName); });
 
   const headerHTML = `<tr style="background:var(--primary-dark);color:white;font-size:13px;">
@@ -12287,7 +12303,7 @@ function exportBonusJPEG(periodKey){
   printDiv.innerHTML = `
     <div style="text-align:center;margin-bottom:16px;border-bottom:3px solid #03654e;padding-bottom:12px;">
       <div style="font-size:22px;font-weight:700;color:#03654e;">Longitude Inc — Stylist Bonus</div>
-      <div style="font-size:16px;color:#555;margin-top:4px;">${label} · ${stys.length} Stylists · Total Payout: ${fmtMoney(stys.reduce((s,e)=>s+payablePayout(e),0))}</div>
+      <div style="font-size:16px;color:#555;margin-top:4px;">${label} · ${stys.length} Stylists · Total Payout: ${fmtMoney(stys.reduce(sumPayout,0))}</div>
     </div>
     <table style="border-collapse:collapse;border:1px solid #ccc;">
       <thead>${headerHTML}</thead>
@@ -12530,7 +12546,7 @@ function buildCompanyBonusAllStylists(){
 
   // Sort cols: 0=name,1=salon,2=am,3=hrs,4=prod,5=nr,6=rr,7=mbc,8=hc,9=pts,10=potential,11=payout
   const sortKey = ['empName','salonNum','salonNum','avgWkHrs','product','nr','rr','mbc','hcTime','points','potential','payout'];
-  let stys = period.employees.filter(e=>e.position!=='M');
+  let stys = period.employees.filter(isStylist);
 
   if(S_bonusSort.col !== null){
     const ci = S_bonusSort.col, asc = S_bonusSort.asc;
@@ -12545,8 +12561,8 @@ function buildCompanyBonusAllStylists(){
     stys = [...stys].sort((a,b)=>{ const sA=parseInt(a.salonNum)||0,sB=parseInt(b.salonNum)||0; return sA-sB||a.empName.localeCompare(b.empName); });
   }
 
-  const totPay = stys.reduce((s,e)=>s+payablePayout(e),0);
-  const totPot = stys.reduce((s,e)=>s+(parseFloat(e.potential)||0),0);
+  const totPay = stys.reduce(sumPayout,0);
+  const totPot = stys.reduce(sumPotential,0);
   const earned = stys.filter(e=>payablePayout(e)>0).length;
 
   const bTh2 = (i,lbl) => {
@@ -12653,7 +12669,7 @@ function buildCoBonusYTDStylist(){
   // Build map: empName+salon -> {periods}
   const empMap = {};
   S_bonusPeriods.forEach(p=>{
-    p.employees.filter(e=>e.position!=='M').forEach(e=>{
+    p.employees.filter(isStylist).forEach(e=>{
       const key = e.empName + '|' + e.salonNum;
       if(!empMap[key]) empMap[key] = {empName:e.empName, salonNum:e.salonNum, periods:{}};
       empMap[key].periods[p.periodKey] = e;
@@ -12737,7 +12753,7 @@ function buildCoBonusYTDStylist(){
   html+=`<tr style="background:var(--primary);color:white;font-weight:700;">
     <td colspan="2">▸ Company Total</td>
     ${S_bonusPeriods.map(p=>{
-      const pay=p.employees.filter(e=>e.position!=='M').reduce((s,e)=>s+payablePayout(e),0);
+      const pay=p.employees.filter(isStylist).reduce(sumPayout,0);
       return `<td style="text-align:center;">${fmtMoney(pay)}</td>`;
     }).join('')}
     <td style="text-align:center;">${fmtMoney(grandPay)}</td>
@@ -12774,12 +12790,12 @@ function buildCoBonusYTDAM(){
     let ytdPay=0, ytdPot=0, ytdStylists=new Set(), ytdEarned=0;
     const cells = S_bonusPeriods.map(p=>{
       const emps = p.employees.filter(e=>{
-        if(e.position==='M') return false;
+        if(isManagerRow(e)) return false;
         if(amId==='kayla') return !NAMED.has(e.salonNum);
         return (am.salons||[]).includes(e.salonNum);
       });
-      const pay=emps.reduce((s,e)=>s+payablePayout(e),0);
-      const pot=emps.reduce((s,e)=>s+(parseFloat(e.potential)||0),0);
+      const pay=emps.reduce(sumPayout,0);
+      const pot=emps.reduce(sumPotential,0);
       emps.forEach(e=>ytdStylists.add(e.empName));
       ytdEarned+=emps.filter(e=>parseFloat(e.payout)>0).length;
       ytdPay+=pay; ytdPot+=pot;
@@ -12802,7 +12818,7 @@ function buildCoBonusYTDAM(){
   html+=`<tr style="background:var(--primary);color:white;font-weight:700;">
     <td>▸ Company</td>
     ${S_bonusPeriods.map(p=>{
-      const pay=p.employees.filter(e=>e.position!=='M').reduce((s,e)=>s+payablePayout(e),0);
+      const pay=p.employees.filter(isStylist).reduce(sumPayout,0);
       return `<td style="text-align:center;">${fmtMoney(pay)}</td>`;
     }).join('')}
     <td style="text-align:center;">${fmtMoney(grandPay)}</td>
@@ -12841,9 +12857,9 @@ function buildCoBonusYTDSalon(){
     const amId=amOf(sn), am=AMS[amId]||{name:'?',color:'#999'};
     let ytdPay=0, ytdPot=0;
     const cells = S_bonusPeriods.map(p=>{
-      const emps=p.employees.filter(e=>e.salonNum===sn&&e.position!=='M');
-      const pay=emps.reduce((s,e)=>s+payablePayout(e),0);
-      const pot=emps.reduce((s,e)=>s+(parseFloat(e.potential)||0),0);
+      const emps=p.employees.filter(e=>e.salonNum===sn&&isStylist(e));
+      const pay=emps.reduce(sumPayout,0);
+      const pot=emps.reduce(sumPotential,0);
       ytdPay+=pay; ytdPot+=pot;
       if(!emps.length) return '<td style="color:#ccc;text-align:center;">—</td>';
       const cls=pay>0?(pay/pot>=0.5?'bv-green':'bv-yellow'):'bv-red';
@@ -12864,7 +12880,7 @@ function buildCoBonusYTDSalon(){
   html+=`<tr style="background:var(--primary);color:white;font-weight:700;">
     <td colspan="2">▸ Company</td>
     ${S_bonusPeriods.map(p=>{
-      const pay=p.employees.filter(e=>e.position!=='M').reduce((s,e)=>s+payablePayout(e),0);
+      const pay=p.employees.filter(isStylist).reduce(sumPayout,0);
       return `<td style="text-align:center;">${fmtMoney(pay)}</td>`;
     }).join('')}
     <td style="text-align:center;">${fmtMoney(grandPay)}</td>
