@@ -21,6 +21,7 @@
 import { NextResponse } from 'next/server'
 import { readSheet } from '@/lib/sheets'
 import { sendAlert } from '@/lib/alert'
+import { requireAdmin } from '@/lib/require-role'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -45,15 +46,26 @@ function yesterdayET(): string {
   return `${et.getFullYear()}-${String(et.getMonth() + 1).padStart(2, '0')}-${String(et.getDate()).padStart(2, '0')}`
 }
 
-function isAuthorized(request: Request): boolean {
+// Two callers, two rules. The nightly workflow authenticates with CRON_SECRET
+// and MAY email an alert. The admin panel authenticates with an owner/admin
+// session and MAY NOT -- otherwise simply opening Data Health would fire an
+// alert email every time a feed happened to be behind.
+type Auth = { ok: false } | { ok: true; mayAlert: boolean }
+
+async function authorize(request: Request): Promise<Auth> {
   const expected = process.env.CRON_SECRET
-  if (!expected) return false
-  if (request.headers.get('authorization') === `Bearer ${expected}`) return true
-  return new URL(request.url).searchParams.get('secret') === expected
+  if (expected) {
+    if (request.headers.get('authorization') === `Bearer ${expected}`) return { ok: true, mayAlert: true }
+    if (new URL(request.url).searchParams.get('secret') === expected) return { ok: true, mayAlert: true }
+  }
+  const gate = await requireAdmin()
+  if (gate.ok) return { ok: true, mayAlert: false }
+  return { ok: false }
 }
 
 export async function GET(request: Request) {
-  if (!isAuthorized(request)) {
+  const auth = await authorize(request)
+  if (!auth.ok) {
     return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 })
   }
   const url = new URL(request.url)
@@ -79,7 +91,7 @@ export async function GET(request: Request) {
   // silent. An alert nobody receives is indistinguishable from no problem.
   let alert: any = { sent: false, reason: 'not needed, nothing missing' }
 
-  if (!ok) {
+  if (!ok && auth.mayAlert) {
     const list = missing
       .map(f => `<li><b>${f.label}</b> (${f.tab}) — ${f.rows} rows, expected at least ${f.min}</li>`)
       .join('')
@@ -88,6 +100,8 @@ export async function GET(request: Request) {
       `<p>${missing.length} feed(s) have no usable data for <b>${date}</b>:</p><ul>${list}</ul>` +
       `<p>Re-run a single day with:<br><code>/api/scrape/&lt;name&gt;?secret=…&amp;start=${date}&amp;end=${date}</code></p>`
     )
+  } else if (!ok) {
+    alert = { sent: false, reason: 'read-only check from the admin panel; the nightly run is what alerts' }
   }
 
   return NextResponse.json({

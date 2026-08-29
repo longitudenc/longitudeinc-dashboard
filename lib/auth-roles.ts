@@ -116,7 +116,28 @@ export async function resolveAccess(email: string): Promise<Access | null> {
     }
   }
 
-  // Not in the manual list → an employee. ONLY NOW pay for the employee tables.
+  // Not in the manual list -> an employee. ONLY NOW pay for the employee tables.
+  const tables = await loadAccessTables()
+  return employeeAccessFor(e, tables)
+}
+
+// ---------------------------------------------------------------------------
+// The employee half of the cascade, split out so it has exactly ONE
+// implementation. The Users & Access panel needs to resolve EVERY login at
+// once, and a second copy of these rules written for the panel would drift
+// from the copy that actually grants access -- at which point the panel would
+// confidently show you something untrue, which is worse than not having it.
+
+export interface AccessTables {
+  areaManagers: any[]
+  managerTable: any[]
+  amAssignments: any[]
+  profiles: any[]
+  roster: any[]
+}
+
+/** The five employee tables, read once. */
+export async function loadAccessTables(): Promise<AccessTables> {
   const [areaManagers, managerTable, amAssignments, profiles, roster] =
     await Promise.all([
       getAreaManagers(),
@@ -125,30 +146,49 @@ export async function resolveAccess(email: string): Promise<Access | null> {
       getEmployeeProfiles(),
       getSalonRoster(),
     ])
+  return { areaManagers, managerTable, amAssignments, profiles, roster }
+}
+
+/**
+ * Steps 2-4 of the cascade for a normalised email. Pure: no I/O, so it can be
+ * run across every profile at once. Returns null when the email is not a known
+ * employee -- the same security backstop resolveAccess() has always had.
+ */
+export function employeeAccessFor(email: string, t: AccessTables): Access | null {
+  const e = norm(email)
 
   // For employee roles we need their globalId, from the SD3 email list.
-  const profile = profiles.find((p: any) => norm(p.email) === e)
+  const profile = t.profiles.find((p: any) => norm(p.email) === e)
   if (!profile || !String(profile.globalId || '').trim()) {
-    return null // email not a known employee and not in the manual list → no access
+    return null // email not a known employee and not in the manual list -> no access
   }
   const globalId = String(profile.globalId).trim()
 
-  // 2) Area manager FIRST — an active AM (with at least one current, un-ended
+  // 1b) DEPARTED? The profile scrape does NOT remove leavers -- it keeps the
+  //     row and flips `inactive` to true. Without this check a former employee
+  //     keeps a working magic link forever: on 2026-08-28 that was 118 people,
+  //     every one of them with a usable email, going back to January 2025.
+  //     Deliberately explicit-true only. If the column were ever dropped by an
+  //     upstream change this reverts to the old behaviour rather than locking
+  //     out all 127 active employees at once.
+  if (norm(profile.inactive) === 'true') return null
+
+  // 2) Area manager FIRST -- an active AM (with at least one current, un-ended
   //    assignment) resolves as area_manager EVEN IF they are also the listed
   //    manager of one of their salons (e.g. Cassi manages 3058, Dana manages
-  //    7728 — they're still AMs). Being an AM is the broader role.
+  //    7728 -- they are still AMs). Being an AM is the broader role.
   //    Conditions, so the role is driven by dated assignment history:
   //      (a) their globalId is in AreaManagers (identity), AND
   //      (b) their amKey has at least one CURRENT (un-ended) AM assignment.
   //    When an AM's last assignment ends (they step down, like Dawn 5/30),
-  //    condition (b) fails → they fall through to manager/stylist below.
-  const am = areaManagers.find((a: any) => String(a.globalId || '').trim() === globalId)
+  //    condition (b) fails -> they fall through to manager/stylist below.
+  const am = t.areaManagers.find((a: any) => String(a.globalId || '').trim() === globalId)
   if (am) {
-    const salons = currentSalonsForAm(am.amKey || am.key || '', amAssignments, roster)
+    const salons = currentSalonsForAm(am.amKey || am.key || '', t.amAssignments, t.roster)
     if (salons.length > 0) {
       return { role: 'area_manager', globalId, salons }
     }
-    // Listed in AreaManagers but no current assignments → former AM. Fall
+    // Listed in AreaManagers but no current assignments -> former AM. Fall
     // through to manager/stylist resolution below for their CURRENT role.
   }
 
@@ -156,7 +196,7 @@ export async function resolveAccess(email: string): Promise<Access | null> {
   //    a true single-salon manager, or an AM who STEPPED DOWN to manage one
   //    salon (no current AM assignments). Their historical AM data still
   //    computes correctly because bonus math reads stored data, not this role.
-  const mgr = managerTable.find((m: any) => String(m.globalId || '').trim() === globalId)
+  const mgr = t.managerTable.find((m: any) => String(m.globalId || '').trim() === globalId)
   if (mgr) {
     return {
       role: 'manager',
@@ -165,6 +205,6 @@ export async function resolveAccess(email: string): Promise<Access | null> {
     }
   }
 
-  // 4) Otherwise a known employee → stylist, scoped to self.
+  // 4) Otherwise a known employee -> stylist, scoped to self.
   return { role: 'stylist', globalId }
 }

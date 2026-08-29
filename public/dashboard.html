@@ -3019,11 +3019,40 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
         <div id="week-dropdown-items"><div class="week-dropdown-item" style="color:var(--text-muted);font-style:italic;">Loading...</div></div>
       </div>
     </div>
-    <a href="/market.html" title="CLT Market Compare" style="font-size:12px;color:#fff;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.28);padding:5px 12px;border-radius:20px;text-decoration:none;">🗺 Market</a>
+    <a href="/market.html" id="market-link" title="CLT Market Compare" style="display:none;font-size:12px;color:#fff;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.28);padding:5px 12px;border-radius:20px;text-decoration:none;">🗺 Market</a>
     <a href="/office.html" id="office-link" title="Office Tools — payroll upload for ADP" style="display:none;font-size:12px;color:#fff;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.28);padding:5px 12px;border-radius:20px;text-decoration:none;">🧾 Payroll</a>
     <div class="user-chip" id="user-chip" title="Click to sign out" onclick="if(confirm('Sign out?')) logout();" style="cursor:pointer;">Loading...</div>
   </div>
 </header>
+<style>
+  /* Top navigation — the new information architecture. Grouped by WHAT you
+     want (Performance / Pay / People / Requests), not by WHICH area manager.
+     The sidebar is still present and still works; this sits above it so both
+     are usable while the grouping settles. */
+  /* A LIGHT strip, deliberately. Painted the same green as the header it sits
+     under, it read as a second header rather than as navigation. */
+  #topnav{background:var(--paper,#fff);border-bottom:1px solid var(--border,#e6ebe7);
+          display:flex;align-items:center;gap:2px;padding:0 14px;
+          overflow-x:auto;-webkit-overflow-scrolling:touch;
+          box-shadow:0 1px 3px rgba(0,0,0,.05);}
+  #topnav .tn{background:transparent;border:0;color:#5b6b64;font-size:13px;
+          font-weight:600;padding:11px 14px;cursor:pointer;white-space:nowrap;
+          border-bottom:3px solid transparent;font-family:inherit;}
+  #topnav .tn:hover{color:#03654e;background:rgba(3,101,78,.06);}
+  #topnav .tn.active{color:#03654e;border-bottom-color:#048667;}
+  #topnav .tn-spacer{flex:1 1 auto;}
+  .hub-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;margin-top:14px;}
+  .hub-card{background:#fff;border:1px solid var(--border);border-radius:10px;padding:14px 15px;
+          cursor:pointer;text-align:left;font-family:inherit;transition:box-shadow .12s,transform .12s;}
+  .hub-card:hover{box-shadow:0 4px 14px rgba(0,0,0,.10);transform:translateY(-1px);}
+  .hub-card .hc-t{font-weight:700;font-size:14px;color:#03654e;margin-bottom:3px;}
+  .hub-card .hc-d{font-size:12px;color:var(--text-muted);line-height:1.45;}
+  .hub-sec{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+          color:var(--text-muted);margin:20px 0 2px;}
+  .hub-sec:first-of-type{margin-top:14px;}
+  #topnav .tn-back{color:#048667;font-weight:700;}
+</style>
+<nav id="topnav" aria-label="Main"></nav>
 
 <div class="main-layout">
   <div id="sidebar-backdrop" onclick="toggleSidebar()"></div>
@@ -3276,12 +3305,22 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
 
 
 
+    <!-- Hub landing for a top-nav group (Performance / Pay / People). -->
+    <div class="page" id="page-hub"></div>
+
     <!-- Admin upload panel -->
     <div class="page" id="page-admin">
       <div class="page-header"><h2>Admin — Data Management</h2><div class="sub">Upload new weekly reports and manage data</div></div>
       <div class="admin-panel">
         <div class="card-title">Admin — Data Management</div>
         <div class="admin-sections">
+          <!-- Users & Access (owner only; the API enforces it independently) -->
+          <div id="access-section" style="margin-bottom:1.2rem;display:none;">
+            <div style="font-weight:700;font-size:13px;color:#03654e;margin-bottom:6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">&#128272; Users &amp; Access <span style="font-weight:400;font-size:11px;color:var(--text-muted);">Every login the app accepts &middot; what each person sees &middot; where their role comes from</span></div>
+            <div style="background:#f8f7f4;border:1px solid var(--border);border-radius:8px;padding:10px;">
+              <div id="access-panel"><div style="color:var(--text-muted);font-size:12px;">Loading&hellip;</div></div>
+            </div>
+          </div>
 
           <!-- Metric Thresholds (the 4/3/2/1 bands) -->
           <div style="margin-bottom:1.2rem;">
@@ -3469,12 +3508,21 @@ function isAdminRole(){ const r=roleClean(); return r==='owner'||r==='admin'; }
 function isViewerRole(){ return roleClean()==='viewer'; }
 function isOwnerRole(){ return roleClean()==='owner'; }
 function isAMRole(){ const r=roleClean(); return r==='area_manager'||r==='am'; }
-function canSeeAllSalons(){ return isAdminRole()||isViewerRole(); }
-// Day Review (whole-company single-day) — owner/admin/viewer (canSeeAllSalons),
-// plus Kayla as a
-// fallback in case her admin role hasn't been set in the users list yet.
-function canSeeDayReview(){ return canSeeAllSalons() || (isAMRole() && String(USER_AM_ID||'').replace(/["']/g,'').trim()==='kayla'); }
-function canSeeDayOfWeek(){ return canSeeAllSalons() || isAMRole(); }  // each role sees the stores they're responsible for
+// Capabilities resolved by the SERVER (/api/auth/me): role defaults from
+// lib/capabilities.ts plus any per-person rows on the Capabilities tab.
+// These hide UI only — every one of them is also enforced server-side, so a
+// tampered-with SESSION_CAPS reveals buttons that then get a 403.
+//
+// The role fallbacks below apply only when the list is missing (an older
+// cached page, or /api/auth/me failing): better to render the previous
+// behaviour than an empty dashboard.
+let SESSION_CAPS = new Set();
+function hasCap(c){ return SESSION_CAPS.has(c); }
+function canSeeAllSalons(){ return SESSION_CAPS.size ? hasCap('view.company')   : (isAdminRole()||isViewerRole()); }
+// Kayla no longer needs naming in code: she is admin, so view.dayreview is
+// simply one of her defaults. Any further exception is an override row.
+function canSeeDayReview(){  return SESSION_CAPS.size ? hasCap('view.dayreview')  : canSeeAllSalons(); }
+function canSeeDayOfWeek(){  return SESSION_CAPS.size ? hasCap('view.dayofweek')  : (canSeeAllSalons()||isAMRole()); }
 
 const AMS = {
   cassi:     {name:'Cassi Sharpe',       init:'CS', color:'#a03030', globalId:'2014-0001-6376', salons:['3015','3058','4138']},
@@ -3634,6 +3682,22 @@ function payBlocked(e, periodKey){
 function payablePayout(e, periodKey){
   return payBlocked(e, periodKey) ? 0 : (parseFloat(e.payout)||0);
 }
+
+// Shared bonus vocabulary. These replaced 17 copies of e.position!=='M', 16 of
+// the payout reducer and 9 of the potential reducer.
+//
+// The position test was written TWO ways: the terse e.position!=='M' and a
+// defensive String(...).trim().toUpperCase()!=='M'. Those disagree on 'm' or
+// ' M', so the codebase had two different definitions of "stylist". Checked
+// against 18,955 EmployeeData rows before unifying: positions are exactly
+// S/M/A/N/R and the two forms disagree on ZERO rows, so standardising on the
+// defensive one changes no output today and removes the trap.
+function isStylist(e){ return String((e && e.position) || '').trim().toUpperCase() !== 'M'; }
+function isManagerRow(e){ return !isStylist(e); }
+// Reducers, so a caller reads X.reduce(sumPayout,0) instead of restating the
+// lambda. sumPayout goes through payablePayout, so blocked people stay at 0.
+function sumPayout(s, e){ return s + payablePayout(e); }
+function sumPotential(s, e){ return s + (parseFloat(e.potential)||0); }
 let ACTIVE_SALONS = [...new Set([
   ...Object.values(AMS).flatMap(am=>am.salons||[]),
   ...Object.keys(SALON_NAMES)
@@ -4536,7 +4600,7 @@ function scoreTierLabel(total){ if(total>=24)return{label:'Performance Excellenc
 
 // ── Init ──────────────────────────────────────────────────────
 // Real per-user identity, set from /api/auth/me after sign-in.
-let SESSION = { email: '', role: 'none', globalId: '', salons: [], name: '' };
+let SESSION = { email: '', role: 'none', globalId: '', salons: [], name: '', viewingAs: '', realEmail: '' };
 
 function init(){
   // Ask the server who's signed in. No valid session → show login.
@@ -4550,8 +4614,15 @@ function init(){
       role: me.access.role || 'none',
       globalId: me.access.globalId || '',
       salons: me.access.salons || [],
-      name: me.access.name || ''
+      name: me.access.name || '',
+      // Set only while an owner is viewing as someone else.
+      viewingAs: me.viewingAs || '',
+      realEmail: me.realEmail || ''
     };
+    SESSION_CAPS = new Set(me.caps || []);
+    renderTopNav();
+    initSidebarNavSync();
+    renderViewAsBanner();
     startDashboard();
   }).catch(()=>{ showLogin(); });
 }
@@ -4584,10 +4655,16 @@ function startDashboard(){
       return;
     }
 
-    // Office Tools (the ADP payroll upload) — same roles requireOffice() allows.
-    if(['owner','admin','office'].includes(SESSION.role)){
+    // Office Tools (the ADP payroll upload).
+    if(hasCap('view.payroll')){
       const ol = document.getElementById('office-link');
       if(ol) ol.style.display = 'inline-block';
+    }
+
+    // Market Compare.
+    if(hasCap('view.market')){
+      const ml = document.getElementById('market-link');
+      if(ml) ml.style.display = 'inline-block';
     }
 
     if(SESSION.role === 'office' || SESSION.role === 'maintenance'){
@@ -5291,6 +5368,7 @@ function switchToAdmin(){
   renderAMAssignTable();
   renderWeeksList();
   renderScrapeStatus();
+  loadAccessPanel();
   initAdminCollapse();   // after the sections exist, and it self-guards on re-entry
 }
 
@@ -7346,7 +7424,7 @@ function _sdStylistBonusYTD(snum){
   if(!periods.length) return '<div style="color:var(--text-muted);padding:10px;">No completed periods this fiscal year.</div>';
   const byEmp={}, periodTot={};
   periods.forEach(function(pp){ var normLabel=normPeriodLabel(pp.periodLabel); var bp=(S_bonusPeriods||[]).find(p=>p.periodKey===normLabel||p.periodLabel===normLabel); if(!bp) return;
-    (bp.employees||[]).filter(e=>String(e.salonNum||'').trim()===String(snum).trim() && String(e.position||'').trim().toUpperCase()!=='M').forEach(function(e){ var gid=(e.globalId||'').trim()||('name:'+(e.empName||'')); var o=byEmp[gid]||(byEmp[gid]={gid:(e.globalId||'').trim(),name:e.empName,byPk:{},pay:0,pot:0}); var pay=payablePayout(e, bp.periodKey); o.byPk[pp.periodKey]=(o.byPk[pp.periodKey]||0)+pay; o.pay+=pay; o.pot+=parseFloat(e.potential)||0; periodTot[pp.periodKey]=(periodTot[pp.periodKey]||0)+pay; }); });
+    (bp.employees||[]).filter(e=>String(e.salonNum||'').trim()===String(snum).trim() && isStylist(e)).forEach(function(e){ var gid=(e.globalId||'').trim()||('name:'+(e.empName||'')); var o=byEmp[gid]||(byEmp[gid]={gid:(e.globalId||'').trim(),name:e.empName,byPk:{},pay:0,pot:0}); var pay=payablePayout(e, bp.periodKey); o.byPk[pp.periodKey]=(o.byPk[pp.periodKey]||0)+pay; o.pay+=pay; o.pot+=parseFloat(e.potential)||0; periodTot[pp.periodKey]=(periodTot[pp.periodKey]||0)+pay; }); });
   const people=Object.values(byEmp);
   if(!people.length) return '<div style="color:var(--text-muted);padding:10px;">No stylist bonus rows at this salon this fiscal year.</div>';
   people.sort((a,b)=>b.pay-a.pay);
@@ -7365,7 +7443,7 @@ function setSdBonusView(v){ S_sdBonusView=v; sdRender(); }
 function _sdStylistBonus(snum, normLabel){
   const bp=(S_bonusPeriods||[]).find(p=>p.periodKey===normLabel||p.periodLabel===normLabel);
   if(!bp) return '<div style="color:var(--text-muted);padding:10px;">No stylist bonus data for this month.</div>';
-  const stys=(bp.employees||[]).filter(e=>String(e.salonNum||'').trim()===String(snum).trim() && String(e.position||'').trim().toUpperCase()!=='M');
+  const stys=(bp.employees||[]).filter(e=>String(e.salonNum||'').trim()===String(snum).trim() && isStylist(e));
   if(!stys.length) return '<div style="color:var(--text-muted);padding:10px;">No stylists with bonus rows at this salon this month.</div>';
   stys.sort((a,b)=>(parseFloat(b.payout)||0)-(parseFloat(a.payout)||0));
   const rows=stys.map(function(e){ var pot=parseFloat(e.potential)||0; var pay=payablePayout(e, bp.periodKey); var pct=pot>0?(pay/pot*100):0; var nm=fmtName(e.empName||''); var nmSafe=nm.replace(/'/g,''); var gid=(e.globalId||'').trim();
@@ -9032,9 +9110,9 @@ function buildBonusMonth(){
   if(!emps.length) return '<div class="no-data">No bonus data for this period</div>';
 
   const period = S_bonusPeriods.find(p=>p.periodKey===S_bonusPeriod);
-  const stys = emps.filter(e=>e.position!=='M');
-  const totPay = stys.reduce((s,e)=>s+payablePayout(e),0);
-  const totPot = stys.reduce((s,e)=>s+(parseFloat(e.potential)||0),0);
+  const stys = emps.filter(isStylist);
+  const totPay = stys.reduce(sumPayout,0);
+  const totPot = stys.reduce(sumPotential,0);
   const earned = stys.filter(e=>payablePayout(e)>0).length;
   const penalties = stys.filter(e=>e.prodPenalty==='true'||e.prodPenalty===true).length;
   const ineligible = stys.filter(e=>(e.eligible==='false'||e.eligible===false)&&parseFloat(e.potential)>0).length;
@@ -9087,7 +9165,7 @@ function buildBonusMonth(){
       const hc = parseFloat(e.hcTime)||0;
       const avgWkHrs = parseFloat(e.avgWkHrs)||0;
 
-      if(e.position==='M'){
+      if(isManagerRow(e)){
         html += `<tr><td>${stylistLink(e.globalId, e.empName)}</td><td>${fmtN1(avgWkHrs)}</td>
           <td>${fmtPct(prod)}</td><td>${fmtPct(nr)}</td><td>${fmtPct(rr)}</td>
           <td>${fmtN1(mbc)}</td><td>${fmtN1(hc)}</td>
@@ -9156,7 +9234,7 @@ function buildBonusYTD(){
   const empMap = {}; // empName -> {periods: {pk: bonusRow}}
 
   periods.forEach(p=>{
-    const emps = bonusByAM(S.currentAM, p.periodKey).filter(e=>e.position!=='M');
+    const emps = bonusByAM(S.currentAM, p.periodKey).filter(isStylist);
     emps.forEach(e=>{
       if(!empMap[e.empName]) empMap[e.empName] = {salonNum:e.salonNum, periods:{}};
       empMap[e.empName].periods[p.periodKey] = e;
@@ -9203,12 +9281,12 @@ function buildBonusYTD(){
 
   // Totals row
   const grandTotals = periods.map(p=>{
-    const emps = bonusByAM(S.currentAM, p.periodKey).filter(e=>e.position!=='M');
-    return emps.reduce((s,e)=>s+payablePayout(e),0);
+    const emps = bonusByAM(S.currentAM, p.periodKey).filter(isStylist);
+    return emps.reduce(sumPayout,0);
   });
   const grandTotal = grandTotals.reduce((a,b)=>a+b,0);
   const grandPot = periods.reduce((s,p)=>{
-    return s + bonusByAM(S.currentAM, p.periodKey).filter(e=>e.position!=='M').reduce((ss,e)=>ss+(parseFloat(e.potential)||0),0);
+    return s + bonusByAM(S.currentAM, p.periodKey).filter(isStylist).reduce(sumPotential,0);
   },0);
 
   html += `<tr style="background:var(--primary);color:white;font-weight:700;">
@@ -9245,9 +9323,9 @@ function buildBonusSalon(){
   amSalons.forEach(sn=>{
     let ytdPay = 0, ytdPot = 0;
     const cells = S_bonusPeriods.map(p=>{
-      const emps = (p.employees||[]).filter(e=>e.salonNum===sn&&e.position!=='M');
-      const pay = emps.reduce((s,e)=>s+payablePayout(e),0);
-      const pot = emps.reduce((s,e)=>s+(parseFloat(e.potential)||0),0);
+      const emps = (p.employees||[]).filter(e=>e.salonNum===sn&&isStylist(e));
+      const pay = emps.reduce(sumPayout,0);
+      const pot = emps.reduce(sumPotential,0);
       ytdPay+=pay; ytdPot+=pot;
       const pp = pot>0?Math.round(pay/pot*100)+'%':'—';
       const cls = pay>0?(pay/pot<0.5?'bv-yellow':'bv-green'):'bv-red';
@@ -9269,9 +9347,9 @@ function buildBonusSalon(){
   html += `<tr style="background:var(--primary);color:white;font-weight:700;">
     <td>▸ AM Total</td>
     ${S_bonusPeriods.map(p=>{
-      const emps = bonusByAM(S.currentAM, p.periodKey).filter(e=>e.position!=='M');
-      const pay = emps.reduce((s,e)=>s+payablePayout(e),0);
-      const pot = emps.reduce((s,e)=>s+(parseFloat(e.potential)||0),0);
+      const emps = bonusByAM(S.currentAM, p.periodKey).filter(isStylist);
+      const pay = emps.reduce(sumPayout,0);
+      const pot = emps.reduce(sumPotential,0);
       return `<td style="text-align:center;font-size:11px;">${fmtMoney(pay)}</td>`;
     }).join('')}
     <td style="text-align:center;">${fmtMoney(grandYTDPay)}</td>
@@ -10205,6 +10283,549 @@ function initAdminCollapse(){
   });
 }
 
+
+
+// == Top navigation + hub pages ==============================================
+// The old sidebar is organised by WHO (pick an area manager, then a report),
+// which is why Bonus, Reviews, Day Review and Team each exist three times over
+// in this file. This groups by WHAT instead. It routes into the SAME render
+// functions the sidebar calls -- nothing is reimplemented here, so the two
+// navigations cannot disagree about what a screen shows.
+//
+// Cards carry a `sec` so a group can be split into Company vs Area manager.
+// That split is temporary scaffolding: the end state is ONE set of reports with
+// a scope switcher, at which point these two sections collapse into each other.
+//
+// GATING RULE: a card must be visible to exactly the people who could already
+// reach it from the sidebar -- no wider, no narrower. setupSidebar() is the
+// reference. Note the AM branch gives area managers their own All Salons,
+// Standouts and Reviews entries, so those are NOT canSeeAllSalons()-only.
+//
+// Deliberately NOT here: company KPI tiles. Recomputing company aggregates for
+// a landing page would create a second implementation of numbers that are
+// scored and paid against, and the two would eventually drift.
+
+// Everyone who gets a performance sidebar at all: owner/admin/viewer + AMs.
+function _navPerfUser(){ return canSeeAllSalons() || isAMRole(); }
+
+const HUB_GROUPS = {
+  performance: {
+    title: 'Performance',
+    sub: 'How the salons are doing',
+    cards: [
+      // --- Company ---
+      { sec:'Company', t:'All Salons', d:'Every salon for the selected period, with tier colouring.',
+        show:_navPerfUser, go:function(){ switchToCompany(); } },
+      { sec:'Company', t:'Scorecards', d:'Area manager rankings and per-AM performance.', cap:'view.company',
+        go:function(){ switchToCompany(); showCompanyTab('ams'); } },
+      { sec:'Company', t:'Day Review', d:'The whole company on a single day.', cap:'view.dayreview',
+        go:function(){ switchToCompany(); showCompanyTab('dayreview'); } },
+      { sec:'Company', t:'Day of Week', d:'Weekday comparisons across a date window.', cap:'view.dayofweek',
+        go:function(){ switchToCompany(); showCompanyTab('dayofweek'); } },
+      { sec:'Company', t:'Market Compare', d:'How we sit against the wider Charlotte market.', cap:'view.market',
+        href:'/market.html' },
+      // --- Area manager (amSubTab picks the current AM, or your own if you are one) ---
+      { sec:'Area manager', t:'Scorecard', d:'One area manager’s scorecard for the period.',
+        show:_navPerfUser, go:function(){ amSubTab('score'); } },
+      { sec:'Area manager', t:'Salon Performance', d:'Each salon under that area manager.',
+        show:_navPerfUser, go:function(){ amSubTab('salon'); } },
+      { sec:'Area manager', t:'My Team’s Performance', d:'Every stylist in those salons.',
+        show:_navPerfUser, go:function(){ amSubTab('individual'); } },
+      { sec:'Area manager', t:'Trends', d:'Movement over time for those salons.',
+        show:_navPerfUser, go:function(){ amSubTab('trends'); } },
+    ],
+  },
+  pay: {
+    title: 'Pay',
+    sub: 'Bonuses and payroll',
+    cards: [
+      { sec:'Company', t:'Bonuses', d:'Stylist, manager and area manager bonus detail.', cap:'view.company',
+        go:function(){ switchToCompany(); showCompanyTab('bonus'); } },
+      { sec:'Area manager', t:'Bonus', d:'Bonus detail for one area manager’s salons.',
+        show:_navPerfUser, go:function(){ amSubTab('bonus'); } },
+      { sec:'Office', t:'Payroll', d:'Build and review the ADP upload for a week.', cap:'view.payroll',
+        href:'/office.html' },
+    ],
+  },
+  people: {
+    title: 'People',
+    sub: 'The team, their recognition and their records',
+    cards: [
+      // Standouts is recognition, not pay -- it belongs with People.
+      { sec:'Company', t:'Standouts', d:'Monthly recognition across the company.',
+        show:_navPerfUser, go:function(){ switchToCompany(); showCompanyTab('standouts'); } },
+      { sec:'Company', t:'Team', d:'Everyone, sortable, with hours and performance.', cap:'view.company',
+        go:function(){ switchToCompany(); showCompanyTab('team'); } },
+      { sec:'Company', t:'Reviews', d:'Stylist and manager reviews.',
+        show:_navPerfUser, go:function(){ switchToCompany(); showCompanyTab('reviews'); } },
+      { sec:'Area manager', t:'Reviews', d:'Reviews for one area manager’s stylists.',
+        show:_navPerfUser, go:function(){ amSubTab('reviews'); } },
+      // No capability for this one yet -- see lib/capabilities.ts. `show` mirrors
+      // the reveal rule on the #ftb-points tab exactly, so the card appears for
+      // precisely the people who already had it. Swap to cap:'view.points' once
+      // something enforces it server-side.
+      { sec:'Records', t:'Disciplinary points', d:'Active points, flags and per-person history.',
+        show:function(){ return isAdminRole() || isAMRole(); },
+        go:function(){ switchToForms(); showFormsTab('points'); } },
+    ],
+  },
+};
+
+// Which top-level item is showing, and whether we have drilled into a card.
+// Kept separate from the sidebar's own state so the two never fight.
+let S_topNav = '';
+let S_hubDrilled = false;
+
+// A card shows when its capability allows it AND any extra client-side
+// predicate does. `show` exists for gates that are not capabilities yet; it
+// must MIRROR the existing rule, never invent a looser one.
+function _tnAllowed(card){
+  if(card.cap && !hasCap(card.cap)) return false;
+  if(card.show && !card.show()) return false;
+  return true;
+}
+
+function renderTopNav(){
+  const nav = document.getElementById('topnav');
+  if(!nav) return;
+  const items = [
+    { key:'home',        label:'Home' },
+    { key:'performance', label:'Performance' },
+    { key:'pay',         label:'Pay' },
+    { key:'people',      label:'People' },
+    { key:'requests',    label:'Requests' },
+  ];
+  let html = '';
+  items.forEach(function(it){
+    // A group with nothing in it would be a dead end, so hide it entirely.
+    const g = HUB_GROUPS[it.key];
+    if(g && !g.cards.some(_tnAllowed)) return;
+    html += '<button class="tn' + (S_topNav === it.key ? ' active' : '') + '" data-nav="' + it.key + '"'
+          + ' onclick="topNavGo(this)">' + _accEsc(it.label) + '</button>';
+  });
+  html += '<span class="tn-spacer"></span>';
+  // Back out of a destination without hunting for the sidebar. Only once you
+  // have actually drilled in from a hub, so it is never a no-op.
+  if(S_hubDrilled && HUB_GROUPS[S_topNav]){
+    html += '<button class="tn tn-back" data-nav="' + _accEsc(S_topNav) + '" onclick="topNavGo(this)">'
+          + '&#8249; Back to ' + _accEsc(HUB_GROUPS[S_topNav].title) + '</button>';
+  }
+  if(hasCap('edit.settings') || hasCap('manage.access')){
+    html += '<button class="tn' + (S_topNav === 'admin' ? ' active' : '') + '" data-nav="admin"'
+          + ' title="Settings" onclick="topNavGo(this)">&#9881;</button>';
+  }
+  nav.innerHTML = html;
+}
+
+function topNavGo(btn){
+  const key = btn.getAttribute('data-nav');
+  S_topNav = key;
+  if(key === 'home')         { S_hubDrilled = false; switchToHome(); }
+  else if(key === 'requests'){ S_hubDrilled = false; switchToForms(); }
+  else if(key === 'admin')   { S_hubDrilled = false; switchToAdminFromNav(); }
+  else                       { showHub(key); return; }   // showHub re-renders
+  renderTopNav();
+}
+
+// Reuse the sidebar's own entry point rather than duplicating its page-show +
+// loader sequence, so the admin panel initialises identically from either nav.
+function switchToAdminFromNav(){
+  if(typeof switchToAdmin === 'function'){ switchToAdmin(); return; }
+  showPage('admin');
+}
+
+function showHub(key){
+  const g = HUB_GROUPS[key];
+  if(!g) return;
+  S_topNav = key;
+  S_hubDrilled = false;
+  clearActive();
+  const pg = document.getElementById('page-hub');
+  if(pg) pg.classList.add('active');
+  const mainEl = document.querySelector('.content');
+  if(mainEl) mainEl.scrollTop = 0;
+
+  const allowed = g.cards.filter(_tnAllowed);
+  let html = '<div class="page-header"><h2>' + _accEsc(g.title) + '</h2>'
+           + '<div class="sub">' + _accEsc(g.sub) + '</div></div>';
+
+  if(!allowed.length){
+    html += '<div style="color:var(--text-muted);font-size:13px;">Nothing here is available to your login.</div>';
+  } else {
+    // Group by section, preserving first-seen order.
+    const order = [];
+    allowed.forEach(function(c){
+      const sec = c.sec || '';
+      if(order.indexOf(sec) < 0) order.push(sec);
+    });
+    order.forEach(function(sec){
+      if(sec) html += '<div class="hub-sec">' + _accEsc(sec) + '</div>';
+      html += '<div class="hub-grid">';
+      allowed.forEach(function(c, i){
+        if((c.sec || '') !== sec) return;
+        html += '<button class="hub-card" data-hub="' + _accEsc(key) + '" data-i="' + i + '" onclick="hubGo(this)">'
+              + '<div class="hc-t">' + _accEsc(c.t) + '</div>'
+              + '<div class="hc-d">' + _accEsc(c.d) + '</div>'
+              + '</button>';
+      });
+      html += '</div>';
+    });
+  }
+  if(pg) pg.innerHTML = html;
+  renderTopNav();
+}
+
+function hubGo(btn){
+  const key = btn.getAttribute('data-hub');
+  const i = parseInt(btn.getAttribute('data-i'), 10);
+  const g = HUB_GROUPS[key];
+  if(!g) return;
+  const card = g.cards.filter(_tnAllowed)[i];
+  if(!card) return;
+  if(card.href){ window.location.href = card.href; return; }
+  if(card.go){
+    card.go();                 // this calls clearActive() internally
+    S_topNav = key;
+    S_hubDrilled = true;
+    renderTopNav();            // so the Back control appears
+  }
+}
+
+// Using the sidebar means you are no longer inside a hub journey, so drop the
+// Back control rather than leaving it pointing somewhere you did not come from.
+// Delegated to the container, which survives setupSidebar() rebuilding it.
+function initSidebarNavSync(){
+  const sb = document.getElementById('sidebar');
+  if(!sb || sb.dataset.navSync) return;
+  sb.dataset.navSync = '1';
+  sb.addEventListener('click', function(){
+    S_hubDrilled = false;
+    S_topNav = '';
+    renderTopNav();
+  });
+}
+
+// == Admin: Users & Access ===================================================
+// Owner-only. Lists EVERY login the app will accept, not just the Users tab.
+// Most roles are DERIVED (area_manager / manager / stylist) rather than
+// assigned, so a screen showing only the manual tab would imply nobody else can
+// sign in. The "where it comes from" column is the actual point of this panel.
+//
+// Hiding the section is cosmetic -- /api/admin/users is requireOwner() on its
+// own and refuses regardless of what the client chooses to render.
+let ACCESS_DATA = null;
+
+// Escapes the four characters that matter inside double-quoted attributes and
+// text nodes. Names and emails come from a spreadsheet people type into.
+function _accEsc(s){
+  return String(s == null ? '' : s)
+    .split('&').join('&amp;')
+    .split('<').join('&lt;')
+    .split('>').join('&gt;')
+    .split('"').join('&quot;');
+}
+
+async function loadAccessPanel(){
+  const sec = document.getElementById('access-section');
+  if(!sec) return;
+  if(String((SESSION && SESSION.role) || '') !== 'owner'){ sec.style.display = 'none'; return; }
+  sec.style.display = '';
+  const host = document.getElementById('access-panel');
+  try{
+    const r = await fetch('/api/admin/users').then(function(x){ return x.json(); });
+    if(!r || !r.success) throw new Error((r && r.error) || 'load failed');
+    ACCESS_DATA = r;
+    renderAccessPanel();
+  }catch(e){
+    if(host) host.innerHTML = '<div style="color:#b3261e;font-size:12px;">Could not load the access list: ' + _accEsc(e.message || e) + '</div>';
+  }
+}
+
+const _ACC_TD  = 'padding:3px 6px;border-bottom:1px solid var(--border);vertical-align:top;';
+const _ACC_INP = 'width:100%;box-sizing:border-box;font-size:12px;padding:3px 5px;border:1px solid var(--border);border-radius:4px;';
+const _ACC_TH  = 'text-align:left;padding:4px 6px;border-bottom:1px solid var(--border);font-size:11px;color:var(--text-muted);white-space:nowrap;';
+
+function _accHead(cols){
+  return '<thead><tr>' + cols.map(function(h){ return '<th style="' + _ACC_TH + '">' + _accEsc(h) + '</th>'; }).join('') + '</tr></thead>';
+}
+
+function _accRow(e, roles){
+  e = e || { email:'', role:'viewer', name:'', salons:[] };
+  const opts = (roles || []).map(function(r){
+    return '<option value="' + _accEsc(r) + '"' + (r === e.role ? ' selected' : '') + '>' + _accEsc(r) + '</option>';
+  }).join('');
+  return '<tr>'
+    + '<td style="' + _ACC_TD + '"><input class="acc-email" style="' + _ACC_INP + '" value="' + _accEsc(e.email) + '" placeholder="name@example.com"></td>'
+    + '<td style="' + _ACC_TD + '"><select class="acc-role" style="' + _ACC_INP + '">' + opts + '</select></td>'
+    + '<td style="' + _ACC_TD + '"><input class="acc-name" style="' + _ACC_INP + '" value="' + _accEsc(e.name) + '"></td>'
+    + '<td style="' + _ACC_TD + '"><input class="acc-salons" style="' + _ACC_INP + '" value="' + _accEsc((e.salons || []).join(' ')) + '" placeholder="e.g. 3058 7728"></td>'
+    + '<td style="' + _ACC_TD + '" nowrap>'
+    + (e.email ? '<button class="btn btn-sm" title="View the site as this person" data-email="' + _accEsc(e.email) + '" onclick="accViewAsClick(this)">&#128065;</button> ' : '')
+    + (e.email ? '<button class="btn btn-sm" title="What this person can see" data-email="' + _accEsc(e.email) + '" onclick="accCapsClick(this)">&#9881;</button> ' : '')
+    + '<button class="btn btn-sm" title="Remove" onclick="accRemoveRow(this)">&#10005;</button></td>'
+    + '</tr>';
+}
+
+function accRemoveRow(btn){
+  const tr = (btn && btn.closest) ? btn.closest('tr') : null;
+  if(tr) tr.remove();
+}
+
+function accAddRow(){
+  const tb = document.querySelector('#access-users-table tbody');
+  if(!tb) return;
+  tb.insertAdjacentHTML('beforeend', _accRow(null, (ACCESS_DATA && ACCESS_DATA.validRoles) || []));
+}
+
+function renderAccessPanel(){
+  const host = document.getElementById('access-panel');
+  if(!host || !ACCESS_DATA) return;
+  const d = ACCESS_DATA;
+  const roles = d.validRoles || [];
+  const manual  = (d.entries || []).filter(function(e){ return e.editable; });
+  const derived = (d.entries || []).filter(function(e){ return !e.editable; });
+
+  let counts = '';
+  Object.keys(d.counts || {}).sort().forEach(function(k){
+    counts += '<span style="display:inline-block;background:#fff;border:1px solid var(--border);border-radius:12px;padding:2px 9px;margin:0 4px 4px 0;font-size:11px;">'
+            + _accEsc(k) + ' <b>' + d.counts[k] + '</b></span>';
+  });
+
+  let html = '<div style="margin-bottom:8px;">' + counts + '</div>';
+
+  html += '<div style="font-size:12px;font-weight:700;margin:10px 0 4px;">Assigned roles'
+        + '<span style="font-weight:400;color:var(--text-muted);"> &mdash; the Users tab. Checked first, so a person listed here keeps this role whatever the employee tables say.</span></div>';
+  html += '<div style="overflow-x:auto;"><table id="access-users-table" style="width:100%;border-collapse:collapse;font-size:12px;">'
+        + _accHead(['Email','Role','Name','Salons','']) + '<tbody>'
+        + manual.map(function(e){ return _accRow(e, roles); }).join('')
+        + '</tbody></table></div>';
+  html += '<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'
+        + '<button class="btn btn-sm" onclick="accAddRow()">+ Add person</button>'
+        + '<button class="btn btn-primary btn-sm" onclick="saveUsersTab()">&#128190; Save access list</button>'
+        + '<span id="access-msg" style="font-size:11px;color:var(--text-muted);"></span></div>';
+
+  html += '<div style="font-size:12px;font-weight:700;margin:16px 0 4px;">Derived roles'
+        + '<span style="font-weight:400;color:var(--text-muted);"> &mdash; computed from the employee tables. Change one by changing the assignment (AM, manager, profile), not here.</span></div>';
+  html += '<div style="overflow-x:auto;max-height:320px;overflow-y:auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;">'
+        + _accHead(['Name','Email','Role','Sees','Where it comes from','']) + '<tbody>'
+        + derived.map(function(e){
+            const scope = (e.salons && e.salons.length) ? e.salons.join(', ')
+                        : (e.role === 'stylist' ? 'Only themselves' : '—');
+            return '<tr>'
+              + '<td style="' + _ACC_TD + '">' + _accEsc(e.name || '—') + '</td>'
+              + '<td style="' + _ACC_TD + 'color:var(--text-muted);">' + _accEsc(e.email) + '</td>'
+              + '<td style="' + _ACC_TD + '"><b>' + _accEsc(e.role) + '</b></td>'
+              + '<td style="' + _ACC_TD + '">' + _accEsc(scope) + '</td>'
+              + '<td style="' + _ACC_TD + 'color:var(--text-muted);">' + _accEsc(e.why)
+                + ((e.overridden && e.overridden.length) ? '<br><b style="color:#b06a00;">custom access: ' + _accEsc(e.overridden.join(', ')) + '</b>' : '')
+                + '</td>'
+              + '<td style="' + _ACC_TD + '" nowrap>'
+              + '<button class="btn btn-sm" title="View the site as this person" data-email="' + _accEsc(e.email) + '" onclick="accViewAsClick(this)">&#128065;</button> '
+              + '<button class="btn btn-sm" title="What this person can see" data-email="' + _accEsc(e.email) + '" onclick="accCapsClick(this)">&#9881;</button></td>'
+              + '</tr>';
+          }).join('')
+        + '</tbody></table></div>';
+
+  if(d.inactiveDenied){
+    html += '<div style="font-size:11px;color:var(--text-muted);margin-top:12px;">'
+          + '<b>' + d.inactiveDenied + '</b> former employee' + (d.inactiveDenied === 1 ? ' is' : 's are')
+          + ' flagged inactive on their profile and are refused at sign-in. They keep their'
+          + ' EmployeeProfile row &mdash; the scrape flags leavers rather than deleting them.</div>';
+  }
+
+  const ne = d.noEmail || [];
+  if(ne.length){
+    html += '<div style="font-size:11px;color:var(--text-muted);margin-top:12px;">'
+          + '<b>' + ne.length + '</b> employee' + (ne.length === 1 ? ' has' : 's have')
+          + ' no email on file and cannot sign in at all. They are on the roster and counted in reports; they just have no way in.</div>';
+  }
+
+  host.innerHTML = html;
+}
+
+async function saveUsersTab(){
+  const setMsg = function(t, ok){
+    const m = document.getElementById('access-msg');
+    if(m){ m.textContent = t; m.style.color = ok ? '#0a5236' : '#b3261e'; }
+  };
+  const val = function(tr, cls){ const el = tr.querySelector(cls); return el ? String(el.value || '').trim() : ''; };
+  const rows = Array.prototype.slice.call(document.querySelectorAll('#access-users-table tbody tr')).map(function(tr){
+    return {
+      email:    val(tr, '.acc-email'),
+      role:     val(tr, '.acc-role'),
+      name:     val(tr, '.acc-name'),
+      salons:   val(tr, '.acc-salons')
+    };
+  }).filter(function(r){ return r.email || r.role; });
+
+  setMsg('Saving…', true);
+  try{
+    const r = await fetch('/api/admin/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rows: rows })
+    }).then(function(x){ return x.json(); });
+    if(!r || !r.success) throw new Error((r && r.error) || 'save failed');
+    ACCESS_DATA = r;
+    renderAccessPanel();
+    // Users stays in the 15s read cache on purpose: resolveAccess reads it on
+    // EVERY request, and making it uncached is what tripped Google's rate limit
+    // before. The write clears this instance; any other expires within 15s.
+    setMsg('Saved ' + r.saved + ' — changes take effect within 15 seconds.', true);
+  }catch(e){
+    setMsg(String(e.message || e), false);
+  }
+}
+
+
+
+// == Admin: per-person capabilities ==========================================
+// A dialog of tick boxes over the capability list. What gets SAVED is the
+// deviation from that person's role defaults, so the Capabilities tab reads as
+// a short list of exceptions rather than a yes/no grid for everyone -- and
+// changing a role default in code still reaches everyone not explicitly excepted.
+
+function accCapsClick(btn){
+  const em = btn && btn.getAttribute ? btn.getAttribute('data-email') : '';
+  if(em) accOpenCaps(em);
+}
+
+function accCloseCaps(){
+  const d = document.getElementById('caps-dialog');
+  if(d) d.remove();
+}
+
+function accOpenCaps(email){
+  if(!ACCESS_DATA) return;
+  const entry = (ACCESS_DATA.entries || []).filter(function(e){ return e.email === email; })[0];
+  if(!entry) return;
+  const meta = ACCESS_DATA.capabilityMeta || [];
+  const defaults = (ACCESS_DATA.roleDefaults || {})[entry.role] || [];
+  const have = new Set(entry.caps || []);
+  const isDefault = new Set(defaults);
+
+  accCloseCaps();
+  const wrap = document.createElement('div');
+  wrap.id = 'caps-dialog';
+  wrap.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.45);'
+    + 'display:flex;align-items:center;justify-content:center;padding:16px;';
+
+  let rows = '';
+  meta.forEach(function(m){
+    const on = have.has(m.key);
+    const def = isDefault.has(m.key);
+    const tag = (on === def)
+      ? '<span style="color:var(--text-muted);font-size:10px;">default</span>'
+      : '<span style="color:#b06a00;font-size:10px;font-weight:700;">' + (on ? 'granted' : 'revoked') + '</span>';
+    rows += '<label style="display:flex;gap:8px;align-items:flex-start;padding:7px 4px;border-bottom:1px solid var(--border);cursor:pointer;">'
+      + '<input type="checkbox" class="cap-box" data-cap="' + _accEsc(m.key) + '"' + (on ? ' checked' : '') + ' style="margin-top:2px;">'
+      + '<span style="flex:1;"><b style="font-size:12px;">' + _accEsc(m.label) + '</b> ' + tag
+      + '<br><span style="font-size:11px;color:var(--text-muted);">' + _accEsc(m.description) + '</span></span>'
+      + '</label>';
+  });
+
+  wrap.innerHTML = '<div style="background:#fff;border-radius:10px;max-width:560px;width:100%;'
+    + 'max-height:86vh;overflow:auto;padding:16px 18px;box-shadow:0 8px 30px rgba(0,0,0,.3);">'
+    + '<div style="font-weight:700;font-size:14px;color:#03654e;">' + _accEsc(entry.name || entry.email) + '</div>'
+    + '<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">' + _accEsc(entry.email)
+    + ' &middot; role <b>' + _accEsc(entry.role) + '</b></div>'
+    + '<div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;">'
+    + 'Ticks matching the role default are not stored. Capabilities decide which <i>features</i>; '
+    + 'which <i>salons</i> they see is still their scope.</div>'
+    + rows
+    + '<div style="margin-top:12px;display:flex;gap:8px;align-items:center;">'
+    + '<button class="btn btn-primary btn-sm" data-email="' + _accEsc(entry.email) + '" onclick="accSaveCaps(this)">Save</button>'
+    + '<button class="btn btn-sm" onclick="accCloseCaps()">Cancel</button>'
+    + '<span id="caps-msg" style="font-size:11px;color:var(--text-muted);"></span>'
+    + '</div></div>';
+
+  wrap.addEventListener('click', function(ev){ if(ev.target === wrap) accCloseCaps(); });
+  document.body.appendChild(wrap);
+}
+
+async function accSaveCaps(btn){
+  const email = btn.getAttribute('data-email');
+  const caps = Array.prototype.slice.call(document.querySelectorAll('#caps-dialog .cap-box'))
+    .filter(function(b){ return b.checked; })
+    .map(function(b){ return b.getAttribute('data-cap'); });
+  const msg = document.getElementById('caps-msg');
+  if(msg){ msg.textContent = 'Saving…'; msg.style.color = 'var(--text-muted)'; }
+  try{
+    const r = await fetch('/api/admin/capabilities', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email, caps: caps })
+    }).then(function(x){ return x.json(); });
+    if(!r || !r.success) throw new Error((r && r.error) || 'save failed');
+    accCloseCaps();
+    await loadAccessPanel();
+  }catch(e){
+    if(msg){ msg.textContent = String(e.message || e); msg.style.color = '#b3261e'; }
+  }
+}
+
+// == View As =================================================================
+// Owner-only, read-only, resolved SERVER-side: the cookie swaps the Access that
+// every API guard enforces, so the APIs really do withhold data. A client-side
+// version that just flipped SESSION.role would render a convincing stylist
+// dashboard while the endpoints kept returning everything -- which would prove
+// nothing about what is actually enforced.
+//
+// A full reload on enter/exit is deliberate: the whole app re-bootstraps from
+// /api/auth/me under the new access, so nothing can be left over from the
+// previous identity in a module-level cache.
+
+function accViewAsClick(btn){
+  const em = btn && btn.getAttribute ? btn.getAttribute('data-email') : '';
+  if(em) startViewAs(em);
+}
+
+async function startViewAs(email){
+  try{
+    const r = await fetch('/api/admin/view-as', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email })
+    }).then(function(x){ return x.json(); });
+    if(!r || !r.success) throw new Error((r && r.error) || 'could not start');
+    location.reload();
+  }catch(e){
+    alert('Could not view as ' + email + '\n\n' + (e.message || e));
+  }
+}
+
+async function exitViewAs(){
+  try{ await fetch('/api/admin/view-as', { method: 'DELETE' }); }catch(e){}
+  location.reload();
+}
+
+// A loud, permanent bar. The failure mode of this feature is forgetting you are
+// in it and then misreading what you see as your own view.
+function renderViewAsBanner(){
+  let bar = document.getElementById('viewas-bar');
+  if(!SESSION.viewingAs){
+    if(bar) bar.remove();
+    document.body.style.paddingTop = '';
+    return;
+  }
+  if(!bar){
+    bar = document.createElement('div');
+    bar.id = 'viewas-bar';
+    bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#9acb3a;'
+      + 'color:#0b2b22;font-size:13px;font-weight:700;padding:8px 14px;display:flex;'
+      + 'align-items:center;gap:14px;justify-content:center;flex-wrap:wrap;'
+      + 'box-shadow:0 2px 8px rgba(0,0,0,.25);';
+    document.body.appendChild(bar);
+  }
+  bar.innerHTML = '<span>&#128065; Viewing as <b>' + _accEsc(SESSION.viewingAs) + '</b>'
+    + ' &middot; role <b>' + _accEsc(SESSION.role) + '</b>'
+    + ' &middot; read-only</span>'
+    + '<button onclick="exitViewAs()" style="background:#0b2b22;color:#fff;border:0;'
+    + 'border-radius:14px;padding:4px 14px;font-size:12px;font-weight:700;cursor:pointer;">'
+    + 'Stop viewing as</button>';
+  document.body.style.paddingTop = (bar.offsetHeight || 34) + 'px';
+}
+
 // == Admin: is everything up to date? ========================================
 // Replaces the old free-text "Scrape / Load Notes" box, which was a place to
 // write down what the program can just tell you. Every row is derived from the
@@ -10284,7 +10905,73 @@ function renderScrapeStatus(){
     html += '<div style="margin-top:8px;padding:8px 12px;background:var(--exc-bg);border:1px solid var(--exc-border);border-radius:8px;font-size:12px;color:var(--exc-text);">'
       + 'Everything is up to date.</div>';
   }
+  // The five DAILY feeds are not represented above -- they are checked
+  // against the sheet itself, asynchronously, by renderDailyHealth().
+  html += '<div id="daily-health"></div>';
   host.innerHTML = html;
+  renderDailyHealth();
+}
+
+
+// == Admin: daily feed health ================================================
+// The Feed status table above is derived from what the dashboard LOADED, which
+// covers the weekly and monthly feeds but says nothing about the five daily
+// ones (SD_DAILY, SD_EMP_DAILY, SD_DEMAND, SD_SHIFTS, SD_CHKINOUT). Those are
+// exactly the feeds that went missing two nights running, and the ones
+// SD_HALFHOUR quietly stopped filling for 70 days while reporting ok:true.
+//
+// This asks the server the same question the nightly run asks -- did rows
+// actually land for yesterday -- rather than inferring it. Reading it here does
+// NOT send an alert email; only the nightly run does that.
+function renderDailyHealth(){
+  const host = document.getElementById('daily-health');
+  if(!host) return;
+  host.innerHTML = '<div style="font-size:11px;color:var(--text-muted);">Checking daily feeds&hellip;</div>';
+
+  fetch('/api/health/daily-check').then(function(r){ return r.json(); }).then(function(d){
+    if(!d || !Array.isArray(d.feeds)){
+      host.innerHTML = '<div style="font-size:11px;color:var(--text-muted);">Daily feed check unavailable'
+        + (d && d.error ? ': ' + _accEsc(d.error) : '') + '</div>';
+      return;
+    }
+    const pill = function(ok){
+      return ok
+        ? '<span style="background:var(--exc-bg);color:var(--exc-text);border-radius:10px;padding:2px 9px;font-size:11px;font-weight:700;">Landed</span>'
+        : '<span style="background:var(--grw-bg);color:var(--grw-text);border-radius:10px;padding:2px 9px;font-size:11px;font-weight:700;">Missing</span>';
+    };
+    const th = 'padding:4px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;';
+    let html = '<div style="font-weight:700;font-size:13px;margin:16px 0 2px;">Daily feeds</div>'
+      + '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">'
+      + 'Rows actually written for <b>' + _accEsc(d.date) + '</b> (yesterday, Eastern). '
+      + 'Read straight from the sheet, so a job that reported success without writing anything still shows as missing.</div>'
+      + '<table style="width:100%;border-collapse:collapse;font-size:12px;">'
+      + '<thead><tr style="color:var(--text-muted);text-align:left;">'
+      + '<th style="' + th + '">Feed</th><th style="' + th + '">Rows</th><th style="' + th + '">Status</th>'
+      + '</tr></thead><tbody>';
+    d.feeds.forEach(function(f){
+      html += '<tr style="border-top:1px solid #f0efec;">'
+        + '<td style="padding:5px 8px;font-weight:600;">' + _accEsc(f.label) + '</td>'
+        + '<td style="padding:5px 8px;">' + _accEsc(f.rows) + '</td>'
+        + '<td style="padding:5px 8px;">' + pill(f.ok) + '</td>'
+        + '</tr>';
+    });
+    html += '</tbody></table>';
+
+    if(d.ok){
+      html += '<div style="margin-top:8px;padding:8px 12px;background:var(--exc-bg);border:1px solid var(--exc-border);border-radius:8px;font-size:12px;color:var(--exc-text);">'
+        + 'All five daily feeds landed for ' + _accEsc(d.date) + '.</div>';
+    } else {
+      const miss = (d.missing || []).join(', ');
+      html += '<div style="margin-top:8px;padding:8px 12px;background:#fff0f0;border:1px solid #f0c0c0;border-radius:8px;font-size:12px;color:#9C0006;">'
+        + '<b>No data for ' + _accEsc(d.date) + ' in:</b> ' + _accEsc(miss) + '.<br>'
+        + 'Every run re-pulls the last 7 days, so the next one should repair it on its own. '
+        + 'If it does not, check the latest <em>SD3 Nightly Scrape</em> run in the Actions tab.</div>';
+    }
+    host.innerHTML = html;
+  }).catch(function(e){
+    host.innerHTML = '<div style="font-size:11px;color:var(--text-muted);">Daily feed check failed: '
+      + _accEsc(e && e.message ? e.message : e) + '</div>';
+  });
 }
 
 function renderManagerTable(){
@@ -10663,15 +11350,15 @@ function renderCompanyStandouts(){
 function buildCompanyBonusMonth(){
   const period = S_bonusPeriods.find(p=>p.periodKey===S_bonusPeriod);
   if(!period) return '<div class="no-data">No data for this period</div>';
-  const stys = period.employees.filter(e=>e.position!=='M');
+  const stys = period.employees.filter(isStylist);
   const _pk = S_bonusPeriod || '';
   const _lbl = formatBonusPeriod(_pk);
   let exportBtns = `<div style="display:flex;gap:8px;margin-bottom:1rem;">
     <button class="btn btn-secondary btn-sm export-bonus" onclick="exportBonusJPEG('${_pk}')">📷 Export Image (${_lbl})</button>
     <button class="btn btn-secondary btn-sm export-bonus" onclick="exportPayrollCSV('${_pk}')">⬇ ADP Payroll CSV (${_lbl})</button>
   </div>`;
-  const totPay = stys.reduce((s,e)=>s+payablePayout(e),0);
-  const totPot = stys.reduce((s,e)=>s+(parseFloat(e.potential)||0),0);
+  const totPay = stys.reduce(sumPayout,0);
+  const totPot = stys.reduce(sumPotential,0);
   const earned = stys.filter(e=>payablePayout(e)>0).length;
 
   // Stats
@@ -10695,10 +11382,10 @@ function buildCompanyBonusMonth(){
     const am = AMS[amId]; if(!am) return;
     const amEmps = period.employees.filter(e=>{
       const salons = amId==='kayla' ? null : (am.salons||[]);
-      return e.position!=='M' && (amId==='kayla' ? !NAMED.has(e.salonNum) : salons.includes(e.salonNum));
+      return isStylist(e) && (amId==='kayla' ? !NAMED.has(e.salonNum) : salons.includes(e.salonNum));
     });
-    const pay = amEmps.reduce((s,e)=>s+payablePayout(e),0);
-    const pot = amEmps.reduce((s,e)=>s+(parseFloat(e.potential)||0),0);
+    const pay = amEmps.reduce(sumPayout,0);
+    const pot = amEmps.reduce(sumPotential,0);
     const earnedN = amEmps.filter(e=>payablePayout(e)>0).length;
     const pp = pot>0?Math.round(pay/pot*100)+'%':'—';
     const cls = pay>0?(pay/pot<0.5?'bv-yellow':'bv-green'):'';
@@ -10740,10 +11427,10 @@ function buildCompanyBonusYTD(){
     const cells = S_bonusPeriods.map(p=>{
       const emps = p.employees.filter(e=>{
         const salons = amId==='kayla'?null:(am.salons||[]);
-        return e.position!=='M'&&(amId==='kayla'?!NAMED.has(e.salonNum):salons.includes(e.salonNum));
+        return isStylist(e)&&(amId==='kayla'?!NAMED.has(e.salonNum):salons.includes(e.salonNum));
       });
-      const pay=emps.reduce((s,e)=>s+payablePayout(e),0);
-      const pot=emps.reduce((s,e)=>s+(parseFloat(e.potential)||0),0);
+      const pay=emps.reduce(sumPayout,0);
+      const pot=emps.reduce(sumPotential,0);
       ytdPay+=pay; ytdPot+=pot;
       const cls=pay>0?(pay/pot<0.5?'bv-yellow':'bv-green'):'bv-red';
       return `<td class="${cls}" style="text-align:center;">${fmtMoney(pay)}</td>`;
@@ -10762,7 +11449,7 @@ function buildCompanyBonusYTD(){
   html+=`<tr style="background:var(--primary);color:white;font-weight:700;">
     <td>▸ Company</td>
     ${S_bonusPeriods.map(p=>{
-      const pay=p.employees.filter(e=>e.position!=='M').reduce((s,e)=>s+payablePayout(e),0);
+      const pay=p.employees.filter(isStylist).reduce(sumPayout,0);
       return `<td style="text-align:center;">${fmtMoney(pay)}</td>`;
     }).join('')}
     <td style="text-align:center;">${fmtMoney(grandPay)}</td>
@@ -10776,7 +11463,7 @@ function buildCompanyBonusYTD(){
 function buildCompanyBonusAll(){
   const period = S_bonusPeriods.find(p=>p.periodKey===S_bonusPeriod);
   if(!period) return '<div class="no-data">No data for this period</div>';
-  const stys = period.employees.filter(e=>e.position!=='M')
+  const stys = period.employees.filter(isStylist)
     .sort((a,b)=>a.empName.localeCompare(b.empName));
 
   const _pk = S_bonusPeriod || '';
@@ -10832,7 +11519,7 @@ function buildCompanyBonusAllYTD(){
   // Build map: empName -> {salonNum, amId, periods: {pk: row}}
   const empMap = {};
   S_bonusPeriods.forEach(p=>{
-    p.employees.filter(e=>e.position!=='M').forEach(e=>{
+    p.employees.filter(isStylist).forEach(e=>{
       const key = e.empName + '|' + e.salonNum;
       if(!empMap[key]) empMap[key] = {empName:e.empName, salonNum:e.salonNum, periods:{}};
       empMap[key].periods[p.periodKey] = e;
@@ -10904,7 +11591,7 @@ function buildCompanyBonusAllYTD(){
   html += `<tr style="background:var(--primary);color:white;font-weight:700;">
     <td colspan="3">▸ Company Total — ${empList.length} stylists · ${grandEarned} earned</td>
     ${S_bonusPeriods.map(p=>{
-      const pay = p.employees.filter(e=>e.position!=='M').reduce((s,e)=>s+payablePayout(e),0);
+      const pay = p.employees.filter(isStylist).reduce(sumPayout,0);
       return `<td style="text-align:center;">${fmtMoney(pay)}</td>`;
     }).join('')}
     <td style="text-align:center;">${fmtMoney(grandPay)}</td>
@@ -11449,7 +12136,7 @@ function buildAdpCsv(periodKey){
   // 1) Stylists — BonusData, code 2, skip disc-ineligible (live, rolling 12mo)
   const bp = S_bonusPeriods.find(p=>p.periodKey===bonusLabel||p.periodLabel===bonusLabel);
   if(bp){
-    (bp.employees||[]).filter(e=>e.position!=='M').forEach(e=>{
+    (bp.employees||[]).filter(isStylist).forEach(e=>{
       if(activeDiscPoints(e.globalId, bonusLabel) >= 4) return; // disc-ineligible
       if(isInactive(e.globalId)) return; // inactive (termed/left) — must be employed at payout
       push(String(e.payId||'').trim(), '2', parseFloat(e.payout)||0, tempDeptForSalon(e.salonNum), (e.empName||'')+' (stylist '+e.salonNum+')');
@@ -11536,7 +12223,7 @@ function exportBonusJPEG(periodKey){
 
   const label = formatBonusPeriod(periodKey);
   const stys = period.employees
-    .filter(e=>e.position!=='M')
+    .filter(isStylist)
     .sort((a,b)=>{ const sA=parseInt(a.salonNum)||0, sB=parseInt(b.salonNum)||0; return sA-sB||a.empName.localeCompare(b.empName); });
 
   const headerHTML = `<tr style="background:var(--primary-dark);color:white;font-size:13px;">
@@ -11616,7 +12303,7 @@ function exportBonusJPEG(periodKey){
   printDiv.innerHTML = `
     <div style="text-align:center;margin-bottom:16px;border-bottom:3px solid #03654e;padding-bottom:12px;">
       <div style="font-size:22px;font-weight:700;color:#03654e;">Longitude Inc — Stylist Bonus</div>
-      <div style="font-size:16px;color:#555;margin-top:4px;">${label} · ${stys.length} Stylists · Total Payout: ${fmtMoney(stys.reduce((s,e)=>s+payablePayout(e),0))}</div>
+      <div style="font-size:16px;color:#555;margin-top:4px;">${label} · ${stys.length} Stylists · Total Payout: ${fmtMoney(stys.reduce(sumPayout,0))}</div>
     </div>
     <table style="border-collapse:collapse;border:1px solid #ccc;">
       <thead>${headerHTML}</thead>
@@ -11859,7 +12546,7 @@ function buildCompanyBonusAllStylists(){
 
   // Sort cols: 0=name,1=salon,2=am,3=hrs,4=prod,5=nr,6=rr,7=mbc,8=hc,9=pts,10=potential,11=payout
   const sortKey = ['empName','salonNum','salonNum','avgWkHrs','product','nr','rr','mbc','hcTime','points','potential','payout'];
-  let stys = period.employees.filter(e=>e.position!=='M');
+  let stys = period.employees.filter(isStylist);
 
   if(S_bonusSort.col !== null){
     const ci = S_bonusSort.col, asc = S_bonusSort.asc;
@@ -11874,8 +12561,8 @@ function buildCompanyBonusAllStylists(){
     stys = [...stys].sort((a,b)=>{ const sA=parseInt(a.salonNum)||0,sB=parseInt(b.salonNum)||0; return sA-sB||a.empName.localeCompare(b.empName); });
   }
 
-  const totPay = stys.reduce((s,e)=>s+payablePayout(e),0);
-  const totPot = stys.reduce((s,e)=>s+(parseFloat(e.potential)||0),0);
+  const totPay = stys.reduce(sumPayout,0);
+  const totPot = stys.reduce(sumPotential,0);
   const earned = stys.filter(e=>payablePayout(e)>0).length;
 
   const bTh2 = (i,lbl) => {
@@ -11982,7 +12669,7 @@ function buildCoBonusYTDStylist(){
   // Build map: empName+salon -> {periods}
   const empMap = {};
   S_bonusPeriods.forEach(p=>{
-    p.employees.filter(e=>e.position!=='M').forEach(e=>{
+    p.employees.filter(isStylist).forEach(e=>{
       const key = e.empName + '|' + e.salonNum;
       if(!empMap[key]) empMap[key] = {empName:e.empName, salonNum:e.salonNum, periods:{}};
       empMap[key].periods[p.periodKey] = e;
@@ -12066,7 +12753,7 @@ function buildCoBonusYTDStylist(){
   html+=`<tr style="background:var(--primary);color:white;font-weight:700;">
     <td colspan="2">▸ Company Total</td>
     ${S_bonusPeriods.map(p=>{
-      const pay=p.employees.filter(e=>e.position!=='M').reduce((s,e)=>s+payablePayout(e),0);
+      const pay=p.employees.filter(isStylist).reduce(sumPayout,0);
       return `<td style="text-align:center;">${fmtMoney(pay)}</td>`;
     }).join('')}
     <td style="text-align:center;">${fmtMoney(grandPay)}</td>
@@ -12103,12 +12790,12 @@ function buildCoBonusYTDAM(){
     let ytdPay=0, ytdPot=0, ytdStylists=new Set(), ytdEarned=0;
     const cells = S_bonusPeriods.map(p=>{
       const emps = p.employees.filter(e=>{
-        if(e.position==='M') return false;
+        if(isManagerRow(e)) return false;
         if(amId==='kayla') return !NAMED.has(e.salonNum);
         return (am.salons||[]).includes(e.salonNum);
       });
-      const pay=emps.reduce((s,e)=>s+payablePayout(e),0);
-      const pot=emps.reduce((s,e)=>s+(parseFloat(e.potential)||0),0);
+      const pay=emps.reduce(sumPayout,0);
+      const pot=emps.reduce(sumPotential,0);
       emps.forEach(e=>ytdStylists.add(e.empName));
       ytdEarned+=emps.filter(e=>parseFloat(e.payout)>0).length;
       ytdPay+=pay; ytdPot+=pot;
@@ -12131,7 +12818,7 @@ function buildCoBonusYTDAM(){
   html+=`<tr style="background:var(--primary);color:white;font-weight:700;">
     <td>▸ Company</td>
     ${S_bonusPeriods.map(p=>{
-      const pay=p.employees.filter(e=>e.position!=='M').reduce((s,e)=>s+payablePayout(e),0);
+      const pay=p.employees.filter(isStylist).reduce(sumPayout,0);
       return `<td style="text-align:center;">${fmtMoney(pay)}</td>`;
     }).join('')}
     <td style="text-align:center;">${fmtMoney(grandPay)}</td>
@@ -12170,9 +12857,9 @@ function buildCoBonusYTDSalon(){
     const amId=amOf(sn), am=AMS[amId]||{name:'?',color:'#999'};
     let ytdPay=0, ytdPot=0;
     const cells = S_bonusPeriods.map(p=>{
-      const emps=p.employees.filter(e=>e.salonNum===sn&&e.position!=='M');
-      const pay=emps.reduce((s,e)=>s+payablePayout(e),0);
-      const pot=emps.reduce((s,e)=>s+(parseFloat(e.potential)||0),0);
+      const emps=p.employees.filter(e=>e.salonNum===sn&&isStylist(e));
+      const pay=emps.reduce(sumPayout,0);
+      const pot=emps.reduce(sumPotential,0);
       ytdPay+=pay; ytdPot+=pot;
       if(!emps.length) return '<td style="color:#ccc;text-align:center;">—</td>';
       const cls=pay>0?(pay/pot>=0.5?'bv-green':'bv-yellow'):'bv-red';
@@ -12193,7 +12880,7 @@ function buildCoBonusYTDSalon(){
   html+=`<tr style="background:var(--primary);color:white;font-weight:700;">
     <td colspan="2">▸ Company</td>
     ${S_bonusPeriods.map(p=>{
-      const pay=p.employees.filter(e=>e.position!=='M').reduce((s,e)=>s+payablePayout(e),0);
+      const pay=p.employees.filter(isStylist).reduce(sumPayout,0);
       return `<td style="text-align:center;">${fmtMoney(pay)}</td>`;
     }).join('')}
     <td style="text-align:center;">${fmtMoney(grandPay)}</td>

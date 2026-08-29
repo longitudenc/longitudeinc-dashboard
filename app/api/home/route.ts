@@ -25,11 +25,18 @@ export async function GET(req: Request) {
     const horizon = Number(url.searchParams.get('horizon') || '') || 31  // events out ~1 month
 
     const role = gate.access.role
+
+    // Celebrations are COMPANY-WIDE for everyone, deliberately: birthdays and
+    // anniversaries are the part of this page meant to be shared, and scoping
+    // them left every single-salon manager staring at an empty section.
+    // The PHONE NUMBER is the only piece that is restricted (PHONE_ROLES), and
+    // it is withheld server-side rather than hidden by the client.
+
     const [announcements, dates, links, celebrations] = await Promise.all([
       getAnnouncements(role),
       getImportantDates(role, horizon),
       getHomeLinks(role),
-      getCelebrations(gate.access.salons, { includePhone: PHONE_ROLES.has(role) }).catch(() => []),
+      getCelebrations(undefined, { includePhone: PHONE_ROLES.has(role) }).catch(() => []),
     ])
     // Auto celebrations sit alongside curated dates in "Coming up".
     const allDates = [...celebrations, ...dates].sort((a, b) => a.date.localeCompare(b.date))

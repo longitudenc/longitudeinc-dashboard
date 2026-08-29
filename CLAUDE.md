@@ -40,6 +40,14 @@ big static file (`public/dashboard.html`); its changes are live on refresh after
 
 ## Architecture map
 
+**Navigation (in transition):** a top bar (`#topnav`, `renderTopNav`) groups screens by
+WHAT — Home / Performance / Pay / People / Requests / ⚙ — with `page-hub` rendering a
+group's destination cards, capability-gated. It routes into the SAME functions the
+sidebar calls, so the two cannot disagree. **The sidebar is still live and unchanged**;
+remove it only once the top bar has earned it. The hub deliberately shows NO company
+KPI tiles: recomputing aggregates there would be a second implementation of numbers
+that get scored and paid against.
+
 **Client:** `public/dashboard.html` (~14,900 lines, single file — HTML + CSS + JS). This is
 the whole authenticated app: home, salon/AM/company views, bonuses, reviews, forms, points.
 Edited surgically; validate the inline scripts after each change.
@@ -78,6 +86,12 @@ as its own request, so every job gets a fresh 60s Hobby budget. Saturday weekly 
 dedicated Vercel cron (`/api/cron/weekly`). Profile scraper runs nightly and captures
 `dateOfHire`, `birthday` (**month-day only**) and `phone`.
 
+> **Departed employees are NOT removed from `EmployeeProfile`.** The scrape keeps the
+> row and flips `inactive` to `true` — 118 of 245 rows on 2026-08-28, going back to
+> Jan 2025. `resolveAccess` refuses them (it did not until 2026-08-28, so every leaver
+> had a working magic link). Anything else reading that tab must filter `inactive`
+> too, or it is counting leavers: that is why the roster looked like 227 stylists.
+
 > **To add a nightly data point:** build the `/api/scrape/<name>` endpoint, then add one
 > line to the matching group in `lib/scrape-plan.ts`. The workflow picks it up
 > automatically — never edit the YAML to add a scrape.
@@ -115,6 +129,23 @@ is a separate path used only by `/api/cron/weekly` and `/api/report/payroll-pace
   tabs), e.g. `fetch('/api/forms/import-discipline', {method:'POST'}).then(r=>r.json()).then(console.log)`.
 - **Owner/admin logins have no `globalId`** (they're Users-tab rows, not roster employees).
   Code that matches "mine"/an employee must also match by email, not just globalId.
+- **Capabilities, not role lists.** `lib/capabilities.ts` holds named capabilities
+  (`view.company`, `view.dayreview`, `view.dayofweek`, `view.market`, `view.salondata`,
+  `view.payroll`, `edit.settings`, `manage.access`) with role defaults in code and
+  per-person exceptions on the **`Capabilities`** tab (deviations only). Gate routes with
+  `requireCapability(cap)`; the client mirrors it via `hasCap()` from `/api/auth/me`.
+  **Capabilities are FEATURES, not rows** — `lib/scope-filter.ts` still trims data to
+  `access.salons`, so a grant never widens which salons someone sees. Do not add a
+  capability before something enforces it: a toggle that does nothing is worse than none.
+- **Every data route needs a guard, and reads need scoping.** `lib/require-role.ts`
+  exports `requireOwner` / `requireAdmin` / `requireOffice` / `requireSalonView` /
+  `requireSignedIn`; anything returning salon or employee rows must ALSO scope through
+  `lib/scope-filter.ts`. Four routes shipped with no gate at all and served company-wide
+  data to the open internet until 2026-08-28 (`/api/gs/getDailyRange` was the live one).
+  **A filter applied in `dashboard.html` is not a filter.** Market-wide data
+  (`MarketWeekly`, other operators' salons) is `requireMarketView` (owner/admin/viewer/
+  office — deliberately NOT `requireOffice`, which gates the ADP payroll builder); our own
+  salons' ratings and CAQ are `requireSalonView` (manager and up).
 
 ---
 
@@ -137,6 +168,9 @@ is a separate path used only by `/api/cron/weekly` and `/api/report/payroll-pace
 - **Favorites → Quick Links:** let each person pin views to a personal shortcuts strip
   (needs small per-user storage, e.g. a `Favorites` tab keyed by login).
 - **"View as":** admin toggle to render the dashboard as a given role/person (impersonation).
+  Must be resolved SERVER-side (swap the Access that `resolveAccess` returns), not by
+  faking the role in the client — a client-only version proves nothing about whether the
+  APIs actually withhold data, which is the main reason to want it.
 - **Supabase migration:** move high-volume tables (sd_demand, sd_halfhour, sd_daily,
   sd_shifts, sd_chkinout) off Sheets; everything else stays.
 - **Vacation-hours tracking (payroll):** SD3 reports vacation HOURS but pays $0.00 for
