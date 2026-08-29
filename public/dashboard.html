@@ -3050,6 +3050,13 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
   .hub-sec{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
           color:var(--text-muted);margin:20px 0 2px;}
   .hub-sec:first-of-type{margin-top:14px;}
+  .hub-scope{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0 2px;}
+  .hub-scope-btn{background:#fff;border:1px solid var(--border);border-radius:999px;
+          padding:5px 14px;font-size:12px;font-weight:600;color:#5b6b64;cursor:pointer;font-family:inherit;}
+  .hub-scope-btn:hover{border-color:#048667;color:#03654e;}
+  .hub-scope-btn.active{background:#03654e;border-color:#03654e;color:#fff;}
+  .hub-card-soon{opacity:.55;cursor:default;}
+  .hub-card-soon:hover{box-shadow:none;transform:none;}
   #topnav .tn-back{color:#048667;font-weight:700;}
 </style>
 <nav id="topnav" aria-label="Main"></nav>
@@ -10285,94 +10292,133 @@ function initAdminCollapse(){
 
 
 
+
 // == Top navigation + hub pages ==============================================
-// The old sidebar is organised by WHO (pick an area manager, then a report),
-// which is why Bonus, Reviews, Day Review and Team each exist three times over
-// in this file. This groups by WHAT instead. It routes into the SAME render
-// functions the sidebar calls -- nothing is reimplemented here, so the two
-// navigations cannot disagree about what a screen shows.
+// Grouped by WHAT you want, not by WHICH area manager. It routes into the SAME
+// render functions the sidebar calls -- nothing is reimplemented here, so the
+// two navigations cannot disagree about what a screen shows.
 //
-// Cards carry a `sec` so a group can be split into Company vs Area manager.
-// That split is temporary scaffolding: the end state is ONE set of reports with
-// a scope switcher, at which point these two sections collapse into each other.
+// SCOPE, NOT DUPLICATE CARDS. The first cut listed "Scorecards" (company) and
+// "Scorecard" (area manager) as separate cards, which is the same report twice
+// and reads as clutter. Now there is ONE card per report plus a scope selector,
+// and the card routes to whichever existing view matches the chosen scope. That
+// is the scope switcher working at the routing level: no maths moved, no view
+// rewritten, but the repetition is gone.
 //
-// GATING RULE: a card must be visible to exactly the people who could already
-// reach it from the sidebar -- no wider, no narrower. setupSidebar() is the
-// reference. Note the AM branch gives area managers their own All Salons,
-// Standouts and Reviews entries, so those are NOT canSeeAllSalons()-only.
+// A card offers only the scopes it has a destination for -- Trends is
+// area-manager only, Day Review is company only -- so switching scope changes
+// which cards are available rather than showing dead tiles.
 //
 // Deliberately NOT here: company KPI tiles. Recomputing company aggregates for
 // a landing page would create a second implementation of numbers that are
 // scored and paid against, and the two would eventually drift.
 
-// Everyone who gets a performance sidebar at all: owner/admin/viewer + AMs.
+// Everyone who gets a performance view at all: owner/admin/viewer + AMs.
 function _navPerfUser(){ return canSeeAllSalons() || isAMRole(); }
+
+// 'company' or an AM key from AMS.
+let S_hubScope = 'company';
+
+function _hubScopes(){
+  if(canSeeAllSalons()) return ['company'].concat(AM_ORDER.filter(function(id){ return !!AMS[id]; }));
+  if(isAMRole()){
+    const me = String(USER_AM_ID||'').replace(/["']/g,'').trim();
+    return AMS[me] ? ['company', me] : ['company'];
+  }
+  return ['company'];
+}
+function _hubScopeLabel(s){ return s === 'company' ? 'Company' : ((AMS[s] && AMS[s].name) || s); }
+
+// Open an area-manager view: select the AM first, then its tab.
+function _amGo(tab){
+  return function(scope){
+    if(scope && scope !== 'company' && typeof switchAM === 'function') switchAM(scope);
+    amSubTab(tab);
+  };
+}
+const _coGo = function(tab){
+  return function(){ switchToCompany(); if(tab) showCompanyTab(tab); };
+};
 
 const HUB_GROUPS = {
   performance: {
     title: 'Performance',
     sub: 'How the salons are doing',
+    scoped: true,
     cards: [
-      // --- Company ---
-      { sec:'Company', t:'All Salons', d:'Every salon for the selected period, with tier colouring.',
-        show:_navPerfUser, go:function(){ switchToCompany(); } },
-      { sec:'Company', t:'Scorecards', d:'Area manager rankings and per-AM performance.', cap:'view.company',
-        go:function(){ switchToCompany(); showCompanyTab('ams'); } },
-      { sec:'Company', t:'Day Review', d:'The whole company on a single day.', cap:'view.dayreview',
-        go:function(){ switchToCompany(); showCompanyTab('dayreview'); } },
-      { sec:'Company', t:'Day of Week', d:'Weekday comparisons across a date window.', cap:'view.dayofweek',
-        go:function(){ switchToCompany(); showCompanyTab('dayofweek'); } },
-      { sec:'Company', t:'Market Compare', d:'How we sit against the wider Charlotte market.', cap:'view.market',
-        href:'/market.html' },
-      // --- Area manager (amSubTab picks the current AM, or your own if you are one) ---
-      { sec:'Area manager', t:'Scorecard', d:'One area manager’s scorecard for the period.',
-        show:_navPerfUser, go:function(){ amSubTab('score'); } },
-      { sec:'Area manager', t:'Salon Performance', d:'Each salon under that area manager.',
-        show:_navPerfUser, go:function(){ amSubTab('salon'); } },
-      { sec:'Area manager', t:'My Team’s Performance', d:'Every stylist in those salons.',
-        show:_navPerfUser, go:function(){ amSubTab('individual'); } },
-      { sec:'Area manager', t:'Trends', d:'Movement over time for those salons.',
-        show:_navPerfUser, go:function(){ amSubTab('trends'); } },
+      { t:'Salons',      d:'Every salon for the selected period, with tier colouring.',
+        show:_navPerfUser, dest:{ company:_coGo(''), am:_amGo('salon') } },
+      { t:'Scorecard',   d:'Rankings and scorecard performance.',
+        show:_navPerfUser, dest:{ company:_coGo('ams'), am:_amGo('score') }, capCompany:'view.company' },
+      { t:'Trends',      d:'Movement over time.',
+        show:_navPerfUser, dest:{ am:_amGo('trends') } },
+      { t:'Day Review',  d:'The whole company on a single day.', cap:'view.dayreview',
+        dest:{ company:_coGo('dayreview') } },
+      { t:'Day of Week', d:'Weekday comparisons across a date window.', cap:'view.dayofweek',
+        dest:{ company:_coGo('dayofweek'), am:function(){ openDayOfWeek(); } } },
     ],
   },
   pay: {
     title: 'Pay',
-    sub: 'Bonuses and payroll',
+    sub: 'Bonuses and recognition payouts',
+    scoped: true,
     cards: [
-      { sec:'Company', t:'Bonuses', d:'Stylist, manager and area manager bonus detail.', cap:'view.company',
-        go:function(){ switchToCompany(); showCompanyTab('bonus'); } },
-      { sec:'Area manager', t:'Bonus', d:'Bonus detail for one area manager’s salons.',
-        show:_navPerfUser, go:function(){ amSubTab('bonus'); } },
-      { sec:'Office', t:'Payroll', d:'Build and review the ADP upload for a week.', cap:'view.payroll',
-        href:'/office.html' },
+      { t:'Bonuses', d:'Stylist, manager and area manager bonus detail.',
+        show:_navPerfUser, dest:{ company:_coGo('bonus'), am:_amGo('bonus') }, capCompany:'view.company' },
     ],
   },
   people: {
     title: 'People',
     sub: 'The team, their recognition and their records',
+    scoped: true,
     cards: [
-      // Standouts is recognition, not pay -- it belongs with People.
-      { sec:'Company', t:'Standouts', d:'Monthly recognition across the company.',
-        show:_navPerfUser, go:function(){ switchToCompany(); showCompanyTab('standouts'); } },
-      { sec:'Company', t:'Team', d:'Everyone, sortable, with hours and performance.', cap:'view.company',
-        go:function(){ switchToCompany(); showCompanyTab('team'); } },
-      { sec:'Company', t:'Reviews', d:'Stylist and manager reviews.',
-        show:_navPerfUser, go:function(){ switchToCompany(); showCompanyTab('reviews'); } },
-      { sec:'Area manager', t:'Reviews', d:'Reviews for one area manager’s stylists.',
-        show:_navPerfUser, go:function(){ amSubTab('reviews'); } },
+      { t:'Team',      d:'Everyone, sortable, with hours and performance.',
+        show:_navPerfUser, dest:{ company:_coGo('team'), am:_amGo('individual') }, capCompany:'view.company' },
+      { t:'Reviews',   d:'Stylist and manager reviews.',
+        show:_navPerfUser, dest:{ company:_coGo('reviews'), am:_amGo('reviews') } },
+      // Recognition, not compensation -- it belongs here rather than under Pay.
+      { t:'Standouts', d:'Monthly recognition across the company.',
+        show:_navPerfUser, dest:{ company:_coGo('standouts') } },
+      { t:'Flexibility & Reliability', d:'Availability and dependability across the team.',
+        show:_navPerfUser, href:'/flexibility_reliability_tool.html' },
       // No capability for this one yet -- see lib/capabilities.ts. `show` mirrors
-      // the reveal rule on the #ftb-points tab exactly, so the card appears for
-      // precisely the people who already had it. Swap to cap:'view.points' once
-      // something enforces it server-side.
-      { sec:'Records', t:'Disciplinary points', d:'Active points, flags and per-person history.',
+      // the reveal rule on the #ftb-points tab exactly.
+      { t:'Disciplinary points', d:'Active points, flags and per-person history.',
         show:function(){ return isAdminRole() || isAMRole(); },
         go:function(){ switchToForms(); showFormsTab('points'); } },
+    ],
+  },
+  market: {
+    title: 'Market',
+    sub: 'How we look from outside',
+    cards: [
+      { t:'Market Compare', d:'How we sit against the wider Charlotte market.', cap:'view.market',
+        href:'/market.html' },
+      { t:'Google Reviews', d:'Every salon’s Google rating and review count, refreshed weekly.',
+        cap:'view.salondata', go:function(){ showGoogleReviews(); } },
+    ],
+  },
+  office: {
+    title: 'Office',
+    sub: 'Back-office tools',
+    cards: [
+      { t:'Payroll', d:'Build and review the ADP upload for a week.', cap:'view.payroll',
+        href:'/office.html' },
+      // Editing is gated server-side to EDIT_ROLES = owner/admin/office in every
+      // /api/newsletter/* route. `show` MIRRORS that list rather than using a
+      // capability, because no capability is checked there yet -- a toggle the
+      // server ignores would be worse than none. Move both to
+      // requireCapability('edit.newsletter') together.
+      { t:'Newsletter', d:'Build the monthly issue, then publish it for the team to read.',
+        show:function(){ return ['owner','admin','office'].indexOf(String(SESSION.role||'')) >= 0; },
+        href:'/newsletter.html' },
+      { t:'Leases', d:'Coming soon — lease terms, renewals and key dates.', cap:'view.payroll',
+        soon:true },
     ],
   },
 };
 
 // Which top-level item is showing, and whether we have drilled into a card.
-// Kept separate from the sidebar's own state so the two never fight.
 let S_topNav = '';
 let S_hubDrilled = false;
 
@@ -10385,6 +10431,16 @@ function _tnAllowed(card){
   return true;
 }
 
+// Available in the CURRENT scope? Company-only cards disappear on an AM scope
+// and vice versa, so a scope change never leaves a tile that goes nowhere.
+function _tnInScope(card, scope){
+  if(!card.dest) return true;                       // href / go / soon cards
+  const want = (scope === 'company') ? 'company' : 'am';
+  if(!card.dest[want]) return false;
+  if(want === 'company' && card.capCompany && !hasCap(card.capCompany)) return false;
+  return true;
+}
+
 function renderTopNav(){
   const nav = document.getElementById('topnav');
   if(!nav) return;
@@ -10393,6 +10449,8 @@ function renderTopNav(){
     { key:'performance', label:'Performance' },
     { key:'pay',         label:'Pay' },
     { key:'people',      label:'People' },
+    { key:'market',      label:'Market' },
+    { key:'office',      label:'Office' },
     { key:'requests',    label:'Requests' },
   ];
   let html = '';
@@ -10404,8 +10462,6 @@ function renderTopNav(){
           + ' onclick="topNavGo(this)">' + _accEsc(it.label) + '</button>';
   });
   html += '<span class="tn-spacer"></span>';
-  // Back out of a destination without hunting for the sidebar. Only once you
-  // have actually drilled in from a hub, so it is never a no-op.
   if(S_hubDrilled && HUB_GROUPS[S_topNav]){
     html += '<button class="tn tn-back" data-nav="' + _accEsc(S_topNav) + '" onclick="topNavGo(this)">'
           + '&#8249; Back to ' + _accEsc(HUB_GROUPS[S_topNav].title) + '</button>';
@@ -10427,12 +10483,13 @@ function topNavGo(btn){
   renderTopNav();
 }
 
-// Reuse the sidebar's own entry point rather than duplicating its page-show +
-// loader sequence, so the admin panel initialises identically from either nav.
 function switchToAdminFromNav(){
   if(typeof switchToAdmin === 'function'){ switchToAdmin(); return; }
   showPage('admin');
 }
+
+function setHubScope(s){ S_hubScope = s; showHub(S_topNav); }
+function hubScopeClick(btn){ setHubScope(btn.getAttribute('data-scope')); }
 
 function showHub(key){
   const g = HUB_GROUPS[key];
@@ -10445,31 +10502,39 @@ function showHub(key){
   const mainEl = document.querySelector('.content');
   if(mainEl) mainEl.scrollTop = 0;
 
-  const allowed = g.cards.filter(_tnAllowed);
+  const scopes = _hubScopes();
+  if(scopes.indexOf(S_hubScope) < 0) S_hubScope = scopes[0] || 'company';
+
   let html = '<div class="page-header"><h2>' + _accEsc(g.title) + '</h2>'
            + '<div class="sub">' + _accEsc(g.sub) + '</div></div>';
 
+  // One scope selector for the whole group, so the cards stay one-per-report.
+  if(g.scoped && scopes.length > 1){
+    html += '<div class="hub-scope">';
+    scopes.forEach(function(s){
+      html += '<button class="hub-scope-btn' + (s === S_hubScope ? ' active' : '') + '"'
+            + ' data-scope="' + _accEsc(s) + '" onclick="hubScopeClick(this)">' + _accEsc(_hubScopeLabel(s)) + '</button>';
+    });
+    html += '</div>';
+  }
+
+  const allowed = g.cards.filter(function(c){
+    return _tnAllowed(c) && (!g.scoped || _tnInScope(c, S_hubScope));
+  });
+
   if(!allowed.length){
-    html += '<div style="color:var(--text-muted);font-size:13px;">Nothing here is available to your login.</div>';
+    html += '<div style="color:var(--text-muted);font-size:13px;margin-top:14px;">Nothing here is available to your login.</div>';
   } else {
-    // Group by section, preserving first-seen order.
-    const order = [];
-    allowed.forEach(function(c){
-      const sec = c.sec || '';
-      if(order.indexOf(sec) < 0) order.push(sec);
+    html += '<div class="hub-grid">';
+    allowed.forEach(function(c, i){
+      const dis = c.soon ? ' hub-card-soon' : '';
+      html += '<button class="hub-card' + dis + '" data-hub="' + _accEsc(key) + '" data-i="' + i + '"'
+            + (c.soon ? ' disabled' : ' onclick="hubGo(this)"') + '>'
+            + '<div class="hc-t">' + _accEsc(c.t) + '</div>'
+            + '<div class="hc-d">' + _accEsc(c.d) + '</div>'
+            + '</button>';
     });
-    order.forEach(function(sec){
-      if(sec) html += '<div class="hub-sec">' + _accEsc(sec) + '</div>';
-      html += '<div class="hub-grid">';
-      allowed.forEach(function(c, i){
-        if((c.sec || '') !== sec) return;
-        html += '<button class="hub-card" data-hub="' + _accEsc(key) + '" data-i="' + i + '" onclick="hubGo(this)">'
-              + '<div class="hc-t">' + _accEsc(c.t) + '</div>'
-              + '<div class="hc-d">' + _accEsc(c.d) + '</div>'
-              + '</button>';
-      });
-      html += '</div>';
-    });
+    html += '</div>';
   }
   if(pg) pg.innerHTML = html;
   renderTopNav();
@@ -10480,20 +10545,28 @@ function hubGo(btn){
   const i = parseInt(btn.getAttribute('data-i'), 10);
   const g = HUB_GROUPS[key];
   if(!g) return;
-  const card = g.cards.filter(_tnAllowed)[i];
-  if(!card) return;
+  const allowed = g.cards.filter(function(c){
+    return _tnAllowed(c) && (!g.scoped || _tnInScope(c, S_hubScope));
+  });
+  const card = allowed[i];
+  if(!card || card.soon) return;
   if(card.href){ window.location.href = card.href; return; }
-  if(card.go){
-    card.go();                 // this calls clearActive() internally
-    S_topNav = key;
-    S_hubDrilled = true;
-    renderTopNav();            // so the Back control appears
-  }
+
+  if(card.dest){
+    const fn = (S_hubScope === 'company') ? card.dest.company : card.dest.am;
+    if(!fn) return;
+    fn(S_hubScope);
+  } else if(card.go){
+    card.go();
+  } else { return; }
+
+  S_topNav = key;
+  S_hubDrilled = true;
+  renderTopNav();            // so the Back control appears
 }
 
 // Using the sidebar means you are no longer inside a hub journey, so drop the
 // Back control rather than leaving it pointing somewhere you did not come from.
-// Delegated to the container, which survives setupSidebar() rebuilding it.
 function initSidebarNavSync(){
   const sb = document.getElementById('sidebar');
   if(!sb || sb.dataset.navSync) return;
@@ -10503,6 +10576,120 @@ function initSidebarNavSync(){
     S_topNav = '';
     renderTopNav();
   });
+}
+
+
+// == Google Reviews ==========================================================
+// Every salon's public Google rating and review count, plus movement since the
+// earliest month still in RatingHistory. The numbers come from
+// /api/market/ratings-data (GooglePlaces, refreshed by /api/market/ratings) --
+// this view does no maths of its own beyond differencing two stored snapshots.
+//
+// Ratings already appeared as one column inside All Salons; this is the place
+// they can actually be read and compared.
+let GR_DATA = null;
+
+function showGoogleReviews(){
+  clearActive();
+  const pg = document.getElementById('page-hub');
+  if(pg) pg.classList.add('active');
+  const mainEl = document.querySelector('.content');
+  if(mainEl) mainEl.scrollTop = 0;
+  if(pg){
+    pg.innerHTML = '<div class="page-header"><h2>Google Reviews</h2>'
+      + '<div class="sub">Public rating and review count for every salon</div></div>'
+      + '<div id="gr-body" style="color:var(--text-muted);font-size:13px;">Loading&hellip;</div>';
+  }
+  if(GR_DATA){ paintGoogleReviews(); return; }
+  fetch('/api/market/ratings-data').then(function(r){ return r.json(); }).then(function(d){
+    GR_DATA = d || {};
+    paintGoogleReviews();
+  }).catch(function(e){
+    const b = document.getElementById('gr-body');
+    if(b) b.innerHTML = '<span style="color:#b3261e;">Could not load ratings: ' + _accEsc(e && e.message ? e.message : e) + '</span>';
+  });
+}
+
+function paintGoogleReviews(){
+  const host = document.getElementById('gr-body');
+  if(!host) return;
+  const ratings = (GR_DATA && GR_DATA.ratings) || {};
+  const hist    = (GR_DATA && GR_DATA.history) || [];
+  const nums = Object.keys(ratings);
+  if(!nums.length){
+    host.innerHTML = '<span style="color:var(--text-muted);">No Google ratings on file yet. '
+      + 'They are refreshed by the weekly scrape.</span>';
+    return;
+  }
+
+  // Earliest and latest stored month per salon, for movement.
+  const first = {}, last = {};
+  hist.forEach(function(h){
+    if(h.rating == null) return;
+    const s = h.salonNum;
+    if(!first[s] || h.month < first[s].month) first[s] = h;
+    if(!last[s]  || h.month > last[s].month)  last[s]  = h;
+  });
+  const months = hist.map(function(h){ return h.month; }).filter(Boolean).sort();
+  const span = months.length ? (months[0] + ' → ' + months[months.length - 1]) : '';
+
+  const rows = nums.map(function(sn){
+    const g = ratings[sn] || {};
+    const f = first[sn];
+    const dR = (f && g.rating != null && f.rating != null) ? (g.rating - f.rating) : null;
+    const dV = (f && g.reviews != null && f.reviews != null) ? (g.reviews - f.reviews) : null;
+    return { sn: sn, rating: g.rating, reviews: g.reviews, status: g.status || '', dR: dR, dV: dV };
+  }).sort(function(a, b){
+    const x = (a.rating == null) ? -1 : a.rating, y = (b.rating == null) ? -1 : b.rating;
+    return y - x;
+  });
+
+  const rated = rows.filter(function(r){ return r.rating != null; });
+  const avg = rated.length ? rated.reduce(function(s, r){ return s + r.rating; }, 0) / rated.length : null;
+  const totalReviews = rows.reduce(function(s, r){ return s + (r.reviews || 0); }, 0);
+
+  const delta = function(v, digits){
+    if(v == null || Math.abs(v) < (digits ? 0.05 : 0.5)) return '<span style="color:var(--text-muted);">—</span>';
+    const up = v > 0;
+    return '<span style="color:' + (up ? '#0a5236' : '#b3261e') + ';font-weight:700;">'
+      + (up ? '▲' : '▼') + ' ' + Math.abs(v).toFixed(digits) + '</span>';
+  };
+  const th = 'padding:6px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);text-align:left;';
+
+  let html = '<div style="display:flex;gap:22px;flex-wrap:wrap;margin-bottom:14px;">'
+    + '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;">Average rating</div>'
+    + '<div style="font-size:26px;font-weight:700;color:#03654e;">' + (avg == null ? '—' : avg.toFixed(2)) + '<span style="font-size:15px;">★</span></div></div>'
+    + '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;">Total reviews</div>'
+    + '<div style="font-size:26px;font-weight:700;color:#03654e;">' + totalReviews.toLocaleString() + '</div></div>'
+    + '<div><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;">Salons rated</div>'
+    + '<div style="font-size:26px;font-weight:700;color:#03654e;">' + rated.length + '<span style="font-size:15px;"> / ' + rows.length + '</span></div></div>'
+    + '</div>';
+
+  html += '<div style="overflow-x:auto;background:#fff;border:1px solid var(--border);border-radius:10px;">'
+    + '<table style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr>'
+    + '<th style="' + th + '">Salon</th><th style="' + th + '">Rating</th>'
+    + '<th style="' + th + '">Reviews</th><th style="' + th + '">Rating change</th>'
+    + '<th style="' + th + '">New reviews</th></tr></thead><tbody>';
+
+  rows.forEach(function(r){
+    const name = (typeof SALON_NAMES !== 'undefined' && SALON_NAMES[r.sn]) ? SALON_NAMES[r.sn] : '';
+    const closed = (r.status === 'CLOSED_TEMPORARILY' || r.status === 'CLOSED_PERMANENTLY')
+      ? ' <span style="color:#c0392b;font-size:10px;">closed</span>' : '';
+    html += '<tr style="border-top:1px solid #f0efec;">'
+      + '<td style="padding:7px 10px;font-weight:700;">' + _accEsc(r.sn)
+      + (name ? '<span style="font-weight:400;color:var(--text-muted);"> · ' + _accEsc(name) + '</span>' : '') + closed + '</td>'
+      + '<td style="padding:7px 10px;font-weight:700;">' + (r.rating == null ? '<span style="color:#bbb;">—</span>' : r.rating.toFixed(1) + '★') + '</td>'
+      + '<td style="padding:7px 10px;">' + (r.reviews == null ? '<span style="color:#bbb;">—</span>' : r.reviews.toLocaleString()) + '</td>'
+      + '<td style="padding:7px 10px;">' + delta(r.dR, 2) + '</td>'
+      + '<td style="padding:7px 10px;">' + delta(r.dV, 0) + '</td>'
+      + '</tr>';
+  });
+  html += '</tbody></table></div>';
+  html += '<div style="font-size:11px;color:var(--text-muted);margin-top:9px;">'
+    + 'Refreshed weekly by the Saturday scrape. Change columns compare today with the earliest stored month'
+    + (span ? ' (' + _accEsc(span) + ')' : '') + ', so they fill in as history accumulates.</div>';
+
+  host.innerHTML = html;
 }
 
 // == Admin: Users & Access ===================================================
