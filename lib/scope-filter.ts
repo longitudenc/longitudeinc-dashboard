@@ -92,8 +92,40 @@ export function scopeAllData(data: any, access: Access): any {
     return out
   }
 
-  // manager / stylist / unknown -> strip all pay; leave the rest at the current
-  // posture (no UI consumes it). Tighten to self when /my ships.
+  // MANAGER -> exactly their own salon. Deliberately NOT the area_manager
+  // branch above: that one keeps EVERY position-"M" row company-wide so the AM
+  // bonus maths has each manager's personal product %, and reusing it here would
+  // hand a manager every other manager's pay. This branch scopes strictly.
+  if (access.role === 'manager' && (access.salons || []).length) {
+    const salons = amSalonSet(access)
+    const inScope = (sn: any) => salons.has(String(sn || '').trim())
+    const homeSalonOf = (gid: string) => data.homeDataMap?.[gid]?.homeSalon
+    const empInScope = (e: any) =>
+      inScope(e.salonNum) || inScope(homeSalonOf(String(e.globalId || '').trim()))
+    const out: any = { ...data }
+
+    // Pay: baseWage only for people homed at THEIR salon.
+    if (data.homeDataMap) {
+      out.homeDataMap = {}
+      for (const [gid, row] of Object.entries<any>(data.homeDataMap)) {
+        out.homeDataMap[gid] = inScope((row as any)?.homeSalon) ? row : withoutWage(row)
+      }
+    }
+    out.bonusPeriods = scopePeriods(data.bonusPeriods, empInScope)
+    out.payrollConsolidatedPeriods = scopePeriods(data.payrollConsolidatedPeriods, empInScope)
+    if (Array.isArray(data.empWeeklyConsRows))
+      out.empWeeklyConsRows = data.empWeeklyConsRows.filter((r: any) => inScope(r.salonNum))
+    if (data.trackerData) {
+      out.trackerData = {}
+      for (const [gid, entries] of Object.entries<any>(data.trackerData)) {
+        if (inScope(homeSalonOf(gid))) out.trackerData[gid] = entries
+      }
+    }
+    return out
+  }
+
+  // stylist / unknown -> strip all pay; leave the rest at the current posture
+  // (no UI consumes it). Tighten to self when /my ships.
   if (data.homeDataMap) {
     const out: any = { ...data, homeDataMap: {} }
     for (const [gid, row] of Object.entries<any>(data.homeDataMap)) {
@@ -127,7 +159,19 @@ export function scopeDaily(
       chkinout: (chkinout || []).filter(r => inScope(r.salonNum)),
     }
   }
-  return { salonDaily: [], empDaily: [], shifts: [], halfHour: [], demand: [], chkinout: [] } // manager / stylist
+  if (access.role === 'manager' && (access.salons || []).length) {
+    const salons = amSalonSet(access)
+    const inScope = (sn: any) => salons.has(String(sn || '').trim())
+    return {
+      salonDaily: (salonDaily || []).filter(r => inScope(r.salonNum)),
+      empDaily: (empDaily || []).filter(r => inScope(r.salonNum)),
+      shifts: (shifts || []).filter(r => inScope(r.salonNum)),
+      halfHour: (halfHour || []).filter(r => inScope(r.salonNum)),
+      demand: (demand || []).filter(r => inScope(r.salonNum)),
+      chkinout: (chkinout || []).filter(r => inScope(r.salonNum)),
+    }
+  }
+  return { salonDaily: [], empDaily: [], shifts: [], halfHour: [], demand: [], chkinout: [] } // stylist / unknown
 }
 
 /**
@@ -142,7 +186,7 @@ export function scopeDaily(
  */
 export function scopeSalonRows<T extends { salonNum?: any }>(rows: T[], access: Access): T[] {
   if (seesEverything(access)) return rows
-  if (access.role === 'area_manager') {
+  if (access.role === 'area_manager' || access.role === 'manager') {
     const salons = amSalonSet(access)
     return (rows || []).filter(r => salons.has(String(r.salonNum || '').trim()))
   }
