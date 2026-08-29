@@ -3515,6 +3515,7 @@ function isAdminRole(){ const r=roleClean(); return r==='owner'||r==='admin'; }
 function isViewerRole(){ return roleClean()==='viewer'; }
 function isOwnerRole(){ return roleClean()==='owner'; }
 function isAMRole(){ const r=roleClean(); return r==='area_manager'||r==='am'; }
+function isManagerRole(){ return roleClean()==='manager'; }
 // Capabilities resolved by the SERVER (/api/auth/me): role defaults from
 // lib/capabilities.ts plus any per-person rows on the Capabilities tab.
 // These hide UI only — every one of them is also enforced server-side, so a
@@ -7057,6 +7058,10 @@ function salonLink(salonNum, label, fromTab){
 //  - manager/stylist: none (read-only company view)
 function canDrillSalon(salonNum){
   if(canSeeAllSalons()) return true;
+  // A manager runs one store and may open it. Server-side, scopeAllData and
+  // scopeDaily confine a manager to access.salons, so this only reveals data
+  // they were already going to be sent.
+  if(isManagerRole() && (SESSION.salons||[]).indexOf(String(salonNum).trim()) >= 0) return true;
   if(isAMRole()){
     const amId = String(USER_AM_ID||'').replace(/["']/g,'').trim();
     const own = (AMS[amId] && AMS[amId].salons) || [];
@@ -10314,12 +10319,18 @@ function initAdminCollapse(){
 // scored and paid against, and the two would eventually drift.
 
 // Everyone who gets a performance view at all: owner/admin/viewer + AMs.
-function _navPerfUser(){ return canSeeAllSalons() || isAMRole(); }
+function _navPerfUser(){ return canSeeAllSalons() || isAMRole() || _navSalonUser(); }
+// A manager with a salon: their whole dashboard is the salon drill, which
+// already exists and is already salon-scoped. Nothing new is built for them.
+function _navSalonUser(){ return isManagerRole() && (SESSION.salons||[]).length > 0; }
+function _mySalon(){ return String((SESSION.salons||[])[0]||'').trim(); }
+function _salonGo(section){ return function(){ openSalonDrill(_mySalon(), section); }; }
 
 // 'company' or an AM key from AMS.
 let S_hubScope = 'company';
 
 function _hubScopes(){
+  if(_navSalonUser()) return ['salon'];
   if(canSeeAllSalons()) return ['company'].concat(AM_ORDER.filter(function(id){ return !!AMS[id]; }));
   if(isAMRole()){
     const me = String(USER_AM_ID||'').replace(/["']/g,'').trim();
@@ -10327,7 +10338,11 @@ function _hubScopes(){
   }
   return ['company'];
 }
-function _hubScopeLabel(s){ return s === 'company' ? 'Company' : ((AMS[s] && AMS[s].name) || s); }
+function _hubScopeLabel(s){
+  if(s === 'company') return 'Company';
+  if(s === 'salon') return 'Salon ' + _mySalon();
+  return (AMS[s] && AMS[s].name) || s;
+}
 
 // Open an area-manager view: select the AM first, then its tab.
 function _amGo(tab){
@@ -10347,11 +10362,11 @@ const HUB_GROUPS = {
     scoped: true,
     cards: [
       { t:'Salons',      d:'Every salon for the selected period, with tier colouring.',
-        show:_navPerfUser, dest:{ company:_coGo(''), am:_amGo('salon') } },
+        show:_navPerfUser, dest:{ company:_coGo(''), am:_amGo('salon'), salon:_salonGo('performance') } },
       { t:'Scorecard',   d:'Rankings and scorecard performance.',
         show:_navPerfUser, dest:{ company:_coGo('ams'), am:_amGo('score') }, capCompany:'view.company' },
       { t:'Trends',      d:'Movement over time.',
-        show:_navPerfUser, dest:{ am:_amGo('trends') } },
+        show:_navPerfUser, dest:{ am:_amGo('trends'), salon:_salonGo('trends') } },
       { t:'Day Review',  d:'A single day, company-wide or for one area manager.', cap:'view.dayreview',
         dest:{ company:_coGo('dayreview'), am:_amGo('dayreview') } },
       { t:'Day of Week', d:'Weekday comparisons across a date window.', cap:'view.dayofweek',
@@ -10364,7 +10379,7 @@ const HUB_GROUPS = {
     scoped: true,
     cards: [
       { t:'Bonuses', d:'Stylist, manager and area manager bonus detail.',
-        show:_navPerfUser, dest:{ company:_coGo('bonus'), am:_amGo('bonus') }, capCompany:'view.company' },
+        show:_navPerfUser, dest:{ company:_coGo('bonus'), am:_amGo('bonus'), salon:_salonGo('bonuses') }, capCompany:'view.company' },
     ],
   },
   people: {
@@ -10373,9 +10388,9 @@ const HUB_GROUPS = {
     scoped: true,
     cards: [
       { t:'Team',      d:'Everyone, sortable, with hours and performance.',
-        show:_navPerfUser, dest:{ company:_coGo('team'), am:_amGo('individual') }, capCompany:'view.company' },
+        show:_navPerfUser, dest:{ company:_coGo('team'), am:_amGo('individual'), salon:_salonGo('individual') }, capCompany:'view.company' },
       { t:'Reviews',   d:'Stylist and manager reviews.',
-        show:_navPerfUser, dest:{ company:_coGo('reviews'), am:_amGo('reviews') } },
+        show:_navPerfUser, dest:{ company:_coGo('reviews'), am:_amGo('reviews'), salon:_salonGo('reviews') } },
       // Recognition, not compensation -- it belongs here rather than under Pay.
       { t:'Standouts', d:'Monthly recognition across the company.',
         show:_navPerfUser, dest:{ company:_coGo('standouts') } },
@@ -10435,7 +10450,7 @@ function _tnAllowed(card){
 // and vice versa, so a scope change never leaves a tile that goes nowhere.
 function _tnInScope(card, scope){
   if(!card.dest) return true;                       // href / go / soon cards
-  const want = (scope === 'company') ? 'company' : 'am';
+  const want = (scope === 'company') ? 'company' : (scope === 'salon') ? 'salon' : 'am';
   if(!card.dest[want]) return false;
   if(want === 'company' && card.capCompany && !hasCap(card.capCompany)) return false;
   return true;
@@ -10553,7 +10568,9 @@ function hubGo(btn){
   if(card.href){ window.location.href = card.href; return; }
 
   if(card.dest){
-    const fn = (S_hubScope === 'company') ? card.dest.company : card.dest.am;
+    const fn = (S_hubScope === 'company') ? card.dest.company
+             : (S_hubScope === 'salon')  ? card.dest.salon
+             : card.dest.am;
     if(!fn) return;
     fn(S_hubScope);
   } else if(card.go){
