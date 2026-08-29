@@ -10352,8 +10352,8 @@ const HUB_GROUPS = {
         show:_navPerfUser, dest:{ company:_coGo('ams'), am:_amGo('score') }, capCompany:'view.company' },
       { t:'Trends',      d:'Movement over time.',
         show:_navPerfUser, dest:{ am:_amGo('trends') } },
-      { t:'Day Review',  d:'The whole company on a single day.', cap:'view.dayreview',
-        dest:{ company:_coGo('dayreview') } },
+      { t:'Day Review',  d:'A single day, company-wide or for one area manager.', cap:'view.dayreview',
+        dest:{ company:_coGo('dayreview'), am:_amGo('dayreview') } },
       { t:'Day of Week', d:'Weekday comparisons across a date window.', cap:'view.dayofweek',
         dest:{ company:_coGo('dayofweek'), am:function(){ openDayOfWeek(); } } },
     ],
@@ -14984,6 +14984,8 @@ function paintHome(){
     .hc-ic{font-size:26px;line-height:1;}
     .hc-nm{font-family:'Fraunces',Georgia,serif;font-weight:500;font-size:1.05rem;margin-top:10px;color:var(--text,#12231d);}
     .hc-sub{color:var(--text-muted,#5c6b64);font-size:.85rem;margin-top:2px;}
+    .hc-li-signup{display:inline-block;margin-left:8px;background:#9acb3a;color:#0b2b22;
+        border-radius:999px;padding:2px 10px;font-size:11px;font-weight:700;text-decoration:none;white-space:nowrap;}
     .hc-tag{display:inline-block;margin-top:9px;background:var(--paper,#fff);border:1px solid var(--border,#e6ebe7);border-radius:999px;padding:2px 11px;font-size:11px;font-family:'Space Mono',ui-monospace,monospace;color:#048667;}
     .hc-edit{margin-top:9px;display:flex;gap:5px;justify-content:center;}
     .hc-groups{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(290px,100%),1fr));gap:18px 20px;align-items:start;}
@@ -15069,7 +15071,8 @@ function paintHome(){
     return `<div class="hc-li" title="${hEsc(celTip(dt))}">
       <span class="hc-li-ic">${dIcon(dt.title)}</span>
       <span class="hc-li-tx"><span class="hc-li-nm">${hEsc(celName(dt))}</span>${sub?`<span class="hc-li-sub">${hEsc(sub)}</span>`:''}</span>
-      <span class="hc-li-when">${hEsc(hMonthAbbr(dt.date))} ${hEsc(hDayNum(dt.date))}${lbl?' \u00b7 '+lbl:''}</span>
+      <span class="hc-li-when">${hEsc(hMonthAbbr(dt.date))} ${hEsc(hDayNum(dt.date))}${dt.time?' · '+hEsc(dt.time):''}${lbl?' \u00b7 '+lbl:''}</span>
+      ${dt.signupUrl?`<a class="hc-li-signup" href="${hEsc(dt.signupUrl)}" target="_blank" rel="noopener noreferrer">Sign up</a>`:''}
       ${(canEdit && !dt.auto)?`<span class="hc-li-act"><button class="btn btn-secondary btn-sm" onclick="openHomeEditor('date','${hEsc(dt.id)}')">Edit</button><button class="btn btn-secondary btn-sm" onclick="deleteHomeItem('date','${hEsc(dt.id)}')">Delete</button></span>`:''}
     </div>`;
   };
@@ -15166,9 +15169,13 @@ function openHomeEditor(kind, id){
   } else if(kind==='date'){
     body = F('Title','title','text',item.title)
       + F('Date','date','date',item.date)
+      // Free text, not a time input: 'morning' and 'after close' are real answers.
+      + F('Time','time','text',item.time,'placeholder="e.g. 10:00 AM, or after close"')
       + F('End Date','endDate','date',item.endDate)
       + F('Category','category','text',item.category,'placeholder="e.g. Training, Payroll, Holiday"')
       + F('Note','note','textarea',item.note)
+      + F('Sign-up link','signupUrl','text',item.signupUrl,'placeholder="https://... volunteer or RSVP form"')
+      + `<div class="ff-help" style="margin:-11px 0 15px;">Optional. Adds a Sign up button to the event.</div>`
       + AUD(item.audience);
   } else {
     body = F('Label','label','text',item.label)
@@ -15224,7 +15231,7 @@ function saveHomeItem(kind, id){
     const p=document.getElementById('he-pinned');
     Object.assign(item,{title:v('title'),body:v('body'),imageUrl:v('imageUrl'),pinned:!!(p&&p.checked),startDate:v('startDate'),endDate:v('endDate'),audience});
   } else if(kind==='date'){
-    Object.assign(item,{title:v('title'),date:v('date'),endDate:v('endDate'),category:v('category'),note:v('note'),audience});
+    Object.assign(item,{title:v('title'),date:v('date'),time:v('time'),endDate:v('endDate'),category:v('category'),note:v('note'),signupUrl:v('signupUrl'),audience});
   } else {
     Object.assign(item,{label:v('label'),url:v('url'),icon:v('icon'),category:v('category'),sortOrder:v('sortOrder'),audience});
   }

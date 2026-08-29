@@ -857,6 +857,22 @@
   function ord(n){var s=['th','st','nd','rd'],v=n%100;return n+(s[(v-20)%10]||s[v]||s[0]);}
   function getRoster(){ try{return JSON.parse(document.getElementById('roster-data').textContent)||[];}catch(e){return [];} }
   function setRoster(arr){ var s=document.getElementById('roster-data'); if(s){ s.textContent=JSON.stringify(arr); autosave(); } }
+  // The <script id="roster-data"> block ships with a FEBRUARY sample. Pulling
+  // any other month against it finds nobody, which is what made September come
+  // back empty. Load the live roster from /api/newsletter/roster instead.
+  // Quietly: replacing sample data is not an edit, so it must not autosave and
+  // mark the draft dirty.
+  var ROSTER_LOADED=false;
+  function setRosterQuiet(arr){ var s=document.getElementById('roster-data'); if(s) s.textContent=JSON.stringify(arr); }
+  function loadRosterFromServer(){
+    return fetch(ROSTER_URL,{credentials:'include'})
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(d){
+        var arr=Array.isArray(d)?d:(d&&Array.isArray(d.roster)?d.roster:null);
+        if(arr&&arr.length){ setRosterQuiet(arr); ROSTER_LOADED=true; }
+        return ROSTER_LOADED;
+      }).catch(function(){ return false; });
+  }
   function mastYear(){ var t=(document.querySelector('.mast-date')||{}).textContent||''; var m=t.match(/\b(20\d\d)\b/); return m?+m[1]:new Date().getFullYear(); }
   function mastMonth(){ var t=(document.querySelector('.mast-date')||{}).textContent||''; for(var i=0;i<12;i++){ if(new RegExp(MONTHS[i],'i').test(t)) return i+1; } return new Date().getMonth()+1; }
   function findList(key,rx){ var a=document.querySelector('.plist[data-autofill="'+key+'"]'); if(a) return a;
@@ -864,6 +880,19 @@
   function annivRow(p){return '<li class="rep"><span class="who"><span class="nm edit">'+escHtml(p.name)+'</span><span class="yr edit">'+(p.years===1?'1 yr':p.years+' yrs')+'</span></span><span class="meta edit">'+(p.salon?escHtml(p.salon)+' \u00B7 ':'')+'the '+ord(p.day)+'</span></li>';}
   function bdayRow(p){return '<li class="rep"><span class="who edit">'+escHtml(p.name)+'</span><span class="meta edit">'+(p.salon?escHtml(p.salon)+' \u00B7 ':'')+ord(p.day)+'</span></li>';}
   function pullMonth(){
+    // First use waits for the roster, so an early click cannot quietly pull
+    // from the February sample and report "0 birthdays".
+    if(!ROSTER_LOADED){
+      flash('Loading roster…');
+      loadRosterFromServer().then(function(ok){
+        if(!ok){ flash('Could not load the roster — check you are signed in to the dashboard.'); return; }
+        doPullMonth();
+      });
+      return;
+    }
+    doPullMonth();
+  }
+  function doPullMonth(){
     var sel=document.getElementById('nl-month'); var m=parseInt(sel.value,10)||mastMonth(); var y=mastYear();
     var roster=getRoster(), anniv=[], bdays=[];
     roster.forEach(function(p){
@@ -920,6 +949,7 @@
   var ub=document.getElementById('btn-undo'); if(ub) ub.addEventListener('click',undo);
   var rdb=document.getElementById('btn-redo'); if(rdb) rdb.addEventListener('click',redo);
   var pb=document.getElementById('btn-pull'); if(pb) pb.addEventListener('click',pullMonth);
+  loadRosterFromServer();   // warm it so the first Pull month is instant
   var rob=document.getElementById('btn-roster'); if(rob) rob.addEventListener('click',openRoster);
   var msel=document.getElementById('nl-month'); if(msel) msel.value=String(mastMonth());
   window.__NL={

@@ -24,8 +24,11 @@ export const ANNOUNCEMENT_COLUMNS = [
   'id', 'title', 'body', 'imageUrl', 'pinned', 'startDate', 'endDate', 'audience', 'createdBy', 'createdAt',
 ] as const
 
+// `time` is free text ('10:00 AM', 'after close') rather than a time input: some
+// events are 'morning' or 'TBD' and forcing HH:MM would lose that.
+// `signupUrl` turns an event into a volunteer sign-up.
 export const DATE_COLUMNS = [
-  'id', 'title', 'date', 'endDate', 'category', 'note', 'audience',
+  'id', 'title', 'date', 'time', 'endDate', 'category', 'note', 'signupUrl', 'audience',
 ] as const
 
 export const LINK_COLUMNS = [
@@ -99,7 +102,9 @@ export interface ImportantDate {
   id: string
   title: string
   date: string
+  time?: string             // free text, e.g. '10:00 AM' or 'after close'
   endDate: string
+  signupUrl?: string        // optional volunteer / RSVP sign-up link
   category: string
   note: string
   audience: string[]
@@ -173,8 +178,10 @@ export async function getImportantDates(role: Role | string, horizonDays = 120):
         title: norm(r.title),
         date,
         endDate,
+        time: norm(r.time),
         category: norm(r.category),
         note: norm(r.note),
+        signupUrl: norm(r.signupUrl),
         audience: splitList(r.audience),
         daysAway: date ? daysBetween(today, date) : 0,
         kind: 'event',
