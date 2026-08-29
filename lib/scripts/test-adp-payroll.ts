@@ -19,6 +19,7 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 import { defaultSettings } from '../adp-settings'
 import { parsePayrollDetail, parsePayrollWeekResult } from '../adp-payroll-detail'
+import { compareToPrevious, lastDownloadOf } from '../adp-history'
 import {
   buildPayroll,
   toPayConsolRows,
@@ -429,6 +430,11 @@ const netCases: DailyFloorRow[] = [
   ...dayRows(findRow('CHONG NEWMAN').payId, '3062', [6.7, 6.7, 6.7, 6.7, 6.7], '2026-08-16'),
   // Genuinely qualifies — SD3 paid exactly the right amount, so nothing moves.
   ...dayRows(findRow('BLAKENEY').payId, '9689', sixEven(37.97)),
+  // A floater who ALSO passes 40 hours: six qualifying days at one salon (so
+  // SD3 pays there) plus a short shift at another. The real week's case — she
+  // is owed the difference on 6-day AND a bigger overtime premium because of it.
+  ...dayRows(findRow('HERNANDEZ').payId, '9489', sixEven(34.33)),
+  ...dayRows(findRow('HERNANDEZ').payId, '3045', [5.34], '2026-08-21'),
 ]
 
 const netted = buildPayroll({
@@ -487,7 +493,7 @@ check(
 )
 check(
   `week nets ${netted.totals.sixDayDelta >= 0 ? '+' : ''}$${netted.totals.sixDayDelta.toFixed(2)}`,
-  Math.abs(netted.totals.sixDayDelta - (-32.80 - 30.79 - 35.90 - 35.62 + 38.59)) < 0.02,
+  Math.abs(netted.totals.sixDayDelta - (-32.80 - 30.79 - 35.90 - 35.62 + 38.59 + 5.34)) < 0.02,
   `got ${netted.totals.sixDayDelta}`
 )
 
@@ -526,6 +532,125 @@ check(
       netted.salonTotals.reduce((s, t) => s + t.sixDayDelta, 0) - netted.totals.sixDayDelta
     ) < 0.05,
     `${round2(netted.salonTotals.reduce((s, t) => s + t.sixDayDelta, 0))} vs ${netted.totals.sixDayDelta}`
+  )
+}
+
+// ── 4b3) Overtime on the CORRECTED regular rate ───────────────────────────
+// The half-time premium is a function of total weekly pay ÷ hours worked, so
+// nondiscretionary incentives belong in it. This file changes those incentives,
+// which means the premium has to be computed AFTER the 6-day netting, not
+// before it.
+console.log('\nOvertime and the regular rate')
+{
+  const claudia = netted.employees.find(e => e.employeeName.startsWith('HERNANDEZ'))!
+  const sd = six('HERNANDEZ')
+  // 41.20 hours across two salons, +$5.34 of 6-day added.
+  // extra rate 5.34/41.20 = $0.1296/hr → 1.20 OT hours × that ÷ 2 = $0.08.
+  check(
+    'a floater\u2019s premium includes the 6-day pay this file adds ($11.44 → $11.52)',
+    Math.abs(sd.delta - 5.34) < 0.02 && Math.abs(claudia.overtimePay - 11.52) < 0.02,
+    `got $${claudia.overtimePay} on ${claudia.totalHoursWorked} hrs, 6-day ${sd.delta}`
+  )
+
+  // A single-salon week: SD3's own premium stands, and only the part that moved
+  // because of the correction is added to it. $25/hr flat, 44 hours, SD3 paid
+  // $44 of 6-day the person didn't earn → rate drops $1.00/hr → 4 OT hours
+  // × $1.00 ÷ 2 = $2.00 comes back off the premium.
+  const base = rows.find(r => r.employeeName.startsWith('BOWERSOX'))!
+  const one = [{
+    ...base, salonNum: '3071', payId: '999001', employeeName: 'SOLO, TESTER',
+    totalHoursWorked: 44, floorHours: 44, totalHoursPay: 44 * 25, baseWage: 25,
+    overtimePay: 25, productivityIncentive: 0, productIncentive: 0,
+    newReturnIncentive: 0, shiftIncentive: 0, allOtherIncentives: 44, sourceRow: 1,
+  }]
+  const soloDays = dayRows('999001', '3071', [8, 8, 8, 8, 8, 3.5])  // one short day
+  const solo = buildPayroll({
+    rows: one, punches: [], settings, weekStart: '2026-08-15', weekEnd: '2026-08-21',
+    dailyFloor: soloDays,
+  })
+  const soloSix = solo.sixDay[0]
+  const soloEmp = solo.employees[0]
+  check(
+    'a clawback lowers the regular rate, so the premium comes down with it ($25.00 → $23.00)',
+    Math.abs(soloSix.delta + 44) < 0.02 && Math.abs(soloEmp.overtimePay - 23) < 0.02,
+    `6-day ${soloSix.delta}, premium ${soloEmp.overtimePay} (SD3 paid ${soloEmp.sd3OvertimePay})`
+  )
+  // Nothing to correct → SD3's premium is left exactly as it came.
+  // A fresh row — buildPayroll writes the premium back onto the rows it is
+  // handed, so reusing `one` here would carry the corrected figure back in.
+  const untouched = buildPayroll({
+    rows: [{
+      ...base, salonNum: '3071', payId: '999002', employeeName: 'SOLO, UNTOUCHED',
+      totalHoursWorked: 44, floorHours: 44, totalHoursPay: 44 * 25, baseWage: 25,
+      overtimePay: 25, productivityIncentive: 0, productIncentive: 0,
+      newReturnIncentive: 0, shiftIncentive: 0, allOtherIncentives: 0, sourceRow: 1,
+    }],
+    punches: [], settings, weekStart: '2026-08-15', weekEnd: '2026-08-21',
+  })
+  check(
+    'with nothing to correct, a single-salon premium is passed through untouched',
+    Math.abs(untouched.employees[0].overtimePay - 25) < 0.005,
+    `got ${untouched.employees[0].overtimePay}`
+  )
+}
+
+// ── 4b4) Week-over-week variance, against the week actually SENT ──────────
+console.log('\nWeek-over-week variance')
+{
+  const hist = [
+    {
+      weekEnd: '2026-08-14', grossPay: 1000, downloadedAt: '2026-08-20T12:00:00Z',
+      downloadedBy: 'office@x.com', fileName: 'EPIBSP33.csv', forced: 'false',
+      salonJson: JSON.stringify([
+        { salonNum: '1304', employees: 5, hours: 100, grossPay: 600, tips: 300 },
+        { salonNum: '3043', employees: 4, hours: 80, grossPay: 400, tips: 200 },
+      ]),
+    },
+    // A later week must never be used as the comparison for an earlier one.
+    { weekEnd: '2026-09-04', grossPay: 9999, downloadedAt: '2026-09-10T12:00:00Z', salonJson: '[]' },
+  ]
+  const fake = {
+    weekEnd: '2026-08-21',
+    totals: { grossPay: 1000 },
+    salonTotals: [
+      { salonNum: '1304', employees: 5, hours: 100, grossPay: 690, tips: 300 },  // +15%
+      { salonNum: '9689', employees: 2, hours: 40, grossPay: 310, tips: 100 },   // new
+      // 3043 has vanished — the case worth stopping for
+    ],
+  } as any
+  const v = compareToPrevious(fake, hist, 15)
+  check(
+    'compares against the previous week, never a later one',
+    v.prevWeekEnd === '2026-08-14',
+    v.prevWeekEnd
+  )
+  check(
+    'a salon that paid last week and has no rows now is flagged',
+    v.warnings.some(w => w.includes('Salon 3043') && w.includes('no rows at all')),
+    v.warnings.join(' | ')
+  )
+  check(
+    'a salon past the threshold is flagged, and one under it is not',
+    v.warnings.some(w => w.includes('Salon 1304') && w.includes('15%')) &&
+      !compareToPrevious(fake, hist, 20).warnings.some(w => w.includes('Salon 1304')),
+    v.warnings.join(' | ')
+  )
+  check(
+    'a new salon is noted, not treated as an error',
+    v.warnings.some(w => w.includes('Salon 9689') && w.includes('new')),
+    v.warnings.join(' | ')
+  )
+  check(
+    'no history means no comparison and no noise',
+    compareToPrevious(fake, [], 15).warnings.length === 0 &&
+      compareToPrevious(fake, [], 15).prevWeekEnd === ''
+  )
+  const last = lastDownloadOf(hist, '2026-08-14')
+  check(
+    'the last download of a week is found, for the already-sent warning',
+    !!last && last.by === 'office@x.com' && last.fileName === 'EPIBSP33.csv' &&
+      lastDownloadOf(hist, '2026-08-21') === null,
+    JSON.stringify(last)
   )
 }
 

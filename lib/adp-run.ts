@@ -26,6 +26,9 @@ import { parsePayrollWeekResult, type Sd3SixDayRow } from '@/lib/adp-payroll-det
 import { parseCsv, rowsToObjectsAt } from '@/lib/csv'
 import { readSheet, rowsToObjects, getChkInOutRange, getDailyRange } from '@/lib/sheets'
 import { loadAdpSettings, type AdpSettings } from '@/lib/adp-settings'
+import {
+  ADP_HISTORY_TAB, compareToPrevious, lastDownloadOf, type VarianceReport,
+} from '@/lib/adp-history'
 import { salonMonth } from '@/lib/salon-month'
 import { fiscalWeekContaining, lastCompletedFiscalWeek, todayET } from '@/lib/fiscal'
 import {
@@ -83,6 +86,10 @@ export interface RunResult extends PayrollBuildResult {
     settingsFromSheet: boolean
     /** Codes still unassigned — the office has to fill these in. */
     missingCodes: string[]
+    /** How this week's per-salon cost compares with the last week sent. */
+    variance: VarianceReport
+    /** Set when this week has already been downloaded — don't send it twice. */
+    lastDownload: ReturnType<typeof lastDownloadOf>
     durationMs: number
   }
   settings: AdpSettings
@@ -362,6 +369,18 @@ export async function runPayrollBuild(opts: RunOptions = {}): Promise<RunResult>
     .filter(([, v]) => !v)
     .map(([k]) => k)
 
+  // What was sent last time, for the variance check and the already-downloaded
+  // warning. One cached Sheets read, and a missing tab just means no history —
+  // never a failed build.
+  let history: Record<string, any>[] = []
+  try {
+    history = rowsToObjects(await readSheet(ADP_HISTORY_TAB))
+  } catch { history = [] }
+  const variance = compareToPrevious(result, history, settings.rules.varianceAlertPct)
+  for (const w of variance.warnings) {
+    result.exceptions.push({ severity: 'warning', kind: 'variance', message: w })
+  }
+
   return {
     ...result,
     settings,
@@ -378,6 +397,8 @@ export async function runPayrollBuild(opts: RunOptions = {}): Promise<RunResult>
       manualLines: manual.length,
       settingsFromSheet: Object.keys(settings.overrides).length > 0,
       missingCodes,
+      variance,
+      lastDownload: lastDownloadOf(history, weekEnd),
       durationMs: Date.now() - startedAt,
     },
   }

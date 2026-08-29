@@ -11,10 +11,11 @@
 //   GET ?weekEnd=YYYY-MM-DD&punches=live|sheet&bonuses=1|0&force=1
 
 import { NextResponse } from 'next/server'
+import { put } from '@vercel/blob'
 import { requireOffice } from '@/lib/require-role'
 import { runPayrollBuild } from '@/lib/adp-run'
 import { upsertSheet } from '@/lib/sheets'
-import { ADP_HISTORY_TAB, HISTORY_COLUMNS } from '@/lib/adp-history'
+import { ADP_HISTORY_TAB, HISTORY_COLUMNS, salonSnapshot } from '@/lib/adp-history'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -56,6 +57,28 @@ export async function GET(request: Request) {
       `${force && blocking.length ? `, FORCED past ${blocking.length} blocking` : ''})`
     )
 
+    // Keep the exact bytes that were sent. When ADP and SD3 disagree three
+    // weeks later, the file is the evidence and the totals are not. It goes to
+    // the PRIVATE blob store — it is names, wages and Payroll IDs — and is read
+    // back only through /api/office/payroll/file, which checks the office role
+    // and that the pathname is one this log actually references.
+    //
+    // Archiving must never cost the office their download, so a failure only
+    // warns: the CSV still streams, and the history row records no file.
+    let filePath = ''
+    try {
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+      const blob = await put(
+        `payroll/${result.weekEnd}/${stamp}-${result.upload.fileName}`,
+        '\uFEFF' + result.upload.csv,
+        { access: 'private', contentType: 'text/csv; charset=utf-8', addRandomSuffix: false }
+      )
+      filePath = blob.pathname
+    } catch (e) {
+      console.warn('[office/payroll/export] archive failed:',
+        e instanceof Error ? e.message : e)
+    }
+
     // Log the week to the history tab. This is the moment it is processed, so
     // it is the figure worth keeping — SD3 can settle numbers days later, and a
     // rebuild would then no longer match what was actually sent. A logging
@@ -71,6 +94,11 @@ export async function GET(request: Request) {
         sixDayDelta: t.sixDayDelta, sixDaySd3Paid: t.sixDaySd3Paid,
         breakMinutes: t.breakMinutes, extraEarnings: t.extraEarnings,
         exceptions: result.exceptions.length,
+        // Per-salon figures as sent, so next week can be compared against this
+        // one without rebuilding it — SD3 settles numbers for days afterwards,
+        // so a rebuild would drift and every week would look like a variance.
+        salonJson: JSON.stringify(salonSnapshot(result.salonTotals)),
+        filePath,
         forced: force && blocking.length > 0 ? 'true' : 'false',
         downloadedAt: new Date().toISOString(), downloadedBy: gate.email,
       }

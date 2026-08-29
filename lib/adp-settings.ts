@@ -164,6 +164,14 @@ export interface AdpRules {
   /** Weekly hours after which the half-time premium applies. */
   otThresholdHours: number
 
+  // ── Week-over-week check ──
+  /**
+   * Percent movement in a salon's payroll cost, against the last week actually
+   * sent, that earns a warning. A bad scrape or a missing person shows up here
+   * before the file does — 0 turns the check off.
+   */
+  varianceAlertPct: number
+
   // ── Bonuses ──
   /** Auto-populate bonuses on the Nth paycheck of the calendar month. */
   bonusPaycheckOfMonth: number
@@ -182,6 +190,7 @@ const DEFAULT_RULES: AdpRules = {
   breakMaxMinutes: 20,
   breakMode: 'off',
   otThresholdHours: 40,
+  varianceAlertPct: 15,
   bonusPaycheckOfMonth: 3,
   payDateOffsetDays: 6,
 }
@@ -275,6 +284,7 @@ export async function loadAdpSettings(): Promise<AdpSettings> {
           }
           break
         case 'otThresholdHours': settings.rules.otThresholdHours = toNum(raw, DEFAULT_RULES.otThresholdHours); break
+        case 'varianceAlertPct': settings.rules.varianceAlertPct = toNum(raw, DEFAULT_RULES.varianceAlertPct); break
         case 'bonusPaycheckOfMonth': settings.rules.bonusPaycheckOfMonth = toNum(raw, DEFAULT_RULES.bonusPaycheckOfMonth); break
         case 'payDateOffsetDays': settings.rules.payDateOffsetDays = toNum(raw, DEFAULT_RULES.payDateOffsetDays); break
       }

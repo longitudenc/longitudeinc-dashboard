@@ -71,6 +71,8 @@ export async function GET(request: Request) {
         extraEarnings: num(r.extraEarnings),
         exceptions: num(r.exceptions),
         forced: String(r.forced || '') === 'true',
+        // Present once the archive is working; older rows predate it.
+        filePath: String(r.filePath || ''),
         downloadedAt: String(r.downloadedAt || ''),
         downloadedBy: String(r.downloadedBy || ''),
       }))

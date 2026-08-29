@@ -567,51 +567,93 @@ function groupBy<T>(items: T[], key: (t: T) => string): Map<string, T[]> {
   return m
 }
 
-// ── 2) Cross-salon overtime (port of CheckOT) ───────────────────────────
+// ── 2) Overtime: cross-salon hours, and the corrected regular rate ──────
+
+/** What a row's week actually looks like once this file's corrections are in. */
+export interface OvertimeBasis {
+  /** Hours worked, including any paid break minutes folded in. */
+  hours(r: PayConsolRow): number
+  /** Pay for those hours. */
+  pay(r: PayConsolRow): number
+  /** Incentives as the file will pay them (6-day netted in or out). */
+  incentives(r: PayConsolRow): number
+  /** The same incentives before this file touched them — SD3's own figure. */
+  baselineIncentives(r: PayConsolRow): number
+}
 
 /**
- * Recompute overtime for anyone SD3 split across salons, and write the premium
- * back onto their rows in place.
+ * Recompute overtime and write the premium back onto the rows in place.
  *
- * SD3 computes overtime per salon, so a floater who works 25 hours at one salon
- * and 20 at another shows 0 overtime at both. Here the week's hours are summed
- * across salons; anything over 40 earns a half-time premium on the BLENDED rate
- * (all hours pay + all incentives ÷ all hours worked, tips excluded), and that
- * premium is split back across the salons in proportion to hours worked.
+ * Two separate problems, deliberately handled differently:
  *
- * Single-salon employees are left alone — SD3 already computes their overtime
- * with the same formula, and re-deriving it would only add rounding drift.
+ * 1. SD3 computes overtime per salon, so a floater working 25 hours at one and
+ *    20 at another shows 0 overtime at both. Their week is summed across salons
+ *    and anything over the threshold earns a half-time premium on the BLENDED
+ *    rate (hours pay + incentives ÷ hours worked, tips excluded), split back
+ *    across salons in proportion to hours. This REPLACES SD3's figure.
+ *
+ * 2. The regular rate is total weekly pay ÷ hours worked, so nondiscretionary
+ *    incentives belong in it. This file changes those incentives — it nets 6-day
+ *    pay in or out — and can add hours when short breaks are paid. For a
+ *    single-salon week SD3's premium otherwise stands, so only the part that
+ *    MOVED because of a correction is added to it. Re-deriving the whole premium
+ *    would substitute our arithmetic for SD3's on weeks nothing changed, which
+ *    is how rounding drift gets into everyone's cheque.
+ *
+ * With no corrections and no floaters, this leaves every row exactly as SD3
+ * sent it.
  */
-export function applyFloaterOvertime(rows: PayConsolRow[], threshold: number): void {
+export function applyOvertime(
+  rows: PayConsolRow[],
+  threshold: number,
+  basis: OvertimeBasis
+): void {
   const byPay = groupBy(rows.filter(r => r.payId), r => `${r.weekEnding}|${r.payId}`)
 
   for (const group of byPay.values()) {
-    if (group.length < 2) continue // single-salon → SD3's own overtime stands
-
-    const hours = group.reduce((s, r) => s + r.totalHoursWorked, 0)
+    const hours = group.reduce((s, r) => s + basis.hours(r), 0)
     if (hours <= threshold) continue
-
     const otHours = hours - threshold
-    const pay = group.reduce((s, r) => s + r.totalHoursPay, 0)
-    const incentives = group.reduce(
-      (s, r) =>
-        s +
-        r.productivityIncentive +
-        r.productIncentive +
-        r.newReturnIncentive +
-        r.shiftIncentive +
-        r.allOtherIncentives,
-      0
-    )
-    const blendedRate = (pay + incentives) / hours
-    const premium = round2((otHours * blendedRate) / 2)
+    const pay = group.reduce((s, r) => s + basis.pay(r), 0)
+    const incentives = group.reduce((s, r) => s + basis.incentives(r), 0)
 
-    const shares = allocate(premium, group.map(r => r.totalHoursWorked))
-    group.forEach((r, i) => {
-      r.overtimeHours = 0 // the hours column is not exported; the premium is
-      r.overtimePay = shares[i]
-    })
+    if (group.length > 1) {
+      // Cross-salon: the whole premium is ours to compute.
+      const premium = round2((otHours * ((pay + incentives) / hours)) / 2)
+      const shares = allocate(premium, group.map(r => basis.hours(r)))
+      group.forEach((r, i) => {
+        r.overtimeHours = 0 // the hours column is not exported; the premium is
+        r.overtimePay = shares[i]
+      })
+      continue
+    }
+
+    // Single salon: SD3's premium stands, plus whatever the corrections moved.
+    const baseline = group.reduce((s, r) => s + basis.baselineIncentives(r), 0)
+    const moved = (incentives - baseline) + (pay - group.reduce((s, r) => s + r.totalHoursPay, 0))
+    if (Math.abs(moved) < 0.005) continue
+    const extra = round2((otHours * (moved / hours)) / 2)
+    if (extra === 0) continue
+    group[0].overtimePay = round2(group[0].overtimePay + extra)
   }
+}
+
+/**
+ * The cross-salon half of the above, for callers with nothing to correct.
+ * Kept because it is the plain statement of the floater rule, and the tests
+ * exercise it directly.
+ */
+export function applyFloaterOvertime(rows: PayConsolRow[], threshold: number): void {
+  applyOvertime(rows, threshold, {
+    hours: r => r.totalHoursWorked,
+    pay: r => r.totalHoursPay,
+    incentives: r =>
+      r.productivityIncentive + r.productIncentive + r.newReturnIncentive +
+      r.shiftIncentive + r.allOtherIncentives,
+    baselineIncentives: r =>
+      r.productivityIncentive + r.productIncentive + r.newReturnIncentive +
+      r.shiftIncentive + r.allOtherIncentives,
+  })
 }
 
 // ── 3) 6-day pay ────────────────────────────────────────────────────────
@@ -919,9 +961,13 @@ export function buildPayroll(input: {
   const sd3OtByRow = new Map<PayConsolRow, number>()
   for (const r of rows) sd3OtByRow.set(r, r.overtimePay)
 
-  // Cross-salon overtime, in place, before anything reads overtimePay.
-  applyFloaterOvertime(rows, rules.otThresholdHours)
-
+  // Overtime is NOT computed here. Under the FLSA the half-time premium is a
+  // function of the regular rate — total weekly pay ÷ hours worked — and this
+  // file changes both: 6-day pay is netted in or out of All Other Incentives,
+  // and paid short breaks (when on) add hours. Computing overtime from SD3's
+  // uncorrected figures would price the premium on money the person isn't
+  // getting, or leave out money they are. So it runs at the END, off the
+  // finished lines. See applyOvertime below.
   const { details: sixDay, exceptions: sixDayExceptions } =
     computeSixDay(rows, punches, settings, input.dailyFloor ?? [], input.sd3SixDay)
   exceptions.push(...sixDayExceptions)
@@ -1126,6 +1172,54 @@ export function buildPayroll(input: {
       kind: line.kind ?? 'manual',
     })
   }
+
+  // ── Overtime, on the corrected regular rate ──
+  //
+  // Two things move the premium away from what SD3 paid:
+  //   • a floater's salons merged — SD3 never saw the hours as one week
+  //   • the regular rate changed — 6-day pay netted in or out, break hours added
+  // The first replaces SD3's figure wholesale. The second is added to whatever
+  // premium already stands, because SD3's own method for a single-salon week is
+  // its own and this file has no business re-deriving it — only the part that
+  // moved because of a correction belongs to us.
+  const INCENTIVE_KEYS = [
+    'productivityIncentive', 'productIncentive', 'newReturnIncentive',
+    'shiftIncentive', 'allOtherIncentives',
+  ]
+  /** Hours worked on this row after any paid break minutes were folded in. */
+  const workedHours = (r: PayConsolRow) => {
+    const v = values.get(r)!
+    const added = round2((v.fixed.get('floorHours') || 0) - r.floorHours)
+    return r.totalHoursWorked + Math.max(0, added)
+  }
+  /** Pay for those hours, at base wage for anything this file added. */
+  const workedPay = (r: PayConsolRow) => {
+    const added = Math.max(0, workedHours(r) - r.totalHoursWorked)
+    return r.totalHoursPay + added * r.baseWage
+  }
+  /**
+   * Weekly incentives as the file will actually pay them: SD3's five incentive
+   * lines after netting, plus 6-day pay written on its own code in 'add' mode.
+   * Bonuses and hand-keyed lines are left out — a monthly bonus paid in one week
+   * is earned across the whole month, and folding it into this week's rate would
+   * overstate it. (Spreading it back over the period is the correct treatment
+   * and is not attempted here.)
+   */
+  const paidIncentives = (r: PayConsolRow) => {
+    const v = values.get(r)!
+    return INCENTIVE_KEYS.reduce((s, k) => s + (v.fixed.get(k) || 0), 0)
+      + v.extras.reduce((s, e) => s + (e.kind === 'sixDay' ? e.amount : 0), 0)
+  }
+  /** The same figure before this file touched anything — the baseline. */
+  const sd3Incentives = (r: PayConsolRow) =>
+    r.productivityIncentive + r.productIncentive + r.newReturnIncentive +
+    r.shiftIncentive + r.allOtherIncentives
+
+  applyOvertime(rows, rules.otThresholdHours, {
+    hours: workedHours, pay: workedPay,
+    incentives: paidIncentives, baselineIncentives: sd3Incentives,
+  })
+  for (const r of rows) values.get(r)!.fixed.set('overtimePay', r.overtimePay)
 
   // Any fixed field carrying money with no code assigned (Shift Incentive is
   // "TBD" in the workbook) would silently drop that pay. Flag it instead.

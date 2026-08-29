@@ -26,7 +26,7 @@ const ADP_SALONS_TAB = 'ADP_SALONS'
 // stray field can't quietly become configuration.
 const RULE_KEYS = [
   'sixDayRate', 'sixDayMinDays', 'sixDayMinShiftHours', 'sixDayMinFloorHours',
-  'breakMaxMinutes', 'breakMode', 'otThresholdHours',
+  'breakMaxMinutes', 'breakMode', 'otThresholdHours', 'varianceAlertPct',
   'bonusPaycheckOfMonth', 'payDateOffsetDays',
 ] as const
 

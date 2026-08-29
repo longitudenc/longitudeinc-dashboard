@@ -394,6 +394,15 @@ function build(){
 function download(){
   if(!LAST_BUILD) return;
   const p = buildQuery();
+  // Sending the same week to ADP twice is worse than not sending it once.
+  const sent = LAST_BUILD.meta && LAST_BUILD.meta.lastDownload;
+  if(sent && sent.at){
+    if(!confirm(
+      'Week ending ' + LAST_BUILD.weekEnd + ' was already downloaded on '
+      + sent.at.slice(0,10) + ' by ' + (sent.by || 'someone') + ' as ' + (sent.fileName||'')
+      + '.\n\nDownloading again gives a NEW file built from SD3 as it stands today, '
+      + 'which may not match what was sent.\n\nDownload it anyway?')) return;
+  }
   if(!LAST_BUILD.canExport){
     const n = LAST_BUILD.exceptions.filter(e=>e.severity==='blocking').length;
     if(!confirm(
@@ -416,6 +425,14 @@ function renderBuild(d){
   } else {
     h += '<div class="banner ok"><b>Ready.</b> '+d.totals.rows+' rows across '
        + d.meta.salonsInReport.length+' salons — no blocking issues.</div>';
+  }
+  const sent = d.meta && d.meta.lastDownload;
+  if(sent && sent.at){
+    h += '<div class="banner warn"><b>This week has already been downloaded</b> \u2014 '
+       + esc(sent.fileName||'') + ' on ' + esc(sent.at.slice(0,10)) + ' by ' + esc(sent.by||'someone')
+       + (sent.forced ? ' (forced past blocking issues)' : '') + '. '
+       + 'The copy that was sent is on the History tab; building again gives a new file from '
+       + 'SD3 as it stands today.</div>';
   }
   if(d.meta.punchSegments === 0){
     h += '<div class="banner warn"><b>No clock punches for this week.</b> '
@@ -449,8 +466,8 @@ function renderBuild(d){
   h += '<div class="card"><h2>What this file corrects '
      + '<span class="sub">everything else is SD3\u2019s own figures, unchanged</span></h2>'
      + '<div class="stats">'
-     + bigstat('Floater overtime', money(d.totals.overtimeDelta), otFloaters.length
-         + ' worked across salons \u2014 SD3 paid ' + money(d.totals.overtimeSd3Paid), d.totals.overtimeDelta)
+     + bigstat('Overtime', money(d.totals.overtimeDelta), otFloaters.length
+         + ' corrected \u2014 SD3 paid ' + money(d.totals.overtimeSd3Paid), d.totals.overtimeDelta)
      + bigstat('6-day pay', money(d.totals.sixDayDelta), sixMoved.length
          + ' corrected \u2014 SD3 paid ' + money(d.totals.sixDaySd3Paid), d.totals.sixDayDelta)
      + '</div></div>';
@@ -465,12 +482,13 @@ function renderBuild(d){
      + '<div id="emp-find-out"></div></div></div>';
 
   // ── 1) Floater overtime ──
-  h += '<div class="card"><h2>1 \u00b7 Floater overtime <span class="sub">'
-     + 'SD3 counts each salon separately, so hours over '+d.rules.otThresholdHours
-     + ' across salons are missed</span></h2><div class="body" style="padding:0;">';
+  h += '<div class="card"><h2>1 \u00b7 Overtime corrections <span class="sub">'
+     + 'hours over '+d.rules.otThresholdHours+' across salons, and the rate they\u2019re '
+     + 'paid at once 6-day pay moves</span></h2><div class="body" style="padding:0;">';
   if(!otFloaters.length){
-    h += '<div class="body muted">No cross-salon overtime this week \u2014 nobody passed '
-       + d.rules.otThresholdHours + ' hours once their salons were merged.</div>';
+    h += '<div class="body muted">No overtime corrections this week \u2014 nobody passed '
+       + d.rules.otThresholdHours + ' hours once their salons were merged, and no 6-day '
+       + 'correction landed on someone already over it.</div>';
   } else {
     h += '<div class="scroll"><table><thead><tr><th data-sort="text">Employee</th>'
        + '<th data-sort="text">Salons</th>'
@@ -572,6 +590,9 @@ function bigstat(k,v,n,delta){
 function salonBreakdownHtml(d){
   const salons = (d.salonTotals||[]).slice();
   if(!salons.length) return '';
+  const va = (d.meta && d.meta.variance) || { prevWeekEnd:'', salons:[] };
+  const varBy = {};
+  (va.salons||[]).forEach(v=>{ varBy[v.salonNum] = v; });
   // salon → [{ emp, split }], biggest cost first.
   const byS = {};
   (d.employees||[]).forEach(e=>{
@@ -586,6 +607,7 @@ function salonBreakdownHtml(d){
     + '<th data-sort="num" class="num">Staff</th>'
     + '<th data-sort="num" class="num">Hours</th>'
     + '<th data-sort="num" class="num">Payroll cost</th>'
+    + (va.prevWeekEnd ? '<th data-sort="num" class="num">vs '+esc(va.prevWeekEnd.slice(5))+'</th>' : '')
     + '<th data-sort="num" class="num">Tips</th>'
     + '<th data-sort="num" class="num">Payroll + tips</th>'
     + '<th data-sort="num" class="num">Overtime</th>'
@@ -599,13 +621,14 @@ function salonBreakdownHtml(d){
       + numTd(t.employees, t.employees)
       + numTd(hrs(t.hours), t.hours)
       + numTd(money(t.grossPay), t.grossPay)
+      + (va.prevWeekEnd ? varianceTd(varBy[t.salonNum], d) : '')
       + numTd(money(t.tips), t.tips)
       + numTd(money(t.totalPay), t.totalPay)
       + numTd(t.overtimePay?money(t.overtimePay):'\u2014', t.overtimePay)
       + signedTd(t.sixDayDelta)
       + '</tr>';
     if(!staff.length){
-      h += '<tr class="sub-row" data-p="'+i+'"><td colspan="8" class="muted">Nobody worked here this week.</td></tr>';
+      h += '<tr class="sub-row" data-p="'+i+'"><td colspan="'+(va.prevWeekEnd?9:8)+'" class="muted">Nobody worked here this week.</td></tr>';
     }
     staff.forEach(x=>{
       const e = x.e, b = x.b;
@@ -616,16 +639,30 @@ function salonBreakdownHtml(d){
         + '<td></td>'
         + numTd(hrs(b.paidHours), b.paidHours)
         + numTd(money(b.grossPay), b.grossPay)
+        + (va.prevWeekEnd ? '<td></td>' : '')
         + numTd(money(b.tips), b.tips)
         + numTd(money(b.totalPay), b.totalPay)
         + numTd(b.overtimePay?money(b.overtimePay):'\u2014', b.overtimePay)
         + signedTd(b.sixDayDelta)
         + '</tr>'
-        + '<tr class="sub-row det-row" data-p="'+i+'"><td colspan="8">'+payLinesHtml(e, d)+'</td></tr>';
+        + '<tr class="sub-row det-row" data-p="'+i+'"><td colspan="'+(va.prevWeekEnd?9:8)+'">'+payLinesHtml(e, d)+'</td></tr>';
     });
   });
   h += '</tbody></table></div></div></div>';
   return h;
+}
+// Movement against the last week actually SENT to ADP. Coloured only when it
+// passes the alert threshold — a payroll that moves a few percent every week is
+// normal, and colouring that trains the eye to ignore the column.
+function varianceTd(v, d){
+  if(!v) return numTd('\u2014', 0);
+  if(v.gone) return numTd('gone', -999999, '#b3261e');
+  if(v.isNew) return numTd('new', 0, '#1a5c0a');
+  if(v.pct == null) return numTd('\u2014', 0);
+  const limit = (d.rules && d.rules.varianceAlertPct) || 15;
+  const big = Math.abs(v.pct) >= limit;
+  return numTd((v.pct>0?'+':'')+v.pct.toFixed(1)+'%', v.pct,
+    big ? (v.pct<0?'#b3261e':'#1a5c0a') : '');
 }
 // A correction: signed and coloured, dash at zero.
 function signedTd(v){
@@ -690,9 +727,11 @@ function payLinesHtml(e, d){
   // of the lines above are SD3's own numbers passed straight through.
   const notes = [];
   if(Math.abs(e.overtimeDelta||0) >= 0.005){
-    notes.push('Overtime includes ' + money(e.overtimeDelta) + ' SD3 missed \u2014 '
-      + hrs(e.totalHoursWorked) + ' hrs across ' + e.salons.length + ' salons, over '
-      + d.rules.otThresholdHours + '.');
+    notes.push('Overtime moved ' + money(e.overtimeDelta) + ' \u2014 '
+      + hrs(e.totalHoursWorked) + ' hrs'
+      + (e.salons.length > 1 ? ' across ' + e.salons.length + ' salons' : '')
+      + ', over ' + d.rules.otThresholdHours
+      + '. The premium is half the regular rate, so a 6-day correction moves it too.');
   }
   const sd = (d.sixDay||[]).find(s=>s.payId===e.payId);
   if(sd && Math.abs(sd.delta) >= 0.005){
@@ -745,7 +784,7 @@ function loadHistory(){
       + '<th data-sort="num" class="num">Staff</th><th data-sort="num" class="num">Hours</th>'
       + '<th data-sort="num" class="num">Payroll cost</th><th data-sort="num" class="num">Tips</th>'
       + '<th data-sort="num" class="num">Overtime</th><th data-sort="num" class="num">6-day net</th>'
-      + '<th data-sort="text">Downloaded</th>'
+      + '<th data-sort="text">Downloaded</th><th>File</th>'
       + '</tr></thead><tbody>';
     d.history.forEach(r=>{
       h += '<tr>'
@@ -760,6 +799,10 @@ function loadHistory(){
                 r.sixDayDelta<0?'#b3261e':(r.sixDayDelta>0?'#1a5c0a':''))
         + '<td class="muted">'+esc((r.downloadedAt||'').slice(0,10))+'<br>'
         + '<span style="font-size:11px;">'+esc(r.downloadedBy||'')+'</span></td>'
+        + '<td>'+(r.filePath
+            ? '<a class="btn ghost small" href="/api/office/payroll/file?p='
+              + encodeURIComponent(r.filePath)+'">Download</a>'
+            : '<span class="muted" style="font-size:11.5px;">not kept</span>')+'</td>'
         + '</tr>';
     });
     h += '</tbody></table></div>';
@@ -1052,6 +1095,7 @@ h += '</div><div class="hint">Blank means \u201cnot assigned\u201d. Short breaks
         + ({off:'Off — ignore breaks entirely',foldFloorHours:'Add to Floor Hours (base rate)',separateCode:'Own earnings code',reportOnly:'Report only — do not pay'})[m]
         + '</option>').join('')+'</select></label>'
      + ruleInput('otThresholdHours','Overtime after (hours/week)', s.rules.otThresholdHours, ro, '0.5')
+     + ruleInput('varianceAlertPct','Flag a salon moving more than (%)', s.rules.varianceAlertPct, ro, '1')
      + ruleInput('bonusPaycheckOfMonth','Bonus on paycheck #', s.rules.bonusPaycheckOfMonth, ro, '1')
      + ruleInput('payDateOffsetDays','Days from week end to pay day', s.rules.payDateOffsetDays, ro, '1')
      + '</div>'
