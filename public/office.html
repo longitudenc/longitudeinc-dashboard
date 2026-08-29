@@ -194,13 +194,16 @@
           Lines SD3 doesn't know about — referral and sign-on bonuses, guarantees, manager cell,
           tuition, retro pay. They're saved against the pay week, so rebuilding the upload keeps them.
           Start typing a name to find someone; the Payroll ID (ADP's <b>File #</b>) comes from the roster.
+          Tick <b>counts toward OT rate</b> for pay earned this week that overtime must be priced on —
+          a referral bonus does; a reimbursement or a guarantee does not.
         </div>
         <div id="manual-note"></div>
         <table id="manual-table">
           <thead><tr>
             <th style="width:250px;">Employee</th><th style="width:190px;">Salon</th>
             <th style="width:230px;">Earnings code</th><th style="width:110px;">Amount</th>
-            <th>Description</th><th style="width:50px;"></th>
+            <th>Description</th><th style="width:120px;">Counts toward<br>OT rate</th>
+            <th style="width:50px;"></th>
           </tr></thead>
           <tbody id="manual-body"></tbody>
         </table>
@@ -251,6 +254,9 @@ const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c =>
 // Negatives read as -$32.80, not $-32.80 — clawbacks show up all over this page.
 const money = n => { const v = Number(n)||0; return (v<0?'-$':'$') + Math.abs(v).toFixed(2); };
 const hrs = n => (Number(n)||0).toFixed(2);
+// The API sends real booleans, but a value read straight off a sheet arrives as
+// the STRING "false" — which is truthy, and would tick every box.
+const truthy = v => v === true || (typeof v === 'string' && ['true','yes','1'].includes(v.trim().toLowerCase()));
 
 // ── Access ────────────────────────────────────────────────────
 // The API routes enforce this server-side; the check here just avoids showing
@@ -451,6 +457,8 @@ function renderBuild(d){
   // so these are what actually need reviewing.
   const otFloaters = d.employees.filter(e=>Math.abs(e.overtimeDelta||0)>=0.005);
   const sixMoved   = d.sixDay.filter(s=>Math.abs(s.delta)>=0.005);
+  const trueUp     = d.otTrueUp || [];
+  const trued      = trueUp.filter(t=>Math.abs(t.amount)>=0.005);
   h += '<div class="card"><h2>This week <span class="sub">'+esc(d.weekStart)+' \u2192 '+esc(d.weekEnd)
      + ' \u00b7 file '+esc(d.fileName)+'</span></h2><div class="stats">'
      + bigstat('Total payroll cost', money(d.totals.grossPay),
@@ -470,6 +478,10 @@ function renderBuild(d){
          + ' corrected \u2014 SD3 paid ' + money(d.totals.overtimeSd3Paid), d.totals.overtimeDelta)
      + bigstat('6-day pay', money(d.totals.sixDayDelta), sixMoved.length
          + ' corrected \u2014 SD3 paid ' + money(d.totals.sixDaySd3Paid), d.totals.sixDayDelta)
+     + (trued.length
+        ? bigstat('OT bonus true-up', money(d.totals.otTrueUp), trued.length
+            + ' owed overtime on the bonus period', d.totals.otTrueUp)
+        : '')
      + '</div></div>';
 
   // ── Salon breakdown, expandable to the employees inside ──
@@ -563,6 +575,46 @@ function renderBuild(d){
     h += '</tbody></table></div>';
   }
   h += '</div></div>';
+
+  // ── OT bonus true-up (bonus weeks only) ──
+  if(trueUp.length){
+    h += '<div class="card"><h2>3 \u00b7 OT bonus true-up <span class="sub">'
+       + 'the bonus raised the regular rate of weeks already paid \u2014 folded into '
+       + 'the overtime line</span></h2><div class="body" style="padding:0;">';
+    h += '<div class="hint" style="padding:12px 14px;margin:0;">'
+       + 'A bonus with rules attached is part of the pay for the weeks it was <b>earned</b> in, '
+       + 'so it lifts those weeks\u2019 overtime rate. Spread over hours worked, that is '
+       + '<b>(bonus \u00f7 hours in the period) \u00d7 \u00bd \u00d7 overtime hours</b>. '
+       + 'ADP does not do this, so the file carries it \u2014 on the overtime code, with no new code needed.'
+       + '</div>';
+    if(!trued.length){
+      h += '<div class="body muted">Nobody getting a bonus passed '+d.rules.otThresholdHours
+         + ' hours in any week of the period \u2014 nothing owed.</div>';
+    } else {
+      h += '<div class="scroll"><table><thead><tr><th data-sort="text">Employee</th>'
+         + '<th data-sort="text">Period</th>'
+         + '<th data-sort="num" class="num">Bonus</th>'
+         + '<th data-sort="num" class="num">Hours</th>'
+         + '<th data-sort="num" class="num">OT hours</th>'
+         + '<th data-sort="num" class="num">Per hour</th>'
+         + '<th data-sort="num" class="num">Owed</th>'
+         + '<th>Weeks</th></tr></thead><tbody>';
+      trued.slice().sort((a,b)=>b.amount-a.amount).forEach(t=>{
+        h += '<tr><td>'+esc(t.employeeName)+'</td><td class="muted">'+esc(t.periodKey)+'</td>'
+          + numTd(money(t.bonusAmount), t.bonusAmount)
+          + numTd(hrs(t.hoursInPeriod), t.hoursInPeriod)
+          + numTd(hrs(t.otHoursInPeriod), t.otHoursInPeriod)
+          + numTd(money(t.ratePerHour), t.ratePerHour)
+          + numTd(money(t.amount), t.amount, '#1a5c0a')
+          + '<td>'+t.weeks.map(w=>'<span class="daychip'+(w.otHours>0?' on':'')+'">'
+              + esc(w.weekEnd.slice(5))+' \u00b7 '+hrs(w.hours)+'h'
+              + (w.otHours>0?' \u00b7 +'+hrs(w.otHours):'')+'</span>').join('')+'</td>'
+          + '</tr>';
+      });
+      h += '</tbody></table></div>';
+    }
+    h += '</div></div>';
+  }
 
   $('build-out').innerHTML = h;
 
@@ -732,6 +784,13 @@ function payLinesHtml(e, d){
       + (e.salons.length > 1 ? ' across ' + e.salons.length + ' salons' : '')
       + ', over ' + d.rules.otThresholdHours
       + '. The premium is half the regular rate, so a 6-day correction moves it too.');
+  }
+  const tu = (d.otTrueUp||[]).find(t=>t.payId===e.payId && Math.abs(t.amount)>=0.005);
+  if(tu){
+    notes.push('Overtime includes ' + money(tu.amount) + ' trued up on the ' + esc(tu.periodKey)
+      + ' bonus \u2014 ' + money(tu.bonusAmount) + ' over ' + hrs(tu.hoursInPeriod)
+      + ' hrs raised the rate ' + money(tu.ratePerHour) + '/hr across '
+      + hrs(tu.otHoursInPeriod) + ' overtime hours.');
   }
   const sd = (d.sixDay||[]).find(s=>s.payId===e.payId);
   if(sd && Math.abs(sd.delta) >= 0.005){
@@ -910,7 +969,7 @@ function loadManual(){
       .catch(()=>{ MANUAL_LINES = []; renderManual(); });
   });
 }
-function emptyManualLine(){ return { payId:'', salonNum:'', code:'', amount:'', label:'' }; }
+function emptyManualLine(){ return { payId:'', salonNum:'', code:'', amount:'', label:'', otEligible:false }; }
 function rosterFor(payId){
   return ROSTER.employees.find(e=>e.payId === String(payId||'').trim()) || null;
 }
@@ -988,6 +1047,9 @@ function renderManual(){
       + '" oninput="setManual('+i+',\'amount\',this.value)"></td>'
     + '<td><input type="text" style="width:100%" value="'+esc(l.label)
       + '" placeholder="e.g. Referral bonus" oninput="setManual('+i+',\'label\',this.value)"></td>'
+    + '<td><label class="check" style="justify-content:center;">'
+      + '<input type="checkbox"'+(truthy(l.otEligible)?' checked':'')
+      + ' onchange="setManual('+i+',\'otEligible\',this.checked)"></label></td>'
     + '<td><button class="btn danger small" onclick="dropManual('+i+')">×</button></td>'
     + '</tr>';
   }).join('');

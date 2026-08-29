@@ -594,7 +594,142 @@ console.log('\nOvertime and the regular rate')
   )
 }
 
-// ── 4b4) Week-over-week variance, against the week actually SENT ──────────
+// ── 4b4) Overtime true-up on a monthly bonus ──────────────────────────────
+// A nondiscretionary bonus belongs in the regular rate of the weeks it was
+// EARNED in. Paid in September for August, it raises August's rate, and every
+// August week over 40 owes another half-time on the difference.
+console.log('\nOvertime true-up on a monthly bonus')
+{
+  const wage = 20
+  const mk = (payId: string, name: string) => ({
+    ...rows.find(r => r.employeeName.startsWith('BOWERSOX'))!,
+    payId, employeeName: name, salonNum: '3071',
+    totalHoursWorked: 30, floorHours: 30, totalHoursPay: 30 * wage, baseWage: wage,
+    overtimePay: 0, productivityIncentive: 0, productIncentive: 0,
+    newReturnIncentive: 0, shiftIncentive: 0, allOtherIncentives: 0, sourceRow: 1,
+  })
+  // 4 weeks: 45, 45, 45, 40 → 175 hours, 15 of them overtime.
+  // A $350 bonus lifts the rate by 350/175 = $2.00/hr, so 15 × $2.00 ÷ 2 = $15.00.
+  const hours = [45, 45, 45, 40]
+  const weekEnds = ['2026-07-04', '2026-07-11', '2026-07-18', '2026-07-25']
+  const periodHours = hours.map((h, i) => ({ payId: '900001', weekEnd: weekEnds[i], hoursWorked: h }))
+  const bonusLine = {
+    payId: '900001', code: '20', amount: 350, label: 'Stylist bonus Jul 26',
+    kind: 'bonus' as const, periodKey: 'Jul 26', salonNum: '3071',
+  }
+  const built = buildPayroll({
+    rows: [mk('900001', 'TRUEUP, TESTER')],
+    punches: [], settings, weekStart: '2026-08-15', weekEnd: '2026-08-21',
+    bonuses: [bonusLine], bonusPeriodHours: periodHours,
+  })
+  const t = built.otTrueUp[0]
+  check(
+    'the true-up is (bonus ÷ hours) × ½ × overtime hours — $350 over 175 hrs, 15 OT → $15.00',
+    !!t && Math.abs(t.amount - 15) < 0.005 && Math.abs(t.hoursInPeriod - 175) < 0.005 &&
+      Math.abs(t.otHoursInPeriod - 15) < 0.005,
+    `${t?.amount} from ${t?.hoursInPeriod} hrs / ${t?.otHoursInPeriod} OT hrs`
+  )
+  // It is FOLDED into the overtime line — no new ADP code — and the bonus
+  // itself still goes out on its own code, undisturbed.
+  const otCol = (b: typeof built) => {
+    const i = b.upload.header.indexOf('Temp Dept')
+    const row = b.upload.rows[0]
+    // Overtime Hours Pay is the 8th of the 15 fixed pairs → amount at 4 + 8*2 - 1
+    return { ot: Number(row[4 + 8 * 2 - 1] || 0), tempDept: String(row[i]) }
+  }
+  check(
+    'it is folded into the overtime line, not given a new code',
+    Math.abs(otCol(built).ot - 15) < 0.005 &&
+      built.upload.header.filter(h => h === 'Earnings 4 Code').length >= 2,
+    `overtime cell ${otCol(built).ot}`
+  )
+  check(
+    'the bonus itself is untouched on its own code',
+    built.employees[0].extraEarnings.some(e => e.code === '20' && Math.abs(e.amount - 350) < 0.005),
+    JSON.stringify(built.employees[0].extraEarnings)
+  )
+  check(
+    'the week total and the salon roll-up both carry it',
+    Math.abs(built.totals.otTrueUp - 15) < 0.005 &&
+      Math.abs(built.salonTotals[0].otTrueUp - 15) < 0.005,
+    `${built.totals.otTrueUp} / ${built.salonTotals[0].otTrueUp}`
+  )
+
+  // Nobody over 40 in the period → nothing owed, and no noise about it.
+  const flat = buildPayroll({
+    rows: [mk('900002', 'FLAT, TESTER')],
+    punches: [], settings, weekStart: '2026-08-15', weekEnd: '2026-08-21',
+    bonuses: [{ ...bonusLine, payId: '900002' }],
+    bonusPeriodHours: weekEnds.map(w => ({ payId: '900002', weekEnd: w, hoursWorked: 32 })),
+  })
+  check(
+    'no week over 40 in the period → no true-up, and no exception raised',
+    flat.otTrueUp[0].amount === 0 &&
+      flat.exceptions.filter(e => e.kind === 'truup-no-hours').length === 0,
+    flat.otTrueUp[0].reason
+  )
+
+  // Hours missing entirely is NOT the same as no overtime — say so.
+  const blind = buildPayroll({
+    rows: [mk('900003', 'BLIND, TESTER')],
+    punches: [], settings, weekStart: '2026-08-15', weekEnd: '2026-08-21',
+    bonuses: [{ ...bonusLine, payId: '900003' }], bonusPeriodHours: [],
+  })
+  check(
+    'missing period hours are reported, never silently treated as no overtime',
+    blind.otTrueUp[0].amount === 0 &&
+      blind.exceptions.some(e => e.kind === 'truup-no-hours'),
+    blind.otTrueUp[0].reason
+  )
+
+  // A floater passes 40 only once the salons are added up — SD3 never saw it.
+  const split = buildPayroll({
+    rows: [mk('900004', 'SPLIT, TESTER')],
+    punches: [], settings, weekStart: '2026-08-15', weekEnd: '2026-08-21',
+    bonuses: [{ ...bonusLine, payId: '900004' }],
+    bonusPeriodHours: [
+      { payId: '900004', weekEnd: weekEnds[0], hoursWorked: 25 },
+      { payId: '900004', weekEnd: weekEnds[0], hoursWorked: 20 },   // same week, 2nd salon
+      ...weekEnds.slice(1).map(w => ({ payId: '900004', weekEnd: w, hoursWorked: 30 })),
+    ],
+  })
+  check(
+    'a floater\u2019s week is merged across salons before the 40-hour test',
+    Math.abs(split.otTrueUp[0].otHoursInPeriod - 5) < 0.005,
+    `${split.otTrueUp[0].otHoursInPeriod} OT hrs from ${split.otTrueUp[0].hoursInPeriod}`
+  )
+
+  // A referral bonus is THIS week's pay, so it belongs in THIS week's rate —
+  // no retro. 44 hours at $20 with a $100 referral: the rate rises 100/44,
+  // and 4 OT hours × that ÷ 2 = $4.55 on top of SD3's premium.
+  const referral = buildPayroll({
+    rows: [{ ...mk('900005', 'REFER, TESTER'), totalHoursWorked: 44, floorHours: 44,
+             totalHoursPay: 44 * wage, overtimePay: 40 }],
+    punches: [], settings, weekStart: '2026-08-15', weekEnd: '2026-08-21',
+    manual: [{ payId: '900005', code: '21', amount: 100, label: 'Referral bonus',
+               kind: 'manual', otEligible: true }],
+  })
+  check(
+    'a referral bonus lifts THIS week\u2019s rate (+$4.55), with no retro period',
+    Math.abs(referral.employees[0].overtimePay - 44.55) < 0.02 &&
+      referral.otTrueUp.length === 0,
+    `premium ${referral.employees[0].overtimePay}`
+  )
+  const notEligible = buildPayroll({
+    rows: [{ ...mk('900006', 'REIMB, TESTER'), totalHoursWorked: 44, floorHours: 44,
+             totalHoursPay: 44 * wage, overtimePay: 40 }],
+    punches: [], settings, weekStart: '2026-08-15', weekEnd: '2026-08-21',
+    manual: [{ payId: '900006', code: '21', amount: 100, label: 'Manager cell',
+               kind: 'manual' }],
+  })
+  check(
+    'a line not marked OT-eligible leaves the premium alone',
+    Math.abs(notEligible.employees[0].overtimePay - 40) < 0.005,
+    `premium ${notEligible.employees[0].overtimePay}`
+  )
+}
+
+// ── 4b5) Week-over-week variance, against the week actually SENT ──────────
 console.log('\nWeek-over-week variance')
 {
   const hist = [

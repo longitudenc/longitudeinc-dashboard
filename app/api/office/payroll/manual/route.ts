@@ -20,7 +20,10 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const ADP_MANUAL_TAB = 'ADP_MANUAL'
-const COLUMNS = ['id', 'weekEnd', 'payId', 'salonNum', 'code', 'amount', 'label', 'updatedAt', 'updatedBy']
+// otEligible: does this line count toward the week's overtime rate? A referral
+// bonus does (nondiscretionary pay for the week); a reimbursement or a
+// guarantee does not. Stored per line so the decision is recorded, not guessed.
+const COLUMNS = ['id', 'weekEnd', 'payId', 'salonNum', 'code', 'amount', 'label', 'otEligible', 'updatedAt', 'updatedBy']
 
 const isWeekEnd = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s)
 
@@ -85,6 +88,7 @@ export async function POST(request: Request) {
         code: String(l.code ?? '').trim(),
         amount: Number(l.amount) || 0,
         label: String(l.label ?? '').trim() || 'Manual earning',
+        otEligible: l.otEligible ? 'true' : 'false',
         updatedAt: now,
         updatedBy: gate.email,
       }))

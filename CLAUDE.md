@@ -173,6 +173,12 @@ is a separate path used only by `/api/cron/weekly` and `/api/report/payroll-pace
   APIs actually withhold data, which is the main reason to want it.
 - **Supabase migration:** move high-volume tables (sd_demand, sd_halfhour, sd_daily,
   sd_shifts, sd_chkinout) off Sheets; everything else stays.
+- **Bonus OT true-up — confirm the method with counsel/ADP before the first live run.**
+  Built and tested, but never run against a real bonus month. ADP does NOT recalculate
+  overtime on a bonus (confirmed with the owner), so `lib/adp-payroll.ts` does it:
+  `(bonus ÷ hours in period) × ½ × OT hours in period`, hours from `SD_PAYROLL` merged
+  across salons, folded into the overtime line and reported separately. Referral bonuses
+  are the only hand-keyed line that counts toward a week's own rate (`otEligible`).
 - **Vacation-hours tracking (payroll):** SD3 reports vacation HOURS but pays $0.00 for
   them, and nothing tracks accrual or the remaining balance. Office Tools already sends
   vacation to ADP on code 14 at the person's base wage; what's missing is a per-employee

@@ -52,6 +52,21 @@ function fridaysInMonth(y: number, m0: number): Date[] {
   return out
 }
 
+/**
+ * Parse a periodKey ("Jul 26") back into its salon month.
+ *
+ * The key is the join value used across BonusData, SalonSummaryData and the
+ * dashboard, so anything holding a key can recover the weeks behind it —
+ * the overtime true-up needs exactly that.
+ */
+export function salonMonthFromKey(key: string): SalonMonth | null {
+  const m = /^([A-Za-z]{3})\s+(\d{2})$/.exec(String(key || '').trim())
+  if (!m) return null
+  const idx = MONTHS.findIndex(x => x.toLowerCase() === m[1].toLowerCase())
+  if (idx < 0) return null
+  return salonMonth(2000 + parseInt(m[2], 10), idx + 1)
+}
+
 /** Build the salon month for calendar year `y`, month `m` (1-12). */
 export function salonMonth(y: number, m: number): SalonMonth {
   const m0 = m - 1

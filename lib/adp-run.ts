@@ -29,20 +29,23 @@ import { loadAdpSettings, type AdpSettings } from '@/lib/adp-settings'
 import {
   ADP_HISTORY_TAB, compareToPrevious, lastDownloadOf, type VarianceReport,
 } from '@/lib/adp-history'
-import { salonMonth } from '@/lib/salon-month'
+import { salonMonth, salonMonthFromKey } from '@/lib/salon-month'
 import { fiscalWeekContaining, lastCompletedFiscalWeek, todayET } from '@/lib/fiscal'
 import {
   buildPayroll,
   toPayConsolRows,
   isBonusPayWeek,
+  normalizePayId,
   type DailyFloorRow,
   type ExtraEarning,
   type PayrollBuildResult,
+  type PeriodHoursRow,
   type PunchSegment,
 } from '@/lib/adp-payroll'
 
 const ADP_MANUAL_TAB = 'ADP_MANUAL'
 const BONUS_TAB = 'BonusData'
+const SD_PAYROLL_TAB = 'SD_PAYROLL'
 
 /** Sheets round-trips booleans as text; accept every shape they come back in. */
 function truthy(v: unknown): boolean {
@@ -113,6 +116,37 @@ export function bonusPeriodFor(weekEnd: string): string {
   return sm.periodKey
 }
 
+/**
+ * Hours WORKED per person per week across a bonus period.
+ *
+ * From SD_PAYROLL — the nightly payroll scrape, re-pulled the Tuesday after a
+ * week closes so the figures are SD3's settled ones. Rows are per salon, and
+ * the engine merges them per person per week, which is the whole point: a
+ * floater passes 40 only once their salons are added together, and SD3 never
+ * saw that week as one.
+ */
+async function loadPeriodHours(weekEnds: string[]): Promise<PeriodHoursRow[]> {
+  if (weekEnds.length === 0) return []
+  const want = new Set(weekEnds)
+  let rows: Record<string, any>[]
+  try {
+    rows = rowsToObjects(await readSheet(SD_PAYROLL_TAB))
+  } catch {
+    return []
+  }
+  const out: PeriodHoursRow[] = []
+  for (const r of rows) {
+    const weekEnd = String(r.weekEnd || '').trim()
+    if (!want.has(weekEnd)) continue
+    const payId = normalizePayId(String(r.payId || ''))
+    if (!payId) continue
+    const hoursWorked = numOrNull(r.totalHoursWorked) ?? 0
+    if (!(hoursWorked > 0)) continue
+    out.push({ payId, weekEnd, hoursWorked })
+  }
+  return out
+}
+
 /** Stylist bonus payouts for a period, as earnings lines keyed by Payroll ID. */
 async function loadBonusLines(periodKey: string, code: string): Promise<ExtraEarning[]> {
   let rows: Record<string, any>[]
@@ -138,6 +172,9 @@ async function loadBonusLines(periodKey: string, code: string): Promise<ExtraEar
       amount: payout,
       label: `Stylist bonus ${periodKey}`,
       kind: 'bonus',
+      // The period is what the true-up is computed against — a bonus paid in
+      // September for August raises August's regular rate, not this week's.
+      periodKey,
     })
   }
   return out
@@ -161,6 +198,10 @@ export async function loadManualLines(weekEnd: string): Promise<(ExtraEarning & 
       amount: numOrNull(r.amount) ?? 0,
       label: String(r.label || '').trim() || 'Manual earning',
       kind: 'manual' as const,
+      // Only lines the office marked count toward the week's overtime rate.
+      // Blank on a row saved before the column existed → not eligible, which is
+      // the safe default: it leaves the premium exactly as it is today.
+      otEligible: String(r.otEligible ?? '').trim().toLowerCase() === 'true',
     }))
     .filter(l => l.payId && l.amount !== 0)
 }
@@ -353,6 +394,13 @@ export async function runPayrollBuild(opts: RunOptions = {}): Promise<RunResult>
 
   const manual = await loadManualLines(weekEnd)
 
+  // Hours behind the bonus period, for the overtime true-up. Only fetched on a
+  // bonus week, and only from the nightly scrape — no extra SD3 calls.
+  const period = bonusPeriod ? salonMonthFromKey(bonusPeriod) : null
+  const bonusPeriodHours = bonuses.length > 0 && period
+    ? await loadPeriodHours(period.weekEnds)
+    : []
+
   const result = buildPayroll({
     rows,
     punches,
@@ -363,6 +411,7 @@ export async function runPayrollBuild(opts: RunOptions = {}): Promise<RunResult>
     sd3SixDay,
     bonuses,
     manual,
+    bonusPeriodHours,
   })
 
   const missingCodes = Object.entries(settings.codes)

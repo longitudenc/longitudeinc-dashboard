@@ -60,6 +60,7 @@ export async function GET(request: Request) {
       salonTotals: result.salonTotals,
       sixDay: result.sixDay,
       breaks: result.breaks,
+      otTrueUp: result.otTrueUp,
       fileName: result.upload.fileName,
       // Settings the review screen shows so the numbers are explainable.
       rules: result.settings.rules,

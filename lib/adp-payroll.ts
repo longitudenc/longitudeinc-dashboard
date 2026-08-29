@@ -167,6 +167,57 @@ export interface ExtraEarning {
   label: string
   /** Defaults to 'manual' when the caller doesn't say. */
   kind?: EarningKind
+  /**
+   * Nondiscretionary pay for THIS week, so it belongs in the regular rate the
+   * overtime premium is priced on. Set on a referral bonus, not on a
+   * reimbursement or a guarantee (which is already straight-time pay).
+   * A monthly bonus does NOT set this — it is earned across a whole period and
+   * is trued up against those weeks instead. See OtTrueUpDetail.
+   */
+  otEligible?: boolean
+  /** For a monthly bonus: the period it was earned in ("Jul 26"). */
+  periodKey?: string
+}
+
+/** One person's hours in one week of a bonus period — the true-up basis. */
+export interface PeriodHoursRow {
+  payId: string
+  weekEnd: string
+  /** Hours WORKED that week, merged across salons. PTO does not count. */
+  hoursWorked: number
+}
+
+/**
+ * Overtime owed because a monthly bonus raised the regular rate of weeks that
+ * are already paid and closed.
+ *
+ * A nondiscretionary bonus is part of the regular rate for the weeks it was
+ * earned in, so a bonus paid in September for August raises August's rate — and
+ * every August week over 40 hours is owed another half-time on the difference.
+ * Allocating the bonus in proportion to hours worked makes the arithmetic
+ * collapse to one line:
+ *
+ *     true-up = (bonus ÷ hours in the period) × 0.5 × overtime hours in the period
+ *
+ * The money is folded into the overtime line so ADP needs no new code; it is
+ * reported separately here so the office can see and explain it.
+ */
+export interface OtTrueUpDetail {
+  payId: string
+  employeeName: string
+  periodKey: string
+  bonusAmount: number
+  /** Every week of the period, with the hours that decided the true-up. */
+  weeks: { weekEnd: string; hours: number; otHours: number }[]
+  hoursInPeriod: number
+  otHoursInPeriod: number
+  /** bonus ÷ hours — how much the bonus lifted the regular rate. */
+  ratePerHour: number
+  amount: number
+  /** The salon row the true-up was written on — the same one as the bonus. */
+  salonNum: string
+  /** Why it is zero, when it is. */
+  reason: string
 }
 
 // ── Outputs ─────────────────────────────────────────────────────────────
@@ -305,6 +356,8 @@ export interface SalonTotal {
   /** grossPay + tips — everything the salon's cheques carry this week. */
   totalPay: number
   overtimePay: number
+  /** Of which: overtime trued up on a bonus period's closed weeks. */
+  otTrueUp: number
   sixDayDelta: number
   breakMinutes: number
 }
@@ -327,6 +380,8 @@ export interface PayrollBuildResult {
   salonTotals: SalonTotal[]
   sixDay: SixDayDetail[]
   breaks: BreakDetail[]
+  /** Overtime owed on closed weeks because a monthly bonus raised their rate. */
+  otTrueUp: OtTrueUpDetail[]
   exceptions: PayrollException[]
   upload: AdpUpload
   totals: {
@@ -341,6 +396,8 @@ export interface PayrollBuildResult {
     overtimePay: number
     overtimeSd3Paid: number
     overtimeDelta: number
+    /** Overtime owed on closed weeks because the bonus raised their rate. */
+    otTrueUp: number
     sixDayPay: number
     sixDaySd3Paid: number
     sixDayDelta: number
@@ -912,7 +969,11 @@ interface UploadRowValues {
   /** field key → amount for the 15 fixed pairs */
   fixed: Map<string, number>
   /** additional lines for the spare Earnings 4 pairs */
-  extras: { code: string; amount: number; label: string; kind: EarningKind }[]
+  extras: {
+    code: string; amount: number; label: string; kind: EarningKind
+    /** Counts toward this week's regular rate (a referral bonus, say). */
+    otEligible?: boolean
+  }[]
   coCode: string
   batchId: string
   fileNum: string
@@ -948,6 +1009,12 @@ export function buildPayroll(input: {
   bonuses?: ExtraEarning[]
   /** Hand-keyed earnings (referral, sign-on, guarantee, manager cell, …). */
   manual?: ExtraEarning[]
+  /**
+   * Hours worked per person per week across the bonus period being paid, for
+   * the overtime true-up. Empty means no true-up can be computed, which is
+   * reported rather than silently skipped.
+   */
+  bonusPeriodHours?: PeriodHoursRow[]
 }): PayrollBuildResult {
   const { rows, punches, settings, weekStart, weekEnd } = input
   const bonuses = input.bonuses ?? []
@@ -1140,6 +1207,71 @@ export function buildPayroll(input: {
     }
   }
 
+  // ── Overtime true-up on a monthly bonus ──
+  //
+  // A nondiscretionary bonus belongs in the regular rate of the weeks it was
+  // earned in, not the week it is handed over. Allocating it in proportion to
+  // hours worked makes every week's rate rise by the same amount — bonus ÷
+  // hours — so the whole period collapses to:
+  //
+  //     (bonus ÷ hours in period) × 0.5 × overtime hours in period
+  //
+  // Hours come from the nightly payroll scrape, merged across salons the same
+  // way this file merges a floater's week, so a person who only passes 40 once
+  // their salons are added up is trued up too. SD3 never saw that week as one.
+  const otTrueUp: OtTrueUpDetail[] = []
+  const hoursByPayWeek = new Map<string, Map<string, number>>()
+  for (const h of input.bonusPeriodHours ?? []) {
+    const payId = String(h.payId).trim()
+    if (!payId) continue
+    let weeks = hoursByPayWeek.get(payId)
+    if (!weeks) hoursByPayWeek.set(payId, (weeks = new Map()))
+    weeks.set(h.weekEnd, round2((weeks.get(h.weekEnd) || 0) + (Number(h.hoursWorked) || 0)))
+  }
+
+  const trueUpFor = (
+    line: ExtraEarning, target: PayConsolRow, employeeName: string
+  ): OtTrueUpDetail => {
+    const periodKey = line.periodKey || ''
+    const base: OtTrueUpDetail = {
+      payId: line.payId, employeeName, periodKey, bonusAmount: round2(line.amount),
+      weeks: [], hoursInPeriod: 0, otHoursInPeriod: 0, ratePerHour: 0,
+      amount: 0, salonNum: target.salonNum, reason: '',
+    }
+    const weeks = hoursByPayWeek.get(line.payId)
+    if (!weeks || weeks.size === 0) {
+      base.reason = 'no hours found for the bonus period'
+      exceptions.push({
+        severity: 'warning',
+        kind: 'truup-no-hours',
+        message:
+          `${employeeName}: no hours found for bonus period ${periodKey || '(unknown)'}, so any ` +
+          `overtime owed on the bonus could not be worked out — check by hand`,
+        employeeName, payId: line.payId,
+      })
+      return base
+    }
+    base.weeks = [...weeks.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([weekEnd, hours]) => ({
+        weekEnd, hours: round2(hours),
+        otHours: round2(Math.max(0, hours - rules.otThresholdHours)),
+      }))
+    base.hoursInPeriod = round2(base.weeks.reduce((s, w) => s + w.hours, 0))
+    base.otHoursInPeriod = round2(base.weeks.reduce((s, w) => s + w.otHours, 0))
+    if (base.hoursInPeriod <= 0) {
+      base.reason = 'no hours worked in the period'
+      return base
+    }
+    base.ratePerHour = base.bonusAmount / base.hoursInPeriod
+    if (base.otHoursInPeriod <= 0) {
+      base.reason = `no week over ${rules.otThresholdHours} hours in the period`
+      return base
+    }
+    base.amount = round2((base.ratePerHour * base.otHoursInPeriod) / 2)
+    return base
+  }
+
   // ── Bonuses and hand-keyed earnings ──
   const extraLines: ExtraEarning[] = [...bonuses, ...manual]
   for (const line of extraLines) {
@@ -1170,7 +1302,13 @@ export function buildPayroll(input: {
       amount: round2(line.amount),
       label: line.label,
       kind: line.kind ?? 'manual',
+      otEligible: line.otEligible,
     })
+    // A monthly bonus is earned across a closed period, so it raises the
+    // regular rate of weeks that are already paid. Work out what that owes.
+    if ((line.kind ?? 'manual') === 'bonus') {
+      otTrueUp.push(trueUpFor(line, target, group[0].employeeName))
+    }
   }
 
   // ── Overtime, on the corrected regular rate ──
@@ -1208,7 +1346,8 @@ export function buildPayroll(input: {
   const paidIncentives = (r: PayConsolRow) => {
     const v = values.get(r)!
     return INCENTIVE_KEYS.reduce((s, k) => s + (v.fixed.get(k) || 0), 0)
-      + v.extras.reduce((s, e) => s + (e.kind === 'sixDay' ? e.amount : 0), 0)
+      + v.extras.reduce(
+          (s, e) => s + (e.kind === 'sixDay' || e.otEligible === true ? e.amount : 0), 0)
   }
   /** The same figure before this file touched anything — the baseline. */
   const sd3Incentives = (r: PayConsolRow) =>
@@ -1220,6 +1359,17 @@ export function buildPayroll(input: {
     incentives: paidIncentives, baselineIncentives: sd3Incentives,
   })
   for (const r of rows) values.get(r)!.fixed.set('overtimePay', r.overtimePay)
+
+  // Folded into the overtime line — it IS overtime, and ADP needs no new code
+  // for it. Reported separately above so the office can explain the figure.
+  // Written after the line is set, or the set would wipe it.
+  for (const t of otTrueUp) {
+    if (t.amount === 0) continue
+    const target = rowsFor(t.payId).find(r => r.salonNum === t.salonNum)
+    if (!target) continue
+    const v = values.get(target)!
+    v.fixed.set('overtimePay', round2((v.fixed.get('overtimePay') || 0) + t.amount))
+  }
 
   // Any fixed field carrying money with no code assigned (Shift Incentive is
   // "TBD" in the workbook) would silently drop that pay. Flag it instead.
@@ -1400,7 +1550,7 @@ export function buildPayroll(input: {
     if (!t) {
       salonMap.set(r.salonNum, (t = {
         salonNum: r.salonNum, employees: 0, hours: 0, grossPay: 0,
-        tips: 0, totalPay: 0, overtimePay: 0, sixDayDelta: 0, breakMinutes: 0,
+        tips: 0, totalPay: 0, overtimePay: 0, otTrueUp: 0, sixDayDelta: 0, breakMinutes: 0,
       }))
       salonStaff.set(r.salonNum, new Set())
     }
@@ -1420,6 +1570,11 @@ export function buildPayroll(input: {
       const t = salonMap.get(salonNum)
       if (t) t.sixDayDelta = round2(t.sixDayDelta + amount)
     }
+  }
+  for (const t of otTrueUp) {
+    if (t.amount === 0) continue
+    const at = salonMap.get(t.salonNum)
+    if (at) at.otTrueUp = round2(at.otTrueUp + t.amount)
   }
   for (const b of breaks) {
     for (const [salonNum, minutes] of Object.entries(b.bySalon)) {
@@ -1443,6 +1598,7 @@ export function buildPayroll(input: {
     salonTotals,
     sixDay: sixDay.sort((a, b) => a.employeeName.localeCompare(b.employeeName)),
     breaks: breaks.sort((a, b) => a.employeeName.localeCompare(b.employeeName)),
+    otTrueUp: otTrueUp.sort((a, b) => a.employeeName.localeCompare(b.employeeName)),
     exceptions,
     upload: { header, rows: uploadRows, fileName, csv: toCsv([header, ...uploadRows]) },
     totals: {
@@ -1464,6 +1620,8 @@ export function buildPayroll(input: {
       overtimeDelta: round2(
         rows.reduce((s, r) => s + r.overtimePay - (sd3OtByRow.get(r) ?? 0), 0)
       ),
+      /** Overtime owed on closed weeks because the bonus raised their rate. */
+      otTrueUp: round2(otTrueUp.reduce((s, t) => s + t.amount, 0)),
       /** What the employees are owed in total under the real rule. */
       sixDayPay: round2(sixDay.reduce((s, d) => s + d.amount, 0)),
       /** What SD3 already paid inside All Other Incentives. */
