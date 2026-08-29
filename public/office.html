@@ -109,6 +109,17 @@
   .det-note{padding:6px 10px;font-size:11.5px;color:var(--text-muted);background:#fafbfa;
             border-top:1px solid #f1f3f1;}
   .twisty{display:inline-block;width:12px;color:var(--text-muted);font-size:10px;}
+  /* Type-ahead picker: an input with a filtered list under it. */
+  .combo{position:relative;}
+  .combo input{width:100%;}
+  .combo-menu{position:absolute;z-index:60;left:0;right:0;top:calc(100% + 2px);background:#fff;
+    border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 22px rgba(0,0,0,.14);
+    max-height:250px;overflow:auto;display:none;min-width:260px;}
+  .combo-menu.open{display:block;}
+  .combo-opt{padding:7px 10px;font-size:13px;cursor:pointer;white-space:nowrap;}
+  .combo-opt.act{background:var(--accent-light);}
+  .combo-opt .sub{color:var(--text-muted);font-size:11.5px;margin-left:6px;}
+  .combo-opt.none{color:var(--text-muted);cursor:default;}
   .exc{display:flex;gap:9px;padding:8px 10px;border-bottom:1px solid #f1f3f1;font-size:13px;align-items:baseline;}
   .exc:last-child{border-bottom:none;}
   .loading{padding:40px;text-align:center;color:var(--text-muted);font-size:14px;}
@@ -182,18 +193,17 @@
         <div class="hint" style="margin-top:0;margin-bottom:12px;">
           Lines SD3 doesn't know about — referral and sign-on bonuses, guarantees, manager cell,
           tuition, retro pay. They're saved against the pay week, so rebuilding the upload keeps them.
-          Payroll ID is the <b>File #</b> ADP uses; the code is the ADP earnings code.
+          Start typing a name to find someone; the Payroll ID (ADP's <b>File #</b>) comes from the roster.
         </div>
-        <div class="scroll">
-          <table id="manual-table">
-            <thead><tr>
-              <th style="width:130px;">Payroll ID</th><th style="width:110px;">Salon #</th>
-              <th style="width:100px;">Code</th><th style="width:120px;">Amount</th>
-              <th>Description</th><th style="width:50px;"></th>
-            </tr></thead>
-            <tbody id="manual-body"></tbody>
-          </table>
-        </div>
+        <div id="manual-note"></div>
+        <table id="manual-table">
+          <thead><tr>
+            <th style="width:250px;">Employee</th><th style="width:190px;">Salon</th>
+            <th style="width:230px;">Earnings code</th><th style="width:110px;">Amount</th>
+            <th>Description</th><th style="width:50px;"></th>
+          </tr></thead>
+          <tbody id="manual-body"></tbody>
+        </table>
         <div style="display:flex;gap:10px;margin-top:12px;">
           <button class="btn ghost small" onclick="addManualRow()">+ Add line</button>
           <button class="btn small" onclick="saveManual()">Save lines</button>
@@ -232,6 +242,8 @@ let CAN_EDIT_SETTINGS = false;
 let LAST_BUILD = null;
 let SETTINGS = null;
 let MANUAL_LINES = [];
+let SETTINGS_FIELDS = [];
+let ROSTER = { employees: [], sourceWeekEnd: '', loadedFor: '' };
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c =>
@@ -446,6 +458,12 @@ function renderBuild(d){
   // ── Salon breakdown, expandable to the employees inside ──
   h += salonBreakdownHtml(d);
 
+  // ── Look one person up without hunting through 18 salons ──
+  h += '<div class="card"><h2>Find an employee <span class="sub">'
+     + 'search by name, Payroll ID or salon</span></h2><div class="body">'
+     + '<div style="max-width:340px;">'+comboHtml('emp-find','','Type a name…')+'</div>'
+     + '<div id="emp-find-out"></div></div></div>';
+
   // ── 1) Floater overtime ──
   h += '<div class="card"><h2>1 \u00b7 Floater overtime <span class="sub">'
      + 'SD3 counts each salon separately, so hours over '+d.rules.otThresholdHours
@@ -529,6 +547,14 @@ function renderBuild(d){
   h += '</div></div>';
 
   $('build-out').innerHTML = h;
+
+  // The picker's input only exists once the HTML is in the page.
+  comboInit('emp-find', (d.employees||[]).map(e=>({
+    label: e.employeeName,
+    sub: '#'+e.payId+' · '+(e.salons||[]).join(', '),
+    search: (e.employeeName+' '+e.payId+' '+(e.salons||[]).join(' ')).toLowerCase(),
+    value: e,
+  })), it=>{ $('emp-find').value = it.label; showEmployee(it.value.payId); });
 }
 
 // A correction tile: green when it adds pay, red when it claws back, grey at zero.
@@ -606,6 +632,23 @@ function signedTd(v){
   const n = Number(v)||0;
   if(Math.abs(n) < 0.005) return numTd('\u2014', 0);
   return numTd((n>0?'+':'')+money(n), n, n<0?'#b3261e':'#1a5c0a');
+}
+// One person's week, pulled up on its own: what each salon is charged, then
+// the same line-by-line breakdown the salon table's drill-down shows.
+function showEmployee(payId){
+  const d = LAST_BUILD;
+  const e = (d.employees||[]).find(x=>x.payId===payId);
+  const out = $('emp-find-out');
+  if(!e){ out.innerHTML = ''; return; }
+  // The pay-lines card already ends with a floater's per-salon split, so this
+  // header just says who and where, without repeating the numbers.
+  const where = (e.bySalon||[]).length > 1
+    ? 'salons '+(e.bySalon||[]).map(b=>salonDisplayNum(b.salonNum)).join(', ')
+    : 'salon '+salonDisplayNum(e.salonNum);
+  out.innerHTML = '<div style="margin-top:14px;">'
+    + '<div class="hint" style="margin:0 0 8px;"><b>'+esc(e.employeeName)+'</b> \u00b7 Payroll ID '
+    + esc(e.payId)+' \u00b7 '+esc(where)+'</div>'
+    + payLinesHtml(e, d) + '</div>';
 }
 // What one person is being paid for, line by line, straight out of the file
 // that goes to ADP. Hour lines show both the hours and what they cost at the
@@ -733,34 +776,214 @@ function ordinal(n){
   return n + (s[(v-20)%10] || s[v] || s[0]);
 }
 
+
+// ── Type-ahead picker ─────────────────────────────────────────
+// An input that filters a list as you type. The chosen value lives in the
+// model, never in the text box, so a half-typed name can't be saved as if it
+// were a real Payroll ID — nothing is selected until an option is clicked.
+//
+// items: [{ label, sub, search, value }]  — `search` is pre-lowercased.
+const COMBOS = {};
+function comboHtml(id, text, placeholder){
+  return '<div class="combo"><input type="text" id="'+id+'" autocomplete="off"'
+    + ' placeholder="'+esc(placeholder||'')+'" value="'+esc(text||'')+'"'
+    + ' oninput="comboFilter(\''+id+'\')" onfocus="comboFilter(\''+id+'\')"'
+    + ' onkeydown="comboKey(event,\''+id+'\')" onblur="comboClose(\''+id+'\')">'
+    + '<div class="combo-menu" id="'+id+'-menu"></div></div>';
+}
+function comboInit(id, items, onPick){ COMBOS[id] = { items: items, onPick: onPick, hits: [], act: 0 }; }
+function comboFilter(id){
+  const c = COMBOS[id], el = $(id), menu = $(id+'-menu');
+  if(!c || !el || !menu) return;
+  const terms = (el.value||'').trim().toLowerCase().split(/\s+/).filter(Boolean);
+  c.hits = c.items.filter(it => terms.every(t => it.search.indexOf(t) >= 0)).slice(0, 60);
+  c.act = 0;
+  comboPaint(id);
+  menu.classList.add('open');
+}
+function comboPaint(id){
+  const c = COMBOS[id], menu = $(id+'-menu');
+  menu.innerHTML = c.hits.length
+    ? c.hits.map((it,i)=>'<div class="combo-opt'+(i===c.act?' act':'')+'"'
+        + ' onmousedown="comboPick(event,\''+id+'\','+i+')">'+esc(it.label)
+        + (it.sub?'<span class="sub">'+esc(it.sub)+'</span>':'')+'</div>').join('')
+    : '<div class="combo-opt none">No match</div>';
+}
+function comboKey(ev, id){
+  const c = COMBOS[id]; if(!c) return;
+  if(ev.key === 'ArrowDown' || ev.key === 'ArrowUp'){
+    ev.preventDefault();
+    if(!c.hits.length) return;
+    c.act = (c.act + (ev.key === 'ArrowDown' ? 1 : c.hits.length - 1)) % c.hits.length;
+    comboPaint(id);
+    const on = $(id+'-menu').children[c.act]; if(on && on.scrollIntoView) on.scrollIntoView({block:'nearest'});
+  } else if(ev.key === 'Enter'){
+    if(c.hits.length){ ev.preventDefault(); comboPick(null, id, c.act); }
+  } else if(ev.key === 'Escape'){
+    comboClose(id);
+  }
+}
+function comboPick(ev, id, i){
+  if(ev) ev.preventDefault();          // fires before blur, so the pick survives
+  const c = COMBOS[id]; if(!c || !c.hits[i]) return;
+  $(id+'-menu').classList.remove('open');
+  c.onPick(c.hits[i]);
+}
+function comboClose(id){
+  const menu = $(id+'-menu');
+  if(menu) setTimeout(()=>menu.classList.remove('open'), 120);
+}
+// One roster read per week, shared by the manual pickers.
+function loadRoster(weekEnd, then){
+  if(ROSTER.loadedFor === weekEnd){ then && then(); return; }
+  fetch('/api/office/payroll/roster?weekEnd='+encodeURIComponent(weekEnd))
+    .then(r=>r.json())
+    .then(d=>{
+      ROSTER = d.success
+        ? { employees: d.employees||[], sourceWeekEnd: d.sourceWeekEnd||'', loadedFor: weekEnd }
+        : { employees: [], sourceWeekEnd: '', loadedFor: weekEnd };
+      then && then();
+    })
+    .catch(()=>{ ROSTER = { employees: [], sourceWeekEnd:'', loadedFor: weekEnd }; then && then(); });
+}
+function rosterItems(){
+  return ROSTER.employees.map(e=>({
+    label: e.name,
+    sub: '#'+e.payId+(e.salons.length?' · '+e.salons.join(', '):''),
+    search: (e.name+' '+e.payId+' '+e.salons.join(' ')).toLowerCase(),
+    value: e,
+  }));
+}
+
 // ── Manual earnings ───────────────────────────────────────────
 function loadManual(){
   const weekEnd = $('week-select').value;
   $('manual-week-sub').textContent = 'week ending ' + weekEnd;
   $('manual-msg').textContent = '';
-  fetch('/api/office/payroll/manual?weekEnd='+encodeURIComponent(weekEnd))
-    .then(r=>r.json())
-    .then(d=>{ MANUAL_LINES = (d.success && d.lines) ? d.lines : []; renderManual(); })
-    .catch(()=>{ MANUAL_LINES = []; renderManual(); });
+  loadRoster(weekEnd, ()=>{
+    fetch('/api/office/payroll/manual?weekEnd='+encodeURIComponent(weekEnd))
+      .then(r=>r.json())
+      .then(d=>{ MANUAL_LINES = (d.success && d.lines) ? d.lines : []; renderManual(); })
+      .catch(()=>{ MANUAL_LINES = []; renderManual(); });
+  });
+}
+function emptyManualLine(){ return { payId:'', salonNum:'', code:'', amount:'', label:'' }; }
+function rosterFor(payId){
+  return ROSTER.employees.find(e=>e.payId === String(payId||'').trim()) || null;
+}
+// Every ADP code the office might hand-key, labelled. Dollar codes first: a
+// manual line is an amount, and an hours code would have ADP read that amount
+// as hours — so those are separated out rather than sitting in the same list.
+function codeOptions(){
+  const codes = (SETTINGS && SETTINGS.codes) || {};
+  const extraLabels = { sixDay:'6-day pay', shortBreak:'Short-break pay', stylistBonus:'Stylist bonus' };
+  const named = {};
+  SETTINGS_FIELDS.forEach(f=>{ if(codes[f.key]) named[codes[f.key]] = { label:f.label, hours:!!f.isHours }; });
+  Object.keys(extraLabels).forEach(k=>{ if(codes[k]) named[codes[k]] = { label:extraLabels[k], hours:false }; });
+  const all = Object.keys(named).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
+  return {
+    dollars: all.filter(c=>!named[c].hours).map(c=>({ code:c, label:named[c].label })),
+    hours:   all.filter(c=> named[c].hours).map(c=>({ code:c, label:named[c].label })),
+  };
+}
+function codeSelect(i, value){
+  const o = codeOptions();
+  const known = o.dollars.concat(o.hours).some(x=>x.code === value);
+  const opt = (x)=>'<option value="'+esc(x.code)+'"'+(x.code===value?' selected':'')+'>'
+    + esc(x.code)+' — '+esc(x.label)+'</option>';
+  let h = '<select style="width:100%" onchange="setManualCode('+i+',this.value)">'
+    + '<option value=""'+(value?'':' selected')+'>— pick a code —</option>'
+    + (o.dollars.length ? '<optgroup label="Dollar amounts">'+o.dollars.map(opt).join('')+'</optgroup>' : '')
+    + (o.hours.length ? '<optgroup label="Hour codes — the amount is sent as HOURS">'
+        + o.hours.map(opt).join('')+'</optgroup>' : '')
+    + '<optgroup label="Not listed">'
+    + '<option value="__other"'+(value && !known ? ' selected':'')+'>Other — type a code…</option>'
+    + '</optgroup></select>';
+  if(value && !known){
+    h += '<input type="text" style="width:100%;margin-top:4px;" value="'+esc(value)+'" '
+      + 'placeholder="code" oninput="setManual('+i+',\'code\',this.value)">';
+  }
+  return h;
+}
+function salonSelect(i, line){
+  const all = Object.keys((SETTINGS && SETTINGS.salons) || {}).sort();
+  const emp = rosterFor(line.payId);
+  const worked = emp ? emp.salons : [];
+  const opt = sn => '<option value="'+esc(sn)+'"'+(sn===line.salonNum?' selected':'')+'>'+esc(sn)+'</option>';
+  const rest = all.filter(sn=>worked.indexOf(sn) < 0);
+  return '<select style="width:100%" onchange="setManual('+i+',\'salonNum\',this.value);renderManual()">'
+    + '<option value=""'+(line.salonNum?'':' selected')+'>Their main salon</option>'
+    + (worked.length ? '<optgroup label="Worked this week">'+worked.map(opt).join('')+'</optgroup>' : '')
+    + '<optgroup label="'+(worked.length?'Other salons':'All salons')+'">'+rest.map(opt).join('')+'</optgroup>'
+    + '</select>';
 }
 function renderManual(){
-  if(!MANUAL_LINES.length) MANUAL_LINES = [{ payId:'', salonNum:'', code:'', amount:'', label:'' }];
-  $('manual-body').innerHTML = MANUAL_LINES.map((l,i)=>
-    '<tr>'
-    + '<td><input type="text" style="width:100%" value="'+esc(l.payId)+'" oninput="setManual('+i+',\'payId\',this.value)"></td>'
-    + '<td><input type="text" style="width:100%" value="'+esc(l.salonNum||'')+'" oninput="setManual('+i+',\'salonNum\',this.value)"></td>'
-    + '<td><input type="text" style="width:100%" value="'+esc(l.code)+'" oninput="setManual('+i+',\'code\',this.value)"></td>'
-    + '<td><input type="number" step="0.01" style="width:100%" value="'+esc(l.amount)+'" oninput="setManual('+i+',\'amount\',this.value)"></td>'
-    + '<td><input type="text" style="width:100%" value="'+esc(l.label)+'" oninput="setManual('+i+',\'label\',this.value)"></td>'
+  if(!MANUAL_LINES.length) MANUAL_LINES = [emptyManualLine()];
+  let note = '';
+  if(!ROSTER.employees.length){
+    note = '<div class="banner warn">No employee list loaded — the nightly employee scrape has '
+         + 'nothing yet. Type the Payroll ID by hand and check it against SD3.</div>';
+  } else if(ROSTER.sourceWeekEnd && ROSTER.sourceWeekEnd !== $('week-select').value){
+    note = '<div class="banner info">Names are from the week ending <b>'+esc(ROSTER.sourceWeekEnd)
+         + '</b> — this week hasn’t been scraped yet. Anyone hired since won’t be listed.</div>';
+  }
+  $('manual-note').innerHTML = note;
+
+  $('manual-body').innerHTML = MANUAL_LINES.map((l,i)=>{
+    const emp = rosterFor(l.payId);
+    const shown = emp ? emp.name : (l.payId ? 'Payroll ID '+l.payId : '');
+    return '<tr>'
+    + '<td>' + (ROSTER.employees.length
+        ? comboHtml('m-emp-'+i, shown, 'Type a name…')
+        : '<input type="text" style="width:100%" value="'+esc(l.payId)+'" placeholder="Payroll ID" '
+          + 'oninput="setManual('+i+',\'payId\',this.value)">')
+      + (emp ? '<div class="hint" style="margin:3px 0 0;">#'+esc(emp.payId)+'</div>' : '')
+      + '</td>'
+    + '<td>'+salonSelect(i,l)+'</td>'
+    + '<td>'+codeSelect(i,l.code)+'</td>'
+    + '<td><input type="number" step="0.01" style="width:100%" value="'+esc(l.amount)
+      + '" oninput="setManual('+i+',\'amount\',this.value)"></td>'
+    + '<td><input type="text" style="width:100%" value="'+esc(l.label)
+      + '" placeholder="e.g. Referral bonus" oninput="setManual('+i+',\'label\',this.value)"></td>'
     + '<td><button class="btn danger small" onclick="dropManual('+i+')">×</button></td>'
-    + '</tr>').join('');
+    + '</tr>';
+  }).join('');
+
+  // Wire a picker per row, after the inputs exist.
+  if(ROSTER.employees.length){
+    const items = rosterItems();
+    MANUAL_LINES.forEach((l,i)=>{
+      comboInit('m-emp-'+i, items, it=>{
+        MANUAL_LINES[i].payId = it.value.payId;
+        // One salon means there is nothing to choose; more than one is a real
+        // decision, so it stays on "their main salon" until the office picks.
+        if(it.value.salons.length === 1) MANUAL_LINES[i].salonNum = it.value.salons[0];
+        renderManual();
+      });
+    });
+  }
 }
 function setManual(i,k,v){ MANUAL_LINES[i][k] = v; }
+function setManualCode(i,v){
+  // "Other" clears the code so the free-text box appears empty rather than
+  // saving the literal sentinel into the sheet.
+  MANUAL_LINES[i].code = (v === '__other') ? ' ' : v;
+  renderManual();
+}
 function dropManual(i){ MANUAL_LINES.splice(i,1); renderManual(); }
-function addManualRow(){ MANUAL_LINES.push({ payId:'', salonNum:'', code:'', amount:'', label:'' }); renderManual(); }
+function addManualRow(){ MANUAL_LINES.push(emptyManualLine()); renderManual(); }
 function saveManual(){
   const weekEnd = $('week-select').value;
-  const lines = MANUAL_LINES.filter(l=>String(l.payId).trim() && Number(l.amount));
+  const lines = MANUAL_LINES
+    .map(l=>({ ...l, code: String(l.code||'').trim() }))
+    .filter(l=>String(l.payId).trim() && Number(l.amount));
+  const noCode = lines.filter(l=>!l.code);
+  if(noCode.length){
+    $('manual-msg').textContent = noCode.length + ' line' + (noCode.length===1?'':'s')
+      + ' still need an earnings code — a line without one blocks the upload.';
+    $('manual-msg').style.color = '#b3261e';
+    return;
+  }
   $('manual-msg').textContent = 'Saving…';
   fetch('/api/office/payroll/manual', {
     method:'POST', headers:{'Content-Type':'application/json'},
@@ -777,7 +1000,7 @@ function saveManual(){
 function loadSettings(){
   fetch('/api/office/payroll/settings').then(r=>r.json()).then(d=>{
     if(!d.success){ $('settings-out').innerHTML = '<div class="banner err">'+esc(d.error)+'</div>'; return; }
-    SETTINGS = d.settings; CAN_EDIT_SETTINGS = !!d.canEdit;
+    SETTINGS = d.settings; CAN_EDIT_SETTINGS = !!d.canEdit; SETTINGS_FIELDS = d.fields || [];
     renderSettings(d);
   }).catch(e=>{ $('settings-out').innerHTML = '<div class="banner err">'+esc(e.message)+'</div>'; });
 }

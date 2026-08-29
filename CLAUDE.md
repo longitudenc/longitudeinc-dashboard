@@ -139,4 +139,9 @@ is a separate path used only by `/api/cron/weekly` and `/api/report/payroll-pace
 - **"View as":** admin toggle to render the dashboard as a given role/person (impersonation).
 - **Supabase migration:** move high-volume tables (sd_demand, sd_halfhour, sd_daily,
   sd_shifts, sd_chkinout) off Sheets; everything else stays.
+- **Vacation-hours tracking (payroll):** SD3 reports vacation HOURS but pays $0.00 for
+  them, and nothing tracks accrual or the remaining balance. Office Tools already sends
+  vacation to ADP on code 14 at the person's base wage; what's missing is a per-employee
+  balance (accrued / taken / left) the office can see and the ADP build can check a week's
+  vacation hours against. Likely a `VacationBalance` tab plus a panel in Office Tools.
 - Newsletter automation, market-compare resolver overrides (salons 4138/5770/9085).
