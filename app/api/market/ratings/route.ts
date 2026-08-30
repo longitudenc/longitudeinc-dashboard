@@ -33,9 +33,12 @@ const SNAP_COLS = ['salonNum','date','rating','reviews','businessStatus']
 const REVIEW_TAB = 'GoogleReviews'
 const REVIEW_COLS = ['reviewId','salonNum','salonName','author','stars','text','publishedAt','capturedAt']
 const DETAILS_URL = 'https://places.googleapis.com/v1/places/'
-// `reviews` returns up to FIVE, most-relevant-first. That is a hard Places API
-// limit, not a parameter we can raise.
-const DETAILS_MASK = 'rating,userRatingCount,businessStatus,reviews'
+const DETAILS_MASK = 'rating,userRatingCount,businessStatus'
+// `reviews` returns up to FIVE, most-relevant-first -- a hard Places API limit,
+// not a parameter we can raise. Requested ONLY for salons we operate: the other
+// 53 rows in GooglePlaces are market comparators whose review text we do not
+// want, and reviews sit in a pricier SKU than the plain rating fields.
+const REVIEW_MASK = DETAILS_MASK + ',reviews'
 
 function isAuthorized(request: Request): boolean {
   const expected = process.env.CRON_SECRET
@@ -71,11 +74,24 @@ export async function GET(request: Request) {
     const day = nowIso.slice(0, 10)    // YYYY-MM-DD
     let updated = 0, errored = 0
     const captured: Record<string, any>[] = []
+    // The first response for one of OUR salons, so a run that captures nothing
+    // says why. The workflow prints this endpoint's JSON, so the Actions log
+    // shows which fields Google actually returned.
+    let debugFields: string[] | null = null
+    let reviewsSeen = 0
+
+    // Only our own salons get review text requested.
+    let ourSalons = new Set<string>()
+    try {
+      ourSalons = new Set(rowsToObjects((await readSheet('SalonRoster')) || [])
+        .map((r: any) => String(r.salonNum || '').trim()).filter(Boolean))
+    } catch { /* no roster -> fall back to ratings only */ }
 
     await mapLimit(withId, 5, async (r: any) => {
+      const isOurs = ourSalons.has(String(r.salonNum || '').trim())
       const res = await fetch(DETAILS_URL + encodeURIComponent(String(r.placeId).trim()), {
         method: 'GET',
-        headers: { 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': DETAILS_MASK },
+        headers: { 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': (isOurs ? REVIEW_MASK : DETAILS_MASK) },
       })
       if (!res.ok) { errored++; return }
       const p = await res.json()
@@ -84,6 +100,9 @@ export async function GET(request: Request) {
       if (p.businessStatus) r.businessStatus = p.businessStatus
       r.resolvedAt = nowIso
       updated++
+
+      if (isOurs && !debugFields) debugFields = Object.keys(p || {})
+      if (isOurs && Array.isArray(p.reviews)) reviewsSeen += p.reviews.length
 
       // Reviews. `name` is the stable review resource id, which is what makes
       // the weekly upsert additive instead of duplicating the same five rows.
@@ -137,6 +156,9 @@ export async function GET(request: Request) {
       snapshotMonth: month, snapshotRows: histRows.length,
       weeklySnapshotDate: day, weeklySnapshotRows: snapRows.length,
       reviewsCaptured: captured.length,
+      ourSalons: ourSalons.size, reviewsSeen,
+      // If reviewsCaptured is 0, this shows what Google actually returned.
+      fieldsReturned: debugFields,
     })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
