@@ -3302,7 +3302,7 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
     </div><!-- /page-company -->
 
     <!-- Stylist Profile Drawer -->
-    <div id="profile-overlay" onclick="closeProfile()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:10000;"></div>
+    <div id="profile-overlay" onclick="dismissProfile()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:10000;"></div>
     <div id="profile-drawer" style="display:none;position:fixed;top:0;right:0;height:100vh;width:100vw;background:#ffffff;box-shadow:-4px 0 24px rgba(0,0,0,.18);z-index:10001;overflow:hidden;flex-direction:column;">
       <div id="profile-content" style="padding:0;"></div>
     </div>
@@ -4852,11 +4852,22 @@ function onDataLoaded(data){
 
     // Small delay to ensure DOM is updated before navigating
     setTimeout(()=>{
+      // A URL beats the default landing: refreshing, or following a link
+      // someone sent, should put you where the URL says rather than on Home.
+      // Captured BEFORE switchAM, which routes and would otherwise replace it.
+      const _incoming = (location.hash && location.hash.length > 2) ? location.hash : '';
+
       if(isAMRole() && amId && AMS[amId]){
         // Initialise the AM view first (sets S.currentAM and repositions the
         // sub-nav) so every code path that assumes currentAM is set after load
-        // keeps working — then land on Home.
+        // keeps working.
         switchAM(amId);
+      }
+
+      if(_incoming){
+        if(location.hash !== _incoming){ try{ history.replaceState({h:_incoming}, '', _incoming); }catch(e){} }
+        applyRoute();
+      } else if(isAMRole() && amId && AMS[amId]){
         switchToHome();
       } else if(canSeeAllSalons()){
         switchToHome();
@@ -5011,6 +5022,7 @@ function switchAM(id){
     if(!id || !AMS[id]) return;
   }
   S.currentAM=id;
+  _route('#/am/' + id + '/salon');   // switchAM lands on Salon Performance
   clearActive();
   const btn=document.getElementById('btn-'+id); if(btn) btn.classList.add('active');
   document.getElementById('page-am').classList.add('active');
@@ -5064,6 +5076,7 @@ function showCompanyTab(name){
   if(name==='dayofweek' && !canSeeDayOfWeek()) name='allsalons';
   else if(!canSeeAllSalons() && !['allsalons','standouts','dayreview','reviews','dayofweek'].includes(name)) name='allsalons';
   S_companyTab = name;
+  _route('#/company/' + name);
   applyCompanyTabVisibility();
   if(name==='dayreview') renderDayReview();
   if(name==='team') renderCompanyTeam();
@@ -5351,6 +5364,7 @@ function renderCompanyTeam(){
 }
 
 function switchToCompany(){ 
+  _route('#/company/' + (S_companyTab || 'allsalons'));
   clearActive(); 
   const b=document.getElementById('btn-company'); if(b) b.classList.add('active'); 
   document.getElementById('page-company').classList.add('active'); 
@@ -5366,6 +5380,7 @@ function openDayOfWeek(){
   showCompanyTab('dayofweek');
 }
 function switchToAdmin(){
+  _route('#/admin');
   initBulkPrintSelectors();
   clearActive();
   const b=document.getElementById('btn-admin'); if(b) b.classList.add('active');
@@ -6197,6 +6212,9 @@ function renderAMDayReview(){
 }
 
 function switchTab(tab,el){ 
+  _route(S.currentAM === 'company'
+    ? '#/trends/company'
+    : ('#/am/' + (S.currentAM || '') + '/' + tab));
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active')); 
   const _tb=el||document.getElementById('tb-'+tab); if(_tb) _tb.classList.add('active');
   document.querySelectorAll('.am-subnav-btn').forEach(b=>b.classList.toggle('active', b.dataset.atab===tab));
@@ -7265,6 +7283,7 @@ function sdRender(){
 }
 function openSalonDrill(salonNum, section){
   if(typeof canDrillSalon==='function' && !canDrillSalon(salonNum)) return;  // role/assignment gate
+  _route('#/salon/' + String(salonNum).trim() + '/' + (section || 'performance'));
   S_sdSalon=String(salonNum).trim(); S_sdSection=section||'performance'; S_sdTab='weekly'; S_sdRange='13'; S_sdDailyWeek=S.currentWeek;
   const old=document.getElementById('salon-drill-overlay'); if(old) old.remove();
   const ov=document.createElement('div'); ov.id='salon-drill-overlay';
@@ -7274,7 +7293,7 @@ function openSalonDrill(salonNum, section){
     +'<div style="background:var(--primary-dark);color:#fff;padding:10px 16px;display:flex;flex-direction:column;gap:9px;">'
     +  '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">'
     +    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><strong style="font-size:15px;">Salon View</strong><span id="sd-salon" style="display:inline-flex;align-items:center;gap:4px;"></span></div>'
-    +    '<button onclick="document.getElementById(\'salon-drill-overlay\').remove()" style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,.4);border-radius:6px;padding:4px 12px;cursor:pointer;font-size:13px;">Close</button>'
+    +    '<button onclick="dismissSalonDrill()" style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,.4);border-radius:6px;padding:4px 12px;cursor:pointer;font-size:13px;">Close</button>'
     +  '</div>'
     +  '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">'
     +    '<span id="sd-sections" style="display:inline-flex;gap:3px;background:rgba(255,255,255,.13);border-radius:12px;padding:3px;flex-wrap:wrap;"></span>'
@@ -8126,6 +8145,7 @@ const TREND_METRICS = {
 // renderTrends(), so no other AM tab renders against the synthetic scope.
 function openCompanyTrends(){
   if(!canSeeAllSalons()) return;
+  _route('#/trends/company');
   clearActive();
   const pg=document.getElementById('page-am'); if(pg) pg.classList.add('active');
   S.currentAM='company';
@@ -10369,6 +10389,120 @@ function initAdminCollapse(){
 
 
 
+
+// == Routing =================================================================
+// Every view now has a URL, and the browser's Back button works.
+//
+// Before this, the whole app was in-memory state: the browser had nothing to go
+// back TO, so Back left the site entirely, a view could not be bookmarked or
+// sent to anyone, and a refresh dumped you on Home.
+//
+// HOW IT WORKS, and why it is not a rewrite. The existing render functions
+// (switchToCompany, showCompanyTab, switchTab, openSalonDrill, ...) are left
+// exactly as they are and stay callable from every existing onclick. Each one
+// gained a single _route('#/...') line at the top. applyRoute() reads the URL
+// and calls those same functions with _applyingRoute set, which makes _route a
+// no-op — so rendering from a URL cannot push another history entry, and there
+// is no double-push to reason about.
+//
+// OVERLAYS get routes too (salon drill, event detail, person). That is the
+// point: pressing Back should close the panel you just opened, not exit the
+// app. Any overlay not named by the current route is closed when a route is
+// applied, so Back closes exactly what Forward opened.
+//
+// Modal EDITORS are deliberately NOT routed — the home editor, the form
+// question and access dialogs. They hold unsaved input, and a Back that
+// silently discarded half-typed work would be worse than no history at all.
+
+let _applyingRoute = false;
+let _routeReady = false;      // first route replaces, so there is no blank entry
+let _routeDepth = 0;          // pushes we own, so Close knows if Back is safe
+
+function _route(hash, replace){
+  if(_applyingRoute) return;                       // rendering FROM a route
+  if(!hash) return;
+  if((location.hash || '') === hash) return;       // already there
+  try{
+    if(replace || !_routeReady){ history.replaceState({h:hash}, '', hash); }
+    else { history.pushState({h:hash}, '', hash); _routeDepth++; }
+    _routeReady = true;
+  }catch(e){}
+}
+
+// Close an overlay the way a browser would: step back if we own the entry that
+// opened it, otherwise fall back to a sensible parent so a deep link still has
+// somewhere to go.
+function _routeBack(fallback){
+  if(_routeDepth > 0){ history.back(); return; }
+  _route(fallback || '#/home', true);
+  applyRoute();
+}
+
+// Dismissing an overlay is a NAVIGATION, not a DOM operation: Close should
+// leave the same history trail Back does, or the two disagree and the app
+// starts feeling haunted. Each falls back to a sensible parent when the
+// overlay was opened by a deep link and there is nothing behind it.
+function dismissSalonDrill(){ _routeBack('#/company/allsalons'); }
+function dismissEventDetail(){ _routeBack('#/home'); }
+function dismissProfile(){ _routeBack('#/home'); }
+
+function _seg(){
+  const h = String(location.hash || '').replace(/^#\/?/, '');
+  const qi = h.indexOf('?');
+  const path = qi >= 0 ? h.slice(0, qi) : h;
+  const query = qi >= 0 ? h.slice(qi + 1) : '';
+  return { seg: path.split('/').filter(Boolean).map(decodeURIComponent), q: new URLSearchParams(query) };
+}
+
+// Shut anything the incoming route does not ask for.
+function _closeOverlaysExcept(kind){
+  if(kind !== 'salon'){ const o = document.getElementById('salon-drill-overlay'); if(o) o.remove(); }
+  if(kind !== 'event'){ closeEventDetail(); }
+  if(kind !== 'person'){
+    const dr = document.getElementById('profile-drawer');
+    if(dr && dr.style.display !== 'none') closeProfile();
+  }
+}
+
+function applyRoute(){
+  const { seg, q } = _seg();
+  const kind = seg[0] || '';
+  _applyingRoute = true;
+  try{
+    _closeOverlaysExcept(kind);
+    switch(kind){
+      case '':
+      case 'home':      switchToHome(); break;
+      case 'hub':       if(q.get('scope')) S_hubScope = q.get('scope');
+                        showHub(seg[1] || 'performance'); break;
+      case 'company':   switchToCompany(); if(seg[1]) showCompanyTab(seg[1]); break;
+      case 'am':        if(seg[1] && AMS[seg[1]]) { switchAM(seg[1]); if(seg[2]) switchTab(seg[2]); } break;
+      case 'trends':    openCompanyTrends(); break;
+      case 'salon':     if(seg[1]) openSalonDrill(seg[1], seg[2] || 'performance'); break;
+      case 'forms':     switchToForms(); if(seg[1]) showFormsTab(seg[1]); break;
+      case 'form':      switchToForms(); if(seg[1]) loadForms(function(){ openForm(seg[1]); }); break;
+      case 'admin':     switchToAdmin(); break;
+      case 'reviews':   showGoogleReviews(); break;
+      case 'event':     if(seg[1]) openEventDetail(seg[1]); break;
+      // Recover the name from loaded data so a deep-linked profile does not open
+      // with a blank header.
+      case 'person':    if(seg[1]) openProfile(seg[1], ((S.homeDataMap||{})[seg[1]]||{}).payrollName || ''); break;
+      default:          switchToHome(); break;
+    }
+  }catch(e){
+    console.error('route failed:', location.hash, e);
+  }finally{
+    _applyingRoute = false;
+  }
+}
+
+window.addEventListener('popstate', function(){
+  // Every Back/Forward lands here. Depth tracks how many of our own entries are
+  // behind us, so Close on an overlay knows whether stepping back is safe.
+  if(_routeDepth > 0) _routeDepth--;
+  applyRoute();
+});
+
 // == Top navigation + hub pages ==============================================
 // Grouped by WHAT you want, not by WHICH area manager. It routes into the SAME
 // render functions the sidebar calls -- nothing is reimplemented here, so the
@@ -10551,10 +10685,9 @@ function renderTopNav(){
           + ' onclick="topNavGo(this)">' + _accEsc(it.label) + '</button>';
   });
   html += '<span class="tn-spacer"></span>';
-  if(S_hubDrilled && HUB_GROUPS[S_topNav]){
-    html += '<button class="tn tn-back" data-nav="' + _accEsc(S_topNav) + '" onclick="topNavGo(this)">'
-          + '&#8249; Back to ' + _accEsc(HUB_GROUPS[S_topNav].title) + '</button>';
-  }
+  // The "Back to ..." chip that used to live here is gone: the browser Back
+  // button now does the same job properly, for every view rather than only
+  // for hub drill-ins.
   if(hasCap('edit.settings') || hasCap('manage.access')){
     html += '<button class="tn' + (S_topNav === 'admin' ? ' active' : '') + '" data-nav="admin"'
           + ' title="Settings" onclick="topNavGo(this)">&#9881;</button>';
@@ -10593,6 +10726,8 @@ function showHub(key){
 
   const scopes = _hubScopes();
   if(scopes.indexOf(S_hubScope) < 0) S_hubScope = scopes[0] || 'company';
+  _route('#/hub/' + key + (S_hubScope && S_hubScope !== 'company'
+    ? '?scope=' + encodeURIComponent(S_hubScope) : ''));
 
   let html = '<div class="page-header"><h2>' + _accEsc(g.title) + '</h2>'
            + '<div class="sub">' + _accEsc(g.sub) + '</div></div>';
@@ -10681,6 +10816,7 @@ function initSidebarNavSync(){
 let GR_DATA = null;
 
 function showGoogleReviews(){
+  _route('#/reviews');
   clearActive();
   const pg = document.getElementById('page-hub');
   if(pg) pg.classList.add('active');
@@ -13262,6 +13398,7 @@ function openProfile(globalId, name){
   // SECURITY: limited-role users may only open profiles of people in their own
   // salons (or themselves). Blocks every link path into the profile drawer.
   if(!canViewPerson(globalId)){ return; }
+  _route('#/person/' + globalId);
   _reviewGlobalId = globalId;
   _reviewName     = name;
   // Keep whatever review year is currently selected (default is set once, globally)
@@ -13807,7 +13944,7 @@ function buildProfile(globalId, name){
 
       <!-- Header -->
       <div class="profile-header" style="position:relative;flex-shrink:0;">
-        <button class="profile-close" onclick="closeProfile()">✕</button>
+        <button class="profile-close" onclick="dismissProfile()">✕</button>
         <div class="profile-name">
           <span style="position:relative;display:inline-block;">
             <span style="cursor:pointer;">${fmtName(name)} <span style="font-size:.55em;vertical-align:middle;opacity:.85;">▾</span></span>
@@ -15020,6 +15157,7 @@ function hDayNum(iso){
 
 // ── Home ──────────────────────────────────────────────────────
 function switchToHome(){
+  _route('#/home');
   clearActive();
   const b=document.getElementById('btn-home'); if(b) b.classList.add('active');
   const pg=document.getElementById('page-home'); if(pg) pg.classList.add('active');
@@ -15254,6 +15392,7 @@ function openEventDetail(id){
   const d = HOME_DATA || {};
   const dt = (d.dates || []).filter(function(x){ return String(x.id) === String(id); })[0];
   if(!dt) return;
+  _route('#/event/' + encodeURIComponent(id));
   closeEventDetail();
 
   const canEdit = (typeof isAdminRole === 'function') && isAdminRole();
@@ -15273,7 +15412,7 @@ function openEventDetail(id){
   wrap.innerHTML = '<div class="form-runner" style="width:100%;max-width:520px;">'
     + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">'
     + '<h3 style="margin:0 0 4px;font-size:18px;color:var(--primary);">' + hEsc(dt.title || '') + '</h3>'
-    + '<button class="btn btn-secondary btn-sm" onclick="closeEventDetail()">Close</button>'
+    + '<button class="btn btn-secondary btn-sm" onclick="dismissEventDetail()">Close</button>'
     + '</div>'
     + (dt.category ? '<div style="display:inline-block;background:#eef4f1;color:#03654e;border-radius:999px;'
         + 'padding:2px 10px;font-size:11px;font-weight:700;margin-bottom:8px;">' + hEsc(dt.category) + '</div>' : '')
@@ -15483,6 +15622,7 @@ function deleteHomeItem(kind,id){
 
 // ── Forms ─────────────────────────────────────────────────────
 function switchToForms(){
+  _route('#/forms/' + (S_formsTab || 'new'));
   clearActive();
   const b=document.getElementById('btn-forms'); if(b) b.classList.add('active');
   const pg=document.getElementById('page-forms'); if(pg) pg.classList.add('active');
@@ -15509,6 +15649,7 @@ function loadForms(cb){
 }
 
 function showFormsTab(name){
+  _route('#/forms/' + name);
   S_formsTab = name;
   // Scoped to this tab bar — the AM tab bar uses the same .tab class and must
   // not have its active state cleared from here.
