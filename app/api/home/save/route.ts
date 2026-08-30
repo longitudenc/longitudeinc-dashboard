@@ -52,9 +52,15 @@ function shapeItem(kind: Kind, raw: any, existing: Record<string, any> | null, e
   } else if (kind === 'date') {
     set('title', str(raw.title, 300))
     set('date', normalizeDate(raw.date))
+    // Free text, deliberately NOT normalised: "morning" and "after close" are
+    // real answers and a time parser would throw them away.
+    set('time', str(raw.time, 60))
     set('endDate', normalizeDate(raw.endDate))
     set('category', str(raw.category, 100))
     set('note', str(raw.note, 2000))
+    // Same http(s)-or-site-relative rule the quick links use, so a sign-up
+    // link cannot smuggle in a javascript: URL.
+    set('signupUrl', isSafeUrl(raw.signupUrl) ? str(raw.signupUrl, 1000) : '')
     set('audience', str(raw.audience, 300))
   } else {
     set('label', str(raw.label, 200))

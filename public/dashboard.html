@@ -15096,12 +15096,12 @@ function paintHome(){
     .hc-gh{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted,#5c6b64);margin:0 0 8px;padding-bottom:5px;border-bottom:1px solid var(--border,#e6ebe7);}
     .hc-count{margin-left:6px;font-weight:400;opacity:.7;}
     .hc-list{display:flex;flex-direction:column;gap:8px;}
-    .hc-li{display:flex;align-items:center;flex-wrap:wrap;gap:6px 11px;padding:11px 14px;border:1px solid var(--border,#e6ebe7);border-radius:12px;background:var(--surface,#f4f7f4);min-width:0;}
+    .hc-li{display:flex;align-items:flex-start;flex-wrap:wrap;gap:6px 11px;padding:13px 14px;border:1px solid var(--border,#e6ebe7);border-radius:12px;background:var(--surface,#f4f7f4);min-width:0;}
     .hc-li-ic{font-size:20px;line-height:1;flex-shrink:0;}
     .hc-li-tx{flex:1 1 130px;min-width:0;}
-    .hc-li-nm{display:block;font-family:'Fraunces',Georgia,serif;font-weight:500;font-size:1rem;color:var(--text,#12231d);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-    .hc-li-sub{display:block;color:var(--text-muted,#5c6b64);font-size:.8rem;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-    .hc-li-when{margin-left:auto;flex-shrink:0;font-family:'Space Mono',ui-monospace,monospace;font-size:11px;color:#048667;white-space:nowrap;}
+    .hc-li-nm{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-family:'Fraunces',Georgia,serif;font-weight:500;font-size:1rem;line-height:1.28;color:var(--text,#12231d);overflow:hidden;}
+    .hc-li-sub{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;color:var(--text-muted,#5c6b64);font-size:.8rem;line-height:1.35;margin-top:3px;overflow:hidden;}
+    .hc-li-when{margin-left:auto;flex-shrink:0;padding-top:2px;font-family:'Space Mono',ui-monospace,monospace;font-size:11px;color:#048667;white-space:nowrap;}
     .hc-li-act{display:flex;gap:4px;flex-shrink:0;position:relative;z-index:1;}
     .hc-li-act .btn{padding:3px 9px;font-size:11px;}
     .hc-pill{display:flex;align-items:center;gap:6px;background:#03654e;color:#eafaf2;border-radius:14px;padding:14px 18px;font-size:.95rem;margin-bottom:22px;cursor:pointer;transition:.15s;}
@@ -15522,7 +15522,7 @@ function renderFormsList(){
       <div class="ft-icon">${hEsc(f.icon)}</div>
       <div class="ft-title">${hEsc(f.title)}</div>
       <div class="ft-desc">${hEsc(f.description)}</div>
-      ${isAdminRole()?`<span role="button" title="Manage access" onclick="event.stopPropagation();openAccessDialog('${hEsc(f.formId)}')" style="position:absolute;top:8px;right:8px;width:28px;height:28px;border-radius:50%;border:1px solid var(--border);background:var(--surface,#fff);cursor:pointer;font-size:14px;line-height:26px;text-align:center;">⚙️</span>`:''}
+      ${isAdminRole()?      `<span role="button" title="Edit questions" onclick="event.stopPropagation();openFieldsDialog('${hEsc(f.formId)}')" style="position:absolute;top:8px;right:42px;width:28px;height:28px;border-radius:50%;border:1px solid var(--border);background:var(--surface,#fff);cursor:pointer;font-size:14px;line-height:26px;text-align:center;">✏️</span>`+`<span role="button" title="Manage access" onclick="event.stopPropagation();openAccessDialog('${hEsc(f.formId)}')" style="position:absolute;top:8px;right:8px;width:28px;height:28px;border-radius:50%;border:1px solid var(--border);background:var(--surface,#fff);cursor:pointer;font-size:14px;line-height:26px;text-align:center;">⚙️</span>`:''}
     </button>`).join('') + '</div>'
     + '<div id="forms-noresult" style="display:none;color:var(--text-muted);padding:14px 4px;">No forms match that search.</div>';
 }
@@ -15544,6 +15544,137 @@ function filterFormsList(q){
 // tile). A friendly front door on the same engine: it writes the form's
 // responseView / notify tags via /api/forms/access. Pre-fills from FORMS_DEFS,
 // which the browser already has.
+
+// == Forms: edit the questions ===============================================
+// The sign-up sheets built from an event ship with a fixed question set, and
+// "How many people are you bringing?" is wrong for a volunteer shift. Editing
+// the FormFields tab by hand is exactly what this dashboard exists to avoid.
+//
+// An existing question keeps its fieldKey when edited, so answers already
+// submitted still line up with the question they answered. Only new rows get a
+// generated key.
+let FQ_FIELDS = [];
+let FQ_TYPES = ['text','textarea','number','date','select','radio','checkbox','multiselect','employee','salon','photo','section'];
+let FQ_FORMID = '';
+
+function openFieldsDialog(formId){
+  FQ_FORMID = formId;
+  const f = (typeof FORMS_DEFS !== 'undefined') ? FORMS_DEFS.find(function(x){ return x.formId === formId; }) : null;
+  const wrap = document.createElement('div');
+  wrap.id = 'fq-dialog';
+  wrap.style.cssText = 'position:fixed;inset:0;z-index:9400;background:rgba(0,0,0,.45);'
+    + 'display:flex;align-items:flex-start;justify-content:center;padding:5vh 16px;overflow:auto;';
+  wrap.innerHTML = '<div class="form-runner" style="width:100%;max-width:640px;">'
+    + '<h3 style="margin:0 0 4px;font-size:17px;color:var(--primary);">Questions</h3>'
+    + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;">'
+    + hEsc((f && f.title) || formId) + '</div>'
+    + '<div id="fq-err"></div>'
+    + '<div id="fq-rows" style="font-size:12px;color:var(--text-muted);">Loading&hellip;</div>'
+    + '<div class="ff-actions" style="margin-top:14px;">'
+    + '<button class="btn btn-primary" onclick="saveFieldsDialog()">Save questions</button>'
+    + '<button class="btn btn-secondary" onclick="closeFieldsDialog()">Cancel</button>'
+    + '<span id="fq-msg" style="font-size:11px;margin-left:8px;color:var(--text-muted);"></span>'
+    + '</div></div>';
+  wrap.addEventListener('click', function(e){ if(e.target === wrap) closeFieldsDialog(); });
+  document.body.appendChild(wrap);
+
+  fetch('/api/forms/fields?formId=' + encodeURIComponent(formId))
+    .then(function(r){ return r.json(); })
+    .then(function(res){
+      if(!res || !res.success) throw new Error((res && res.error) || 'could not load');
+      if(Array.isArray(res.fieldTypes) && res.fieldTypes.length) FQ_TYPES = res.fieldTypes;
+      FQ_FIELDS = (res.fields || []).map(function(x){
+        return { fieldKey:x.fieldKey||'', label:x.label||'', type:x.type||'text',
+                 required:String(x.required||'').toLowerCase()==='yes',
+                 options:x.options||'', placeholder:x.placeholder||'', help:x.help||'' };
+      });
+      renderFieldRows();
+    })
+    .catch(function(e){
+      const el = document.getElementById('fq-rows');
+      if(el) el.innerHTML = '<span style="color:#b3261e;">' + hEsc(e.message || e) + '</span>';
+    });
+}
+function closeFieldsDialog(){ const el = document.getElementById('fq-dialog'); if(el) el.remove(); }
+
+function renderFieldRows(){
+  const host = document.getElementById('fq-rows');
+  if(!host) return;
+  const inp = 'width:100%;box-sizing:border-box;font-size:12px;padding:5px 7px;border:1px solid var(--border);border-radius:5px;';
+  let html = '';
+  FQ_FIELDS.forEach(function(f, i){
+    // `section` is a heading, not a question, so it has no options or required.
+    const isSection = f.type === 'section';
+    html += '<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px;background:#fafaf8;">'
+      + '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">'
+      + '<span style="font-size:11px;color:var(--text-muted);font-weight:700;">' + (i + 1) + '</span>'
+      + '<input class="fq-label" data-i="' + i + '" style="' + inp + '" value="' + hEsc(f.label) + '" placeholder="Question">'
+      + '<button class="btn btn-secondary btn-sm" title="Move up" onclick="fqMove(' + i + ',-1)">&#8593;</button>'
+      + '<button class="btn btn-secondary btn-sm" title="Move down" onclick="fqMove(' + i + ',1)">&#8595;</button>'
+      + '<button class="btn btn-secondary btn-sm" title="Remove" onclick="fqRemove(' + i + ')">&#10005;</button>'
+      + '</div>'
+      + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'
+      + '<select class="fq-type" data-i="' + i + '" style="' + inp + 'width:auto;" onchange="fqSync();renderFieldRows();">'
+      + FQ_TYPES.map(function(t){ return '<option value="' + hEsc(t) + '"' + (t === f.type ? ' selected' : '') + '>' + hEsc(t) + '</option>'; }).join('')
+      + '</select>'
+      + (isSection ? '' : '<label style="font-size:11px;display:flex;gap:5px;align-items:center;">'
+          + '<input type="checkbox" class="fq-req" data-i="' + i + '"' + (f.required ? ' checked' : '') + '> Required</label>')
+      + '</div>'
+      + (isSection ? '' :
+          '<input class="fq-help" data-i="' + i + '" style="' + inp + 'margin-top:6px;" value="' + hEsc(f.help) + '" placeholder="Helper text (optional)">')
+      + ((f.type === 'select' || f.type === 'radio' || f.type === 'checkbox' || f.type === 'multiselect')
+          ? '<input class="fq-opts" data-i="' + i + '" style="' + inp + 'margin-top:6px;" value="' + hEsc(f.options) + '" placeholder="Choices, separated by |">'
+            + '<div style="font-size:10px;color:var(--text-muted);margin-top:3px;">Separate choices with <b>|</b>. Commas are treated as separators too, so avoid them inside a choice.</div>'
+          : '')
+      + '</div>';
+  });
+  html += '<button class="btn btn-secondary btn-sm" onclick="fqAdd()">+ Add question</button>';
+  host.innerHTML = html;
+}
+
+// Read the inputs back into FQ_FIELDS before any structural change, so edits
+// are not lost when a row is added, removed or moved.
+function fqSync(){
+  const g = function(cls, i){ return document.querySelector('.' + cls + '[data-i="' + i + '"]'); };
+  FQ_FIELDS.forEach(function(f, i){
+    const l = g('fq-label', i); if(l) f.label = l.value;
+    const t = g('fq-type', i);  if(t) f.type = t.value;
+    const r = g('fq-req', i);   f.required = r ? !!r.checked : false;
+    const h = g('fq-help', i);  if(h) f.help = h.value;
+    const o = g('fq-opts', i);  if(o) f.options = o.value;
+  });
+}
+function fqAdd(){ fqSync(); FQ_FIELDS.push({fieldKey:'',label:'',type:'text',required:false,options:'',placeholder:'',help:''}); renderFieldRows(); }
+function fqRemove(i){ fqSync(); FQ_FIELDS.splice(i,1); renderFieldRows(); }
+function fqMove(i,d){
+  fqSync();
+  const j = i + d;
+  if(j < 0 || j >= FQ_FIELDS.length) return;
+  const t = FQ_FIELDS[i]; FQ_FIELDS[i] = FQ_FIELDS[j]; FQ_FIELDS[j] = t;
+  renderFieldRows();
+}
+
+function saveFieldsDialog(){
+  fqSync();
+  const msg = document.getElementById('fq-msg');
+  const err = document.getElementById('fq-err');
+  if(err) err.innerHTML = '';
+  if(msg){ msg.textContent = 'Saving…'; msg.style.color = 'var(--text-muted)'; }
+  fetch('/api/forms/fields', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ formId: FQ_FORMID, fields: FQ_FIELDS })
+  }).then(function(r){ return r.json(); }).then(function(res){
+    if(!res || !res.success) throw new Error((res && res.error) || 'save failed');
+    closeFieldsDialog();
+    // Reload so the form runner picks up the new questions immediately.
+    loadForms();
+  }).catch(function(e){
+    if(err) err.innerHTML = '<div class="ff-error">' + hEsc(e.message || e) + '</div>';
+    if(msg){ msg.textContent = ''; }
+  });
+}
+
 function openAccessDialog(formId){
   const f = FORMS_DEFS.find(x=>x.formId===formId); if(!f) return;
   const view   = (f.responseView||[]).map(x=>String(x).toLowerCase());
