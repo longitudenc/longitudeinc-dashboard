@@ -20,7 +20,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/require-role'
 import { readSheet, writeSheet, rowsToObjects } from '@/lib/sheets'
-import { TAB_FIELDS, FIELDS_COLUMNS, FIELD_TYPES } from '@/lib/forms'
+import { TAB_DEFS, TAB_FIELDS, DEFS_COLUMNS, FIELDS_COLUMNS, FIELD_TYPES } from '@/lib/forms'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -47,7 +47,12 @@ export async function GET(req: NextRequest) {
     const fields = rows
       .filter(r => str(r.formId) === formId)
       .sort((a, b) => (parseInt(str(a.sortOrder), 10) || 0) - (parseInt(str(b.sortOrder), 10) || 0))
-    return NextResponse.json({ success: true, formId, fields, fieldTypes: FIELD_TYPES })
+    const defs = rowsToObjects((await readSheet(TAB_DEFS, undefined, { fresh: true })) || [])
+    const def = defs.find(r => str(r.formId) === formId) || {}
+    return NextResponse.json({
+      success: true, formId, fields, fieldTypes: FIELD_TYPES,
+      title: str(def.title, 300), description: str(def.description, 4000),
+    })
   } catch (e: any) {
     return NextResponse.json({ success: false, error: String(e?.message || e) }, { status: 500 })
   }
@@ -121,6 +126,30 @@ export async function POST(req: NextRequest) {
     }))
 
     await writeSheet(TAB_FIELDS, [finalHeader, ...kept, ...added])
+
+    // The form's own wording lives on FormDefs. Editing it here means the
+    // "what is this form for" text is changed in the same place as the
+    // questions, rather than being fixed at creation time forever.
+    if (body?.title !== undefined || body?.description !== undefined) {
+      const defsRaw = (await readSheet(TAB_DEFS, undefined, { fresh: true })) as any[][]
+      const dHeader: string[] = (defsRaw?.[0] || []).map((h: any) => str(h))
+      const dFinal = dHeader.length ? dHeader : [...DEFS_COLUMNS]
+      const idIdx = dFinal.findIndex(h => h.toLowerCase() === 'formid')
+      const tIdx = dFinal.findIndex(h => h.toLowerCase() === 'title')
+      const dIdx = dFinal.findIndex(h => h.toLowerCase() === 'description')
+      if (idIdx >= 0) {
+        const rows = (defsRaw || []).slice(1).map(row => {
+          if (str(row?.[idIdx]) !== formId) return row
+          const copy = [...row]
+          while (copy.length < dFinal.length) copy.push('')
+          if (body.title !== undefined && tIdx >= 0) copy[tIdx] = str(body.title, 300)
+          if (body.description !== undefined && dIdx >= 0) copy[dIdx] = str(body.description, 4000)
+          return copy
+        })
+        await writeSheet(TAB_DEFS, [dFinal, ...rows])
+      }
+    }
+
     return NextResponse.json({ success: true, formId, saved: clean.length })
   } catch (e: any) {
     return NextResponse.json({ success: false, error: String(e?.message || e) }, { status: 500 })

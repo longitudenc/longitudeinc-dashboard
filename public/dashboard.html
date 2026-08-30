@@ -3019,8 +3019,6 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
         <div id="week-dropdown-items"><div class="week-dropdown-item" style="color:var(--text-muted);font-style:italic;">Loading...</div></div>
       </div>
     </div>
-    <a href="/market.html" id="market-link" title="CLT Market Compare" style="display:none;font-size:12px;color:#fff;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.28);padding:5px 12px;border-radius:20px;text-decoration:none;">🗺 Market</a>
-    <a href="/office.html" id="office-link" title="Office Tools — payroll upload for ADP" style="display:none;font-size:12px;color:#fff;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.28);padding:5px 12px;border-radius:20px;text-decoration:none;">🧾 Payroll</a>
     <div class="user-chip" id="user-chip" title="Click to sign out" onclick="if(confirm('Sign out?')) logout();" style="cursor:pointer;">Loading...</div>
   </div>
 </header>
@@ -3031,7 +3029,7 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
      are usable while the grouping settles. */
   /* A LIGHT strip, deliberately. Painted the same green as the header it sits
      under, it read as a second header rather than as navigation. */
-  #topnav{background:var(--paper,#fff);border-bottom:1px solid var(--border,#e6ebe7);
+  #topnav{position:sticky;top:56px;z-index:99;background:var(--paper,#fff);border-bottom:1px solid var(--border,#e6ebe7);
           display:flex;align-items:center;gap:2px;padding:0 14px;
           overflow-x:auto;-webkit-overflow-scrolling:touch;
           box-shadow:0 1px 3px rgba(0,0,0,.05);}
@@ -4677,17 +4675,9 @@ function startDashboard(){
       return;
     }
 
-    // Office Tools (the ADP payroll upload).
-    if(hasCap('view.payroll')){
-      const ol = document.getElementById('office-link');
-      if(ol) ol.style.display = 'inline-block';
-    }
-
-    // Market Compare.
-    if(hasCap('view.market')){
-      const ml = document.getElementById('market-link');
-      if(ml) ml.style.display = 'inline-block';
-    }
+    // The Market and Payroll header chips are gone: they duplicated the
+    // Market and Office tabs in the top bar, which are capability-gated in
+    // exactly the same way.
 
     if(SESSION.role === 'office' || SESSION.role === 'maintenance'){
       // Focused login for back-office (Laura/Brandy) and the handyman: skip the
@@ -10550,7 +10540,7 @@ function renderTopNav(){
     { key:'people',      label:'People' },
     { key:'market',      label:'Market' },
     { key:'office',      label:'Office' },
-    { key:'requests',    label:'Requests' },
+    { key:'requests',    label:'Forms' },
   ];
   let html = '';
   items.forEach(function(it){
@@ -15087,6 +15077,14 @@ function paintHome(){
     .hc-sub{color:var(--text-muted,#5c6b64);font-size:.85rem;margin-top:2px;}
     .hc-li-click{cursor:pointer;}
     .hc-li-click:hover{background:#f4f7f5;}
+    .hc-li-more{display:block;color:#048667;font-size:.78rem;font-weight:600;margin-top:3px;}
+    /* The date is what you scan a list of events for, so give it real size. */
+    .hc-li-when-big{text-align:right;line-height:1.22;}
+    .hc-li-when-big .hc-when-d{display:block;font-size:15px;font-weight:700;color:#03654e;}
+    .hc-li-when-big .hc-when-t{display:block;font-size:12px;color:#048667;}
+    .hc-li-when-big .hc-when-l{display:block;font-size:10px;color:var(--text-muted,#5c6b64);}
+    .hc-li-when .hc-when-t:before,.hc-li-when .hc-when-l:before{content:'  b7 ';}
+    .hc-li-when-big .hc-when-t:before,.hc-li-when-big .hc-when-l:before{content:none;}
     .hc-li-signup{display:inline-block;margin-left:8px;background:#9acb3a;color:#0b2b22;
         border-radius:999px;padding:2px 10px;font-size:11px;font-weight:700;text-decoration:none;white-space:nowrap;}
     .hc-tag{display:inline-block;margin-top:9px;background:var(--paper,#fff);border:1px solid var(--border,#e6ebe7);border-radius:999px;padding:2px 11px;font-size:11px;font-family:'Space Mono',ui-monospace,monospace;color:#048667;}
@@ -15175,8 +15173,14 @@ function paintHome(){
     return `<div class="hc-li${_clickable?' hc-li-click':''}" title="${_clickable?'Open for details':hEsc(celTip(dt))}"
       ${_clickable?`onclick="openEventDetail(&#39;${hEsc(dt.id)}&#39;)"`:''}>
       <span class="hc-li-ic">${dIcon(dt.title)}</span>
-      <span class="hc-li-tx"><span class="hc-li-nm">${hEsc(celName(dt))}</span>${sub?`<span class="hc-li-sub">${hEsc(sub)}</span>`:''}</span>
-      <span class="hc-li-when">${hEsc(hMonthAbbr(dt.date))} ${hEsc(hDayNum(dt.date))}${dt.time?' · '+hEsc(dt.time):''}${lbl?' \u00b7 '+lbl:''}</span>
+      <span class="hc-li-tx"><span class="hc-li-nm">${hEsc(celName(dt))}</span>
+        ${_clickable
+          ? `<span class="hc-li-more">Click for more details</span>`
+          : (sub?`<span class="hc-li-sub">${hEsc(sub)}</span>`:'')}</span>
+      <span class="hc-li-when${_clickable?' hc-li-when-big':''}">
+        <span class="hc-when-d">${hEsc(hMonthAbbr(dt.date))} ${hEsc(hDayNum(dt.date))}</span>
+        ${dt.time?`<span class="hc-when-t">${hEsc(dt.time)}</span>`:''}
+        ${lbl?`<span class="hc-when-l">${lbl}</span>`:''}</span>
       ${dt.signupUrl?`<a class="hc-li-signup" href="${hEsc(dt.signupUrl)}" target="_blank" rel="noopener noreferrer">Sign up</a>`:''}
       ${(canEdit && !dt.auto)?`<span class="hc-li-act"><button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();openHomeEditor('date','${hEsc(dt.id)}')">Edit</button><button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();deleteHomeItem('date','${hEsc(dt.id)}')">Delete</button></span>`:''}
     </div>`;
@@ -15340,8 +15344,11 @@ function openHomeEditor(kind, id){
       + F('Note','note','textarea',item.note)
       + F('Sign-up link','signupUrl','text',item.signupUrl,'placeholder="https://... volunteer or RSVP form"')
       + `<div class="ff-help" style="margin:-11px 0 15px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-           <span>Optional. Adds a Sign up button to the event.</span>
-           <button type="button" class="btn btn-secondary btn-sm" id="he-mkform" onclick="makeSignupForm(${id?`&#39;${hEsc(id)}&#39;`:'null'})">&#128587; Create a sign-up form</button>
+           ${item.signupUrl
+             ? `<a href="${hEsc(item.signupUrl)}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" style="text-decoration:none;">&#128279; Open the sign-up form</a>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="editSignupForm()">&#9998; Edit its questions</button>`
+             : `<span>Optional. Adds a Sign up button to the event.</span>
+                <button type="button" class="btn btn-secondary btn-sm" id="he-mkform" onclick="makeSignupForm(${id?`&#39;${hEsc(id)}&#39;`:'null'})">&#128587; Create a sign-up form</button>`}
            <span id="he-mkform-msg" style="font-size:11px;"></span>
          </div>`
       + AUD(item.audience);
@@ -15370,6 +15377,21 @@ function openHomeEditor(kind, id){
   wrap.addEventListener('click',e=>{ if(e.target===wrap) closeHomeEditor(); });
   document.body.appendChild(wrap);
 }
+// Jump from the event to the questions on its sign-up form. The formId is
+// carried in the link the create step wrote, so nothing new needs storing.
+function editSignupForm(){
+  const el = document.getElementById('he-signupUrl');
+  const url = el ? String(el.value || '') : '';
+  const m = /[?&]form=([^&]+)/.exec(url);
+  if(!m){
+    const msg = document.getElementById('he-mkform-msg');
+    if(msg){ msg.textContent = 'That link does not point at a form on this site.'; msg.style.color = '#b3261e'; }
+    return;
+  }
+  closeHomeEditor();
+  openFieldsDialog(decodeURIComponent(m[1]));
+}
+
 function closeHomeEditor(){ const el=document.getElementById('home-editor'); if(el) el.remove(); }
 
 // Build a volunteer / RSVP sheet for this event out of the Forms engine, and
@@ -15569,6 +15591,11 @@ function openFieldsDialog(formId){
     + '<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;">'
     + hEsc((f && f.title) || formId) + '</div>'
     + '<div id="fq-err"></div>'
+    + '<label style="display:block;font-size:11px;font-weight:700;color:var(--text-muted);margin-bottom:3px;">FORM NAME</label>'
+    + '<input id="fq-title" style="width:100%;box-sizing:border-box;font-size:13px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;margin-bottom:10px;">'
+    + '<label style="display:block;font-size:11px;font-weight:700;color:var(--text-muted);margin-bottom:3px;">DETAILS</label>'
+    + '<textarea id="fq-desc" rows="3" style="width:100%;box-sizing:border-box;font-size:13px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;margin-bottom:4px;"></textarea>'
+    + '<div style="font-size:10px;color:var(--text-muted);margin-bottom:14px;">Shown under the form name. Use it for anything people need to know before they answer.</div>'
     + '<div id="fq-rows" style="font-size:12px;color:var(--text-muted);">Loading&hellip;</div>'
     + '<div class="ff-actions" style="margin-top:14px;">'
     + '<button class="btn btn-primary" onclick="saveFieldsDialog()">Save questions</button>'
@@ -15583,6 +15610,8 @@ function openFieldsDialog(formId){
     .then(function(res){
       if(!res || !res.success) throw new Error((res && res.error) || 'could not load');
       if(Array.isArray(res.fieldTypes) && res.fieldTypes.length) FQ_TYPES = res.fieldTypes;
+      const tEl=document.getElementById('fq-title'); if(tEl) tEl.value = res.title || '';
+      const dEl=document.getElementById('fq-desc');  if(dEl) dEl.value = res.description || '';
       FQ_FIELDS = (res.fields || []).map(function(x){
         return { fieldKey:x.fieldKey||'', label:x.label||'', type:x.type||'text',
                  required:String(x.required||'').toLowerCase()==='yes',
@@ -15663,7 +15692,12 @@ function saveFieldsDialog(){
   fetch('/api/forms/fields', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ formId: FQ_FORMID, fields: FQ_FIELDS })
+    body: JSON.stringify({
+      formId: FQ_FORMID,
+      title: (document.getElementById('fq-title')||{}).value || '',
+      description: (document.getElementById('fq-desc')||{}).value || '',
+      fields: FQ_FIELDS
+    })
   }).then(function(r){ return r.json(); }).then(function(res){
     if(!res || !res.success) throw new Error((res && res.error) || 'save failed');
     closeFieldsDialog();
