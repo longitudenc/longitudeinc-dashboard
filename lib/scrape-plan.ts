@@ -126,6 +126,15 @@ export function planForDate(todayIso?: string, hourUtc?: number): PlannedJob[] {
   // Access control: departed employees drop out of EmployeeProfile within a day.
   jobs.push(scrape('profile'))
 
+  // GOOGLE RATINGS + REVIEWS.
+  // TEMPORARILY DAILY. The intended cadence is weekly (it was in the Saturday
+  // block), but review capture currently returns nothing and a weekly job means
+  // a WEEK per diagnostic attempt. It refreshes GooglePlaces from Place Details
+  // and upserts by salon+month / review id, so extra runs are idempotent -- the
+  // cost is ~71 Place Details calls a day, not duplicated data.
+  // MOVE THIS BACK under `if (dow === 6)` once GoogleReviews is filling.
+  jobs.push({ name: 'google-ratings', path: '/api/market/ratings', query: '' })
+
   // 3. SATURDAY — weekly finalizer.
   if (dow === 6) {
     jobs.push(scrape('weekly'))
@@ -133,11 +142,6 @@ export function planForDate(todayIso?: string, hourUtc?: number): PlannedJob[] {
     jobs.push(scrape('employee'))
     jobs.push(scrape('employee-weekly-cons'))
     jobs.push(scrape('payroll'))
-    // Google ratings. Not an /api/scrape/* route -- it refreshes GooglePlaces
-    // from Place Details and upserts a month row into RatingHistory, so extra
-    // runs are idempotent. It already has a MONTHLY Vercel cron; this makes it
-    // weekly, which is the cadence the review numbers are actually watched at.
-    jobs.push({ name: 'google-ratings', path: '/api/market/ratings', query: '' })
   }
 
   // 4. TUESDAY SETTLE — SD3's payroll finalizes the Tuesday after a week closes,
