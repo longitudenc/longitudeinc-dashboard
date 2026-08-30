@@ -4609,6 +4609,7 @@ function scoreTierLabel(total){ if(total>=24)return{label:'Performance Excellenc
 // ── Init ──────────────────────────────────────────────────────
 // Real per-user identity, set from /api/auth/me after sign-in.
 let SESSION = { email: '', role: 'none', globalId: '', salons: [], name: '', viewingAs: '', realEmail: '' };
+let S_deepForm = null;
 
 function init(){
   // Ask the server who's signed in. No valid session → show login.
@@ -4642,6 +4643,10 @@ function startDashboard(){
     USER_EMAIL = SESSION.email || '';
     USER_ROLE  = SESSION.role || 'none';
     try { S_deepReq = new URLSearchParams(location.search).get('req') || null; } catch(e){ S_deepReq=null; }
+    // ?form=<formId> opens a single form. This is what an event’s Sign up
+    // button points at, so the link has to survive a cold load for someone
+    // who was not already on the Forms page.
+    try { S_deepForm = new URLSearchParams(location.search).get('form') || null; } catch(e){ S_deepForm=null; }
     // Map an area_manager's globalId to their amKey (the dashboard's amId).
     if(SESSION.role === 'area_manager' && SESSION.globalId){
       const entry = Object.entries(AMS).find(([k,v])=>v.globalId===SESSION.globalId);
@@ -4654,6 +4659,15 @@ function startDashboard(){
 
     const chip = document.getElementById('user-chip');
     if(chip) chip.textContent = SESSION.email || 'Unknown';
+
+    // A sign-up link beats every other landing rule: the person clicked it.
+    if(S_deepForm && SESSION.role !== 'none'){
+      clearActive();
+      const fp=document.getElementById('page-forms'); if(fp) fp.classList.add('active');
+      loadForms(function(){ openForm(S_deepForm); });
+      hideLoading();
+      return;
+    }
 
     if(SESSION.role === 'none'){
       showPage('noaccess');
@@ -15262,7 +15276,11 @@ function openHomeEditor(kind, id){
       + F('Category','category','text',item.category,'placeholder="e.g. Training, Payroll, Holiday"')
       + F('Note','note','textarea',item.note)
       + F('Sign-up link','signupUrl','text',item.signupUrl,'placeholder="https://... volunteer or RSVP form"')
-      + `<div class="ff-help" style="margin:-11px 0 15px;">Optional. Adds a Sign up button to the event.</div>`
+      + `<div class="ff-help" style="margin:-11px 0 15px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+           <span>Optional. Adds a Sign up button to the event.</span>
+           <button type="button" class="btn btn-secondary btn-sm" id="he-mkform" onclick="makeSignupForm(${id?`&#39;${hEsc(id)}&#39;`:'null'})">&#128587; Create a sign-up form</button>
+           <span id="he-mkform-msg" style="font-size:11px;"></span>
+         </div>`
       + AUD(item.audience);
   } else {
     body = F('Label','label','text',item.label)
@@ -15290,6 +15308,33 @@ function openHomeEditor(kind, id){
   document.body.appendChild(wrap);
 }
 function closeHomeEditor(){ const el=document.getElementById('home-editor'); if(el) el.remove(); }
+
+// Build a volunteer / RSVP sheet for this event out of the Forms engine, and
+// drop the link straight into the Sign-up field. Nothing new is invented: the
+// responses land in the same Requests queue as every other form, so there is
+// no second place to check.
+//
+// The event must be SAVED first — the form is keyed to the event id, and a
+// brand-new event has not got one yet.
+function makeSignupForm(eventId){
+  const msg=document.getElementById('he-mkform-msg');
+  const set=function(t,ok){ if(msg){ msg.textContent=t; msg.style.color = ok===false ? '#b3261e' : ok ? '#0a5236' : 'var(--text-muted)'; } };
+  const v=function(n){ const el=document.getElementById('he-'+n); return el?String(el.value||'').trim():''; };
+  const title=v('title');
+  if(!title){ set('Give the event a title first.', false); return; }
+  if(!eventId){ set('Save the event first, then reopen it to add a sign-up form.', false); return; }
+  set('Creating…');
+  fetch('/api/forms/create-signup',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({eventId:eventId,title:title,date:v('date'),time:v('time')})})
+    .then(function(r){ return r.json(); })
+    .then(function(res){
+      if(!res||!res.success) throw new Error((res&&res.error)||'could not create the form');
+      const el=document.getElementById('he-signupUrl'); if(el) el.value=res.url;
+      set(res.created ? 'Form created — Save the event to publish the link.'
+                      : 'This event already has a sign-up form; link filled in.', true);
+    })
+    .catch(function(e){ set(String(e.message||e), false); });
+}
 
 // Roles offered by the audience picker. Order matches the sidebar hierarchy.
 const HOME_ROLE_OPTS=[['owner','Owner'],['admin','Admin'],['viewer','Viewer'],

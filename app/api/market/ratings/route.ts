@@ -31,6 +31,11 @@ const SNAP_COLS = ['salonNum','date','rating','reviews','businessStatus']
 // retroactively, so the archive can only ever grow forwards from the first
 // capture. Every week not captured is lost permanently.
 const REVIEW_TAB = 'GoogleReviews'
+// A one-row-per-run log, so a run that captures nothing can be diagnosed
+// afterwards from the sheet. The Actions log has the same information, but
+// this is readable by anyone with the spreadsheet and outlives the log.
+const DIAG_TAB = 'GoogleReviewsDiag'
+const DIAG_COLS = ['runAt', 'ourSalons', 'reviewsSeen', 'reviewsCaptured', 'fieldsReturned', 'note']
 const REVIEW_COLS = ['reviewId','salonNum','salonName','author','stars','text','publishedAt','capturedAt']
 const DETAILS_URL = 'https://places.googleapis.com/v1/places/'
 const DETAILS_MASK = 'rating,userRatingCount,businessStatus'
@@ -150,6 +155,27 @@ export async function GET(request: Request) {
 
     // 4) review archive — additive, keyed on the review id
     if (captured.length) await upsertSheet(REVIEW_TAB, [...REVIEW_COLS], ['reviewId'], captured)
+
+    // debugFields is assigned inside the mapLimit closure, so TypeScript's
+    // control-flow analysis still sees it as null out here. Copy it into a
+    // plainly-typed local rather than fight the narrowing.
+    const fieldsList: string[] = debugFields ?? []
+
+    // 5) diagnostic row, ALWAYS written — the empty case is the one worth
+    //    recording, so this must not be inside the `if (captured.length)` above.
+    try {
+      await upsertSheet(DIAG_TAB, [...DIAG_COLS], ['runAt'], [{
+        runAt: nowIso,
+        ourSalons: ourSalons.size,
+        reviewsSeen,
+        reviewsCaptured: captured.length,
+        fieldsReturned: fieldsList.join(','),
+        note: captured.length ? ''
+          : (fieldsList.length && fieldsList.indexOf('reviews') < 0
+              ? 'Google returned no `reviews` field — likely the API key lacks the SKU that includes reviews'
+              : '`reviews` present but nothing parsed — check the review object shape'),
+      }])
+    } catch { /* diagnostics must never fail the run */ }
 
     return NextResponse.json({
       ok: true, refreshed: updated, errored, total: withId.length,
