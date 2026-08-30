@@ -29,6 +29,25 @@ export async function GET() {
       ])
       const data: any = formatAllData(raw, scrapedWeeks, rosterRows)
       data.inactiveMap = inactiveMap
+
+      // HOME SALON: the nightly scrape wins over the hand-loaded tab.
+      // homeDataMap is built from HomeData, an ADP export loaded by hand
+      // (loadedAt 2026-05-10 when this was written). EmployeeProfile is
+      // scraped every night. On 2026-08-29 they disagreed for 3 active people
+      // and HomeData was missing 18 more outright.
+      //
+      // That is not cosmetic. stylistsForSalon() falls back to "most-worked
+      // salon" when home is blank, which is why Candace Harris (moved 3053 ->
+      // 3685) still appeared under 3053: 118 weeks there against 90 at the new
+      // store. And lib/scope-filter.ts reads homeSalon to decide which
+      // employees an AM or manager may see, so a stale value mis-scopes ACCESS.
+      // HomeData is still the source for baseWage; only the salon is overlaid.
+      for (const [gid, v] of Object.entries(inactiveMap)) {
+        const home = String((v as any).homeSalon || '').trim()
+        if (!home) continue
+        if (data.homeDataMap[gid]) data.homeDataMap[gid].homeSalon = home
+        else data.homeDataMap[gid] = { globalId: gid, homeSalon: home }
+      }
       // 4/3/2/1 bands, effective-dated. Raw rows: the client resolves which set
       // applies to the period being viewed (resolveTiersFor in dashboard.html).
       data.metricThresholds = thresholdRows

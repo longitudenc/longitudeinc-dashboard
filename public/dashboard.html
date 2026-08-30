@@ -8131,6 +8131,50 @@ function openCompanyTrends(){
   switchTab('trends');
 }
 
+// Legend shortcuts. With every salon plotted, clicking lines off one at a
+// time is the slow way round; these drive the same Chart.js visibility the
+// legend does, so the two stay in step.
+function trendLineControlsHtml(){
+  const ams = AM_ORDER.filter(function(id){ return AMS[id] && (AMS[id].salons||[]).length; });
+  const b = function(fn, label){
+    return '<button onclick="' + fn + '" style="padding:3px 11px;border-radius:14px;border:1px solid var(--border);' +
+      'font-size:11px;font-weight:600;cursor:pointer;background:#fff;color:var(--text);">' + label + '</button>';
+  };
+  let h = '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0 0 10px;">';
+  h += '<span style="font-size:11px;font-weight:700;letter-spacing:.05em;color:var(--text-muted);">LINES</span>';
+  h += b('trendSetAllLines(true)', 'Select all');
+  h += b('trendSetAllLines(false)', 'Deselect all');
+  ams.forEach(function(id){ h += b('trendShowAM(\u0027' + id + '\u0027)', _accEsc(AMS[id].name.split(' ')[0])); });
+  h += '</div>';
+  return h;
+}
+
+// Datasets are labelled with the salon NAME (SALON_NAMES[num]||num), so map
+// back to a number to test AM membership.
+function _trendSalonOfLabel(label){
+  var base = String(label||'').replace(/ (PY)$/, '');
+  for (var num in SALON_NAMES) { if (SALON_NAMES[num] === base) return num; }
+  return base;   // already a number, or the company-average line
+}
+
+function trendSetAllLines(vis){
+  if(!S_trendChart) return;
+  S_trendChart.data.datasets.forEach(function(ds, i){ S_trendChart.setDatasetVisibility(i, !!vis); });
+  S_trendChart.update();
+}
+
+function trendShowAM(amId){
+  if(!S_trendChart) return;
+  var own = new Set(((AMS[amId]||{}).salons)||[]);
+  S_trendChart.data.datasets.forEach(function(ds, i){
+    var sn = _trendSalonOfLabel(ds.label);
+    // Keep any non-salon line (the company average) visible for context.
+    var isSalon = /^[0-9]{3,5}$/.test(sn);
+    S_trendChart.setDatasetVisibility(i, isSalon ? own.has(sn) : true);
+  });
+  S_trendChart.update();
+}
+
 function renderTrends(){
   if(!S.currentAM) return;
   selectTrendMetric(S_trendMetric, document.querySelector('.trend-metric-btn.active'));
@@ -8445,6 +8489,7 @@ function selectTrendMetric(key, btn, overrideSalon, hostId, storeView){
       </div>
     </div>
     ${periodStatsHtml}
+    ${trendLineControlsHtml()}
     <div class="chart-canvas-wrap"><canvas id="trend-canvas"></canvas></div>
     <div id="trend-custom-legend" style="margin-top:14px;display:flex;flex-wrap:wrap;gap:6px;padding:0 4px;"></div>`;
 
@@ -10393,6 +10438,11 @@ const HUB_GROUPS = {
         dest:{ company:_coGo('dayreview'), am:_amGo('dayreview') } },
       { t:'Day of Week', d:'Weekday comparisons across a date window.', cap:'view.dayofweek',
         dest:{ company:_coGo('dayofweek'), am:function(){ openDayOfWeek(); } } },
+      // OUR salons, not the market -- so it lives under Performance rather than
+      // Market, which is for operators we do not run. No `dest`: it is relevant
+      // whichever scope you are viewing through.
+      { t:'Google Reviews', d:'What customers wrote, by salon — refreshed weekly.',
+        cap:'view.salondata', go:function(){ showGoogleReviews(); } },
     ],
   },
   pay: {
@@ -10431,8 +10481,6 @@ const HUB_GROUPS = {
     cards: [
       { t:'Market Compare', d:'How we sit against the wider Charlotte market.', cap:'view.market',
         href:'/market.html' },
-      { t:'Google Reviews', d:'Every salon’s Google rating and review count, refreshed weekly.',
-        cap:'view.salondata', go:function(){ showGoogleReviews(); } },
     ],
   },
   office: {
