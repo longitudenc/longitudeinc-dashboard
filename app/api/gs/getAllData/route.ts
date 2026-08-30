@@ -30,26 +30,20 @@ export async function GET() {
       const data: any = formatAllData(raw, scrapedWeeks, rosterRows)
       data.inactiveMap = inactiveMap
 
-      // HOMEDATA IS NO LONGER A SOURCE. It was a hand-loaded ADP export whose
-      // baseWage was 0 on all 130 rows, whose fileNum nothing reads (adp-payroll
-      // takes fileNum from payId), and whose homeSalon was months stale --
-      // wrong for 3 active people and missing 18 more. Everything it carried is
-      // now taken from EmployeeProfile, which the nightly profile scrape keeps
-      // current, with wages from SD_PAYROLL (127 of 127 active covered).
+      // HOMEDATA IS NO LONGER A SOURCE. It was a hand-loaded ADP export, last
+      // loaded 2026-05-10. Everything it carried is now taken from
+      // EmployeeProfile, which the nightly profile scrape keeps current:
+      //   baseWage   was 0 on all 130 rows; real wages come from SD_PAYROLL
+      //   fileNum    unused (adp-payroll takes fileNum from payId)
+      //   homeSalon  months stale
       //
-      // ORIGINAL COMMENT, kept because it is the reason this exists:
-      // HOME SALON: the nightly scrape wins over the hand-loaded tab.
-      // homeDataMap is built from HomeData, an ADP export loaded by hand
-      // (loadedAt 2026-05-10 when this was written). EmployeeProfile is
-      // scraped every night. On 2026-08-29 they disagreed for 3 active people
-      // and HomeData was missing 18 more outright.
-      //
-      // That is not cosmetic. stylistsForSalon() falls back to "most-worked
-      // salon" when home is blank, which is why Candace Harris (moved 3053 ->
-      // 3685) still appeared under 3053: 118 weeks there against 90 at the new
-      // store. And lib/scope-filter.ts reads homeSalon to decide which
-      // employees an AM or manager may see, so a stale value mis-scopes ACCESS.
-      // HomeData is still the source for baseWage; only the salon is overlaid.
+      // That last one was not cosmetic. stylistsForSalon() falls back to
+      // "most-worked salon" when home is blank, which is why Candace Harris
+      // (moved 3053 -> 3685) still appeared under 3053: 118 weeks there against
+      // 90 at the new store. And lib/scope-filter.ts reads homeSalon to decide
+      // which employees an AM or manager may see, so a stale value mis-scoped
+      // ACCESS. On 2026-08-29 the two sources disagreed for 3 active people and
+      // HomeData was missing 18 more outright.
       for (const [gid, v] of Object.entries(inactiveMap)) {
         const home = String((v as any).homeSalon || '').trim()
         if (!home) continue

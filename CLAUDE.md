@@ -129,6 +129,12 @@ is a separate path used only by `/api/cron/weekly` and `/api/report/payroll-pace
   tabs), e.g. `fetch('/api/forms/import-discipline', {method:'POST'}).then(r=>r.json()).then(console.log)`.
 - **Owner/admin logins have no `globalId`** (they're Users-tab rows, not roster employees).
   Code that matches "mine"/an employee must also match by email, not just globalId.
+- **`HomeData` is retired — do not read it.** It was a hand-loaded ADP export;
+  `baseWage` was 0 on every row, `fileNum` unused, and `homeSalon` months stale (wrong
+  for 3 active people, missing 18). **Home salon comes from `EmployeeProfile`**
+  (scraped nightly) and wages from `SD_PAYROLL`. This matters beyond display:
+  `lib/scope-filter.ts` reads `homeSalon` to decide which employees an AM or manager
+  may see, so a stale value mis-scopes ACCESS. The tab still exists but nothing reads it.
 - **Capabilities, not role lists.** `lib/capabilities.ts` holds named capabilities
   (`view.company`, `view.dayreview`, `view.dayofweek`, `view.market`, `view.salondata`,
   `view.payroll`, `edit.settings`, `manage.access`) with role defaults in code and
