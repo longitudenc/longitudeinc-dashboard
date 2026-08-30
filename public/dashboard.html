@@ -15085,6 +15085,8 @@ function paintHome(){
     .hc-ic{font-size:26px;line-height:1;}
     .hc-nm{font-family:'Fraunces',Georgia,serif;font-weight:500;font-size:1.05rem;margin-top:10px;color:var(--text,#12231d);}
     .hc-sub{color:var(--text-muted,#5c6b64);font-size:.85rem;margin-top:2px;}
+    .hc-li-click{cursor:pointer;}
+    .hc-li-click:hover{background:#f4f7f5;}
     .hc-li-signup{display:inline-block;margin-left:8px;background:#9acb3a;color:#0b2b22;
         border-radius:999px;padding:2px 10px;font-size:11px;font-weight:700;text-decoration:none;white-space:nowrap;}
     .hc-tag{display:inline-block;margin-top:9px;background:var(--paper,#fff);border:1px solid var(--border,#e6ebe7);border-radius:999px;padding:2px 11px;font-size:11px;font-family:'Space Mono',ui-monospace,monospace;color:#048667;}
@@ -15100,7 +15102,7 @@ function paintHome(){
     .hc-li-nm{display:block;font-family:'Fraunces',Georgia,serif;font-weight:500;font-size:1rem;color:var(--text,#12231d);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
     .hc-li-sub{display:block;color:var(--text-muted,#5c6b64);font-size:.8rem;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
     .hc-li-when{margin-left:auto;flex-shrink:0;font-family:'Space Mono',ui-monospace,monospace;font-size:11px;color:#048667;white-space:nowrap;}
-    .hc-li-act{display:flex;gap:4px;flex-shrink:0;}
+    .hc-li-act{display:flex;gap:4px;flex-shrink:0;position:relative;z-index:1;}
     .hc-li-act .btn{padding:3px 9px;font-size:11px;}
     .hc-pill{display:flex;align-items:center;gap:6px;background:#03654e;color:#eafaf2;border-radius:14px;padding:14px 18px;font-size:.95rem;margin-bottom:22px;cursor:pointer;transition:.15s;}
     .hc-pill:hover{background:#024c3a;}
@@ -15169,12 +15171,14 @@ function paintHome(){
   const celRow=(dt)=>{
     const away=dt.daysAway, lbl=(away===0?'Today':away===1?'Tomorrow':(away>1&&away<=31?away+'d':''));
     const sub=celSub(dt);
-    return `<div class="hc-li" title="${hEsc(celTip(dt))}">
+    const _clickable = !dt.auto && (dt.kind||'event')==='event';
+    return `<div class="hc-li${_clickable?' hc-li-click':''}" title="${_clickable?'Open for details':hEsc(celTip(dt))}"
+      ${_clickable?`onclick="openEventDetail(&#39;${hEsc(dt.id)}&#39;)"`:''}>
       <span class="hc-li-ic">${dIcon(dt.title)}</span>
       <span class="hc-li-tx"><span class="hc-li-nm">${hEsc(celName(dt))}</span>${sub?`<span class="hc-li-sub">${hEsc(sub)}</span>`:''}</span>
       <span class="hc-li-when">${hEsc(hMonthAbbr(dt.date))} ${hEsc(hDayNum(dt.date))}${dt.time?' · '+hEsc(dt.time):''}${lbl?' \u00b7 '+lbl:''}</span>
       ${dt.signupUrl?`<a class="hc-li-signup" href="${hEsc(dt.signupUrl)}" target="_blank" rel="noopener noreferrer">Sign up</a>`:''}
-      ${(canEdit && !dt.auto)?`<span class="hc-li-act"><button class="btn btn-secondary btn-sm" onclick="openHomeEditor('date','${hEsc(dt.id)}')">Edit</button><button class="btn btn-secondary btn-sm" onclick="deleteHomeItem('date','${hEsc(dt.id)}')">Delete</button></span>`:''}
+      ${(canEdit && !dt.auto)?`<span class="hc-li-act"><button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();openHomeEditor('date','${hEsc(dt.id)}')">Edit</button><button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();deleteHomeItem('date','${hEsc(dt.id)}')">Delete</button></span>`:''}
     </div>`;
   };
   html += `<div class="hc-sec"><div class="hc-h2"><span>Coming up at Longitude</span>${canEdit?`<button class="btn btn-secondary btn-sm" onclick="openHomeEditor('date')">+ New event</button>`:''}</div><div class="hc-groups">`;
@@ -15233,6 +15237,65 @@ function paintHome(){
 // ── Home admin editor ─────────────────────────────────────────
 // Small inline modal. Owner/admin only — the server re-checks on save, so a
 // hidden button is a convenience, not the security boundary.
+
+// == Home: event detail ======================================================
+// The "Coming up" cards are deliberately compact, which meant a long title was
+// truncated and the note, the time and the sign-up link were not reachable at
+// all unless you could edit the event. Anyone can now open an event and read
+// the whole thing.
+//
+// Events only: birthdays, anniversaries and new hires are generated rows with
+// nothing further to show.
+function openEventDetail(id){
+  const d = HOME_DATA || {};
+  const dt = (d.dates || []).filter(function(x){ return String(x.id) === String(id); })[0];
+  if(!dt) return;
+  closeEventDetail();
+
+  const canEdit = (typeof isAdminRole === 'function') && isAdminRole();
+  const when = [
+    (typeof hFmtDate === 'function' ? hFmtDate(dt.date, true) : dt.date),
+    dt.endDate && dt.endDate !== dt.date
+      ? ('through ' + (typeof hFmtDate === 'function' ? hFmtDate(dt.endDate, true) : dt.endDate))
+      : '',
+    dt.time || ''
+  ].filter(Boolean).join(' · ');
+
+  const wrap = document.createElement('div');
+  wrap.id = 'event-detail';
+  wrap.style.cssText = 'position:fixed;inset:0;z-index:9200;background:rgba(0,0,0,.45);'
+    + 'display:flex;align-items:flex-start;justify-content:center;padding:6vh 16px;overflow:auto;';
+
+  wrap.innerHTML = '<div class="form-runner" style="width:100%;max-width:520px;">'
+    + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">'
+    + '<h3 style="margin:0 0 4px;font-size:18px;color:var(--primary);">' + hEsc(dt.title || '') + '</h3>'
+    + '<button class="btn btn-secondary btn-sm" onclick="closeEventDetail()">Close</button>'
+    + '</div>'
+    + (dt.category ? '<div style="display:inline-block;background:#eef4f1;color:#03654e;border-radius:999px;'
+        + 'padding:2px 10px;font-size:11px;font-weight:700;margin-bottom:8px;">' + hEsc(dt.category) + '</div>' : '')
+    + '<div style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">' + hEsc(when) + '</div>'
+    + (dt.note
+        ? '<div style="font-size:14px;line-height:1.55;white-space:pre-wrap;margin-bottom:16px;">' + hEsc(dt.note) + '</div>'
+        : '<div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">No further details.</div>')
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">'
+    + (dt.signupUrl
+        ? '<a class="btn btn-primary" href="' + hEsc(dt.signupUrl) + '" style="text-decoration:none;">Sign up</a>'
+        : '')
+    + (canEdit
+        ? '<button class="btn btn-secondary" data-eid="' + hEsc(dt.id) + '" onclick="eventDetailEdit(this)">Edit</button>'
+        : '')
+    + '</div></div>';
+
+  wrap.addEventListener('click', function(e){ if(e.target === wrap) closeEventDetail(); });
+  document.body.appendChild(wrap);
+}
+function eventDetailEdit(btn){
+  const id = btn.getAttribute('data-eid');
+  closeEventDetail();
+  openHomeEditor('date', id);
+}
+function closeEventDetail(){ const el = document.getElementById('event-detail'); if(el) el.remove(); }
+
 function openHomeEditor(kind, id){
   const d=HOME_DATA||{};
   const list = kind==='announcement' ? (d.announcements||[]) : kind==='date' ? (d.dates||[]) : (d.links||[]);

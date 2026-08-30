@@ -59,10 +59,15 @@ export async function POST(req: NextRequest) {
     }
 
     const when = [str(body?.date), str(body?.time)].filter(Boolean).join(' · ')
+    // The event's own note is the description people actually need ("3
+    // volunteers needed to hand out..."). Falling back to a generic line only
+    // when there is no note means the form never says less than the event did.
+    const note = str(body?.note)
+    const described = [when, note].filter(Boolean).join(' — ')
     const def: Record<string, string> = {
       formId,
       title: `Sign up: ${title}`,
-      description: when ? `${when}. Let us know if you can make it.` : 'Let us know if you can make it.',
+      description: described || 'Let us know if you can make it.',
       icon: '🙋',
       // Blank audience = everyone. A volunteer sheet nobody can see is useless;
       // narrow it afterwards in Manage access if the event is not for all staff.

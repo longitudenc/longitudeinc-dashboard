@@ -30,6 +30,14 @@ export async function GET() {
       const data: any = formatAllData(raw, scrapedWeeks, rosterRows)
       data.inactiveMap = inactiveMap
 
+      // HOMEDATA IS NO LONGER A SOURCE. It was a hand-loaded ADP export whose
+      // baseWage was 0 on all 130 rows, whose fileNum nothing reads (adp-payroll
+      // takes fileNum from payId), and whose homeSalon was months stale --
+      // wrong for 3 active people and missing 18 more. Everything it carried is
+      // now taken from EmployeeProfile, which the nightly profile scrape keeps
+      // current, with wages from SD_PAYROLL (127 of 127 active covered).
+      //
+      // ORIGINAL COMMENT, kept because it is the reason this exists:
       // HOME SALON: the nightly scrape wins over the hand-loaded tab.
       // homeDataMap is built from HomeData, an ADP export loaded by hand
       // (loadedAt 2026-05-10 when this was written). EmployeeProfile is
@@ -45,9 +53,29 @@ export async function GET() {
       for (const [gid, v] of Object.entries(inactiveMap)) {
         const home = String((v as any).homeSalon || '').trim()
         if (!home) continue
-        if (data.homeDataMap[gid]) data.homeDataMap[gid].homeSalon = home
-        else data.homeDataMap[gid] = { globalId: gid, homeSalon: home }
+        if (data.homeDataMap[gid]) {
+          data.homeDataMap[gid].homeSalon = home
+          if (!data.homeDataMap[gid].payrollName) data.homeDataMap[gid].payrollName = (v as any).name || ''
+        } else {
+          data.homeDataMap[gid] = { globalId: gid, homeSalon: home, payrollName: (v as any).name || '' }
+        }
       }
+
+      // The employee picker (Manager Assignments) now lists ACTIVE employees
+      // from the scrape rather than the stale export. Net effect: departed
+      // people stop appearing in a dropdown used to name a CURRENT manager.
+      const picker = Object.entries(inactiveMap)
+        .filter(([, v]) => !(v as any).inactive && (v as any).name)
+        .map(([gid, v]) => ({ name: (v as any).name, globalId: gid, salon: (v as any).homeSalon || '' }))
+      for (const am of Object.values(AMS) as any[]) {
+        if (am.globalId && !picker.find(e => e.globalId === am.globalId)) {
+          picker.push({ name: am.name + ' (AM)', globalId: am.globalId, salon: 'AM' })
+        }
+      }
+      picker.sort((a, b) => a.name.localeCompare(b.name))
+      data.homeEmployees = picker
+      data.homeCount = picker.length
+      data.homeEffectiveDate = ''   // no longer a hand-loaded snapshot date
       // 4/3/2/1 bands, effective-dated. Raw rows: the client resolves which set
       // applies to the period being viewed (resolveTiersFor in dashboard.html).
       data.metricThresholds = thresholdRows
@@ -295,23 +323,13 @@ function formatAllData(raw: any, scrapedWeeks: any[], rosterRows: any[]) {
     notes: String(row.notes || '').trim(),
   })).filter((r: any) => r.salonNum)
 
-  // ── Home employees ─────────────────────────────────────────
-  const homeEmployees = raw.homeRows.map((row: any) => ({
-    name: row.payrollName || '', globalId: row.globalId || '', salon: row.homeSalon || ''
-  })).filter((e: any) => e.name && e.globalId)
-  Object.values(AMS).forEach((am: any) => {
-    if (am.globalId && !homeEmployees.find((e: any) => e.globalId === am.globalId)) {
-      homeEmployees.push({ name: am.name + ' (AM)', globalId: am.globalId, salon: 'AM' })
-    }
-  })
-  homeEmployees.sort((a: any, b: any) => a.name.localeCompare(b.name))
-
-  // ── Home data map (for tracker) ────────────────────────────
+  // Home employees + home data map
+  // Both were built from the HomeData tab. They are now filled in by the GET
+  // handler from EmployeeProfile, which needs inactiveMap and therefore cannot
+  // happen in here. Declared empty rather than deleted because the SHAPE of this
+  // payload is what the client reads.
+  const homeEmployees: any[] = []
   const homeDataMap: Record<string, any> = {}
-  raw.homeRows.forEach((row: any) => {
-    const id = row.globalId || ''
-    if (id) homeDataMap[id] = row
-  })
 
   // Current base wage per person: HomeData doesn't carry it and the consolidated
   // payroll drops it, so take the most-recent weekly SD_PAYROLL row per globalId.
@@ -342,8 +360,8 @@ function formatAllData(raw: any, scrapedWeeks: any[], rosterRows: any[]) {
     amAssignments,
     homeEmployees,
     homeDataMap,
-    homeCount: raw.homeRows.length,
-    homeEffectiveDate: raw.homeRows[0]?.effectiveDate || '',
+    homeCount: 0,              // both set by the GET handler
+    homeEffectiveDate: '',
     homeRetroUpdated: 0,
     lyAvg: null,
     salonRoster: rosterRows,

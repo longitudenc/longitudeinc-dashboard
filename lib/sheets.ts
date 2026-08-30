@@ -393,7 +393,6 @@ export async function getAllDashboardData() {
     managerRows,
     waiverRows,
     amAssignmentRows,
-    homeRows,
     trackerRows,
     payrollWeeklyRows,
     empWeeklyConsRows,
@@ -407,7 +406,9 @@ export async function getAllDashboardData() {
     getManagerTable(),
     getPenaltyWaivers(),
     getAMAssignments(),
-    getHomeData(),
+    // getHomeData() removed: the HomeData tab was a hand-loaded ADP export
+    // that nothing reads any more. Home salon and the employee picker come
+    // from EmployeeProfile (scraped nightly); wages come from SD_PAYROLL.
     getTrackerData(),
     getPayrollWeekly(),
     getEmployeeWeeklyConsolidated(),
@@ -423,7 +424,6 @@ export async function getAllDashboardData() {
     managerRows,
     waiverRows,
     amAssignmentRows,
-    homeRows,
     trackerRows,
     payrollWeeklyRows,
     empWeeklyConsRows,
