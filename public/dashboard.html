@@ -3008,6 +3008,7 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
   <div style="display:flex;align-items:center;">
     <button class="sidebar-toggle" id="sidebar-toggle-btn" onclick="toggleSidebar()" title="Show/hide sidebar">☰</button>
     <img src="longitude-header.png?v=1" alt="Longitude Inc — A Great Clips Franchisee" style="height:46px;width:auto;display:block;" />
+    <nav id="topnav" aria-label="Main"></nav>
   </div>
   <div class="header-right">
     <div style="position:relative;display:none;align-items:center;gap:6px;">
@@ -3027,17 +3028,17 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
      want (Performance / Pay / People / Requests), not by WHICH area manager.
      The sidebar is still present and still works; this sits above it so both
      are usable while the grouping settles. */
-  /* A LIGHT strip, deliberately. Painted the same green as the header it sits
-     under, it read as a second header rather than as navigation. */
-  #topnav{position:sticky;top:56px;z-index:99;background:var(--paper,#fff);border-bottom:1px solid var(--border,#e6ebe7);
-          display:flex;align-items:center;gap:2px;padding:0 14px;
-          overflow-x:auto;-webkit-overflow-scrolling:touch;
-          box-shadow:0 1px 3px rgba(0,0,0,.05);}
-  #topnav .tn{background:transparent;border:0;color:#5b6b64;font-size:13px;
-          font-weight:600;padding:11px 14px;cursor:pointer;white-space:nowrap;
+  /* Lives INSIDE the green header now, so the app gets a whole bar of
+     vertical space back. No sticky of its own -- the header already is. */
+  #topnav{display:flex;align-items:center;gap:2px;margin-left:22px;height:56px;
+          overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;
+          scrollbar-width:none;}
+  #topnav::-webkit-scrollbar{display:none;}
+  #topnav .tn{background:transparent;border:0;color:rgba(255,255,255,.78);font-size:13px;
+          font-weight:600;padding:0 13px;height:56px;cursor:pointer;white-space:nowrap;
           border-bottom:3px solid transparent;font-family:inherit;}
-  #topnav .tn:hover{color:#03654e;background:rgba(3,101,78,.06);}
-  #topnav .tn.active{color:#03654e;border-bottom-color:#048667;}
+  #topnav .tn:hover{color:#fff;background:rgba(255,255,255,.08);}
+  #topnav .tn.active{color:#fff;border-bottom-color:#9acb3a;}
   #topnav .tn-spacer{flex:1 1 auto;}
   .hub-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;margin-top:14px;}
   .hub-card{background:#fff;border:1px solid var(--border);border-radius:10px;padding:14px 15px;
@@ -3066,6 +3067,7 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
   .act-t{width:100%;border-collapse:collapse;font-size:13px;}
   .act-row{border-top:1px solid #f0efec;cursor:pointer;}
   .act-row:hover{background:#f4f7f5;}
+  .act-t .act-b{padding:3px 9px;font-size:11px;margin-right:4px;}
   /* Age is the point of the outstanding list, so it carries a word as well
      as a colour -- nothing here depends on colour alone. */
   .act-old{background:#fdecea;color:#b3261e;border-radius:999px;padding:2px 9px;font-weight:700;font-size:11px;}
@@ -3075,8 +3077,6 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
   .hub-card-soon:hover{box-shadow:none;transform:none;}
   #topnav .tn-back{color:#048667;font-weight:700;}
 </style>
-<nav id="topnav" aria-label="Main"></nav>
-
 <div class="main-layout">
   <div id="sidebar-backdrop" onclick="toggleSidebar()"></div>
   <aside class="sidebar" id="sidebar">
@@ -10502,6 +10502,7 @@ function applyRoute(){
       case 'admin':     switchToAdmin(); break;
       case 'reviews':   showGoogleReviews(); break;
       case 'activity':  showFormActivity(); break;
+      case 'request':   if(seg[1]) openRequestDeepLink(seg[1]); break;
       case 'event':     if(seg[1]) openEventDetail(seg[1]); break;
       // Recover the name from loaded data so a deep-linked profile does not open
       // with a blank header.
@@ -10705,7 +10706,6 @@ function renderTopNav(){
     html += '<button class="tn' + (S_topNav === it.key ? ' active' : '') + '" data-nav="' + it.key + '"'
           + ' onclick="topNavGo(this)">' + _accEsc(it.label) + '</button>';
   });
-  html += '<span class="tn-spacer"></span>';
   // The "Back to ..." chip that used to live here is gone: the browser Back
   // button now does the same job properly, for every view rather than only
   // for hub drill-ins.
@@ -10840,12 +10840,9 @@ function initSidebarNavSync(){
 
 const ACT_OPEN = ['submitted', 'in_review'];
 
-function _actWorkflow(formId){
-  const d = (FORMS_DEFS || []).filter(function(x){ return x.formId === formId; })[0];
-  return String((d && d.workflow) || '').trim().toLowerCase();
-}
+// formWorkflow() is the existing single definition -- no second copy here.
 function _actAwaited(s){
-  const wf = _actWorkflow(s.formId);
+  const wf = String(formWorkflow(s.formId) || '').toLowerCase();
   return (wf === 'ticket' || wf === 'approval') && ACT_OPEN.indexOf(String(s.status || '').toLowerCase()) >= 0;
 }
 function _actDays(iso){
@@ -10918,7 +10915,9 @@ function paintFormActivity(){
         + hEsc(String(s.submittedAt || '').slice(0, 10))
         + (nComments ? ' · ' + nComments + '&#128172;' : '')
         + (s.canReview ? ' · <b style="color:#03654e;">yours</b>' : '')
-        + '</td></tr>';
+        + '</td>'
+        + (showAge ? '<td style="padding:7px 9px;white-space:nowrap;">' + actBtns(s) + '</td>' : '')
+        + '</tr>';
     }).join('');
   };
 
@@ -10926,7 +10925,7 @@ function paintFormActivity(){
   html += awaited.length
     ? '<div class="act-note">Oldest first. Anything past a week is amber, past two weeks is red.</div>'
       + '<div class="act-tw"><table class="act-t"><thead><tr>'
-      + ['Age','Form','Submitted by','Salon','Status','Activity'].map(function(h){ return '<th style="' + th + '">' + h + '</th>'; }).join('')
+      + ['Age','Form','Submitted by','Salon','Status','Activity','Action'].map(function(h){ return '<th style="' + th + '">' + h + '</th>'; }).join('')
       + '</tr></thead><tbody>' + rowsFor(awaited, true) + '</tbody></table></div>'
     : '<div class="act-empty">Nothing open. Every ticket and approval has been actioned.</div>';
 
@@ -10938,6 +10937,43 @@ function paintFormActivity(){
     : '<div class="act-empty">No submissions yet.</div>';
 
   host.innerHTML = html;
+}
+
+// The same button set the review row builds, from the same formWorkflow().
+// Duplicating the labels would let the two drift into disagreeing about what
+// "done" means for a ticket.
+function actBtns(s){
+  if(!s.canReview) return '<span style="font-size:11px;color:var(--text-muted);">—</span>';
+  const wf = String(formWorkflow(s.formId) || '').toLowerCase();
+  const B = function(status, label, primary){
+    return '<button class="btn ' + (primary ? 'btn-primary' : 'btn-secondary') + ' btn-sm act-b" '
+         + 'data-sub="' + hEsc(s.submissionId) + '" data-st="' + status + '" onclick="actAct(event,this)">' + label + '</button>';
+  };
+  if(wf === 'ticket')   return B('in_review', 'In progress') + B('closed', '&#10003; Done', true);
+  if(wf === 'approval') return B('approved', 'Approve', true) + B('denied', 'Deny');
+  return B('closed', '&#10003; Reviewed', true);
+}
+
+// Acting from the list must not also open the row underneath it.
+function actAct(ev, btn){
+  if(ev && ev.stopPropagation) ev.stopPropagation();
+  const sid = btn.getAttribute('data-sub'), st = btn.getAttribute('data-st');
+  if(!sid || !st) return;
+
+  // Optimistic disable, so a double-click cannot fire the same change twice.
+  Array.prototype.slice.call(document.querySelectorAll('.act-b[data-sub="' + sid + '"]'))
+    .forEach(function(b){ b.disabled = true; b.style.opacity = '.5'; });
+
+  fetch('/api/forms/status', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ submissionId: sid, status: st, reviewNote: '' })
+  }).then(function(r){ return r.json(); }).then(function(res){
+    if(!res || !res.success) throw new Error((res && res.error) || 'Update failed');
+    loadForms(function(){ paintFormActivity(); });
+  }).catch(function(e){
+    alert(e.message || e);
+    loadForms(function(){ paintFormActivity(); });
+  });
 }
 
 function actOpen(tr){
@@ -16564,16 +16600,23 @@ function exportResponsesCSV(formId){
 }
 function openRequestDeepLink(id){
   S_deepReq=null;
+  _route('#/request/' + encodeURIComponent(id));
+  // ONE history entry for this view. loadForms() and showFormsTab() both
+  // route, and two pushes meant Back landed on the Forms page rather than
+  // wherever you opened the request FROM.
+  const _prevApplying = _applyingRoute;
+  _applyingRoute = true;
   clearActive();
   const b=document.getElementById('btn-forms'); if(b) b.classList.add('active');
   const pg=document.getElementById('page-forms'); if(pg) pg.classList.add('active');
   loadForms(()=>{
     const s=(FORMS_SUBS||[]).find(x=>x.submissionId===id);
-    if(!s){ showFormsTab('new'); return; }
+    if(!s){ showFormsTab('new'); _applyingRoute = _prevApplying; return; }
     const ctx = s.canReview ? 'q-' : 'm-';
     showFormsTab(s.canReview ? 'queue' : 'mine');
     setTimeout(()=>{ const row=document.getElementById('sub-'+ctx+id);
       if(row){ row.style.display='table-row'; try{ row.scrollIntoView({behavior:'smooth',block:'center'}); }catch(e){} } }, 60);
+    _applyingRoute = _prevApplying;
   });
 }
 
