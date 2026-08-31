@@ -3053,6 +3053,24 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
           padding:5px 14px;font-size:12px;font-weight:600;color:#5b6b64;cursor:pointer;font-family:inherit;}
   .hub-scope-btn:hover{border-color:#048667;color:#03654e;}
   .hub-scope-btn.active{background:#03654e;border-color:#03654e;color:#fff;}
+  .act-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:6px;}
+  .act-kpi{background:#fff;border:1px solid var(--border);border-radius:10px;padding:12px 14px;}
+  .act-kpi-l{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);}
+  .act-kpi-v{font-size:26px;font-weight:700;color:#03654e;line-height:1.15;}
+  .act-kpi-n{font-size:11px;color:var(--text-muted);line-height:1.35;}
+  .act-h2{font-size:13px;font-weight:700;color:#03654e;margin:22px 0 2px;}
+  .act-h2 span{font-weight:400;color:var(--text-muted);}
+  .act-note{font-size:11px;color:var(--text-muted);margin-bottom:7px;}
+  .act-empty{font-size:13px;color:var(--text-muted);background:#fff;border:1px solid var(--border);border-radius:10px;padding:14px;}
+  .act-tw{overflow-x:auto;background:#fff;border:1px solid var(--border);border-radius:10px;}
+  .act-t{width:100%;border-collapse:collapse;font-size:13px;}
+  .act-row{border-top:1px solid #f0efec;cursor:pointer;}
+  .act-row:hover{background:#f4f7f5;}
+  /* Age is the point of the outstanding list, so it carries a word as well
+     as a colour -- nothing here depends on colour alone. */
+  .act-old{background:#fdecea;color:#b3261e;border-radius:999px;padding:2px 9px;font-weight:700;font-size:11px;}
+  .act-aging{background:#fff4e5;color:#b06a00;border-radius:999px;padding:2px 9px;font-weight:700;font-size:11px;}
+  .act-fresh{color:var(--text-muted);font-size:11px;}
   .hub-card-soon{opacity:.55;cursor:default;}
   .hub-card-soon:hover{box-shadow:none;transform:none;}
   #topnav .tn-back{color:#048667;font-weight:700;}
@@ -10483,6 +10501,7 @@ function applyRoute(){
       case 'form':      switchToForms(); if(seg[1]) loadForms(function(){ openForm(seg[1]); }); break;
       case 'admin':     switchToAdmin(); break;
       case 'reviews':   showGoogleReviews(); break;
+      case 'activity':  showFormActivity(); break;
       case 'event':     if(seg[1]) openEventDetail(seg[1]); break;
       // Recover the name from loaded data so a deep-linked profile does not open
       // with a blank header.
@@ -10627,6 +10646,8 @@ const HUB_GROUPS = {
     cards: [
       { t:'Payroll', d:'Build and review the ADP upload for a week.', cap:'view.payroll',
         href:'/office.html' },
+      { t:'Form Activity', d:'Recent submissions, and what is still waiting on a decision.',
+        cap:'view.payroll', go:function(){ showFormActivity(); } },
       // Editing is gated server-side to EDIT_ROLES = owner/admin/office in every
       // /api/newsletter/* route. `show` MIRRORS that list rather than using a
       // capability, because no capability is checked there yet -- a toggle the
@@ -10804,6 +10825,125 @@ function initSidebarNavSync(){
   });
 }
 
+
+
+// == Office: form activity ===================================================
+// "What needs attention" across every form, rather than one queue tab per
+// person. Built entirely from FORMS_SUBS and FORMS_DEFS, which the server has
+// ALREADY scoped to what this person may see (filterSubmissions in lib/forms).
+// No second endpoint and no second copy of the access rules: a dashboard that
+// disagreed with the queue about who can see what would be worse than none.
+//
+// OUTSTANDING counts only forms whose workflow is ticket or approval. A `record`
+// form -- Kudos, documentation -- is filed, not awaited, and treating those as
+// unresolved would bury the things that genuinely are.
+
+const ACT_OPEN = ['submitted', 'in_review'];
+
+function _actWorkflow(formId){
+  const d = (FORMS_DEFS || []).filter(function(x){ return x.formId === formId; })[0];
+  return String((d && d.workflow) || '').trim().toLowerCase();
+}
+function _actAwaited(s){
+  const wf = _actWorkflow(s.formId);
+  return (wf === 'ticket' || wf === 'approval') && ACT_OPEN.indexOf(String(s.status || '').toLowerCase()) >= 0;
+}
+function _actDays(iso){
+  const t = Date.parse(String(iso || '').slice(0, 19));
+  if(!t) return 0;
+  return Math.max(0, Math.floor((Date.now() - t) / 86400000));
+}
+// Age bands. 14+ days is the one worth shouting about; 7 is "this is drifting".
+function _actAgeCell(days){
+  const cls = days >= 14 ? 'act-old' : (days >= 7 ? 'act-aging' : 'act-fresh');
+  return '<span class="' + cls + '">' + days + 'd</span>';
+}
+
+function showFormActivity(){
+  _route('#/activity');
+  clearActive();
+  const pg = document.getElementById('page-hub');
+  if(pg) pg.classList.add('active');
+  const mainEl = document.querySelector('.content');
+  if(mainEl) mainEl.scrollTop = 0;
+  if(pg){
+    pg.innerHTML = '<div class="page-header"><h2>Form Activity</h2>'
+      + '<div class="sub">Recent submissions and what is still open</div></div>'
+      + '<div id="act-body" style="color:var(--text-muted);font-size:13px;">Loading&hellip;</div>';
+  }
+  // loadForms fills FORMS_DEFS/FORMS_SUBS and is what the Forms page uses too.
+  loadForms(function(){ paintFormActivity(); });
+}
+
+function paintFormActivity(){
+  const host = document.getElementById('act-body');
+  if(!host) return;
+  const subs = (FORMS_SUBS || []).slice();
+
+  const awaited = subs.filter(_actAwaited)
+    .sort(function(a, b){ return String(a.submittedAt || '').localeCompare(String(b.submittedAt || '')); });
+  const mine = awaited.filter(function(s){ return s.canReview; });
+  const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+  const recent = subs.slice()
+    .sort(function(a, b){ return String(b.submittedAt || '').localeCompare(String(a.submittedAt || '')); });
+  const thisWeek = recent.filter(function(s){ return String(s.submittedAt || '').slice(0, 10) >= weekAgo; });
+  const oldest = awaited.length ? _actDays(awaited[0].submittedAt) : 0;
+
+  const kpi = function(label, value, note, warn){
+    return '<div class="act-kpi"><div class="act-kpi-l">' + hEsc(label) + '</div>'
+      + '<div class="act-kpi-v"' + (warn ? ' style="color:#b3261e;"' : '') + '>' + hEsc(String(value)) + '</div>'
+      + '<div class="act-kpi-n">' + hEsc(note) + '</div></div>';
+  };
+
+  let html = '<div class="act-kpis">'
+    + kpi('Still open', awaited.length, 'tickets and approvals awaiting a decision')
+    + kpi('Waiting on you', mine.length, 'open items you can action', mine.length > 0)
+    + kpi('New this week', thisWeek.length, 'submissions in the last 7 days')
+    + kpi('Oldest open', oldest ? oldest + 'd' : '—', 'age of the longest-waiting item', oldest >= 14)
+    + '</div>';
+
+  const th = 'padding:5px 9px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);text-align:left;';
+  const rowsFor = function(list, showAge){
+    return list.map(function(s){
+      const days = _actDays(s.submittedAt);
+      const nComments = (s.comments || []).length;
+      return '<tr class="act-row" data-sub="' + hEsc(s.submissionId) + '" onclick="actOpen(this)">'
+        + (showAge ? '<td style="padding:7px 9px;">' + _actAgeCell(days) + '</td>' : '')
+        + '<td style="padding:7px 9px;font-weight:600;">' + hEsc(s.formTitle || s.formId) + '</td>'
+        + '<td style="padding:7px 9px;">' + hEsc(s.submittedByName || '—') + '</td>'
+        + '<td style="padding:7px 9px;">' + hEsc(s.salonNum || '—') + '</td>'
+        + '<td style="padding:7px 9px;"><span class="st-' + hEsc(String(s.status || '').toLowerCase()) + '">'
+        + hEsc(String(s.status || '').replace(/_/g, ' ')) + '</span></td>'
+        + '<td style="padding:7px 9px;color:var(--text-muted);">'
+        + hEsc(String(s.submittedAt || '').slice(0, 10))
+        + (nComments ? ' · ' + nComments + '&#128172;' : '')
+        + (s.canReview ? ' · <b style="color:#03654e;">yours</b>' : '')
+        + '</td></tr>';
+    }).join('');
+  };
+
+  html += '<div class="act-h2">Outstanding <span>' + awaited.length + '</span></div>';
+  html += awaited.length
+    ? '<div class="act-note">Oldest first. Anything past a week is amber, past two weeks is red.</div>'
+      + '<div class="act-tw"><table class="act-t"><thead><tr>'
+      + ['Age','Form','Submitted by','Salon','Status','Activity'].map(function(h){ return '<th style="' + th + '">' + h + '</th>'; }).join('')
+      + '</tr></thead><tbody>' + rowsFor(awaited, true) + '</tbody></table></div>'
+    : '<div class="act-empty">Nothing open. Every ticket and approval has been actioned.</div>';
+
+  html += '<div class="act-h2">Recent submissions <span>' + Math.min(recent.length, 15) + '</span></div>';
+  html += recent.length
+    ? '<div class="act-tw"><table class="act-t"><thead><tr>'
+      + ['Form','Submitted by','Salon','Status','Submitted'].map(function(h){ return '<th style="' + th + '">' + h + '</th>'; }).join('')
+      + '</tr></thead><tbody>' + rowsFor(recent.slice(0, 15), false) + '</tbody></table></div>'
+    : '<div class="act-empty">No submissions yet.</div>';
+
+  host.innerHTML = html;
+}
+
+function actOpen(tr){
+  const id = tr && tr.getAttribute ? tr.getAttribute('data-sub') : '';
+  if(id) openRequestDeepLink(id);
+}
 
 // == Google Reviews ==========================================================
 // Every salon's public Google rating and review count, plus movement since the
