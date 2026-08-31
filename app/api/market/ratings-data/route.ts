@@ -13,6 +13,12 @@ export const dynamic = 'force-dynamic'
 
 const TAB = 'GooglePlaces'
 const HIST_TAB = 'RatingHistory'
+// GooglePlaces holds the whole Charlotte market -- 71 places, only 18 of which
+// we operate. Everything served here is about OUR salons (the dashboard's
+// rating column and the Google Reviews page), so the comparators are filtered
+// out. Market-wide comparison lives at /api/market/data, which is a different
+// question with a different audience.
+const ROSTER_TAB = 'SalonRoster'
 const CACHE_TTL = 5 * 60 * 1000
 let cache: { ratings: Record<string, any>; history: any[]; timestamp: number } | null = null
 
@@ -31,6 +37,20 @@ export async function GET() {
     // RatingHistory is the month-by-month series the ratings refresh appends to.
     // Shipped alongside the current numbers so the client can show movement
     // without a second round trip. Tolerant of a missing tab.
+    // Sold or closed salons drop out too: a store we no longer run is not
+    // part of "how are our reviews doing".
+    let ours: Set<string> | null = null
+    try {
+      const roster = rowsToObjects((await readSheet(ROSTER_TAB)) || [])
+      const live = roster.filter((r: any) => {
+        const st = String(r.status ?? '').trim().toLowerCase()
+        return !st || st === 'active'
+      })
+      const set = new Set(live.map((r: any) => String(r.salonNum ?? '').trim()).filter(Boolean))
+      if (set.size) ours = set
+    } catch { ours = null }   // no roster -> fall back to returning everything
+    const isOurs = (sn: string) => !ours || ours.has(sn)
+
     let history: any[] = []
     try {
       history = rowsToObjects((await readSheet(HIST_TAB)) || []).map((r: any) => ({
@@ -38,13 +58,13 @@ export async function GET() {
         month: String(r.month ?? '').trim(),
         rating: toNum(r.rating),
         reviews: toNum(r.reviews),
-      })).filter((r: any) => r.salonNum && r.month)
+      })).filter((r: any) => r.salonNum && r.month && isOurs(r.salonNum))
     } catch { history = [] }
 
     const rows = rowsToObjects((await readSheet(TAB)) || [])
     const ratings: Record<string, any> = {}
     for (const r of rows) {
-      const sn = String(r.salonNum ?? '').trim(); if (!sn) continue
+      const sn = String(r.salonNum ?? '').trim(); if (!sn || !isOurs(sn)) continue
       ratings[sn] = { rating: toNum(r.rating), reviews: toNum(r.reviews), status: String(r.businessStatus ?? '').trim() }
     }
     cache = { ratings, history, timestamp: Date.now() }
