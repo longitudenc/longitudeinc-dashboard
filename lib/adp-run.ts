@@ -86,6 +86,8 @@ export interface RunResult extends PayrollBuildResult {
     bonusPeriod: string | null
     bonusLines: number
     manualLines: number
+    /** The hand-keyed lines this build actually included. */
+    manualDetail: (ExtraEarning & { id: string })[]
     settingsFromSheet: boolean
     /** Codes still unassigned — the office has to fill these in. */
     missingCodes: string[]
@@ -444,6 +446,9 @@ export async function runPayrollBuild(opts: RunOptions = {}): Promise<RunResult>
       bonusPeriod,
       bonusLines: bonuses.length,
       manualLines: manual.length,
+      // The lines themselves, not just how many. A count cannot tell you the
+      // $200 referral is missing; a list can.
+      manualDetail: manual,
       settingsFromSheet: Object.keys(settings.overrides).length > 0,
       missingCodes,
       variance,

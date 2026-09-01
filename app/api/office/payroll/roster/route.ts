@@ -22,6 +22,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const SD_EMP_WEEKLY_TAB = 'SD_EMP_WEEKLY'
+const SALON_ROSTER_TAB = 'SalonRoster'
 
 interface RosterEntry {
   payId: string
@@ -63,6 +64,13 @@ export async function GET(request: Request) {
       if (salon && !e.salons.includes(salon)) e.salons.push(salon)
     }
 
+    let activeSalons: string[] = []
+    try {
+      activeSalons = rowsToObjects(await readSheet(SALON_ROSTER_TAB))
+        .filter(r => { const st = String(r.status ?? '').trim().toLowerCase(); return !st || st === 'active' })
+        .map(r => String(r.salonNum ?? '').trim()).filter(Boolean).sort()
+    } catch { activeSalons = [] }   // no roster -> the picker falls back to all
+
     const employees = [...byPay.values()]
       .map(e => ({ ...e, salons: e.salons.sort() }))
       .sort((a, b) => a.name.localeCompare(b.name))
@@ -74,6 +82,10 @@ export async function GET(request: Request) {
       // not the week being paid, rather than implying a roster it doesn't have.
       sourceWeekEnd: useWeek,
       employees,
+      // Salons still open. The ADP settings map carries every salon that ever
+      // had a co-code — 3446, 1082 and 8725 among them — which is right for
+      // rebuilding an old week and wrong for a picker.
+      activeSalons,
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)

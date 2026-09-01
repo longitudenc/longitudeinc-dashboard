@@ -173,6 +173,8 @@
           </label>
           <button class="btn" id="build-btn" onclick="build()">Build upload</button>
           <button class="btn ghost" id="dl-btn" onclick="download()" disabled>Download ADP file</button>
+          <button class="btn" id="fin-btn" onclick="finalizeWeek()" disabled
+            title="Record this week as the agreed version">Finalize week</button>
           <button class="btn ghost" id="rec-btn" onclick="downloadReconciliation()" disabled
             title="A per-salon CSV of everything that differs from SD3, and who caused it">Download reconciliation</button>
         </div>
@@ -248,7 +250,7 @@ let LAST_BUILD = null;
 let SETTINGS = null;
 let MANUAL_LINES = [];
 let SETTINGS_FIELDS = [];
-let ROSTER = { employees: [], sourceWeekEnd: '', loadedFor: '' };
+let ROSTER = { employees: [], sourceWeekEnd: '', loadedFor: '', activeSalons: [] };
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c =>
@@ -337,6 +339,7 @@ function onWeekChange(){
   }catch(e){}
   $('dl-btn').disabled = true;
   $('rec-btn').disabled = true;
+  $('fin-btn').disabled = true;
   LAST_BUILD = null;
   $('build-out').innerHTML = '';
   $('week-sub').textContent = 'week ending ' + $('week-select').value;
@@ -379,6 +382,7 @@ function clearSavedBuild(){
   $('build-out').innerHTML = '';
   $('dl-btn').disabled = true;
   $('rec-btn').disabled = true;
+  $('fin-btn').disabled = true;
 }
 
 function restoreBuild(){
@@ -400,6 +404,7 @@ function restoreBuild(){
   renderBuild(saved.build);
   $('dl-btn').disabled = false;
   $('rec-btn').disabled = false;
+  $('fin-btn').disabled = false;
 
   const when = (function(){
     try{
@@ -489,6 +494,82 @@ function sixDetailHtml(s){
   return h;
 }
 
+
+// ── Finalize ──────────────────────────────────────────────────
+// Until now the only record a week existed was written as a side effect of
+// clicking Download — so an accidental download logged a week, and a week
+// reviewed and agreed but not yet downloaded logged nothing. Finalizing writes
+// the decision down separately: the totals as they stood, the corrections
+// against SD3, and who agreed them. Downloads still log themselves; that is a
+// delivery receipt, which is a different fact.
+let FINAL_STATE = { weekEnd: '', finalized: false, record: null };
+
+function checkFinalized(weekEnd, then){
+  fetch('/api/office/payroll/finalize?weekEnd=' + encodeURIComponent(weekEnd))
+    .then(r => r.json())
+    .then(d => {
+      FINAL_STATE = d && d.success
+        ? { weekEnd: weekEnd, finalized: !!d.finalized, record: d.record || null }
+        : { weekEnd: weekEnd, finalized: false, record: null };
+      then && then();
+    })
+    .catch(() => { FINAL_STATE = { weekEnd: weekEnd, finalized: false, record: null }; then && then(); });
+}
+
+function finalizeBannerHtml(){
+  if(!FINAL_STATE.finalized || !FINAL_STATE.record) return '';
+  const r = FINAL_STATE.record;
+  let when = String(r.finalizedAt || '');
+  try{ when = new Date(r.finalizedAt).toLocaleString(); }catch(e){}
+  return '<div class="banner" style="margin:0 0 12px;background:#eef7ee;border-color:#bcd9bc;">'
+    + '<b>This week is finalized.</b> Locked in on ' + esc(when) + ' by ' + esc(r.finalizedBy || '')
+    + ' — total pay ' + money(r.totalPay) + ' across ' + esc(r.employees) + ' people'
+    + (Number(r.manualLines) ? ', including ' + esc(r.manualLines) + ' hand-keyed line'
+        + (Number(r.manualLines) === 1 ? '' : 's') + ' worth ' + money(r.manualTotal) : '')
+    + '. <button class="btn ghost small" onclick="unfinalizeWeek()">Unlock</button></div>';
+}
+
+function finalizeWeek(){
+  if(!LAST_BUILD){ return; }
+  const weekEnd = $('week-select').value;
+  const blocking = (LAST_BUILD.exceptions || []).filter(e => e.severity === 'blocking').length;
+  let msg = 'Finalize week ending ' + weekEnd + '?\n\n'
+    + 'This records the totals, the corrections against SD3, and the hand-keyed '
+    + 'lines as the agreed version. It is rebuilt server-side first, so what gets '
+    + 'recorded is the real figure rather than what this page happens to show.';
+  if(blocking) msg += '\n\nWARNING: ' + blocking + ' blocking exception(s) are still open.';
+  if(!(LAST_BUILD.meta && (LAST_BUILD.meta.manualDetail || []).length)){
+    msg += '\n\nNote: no hand-keyed earnings are recorded for this week.';
+  }
+  if(!confirm(msg)) return;
+
+  const btn = $('fin-btn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Finalizing…'; }
+  fetch('/api/office/payroll/finalize', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ weekEnd: weekEnd })
+  }).then(r => r.json()).then(d => {
+    if(!d.success){
+      alert(d.error || 'Could not finalize.');
+      return;
+    }
+    FINAL_STATE = { weekEnd: weekEnd, finalized: true, record: d.record };
+    renderBuild(LAST_BUILD);
+  }).catch(e => alert(e.message || e))
+    .finally(() => { if(btn){ btn.disabled = false; btn.textContent = 'Finalize week'; } });
+}
+
+function unfinalizeWeek(){
+  const weekEnd = $('week-select').value;
+  if(!confirm('Unlock week ending ' + weekEnd + '?\n\nThe finalized record is removed. '
+    + 'Any ADP download already logged stays logged — that is a separate record.')) return;
+  fetch('/api/office/payroll/finalize?weekEnd=' + encodeURIComponent(weekEnd), { method: 'DELETE' })
+    .then(r => r.json()).then(() => {
+      FINAL_STATE = { weekEnd: weekEnd, finalized: false, record: null };
+      if(LAST_BUILD) renderBuild(LAST_BUILD);
+    }).catch(e => alert(e.message || e));
+}
+
 // ── Sortable tables ───────────────────────────────────────────
 // Any table gets sorting by adding data-sort to its <th>: "num" for numeric,
 // "text" otherwise. Values come from the cell's data-v when present (so a
@@ -551,10 +632,12 @@ function build(){
         return;
       }
       LAST_BUILD = d;
+      checkFinalized(d.weekEnd, function(){ renderBuild(d); });
       renderBuild(d);
       saveBuild(d);
       $('dl-btn').disabled = false;
       $('rec-btn').disabled = false;
+      $('fin-btn').disabled = false;
     })
     .catch(e=>{ $('build-out').innerHTML = '<div class="banner err"><b>Build failed.</b> '+esc(e.message)+'</div>'; })
     .finally(()=>{ btn.disabled = false; btn.textContent = 'Build upload'; });
@@ -596,6 +679,10 @@ function renderBuild(d){
   const blocking = d.exceptions.filter(e=>e.severity==='blocking');
   const warnings = d.exceptions.filter(e=>e.severity!=='blocking');
   let h = '';
+
+  // The lock state leads, because whether this week is already agreed changes
+  // how you read everything under it.
+  h += finalizeBannerHtml();
 
   // ── Banners ──
   if(blocking.length){
@@ -748,6 +835,38 @@ function renderBuild(d){
       h += '<tr id="six-d-'+si+'" style="display:none;"><td colspan="5" style="padding:0;">'
          + sixDetailHtml(s) + '</td></tr>';
     });
+    h += '</tbody></table></div>';
+  }
+  h += '</div></div>';
+
+  // ── Hand-keyed earnings ──
+  // Always shown, INCLUDING when there are none: "nothing keyed" is the
+  // fact that explains a total which will not tie against the old workbook.
+  const manual = (d.meta && d.meta.manualDetail) || [];
+  const manualTotal = manual.reduce((t,m)=>t+(Number(m.amount)||0),0);
+  h += '<div class="card"><h2>Hand-keyed earnings <span class="sub">'
+     + 'referral and sign-on bonuses, guarantees, reimbursements — anything with no source in SD3'
+     + '</span></h2><div class="body" style="padding:0;">';
+  if(!manual.length){
+    h += '<div class="body"><div class="banner warn" style="margin:0;">'
+       + '<b>Nothing keyed for this week.</b> If the old workbook carries referral '
+       + 'bonuses, manager cell, or any other hand-added line, this file is short by '
+       + 'exactly that amount. Add them on the <b>Manual Earnings</b> tab and rebuild.'
+       + '</div></div>';
+  } else {
+    h += '<div class="scroll"><table><thead><tr><th data-sort="text">Employee</th>'
+       + '<th data-sort="text">Salon</th><th data-sort="text">Description</th>'
+       + '<th data-sort="num" class="num">Amount</th><th>In OT rate</th></tr></thead><tbody>';
+    manual.forEach(function(m){
+      const emp = rosterFor(m.payId);
+      h += '<tr><td>' + esc(emp ? emp.name : ('Payroll ID ' + m.payId)) + '</td>'
+         + '<td>' + esc(m.salonNum || 'their main salon') + '</td>'
+         + '<td>' + esc(m.label || '') + '</td>'
+         + numTd(money(m.amount), m.amount)
+         + '<td>' + (m.otEligible ? 'yes' : '<span class="muted">no</span>') + '</td></tr>';
+    });
+    h += '<tr class="sum"><td colspan="3">Total hand-keyed</td>'
+       + numTd(money(manualTotal), manualTotal) + '<td></td></tr>';
     h += '</tbody></table></div>';
   }
   h += '</div></div>';
@@ -1118,11 +1237,12 @@ function loadRoster(weekEnd, then){
     .then(r=>r.json())
     .then(d=>{
       ROSTER = d.success
-        ? { employees: d.employees||[], sourceWeekEnd: d.sourceWeekEnd||'', loadedFor: weekEnd }
-        : { employees: [], sourceWeekEnd: '', loadedFor: weekEnd };
+        ? { employees: d.employees||[], sourceWeekEnd: d.sourceWeekEnd||'', loadedFor: weekEnd,
+            activeSalons: d.activeSalons||[] }
+        : { employees: [], sourceWeekEnd: '', loadedFor: weekEnd, activeSalons: [] };
       then && then();
     })
-    .catch(()=>{ ROSTER = { employees: [], sourceWeekEnd:'', loadedFor: weekEnd }; then && then(); });
+    .catch(()=>{ ROSTER = { employees: [], sourceWeekEnd:'', loadedFor: weekEnd, activeSalons: [] }; then && then(); });
 }
 function rosterItems(){
   return ROSTER.employees.map(e=>({
@@ -1184,7 +1304,13 @@ function codeSelect(i, value){
   return h;
 }
 function salonSelect(i, line){
-  const all = Object.keys((SETTINGS && SETTINGS.salons) || {}).sort();
+  // SETTINGS.salons carries every salon that ever had an ADP co-code (3446,
+  // 1082, 8725 among them) because an old week still has to rebuild. For a
+  // picker that is just clutter, so offer the OPEN ones — plus whatever this
+  // line already has, or editing an old row would silently rewrite it.
+  const every = Object.keys((SETTINGS && SETTINGS.salons) || {});
+  const open = (ROSTER.activeSalons && ROSTER.activeSalons.length) ? ROSTER.activeSalons : every;
+  const all = every.filter(sn => open.indexOf(sn) >= 0 || sn === line.salonNum).sort();
   const emp = rosterFor(line.payId);
   const worked = emp ? emp.salons : [];
   const opt = sn => '<option value="'+esc(sn)+'"'+(sn===line.salonNum?' selected':'')+'>'+esc(sn)+'</option>';
