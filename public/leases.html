@@ -95,11 +95,8 @@
       <h2>Upload documents <span class="sub" id="up-sub">leases, amendments, abstracts, notices</span></h2>
       <div class="body">
         <div class="filegrid">
-          <label class="fld">Location
-            <input type="text" id="f-location" list="loc-list" placeholder="e.g. Ingram Plaza" oninput="onLocationTyped()">
-          </label>
-          <label class="fld">Unit #
-            <input type="text" id="f-unit" placeholder="e.g. 1449">
+          <label class="fld">Salon
+            <select id="f-salon"><option value="">&mdash; pick a salon &mdash;</option></select>
           </label>
           <label class="fld">Document type
             <select id="f-doctype"></select>
@@ -108,7 +105,6 @@
             <input type="text" id="f-note" placeholder="anything worth remembering">
           </label>
         </div>
-        <datalist id="loc-list"></datalist>
 
         <div class="drop" id="drop"
              onclick="document.getElementById('picker').click()"
@@ -120,7 +116,7 @@
 
         <div class="hint">
           Whatever is filled in above is applied to every file in the drop, so a batch for one
-          location files itself. It can be changed per document afterwards.
+          salon files itself. Leave the salon blank for anything not tied to one.
         </div>
 
         <div class="q" id="queue" style="display:none;"></div>
@@ -130,7 +126,7 @@
     <div class="card">
       <h2>Documents <span class="sub" id="doc-sub"></span></h2>
       <div class="body" style="padding:10px 14px;">
-        <input type="text" id="search" placeholder="Filter by name, location, unit or type…"
+        <input type="text" id="search" placeholder="Filter by name, salon or type…"
                style="width:100%;max-width:420px;" oninput="renderFiles()">
       </div>
       <div class="scroll" id="files-out"><div class="loading">Loading…</div></div>
@@ -149,17 +145,14 @@ let SESSION = { email:'', role:'none' };
 let FILES = [];
 let DOC_TYPES = [];
 
-// The 16 Twin Dome locations, so filing a document is a pick rather than a
-// retype. Choosing one fills the unit number in. Typing anything else is fine —
-// this is a convenience, not a constraint, and nothing validates against it.
-const LOCATIONS = [
-  ['Ingram Plaza','1449'], ['Mayodan Shopping Center','4340'], ['Westchester Square','1971'],
-  ['North Elm Village','4313'], ['Tanglewood Commons','4314'], ['Clemmons Town Center','9229'],
-  ['Tarheel Plaza','4339'], ['Oak Summit','4309'], ['Union Cross','3844'],
-  ['Hanes Point','4317'], ['Wilkes Plaza','4341'], ['Cloverdale Plaza','4318'],
-  ['Lewisville Commons','4323'], ['Granite Towne Centre','4342'],
-  ['Mocksville Shopping Center','9672'], ['Walkertown Commons','4333'],
-];
+// OUR salons, served by /api/leases/files straight from lib/config, so there
+// is one list rather than a copy here that drifts. What gets recorded is the
+// salon NUMBER: that is what a lease record joins on.
+let SALONS = [];
+function salonLabel(num){
+  const hit = SALONS.find(x => x.num === String(num));
+  return hit ? (hit.num + ' ' + hit.name) : String(num || '');
+}
 
 // A file dragged from some systems arrives with an empty type. The server
 // checks the content type it is told, so guess from the extension rather than
@@ -215,16 +208,9 @@ fetch('/api/auth/me').then(r=>r.json()).then(me=>{
   }
   $('gate').style.display = 'none';
   $('app').style.display = '';
-  $('loc-list').innerHTML = LOCATIONS.map(l=>'<option value="'+esc(l[0])+'">').join('');
   loadFiles();
 }).catch(e=>{ $('gate').innerHTML = '<div class="banner err">'+esc(e.message)+'</div>'; });
 
-/** Picking a known location fills its unit in, unless one was typed already. */
-function onLocationTyped(){
-  const v = $('f-location').value.trim().toLowerCase();
-  const hit = LOCATIONS.find(l => l[0].toLowerCase() === v);
-  if(hit && !$('f-unit').value.trim()) $('f-unit').value = hit[1];
-}
 
 // ── The drop target ───────────────────────────────────────────
 function dropOver(ev, on){
@@ -275,9 +261,10 @@ function queue(files){
   if(!files.length) return;
   // Read the filing fields ONCE, at drop time. Changing them mid-upload should
   // not retroactively refile what is already going up.
+  const salonNum = $('f-salon').value;
   const meta = {
-    location: $('f-location').value.trim(),
-    unit: $('f-unit').value.trim(),
+    salonNum: salonNum,
+    location: salonNum ? salonLabel(salonNum) : '',
     docType: $('f-doctype').value,
     note: $('f-note').value.trim(),
   };
@@ -320,8 +307,8 @@ async function uploadOne(item){
   const meta = {
     fileName: item.file.name,
     contentType: item.contentType,
+    salonNum: item.meta.salonNum,
     location: item.meta.location,
-    unit: item.meta.unit,
     docType: item.meta.docType,
     note: item.meta.note,
   };
@@ -421,6 +408,12 @@ function loadFiles(){
     if(!d.success){ $('files-out').innerHTML = '<div class="banner err">'+esc(d.error)+'</div>'; return; }
     FILES = d.files || [];
     DOC_TYPES = d.docTypes || [];
+    SALONS = d.salons || [];
+    const ssel = $('f-salon');
+    if(ssel && ssel.options.length <= 1){
+      ssel.innerHTML = ssel.options[0].outerHTML
+        + SALONS.map(x=>'<option value="'+esc(x.num)+'">'+esc(x.num+' '+x.name)+'</option>').join('');
+    }
     const sel = $('f-doctype');
     if(sel && !sel.options.length){
       sel.innerHTML = DOC_TYPES.map(t=>'<option value="'+esc(t)+'">'+esc(t)+'</option>').join('');
@@ -432,7 +425,8 @@ function loadFiles(){
 function renderFiles(){
   const term = ($('search').value||'').trim().toLowerCase();
   const rows = FILES.filter(f => !term ||
-    (f.fileName+' '+f.location+' '+f.unit+' '+f.docType+' '+f.note).toLowerCase().indexOf(term) >= 0);
+    (f.fileName+' '+f.salonNum+' '+f.location+' '+f.docType+' '+f.note)
+      .toLowerCase().indexOf(term) >= 0);
 
   $('doc-sub').textContent = FILES.length
     ? (rows.length === FILES.length ? FILES.length + ' documents'
@@ -449,15 +443,14 @@ function renderFiles(){
     return;
   }
 
-  let h = '<table><thead><tr><th>Document</th><th>Location</th><th>Unit</th><th>Type</th>'
+  let h = '<table><thead><tr><th>Document</th><th>Salon</th><th>Type</th>'
         + '<th>Size</th><th>Uploaded</th><th></th></tr></thead><tbody>';
   rows.forEach(f=>{
     const view = '/api/leases/files/view?fileId='+encodeURIComponent(f.fileId);
     h += '<tr>'
       + '<td><a href="'+view+'" target="_blank" rel="noopener noreferrer">'+esc(f.fileName)+'</a>'
       + (f.note? '<div class="hint" style="margin-top:2px;">'+esc(f.note)+'</div>':'')+'</td>'
-      + '<td>'+esc(f.location||'—')+'</td>'
-      + '<td class="muted">'+esc(f.unit||'—')+'</td>'
+      + '<td>'+esc(f.salonNum ? salonLabel(f.salonNum) : (f.location||'—'))+'</td>'
       + '<td>'+(f.docType? '<span class="pill">'+esc(f.docType)+'</span>':'')+'</td>'
       + '<td class="muted nowrap">'+esc(sizeText(f.sizeBytes))+'</td>'
       + '<td class="muted nowrap">'+esc(dateText(f.uploadedAt))

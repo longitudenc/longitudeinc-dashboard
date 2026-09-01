@@ -16,6 +16,7 @@ import { NextResponse } from 'next/server'
 import { del } from '@vercel/blob'
 import { requireAdmin } from '@/lib/require-role'
 import { listFiles, upsertFile, removeFile, DOC_TYPES } from '@/lib/leases'
+import { SALON_NAMES } from '@/lib/config'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -29,7 +30,11 @@ export async function GET() {
     // Fresh: a file uploaded seconds ago must appear, or the upload reads as
     // having failed.
     const files = await listFiles({ fresh: true })
-    return NextResponse.json({ success: true, files, docTypes: [...DOC_TYPES] })
+    // The salon list travels with the listing so the upload picker has one
+    // source of truth — lib/config — rather than a copy that drifts.
+    const salons = Object.keys(SALON_NAMES).sort()
+      .map(num => ({ num, name: SALON_NAMES[num] }))
+    return NextResponse.json({ success: true, files, docTypes: [...DOC_TYPES], salons })
   } catch (e: any) {
     return NextResponse.json({ success: false, error: String(e?.message || e) }, { status: 500 })
   }
@@ -56,6 +61,7 @@ export async function POST(req: Request) {
       contentType: body?.contentType !== undefined ? S(body.contentType, 120) : undefined,
       sizeBytes: body?.sizeBytes !== undefined ? Number(body.sizeBytes) || 0 : undefined,
       uploadedBy: gate.email,
+      salonNum: body?.salonNum !== undefined ? S(body.salonNum, 20) : undefined,
       location: body?.location !== undefined ? S(body.location, 120) : undefined,
       unit: body?.unit !== undefined ? S(body.unit, 40) : undefined,
       docType: body?.docType !== undefined ? S(body.docType, 60) : undefined,

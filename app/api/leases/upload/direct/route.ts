@@ -100,6 +100,7 @@ export async function POST(req: Request) {
       contentType,
       sizeBytes: file.size,
       uploadedBy: gate.email,
+      salonNum: S(form.get("salonNum"), 20),
       location,
       unit: S(form.get('unit'), 40),
       docType: S(form.get('docType'), 60),

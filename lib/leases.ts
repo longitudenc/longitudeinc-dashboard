@@ -31,7 +31,7 @@ export const TAB_LEASE_FILES = 'LeaseFiles'
 
 export const LEASE_FILE_COLUMNS = [
   'fileId', 'pathname', 'fileName', 'contentType', 'sizeBytes',
-  'uploadedAt', 'uploadedBy', 'location', 'unit', 'docType', 'note',
+  'uploadedAt', 'uploadedBy', 'salonNum', 'location', 'unit', 'docType', 'note',
 ] as const
 
 /** What kind of paper this is. Free text is allowed; these are the offered set. */
@@ -104,6 +104,8 @@ export interface LeaseFile {
   sizeBytes: number
   uploadedAt: string
   uploadedBy: string
+  /** Which of our salons this belongs to, e.g. "2554". The join to a lease. */
+  salonNum: string
   location: string
   unit: string
   docType: string
@@ -129,6 +131,7 @@ function toFile(r: Record<string, any>): LeaseFile {
     sizeBytes: N(r.sizeBytes),
     uploadedAt: S(r.uploadedAt),
     uploadedBy: S(r.uploadedBy),
+    salonNum: S(r.salonNum),
     location: S(r.location),
     unit: S(r.unit),
     docType: S(r.docType),
@@ -189,6 +192,7 @@ export async function upsertFile(input: Partial<LeaseFile> & { pathname: string 
     sizeBytes: N(input.sizeBytes) || N(existing?.sizeBytes),
     uploadedAt: S(existing?.uploadedAt) || S(input.uploadedAt) || new Date().toISOString(),
     uploadedBy: S(existing?.uploadedBy) || S(input.uploadedBy),
+    salonNum: input.salonNum !== undefined ? S(input.salonNum) : S(existing?.salonNum),
     location: input.location !== undefined ? S(input.location) : S(existing?.location),
     unit: input.unit !== undefined ? S(input.unit) : S(existing?.unit),
     docType: input.docType !== undefined ? S(input.docType) : S(existing?.docType),
@@ -200,6 +204,16 @@ export async function upsertFile(input: Partial<LeaseFile> & { pathname: string 
 
   if (!hasHeader) {
     await writeSheet(TAB_LEASE_FILES, [cols, rowFor(merged)])
+    return merged
+  }
+  const missing = cols.filter(c => !header.some(h => h.toLowerCase() === c.toLowerCase()))
+  if (missing.length) {
+    // A column was added since this tab was created. Rewrite it whole with
+    // the full header, keeping every row, rather than dropping the new
+    // field on every write from here on.
+    const all = rows.map(r => (S(r.pathname) === pathname ? merged : toFile(r)))
+    if (!existing) all.push(merged)
+    await writeSheet(TAB_LEASE_FILES, [cols, ...all.map(rowFor)])
     return merged
   }
   if (!existing) {

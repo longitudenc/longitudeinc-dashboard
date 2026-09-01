@@ -73,6 +73,7 @@ export async function POST(req: Request) {
           tokenPayload: JSON.stringify({
             fileName: S(meta.fileName, 260),
             contentType: S(meta.contentType, 120),
+            salonNum: S(meta.salonNum, 20),
             location: S(meta.location, 120),
             unit: S(meta.unit, 40),
             docType: S(meta.docType, 60),
@@ -91,6 +92,7 @@ export async function POST(req: Request) {
           contentType: S(meta.contentType, 120),
           sizeBytes: Number((blob as any).size) || 0,
           uploadedBy: S(meta.uploadedBy, 200),
+          salonNum: S(meta.salonNum, 20),
           location: S(meta.location, 120),
           unit: S(meta.unit, 40),
           docType: S(meta.docType, 60),

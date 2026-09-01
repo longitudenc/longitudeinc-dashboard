@@ -20,6 +20,7 @@ import { upload } from '@vercel/blob/client'
 export interface LeaseUploadMeta {
   fileName: string
   contentType: string
+  salonNum?: string
   location?: string
   unit?: string
   docType?: string
