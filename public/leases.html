@@ -45,6 +45,33 @@
   .loading{padding:40px;text-align:center;color:var(--text-muted);font-size:14px;}
   .hint{font-size:11.5px;color:var(--text-light);margin-top:5px;line-height:1.5;}
   .filegrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;margin-bottom:14px;}
+  .tabs{display:flex;gap:2px;background:var(--primary-dark);padding:0 1.25rem;}
+  .tab{font-family:inherit;font-size:12.5px;font-weight:500;padding:9px 15px;border:none;
+    background:transparent;color:#bfe9d8;cursor:pointer;border-bottom:3px solid transparent;}
+  .tab:hover{color:#fff;}
+  .tab.active{color:#fff;border-bottom-color:var(--accent);}
+  .panel{display:none;} .panel.active{display:block;}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--border);}
+  .stat{background:#fff;padding:12px 14px;}
+  .stat .k{font-size:10px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--text-muted);}
+  .stat .v{font-size:19px;font-weight:700;color:var(--primary-dark);margin-top:3px;}
+  .stat .n{font-size:11px;color:var(--text-light);margin-top:2px;}
+  .act{display:flex;gap:11px;padding:11px 14px;border-bottom:1px solid #f1f3f1;align-items:flex-start;}
+  .act:last-child{border-bottom:none;}
+  .act .dot{width:9px;height:9px;border-radius:50%;flex:none;margin-top:5px;}
+  .act .hd{font-size:13.5px;font-weight:600;}
+  .act .dt{font-size:12px;color:var(--text-muted);margin-top:2px;line-height:1.5;}
+  .act .when{margin-left:auto;font-size:12px;font-weight:600;white-space:nowrap;text-align:right;}
+  .sev-past .dot{background:#b3261e;} .sev-past .when{color:#b3261e;}
+  .sev-urgent .dot{background:#e08a00;} .sev-urgent .when{color:#a06300;}
+  .sev-soon .dot{background:var(--primary);} .sev-soon .when{color:var(--primary-dark);}
+  .prog{width:74px;height:6px;border-radius:4px;background:#e6ebe8;overflow:hidden;display:inline-block;vertical-align:middle;}
+  .prog > i{display:block;height:100%;background:var(--primary);}
+  .num{text-align:right;font-variant-numeric:tabular-nums;}
+  .lg{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;}
+  .opt-row{display:grid;grid-template-columns:70px 1fr 1fr 1fr 90px auto;gap:8px;align-items:end;
+    padding:9px 0;border-bottom:1px solid #f1f3f1;}
+  @media(max-width:820px){ .opt-row{grid-template-columns:1fr 1fr;} }
 
   /* ── The drop target ── */
   .drop{border:2px dashed #b9c8c1;border-radius:12px;background:#fafcfb;padding:34px 20px;text-align:center;cursor:pointer;transition:background .12s,border-color .12s;}
@@ -86,10 +113,29 @@
   <a class="back-link" href="/dashboard.html">← Dashboard</a>
 </div>
 
+<div class="tabs" id="tabs" style="display:none;">
+  <button class="tab active" data-panel="dash" onclick="showPanel('dash')">Dashboard</button>
+  <button class="tab" data-panel="leases" onclick="showPanel('leases')">Lease records</button>
+  <button class="tab" data-panel="docs" onclick="showPanel('docs')">Documents</button>
+</div>
+
 <div class="content">
   <div id="gate" class="loading">Checking access…</div>
 
   <div id="app" style="display:none;">
+
+    <!-- ── Dashboard ─────────────────────────────────────────── -->
+    <div class="panel active" id="panel-dash">
+      <div id="dash-out"><div class="loading">Loading…</div></div>
+    </div>
+
+    <!-- ── Lease records ─────────────────────────────────────── -->
+    <div class="panel" id="panel-leases">
+      <div id="leases-out"><div class="loading">Loading…</div></div>
+    </div>
+
+    <!-- ── Documents ─────────────────────────────────────────── -->
+    <div class="panel" id="panel-docs">
 
     <div class="card">
       <h2>Upload documents <span class="sub" id="up-sub">leases, amendments, abstracts, notices</span></h2>
@@ -131,6 +177,8 @@
       </div>
       <div class="scroll" id="files-out"><div class="loading">Loading…</div></div>
     </div>
+
+    </div><!-- /panel-docs -->
 
   </div>
 </div>
@@ -208,6 +256,8 @@ fetch('/api/auth/me').then(r=>r.json()).then(me=>{
   }
   $('gate').style.display = 'none';
   $('app').style.display = '';
+  $('tabs').style.display = 'flex';
+  loadRecords();
   loadFiles();
 }).catch(e=>{ $('gate').innerHTML = '<div class="banner err">'+esc(e.message)+'</div>'; });
 
@@ -473,6 +523,268 @@ function removeFile(fileId){
     .then(r=>r.json()).then(d=>{
       if(!d.success){ alert(d.error || 'Could not delete.'); return; }
       loadFiles();
+    }).catch(e=>alert(e.message||e));
+}
+
+// ── Panels ────────────────────────────────────────────────────
+function showPanel(name){
+  document.querySelectorAll('.panel').forEach(el => el.classList.toggle('active', el.id === 'panel-'+name));
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.panel === name));
+}
+
+// ── Lease records ─────────────────────────────────────────────
+let REC = { leases:[], options:[], timeline:[], actions:[], portfolio:null, statuses:[], today:'' };
+
+const money = n => '$' + (Number(n)||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+const money0 = n => '$' + Math.round(Number(n)||0).toLocaleString();
+const num0 = n => Math.round(Number(n)||0).toLocaleString();
+
+/** "6 mo", "31 mo", or "8 days ago" once it is behind us. */
+function timeLeft(months, days){
+  if(days == null) return '—';
+  if(days < 0) return Math.abs(days) + ' days ago';
+  if(months <= 0) return days + ' days';
+  return months + ' mo';
+}
+
+function loadRecords(){
+  fetch('/api/leases/records').then(r=>r.json()).then(d=>{
+    if(!d.success){ $('dash-out').innerHTML = '<div class="banner err">'+esc(d.error)+'</div>'; return; }
+    REC = d;
+    // The dashboard loads before the Documents tab is opened, so seed the
+    // shared salon list from here too.
+    if(!SALONS.length) SALONS = d.salons || [];
+    renderDash();
+    renderLeaseList();
+  }).catch(e=>{ $('dash-out').innerHTML = '<div class="banner err">'+esc(e.message)+'</div>'; });
+}
+
+function renderDash(){
+  const P = REC.portfolio || {};
+  let h = '';
+
+  // Nothing entered yet: say what to do rather than showing sixteen zeroes.
+  if(!REC.leases.length){
+    h += '<div class="banner"><b>No lease records yet.</b> The documents are stored, but a dashboard needs the terms inside them \u2014 expiration, rent, area, and the renewal notice deadlines. Open <b>Lease records</b> and add the first one.</div>';
+  }
+
+  // ── Action items ──
+  const acts = REC.actions || [];
+  h += '<div class="card"><h2>Action items <span class="sub">'
+     + (acts.length ? acts.length + ' needing attention' : 'nothing due in the next 12 months')
+     + '</span></h2>';
+  if(!acts.length){
+    h += '<div class="body muted" style="font-size:13px;">No notice deadlines or expirations inside the next 12 months.</div>';
+  } else {
+    acts.forEach(a=>{
+      h += '<div class="act sev-'+esc(a.severity)+'"><span class="dot"></span><div>'
+        + '<div class="hd">'+esc(salonLabel(a.salonNum))
+        + (a.locationName ? ' \u2014 ' + esc(a.locationName) : '')
+        + '</div>'
+        + '<div class="dt"><b>'+esc(a.headline)+'.</b> '+esc(a.detail)+'</div></div>'
+        + '<div class="when">'+esc(timeLeft(a.monthsAway, a.daysAway))+'<br>'
+        + '<span style="font-weight:400;color:var(--text-muted);">'+esc(a.date)+'</span></div></div>';
+    });
+  }
+  h += '</div>';
+
+  // ── Portfolio at a glance ──
+  h += '<div class="card"><h2>Portfolio at a glance</h2><div class="stats">'
+     + stat('Active leases', num0(P.activeLeases), P.recordsPresent < P.recordsExpected
+         ? (P.recordsExpected - P.recordsPresent) + ' salons have no record yet' : 'all salons recorded')
+     + stat('Expiring \u2264 12 months', num0(P.expiringWithin12), num0(P.expiringWithin18) + ' within 18 months')
+     + stat('Total leased area', num0(P.totalAreaSqFt) + ' sq ft', 'across recorded leases')
+     + stat('Security deposits', money0(P.totalDeposits), 'on deposit with landlords')
+     + stat('Monthly obligation', money0(P.totalMonthly), money0(P.totalAnnual) + ' / year')
+     + stat('Records entered', num0(P.recordsPresent) + ' / ' + num0(P.recordsExpected), 'salons with a lease record')
+     + '</div></div>';
+
+  // ── Expiration timeline ──
+  const T = REC.timeline || [];
+  if(T.length){
+    h += '<div class="card"><h2>Lease expiration timeline <span class="sub">soonest first</span></h2>'
+       + '<div class="scroll"><table><thead><tr>'
+       + '<th>Salon</th><th>Expiration</th><th>Time left</th><th>Term</th>'
+       + '<th class="num">Monthly rent</th><th class="num">$/SF/yr</th><th class="num">Area</th>'
+       + '<th>Landlord</th></tr></thead><tbody>';
+    T.forEach(l=>{
+      const pr = Math.round(l.termProgress || 0);
+      h += '<tr>'
+        + '<td><b>'+esc(salonLabel(l.salonNum))+'</b>'
+        + (l.locationName ? '<div class="hint" style="margin-top:1px;">'+esc(l.locationName)+'</div>' : '')
+        + '</td>'
+        + '<td class="nowrap">'+esc(l.expirationDate || '\u2014')+'</td>'
+        + '<td class="nowrap">'+esc(timeLeft(l.monthsLeft, l.monthsLeft == null ? null : l.monthsLeft * 30))+'</td>'
+        + '<td class="nowrap"><span class="prog"><i style="width:'+pr+'%"></i></span> '
+        + '<span class="muted" style="font-size:11px;">'+pr+'%</span></td>'
+        + '<td class="num">'+esc(l.monthlyRent ? money(l.monthlyRent) : '\u2014')+'</td>'
+        + '<td class="num">'+esc(l.rentPerSfYr ? money(l.rentPerSfYr) : '\u2014')+'</td>'
+        + '<td class="num">'+esc(l.areaSqFt ? num0(l.areaSqFt) + ' SF' : '\u2014')+'</td>'
+        + '<td class="muted">'+esc(l.landlord || '\u2014')+'</td></tr>';
+    });
+    h += '</tbody></table></div></div>';
+  }
+
+  $('dash-out').innerHTML = h;
+}
+
+function stat(k, v, n){
+  return '<div class="stat"><div class="k">'+esc(k)+'</div><div class="v">'+esc(v)+'</div>'
+    + (n ? '<div class="n">'+esc(n)+'</div>' : '') + '</div>';
+}
+
+// ── The record list, and the editor ───────────────────────────
+function renderLeaseList(){
+  const salons = REC.salons || SALONS || [];
+  let h = '<div class="card"><h2>Lease records <span class="sub">'
+    + REC.leases.length + ' of ' + salons.length + ' salons</span></h2>'
+    + '<div class="scroll"><table><thead><tr><th>Salon</th><th>Expiration</th>'
+    + '<th class="num">Monthly rent</th><th class="num">Area</th><th>Options</th>'
+    + '<th>Landlord</th><th></th></tr></thead><tbody>';
+  salons.forEach(sn=>{
+    const l = REC.leases.find(x=>x.salonNum===sn.num);
+    const opts = (REC.options||[]).filter(o=>o.salonNum===sn.num);
+    h += '<tr>'
+      + '<td><b>'+esc(sn.num+' '+sn.name)+'</b></td>'
+      + '<td class="nowrap">'+esc(l && l.expirationDate ? l.expirationDate : '\u2014')+'</td>'
+      + '<td class="num">'+esc(l && l.monthlyRent ? money(l.monthlyRent) : '\u2014')+'</td>'
+      + '<td class="num">'+esc(l && l.areaSqFt ? num0(l.areaSqFt)+' SF' : '\u2014')+'</td>'
+      + '<td>'+(opts.length ? opts.length : '<span class="muted">\u2014</span>')+'</td>'
+      + '<td class="muted">'+esc(l ? (l.landlord || '\u2014') : '\u2014')+'</td>'
+      + '<td class="nowrap"><button class="btn ghost small" onclick="editLease(\''+esc(sn.num)+'\')">'
+      + (l ? 'Edit' : 'Add') + '</button></td></tr>';
+  });
+  h += '</tbody></table></div></div><div id="lease-edit"></div>';
+  $('leases-out').innerHTML = h;
+}
+
+function fld(label, id, value, type, extra){
+  return '<label class="fld">'+esc(label)
+    + '<input type="'+(type||'text')+'" id="le-'+id+'" value="'+esc(value==null?'':value)+'" '
+    + (extra||'') + '></label>';
+}
+
+function editLease(salonNum){
+  const sn = (REC.salons||[]).find(x=>x.num===salonNum) || {num:salonNum, name:''};
+  const l = REC.leases.find(x=>x.salonNum===salonNum) || {};
+  const opts = (REC.options||[]).filter(o=>o.salonNum===salonNum);
+
+  let h = '<div class="card"><h2>'+esc(sn.num+' '+sn.name)+' <span class="sub">lease record</span></h2>'
+    + '<div class="body"><div class="lg">'
+    + fld('Location name','locationName', l.locationName || sn.name)
+    + fld('Landlord','landlord', l.landlord)
+    + fld('Address','address', l.address)
+    + fld('Area (sq ft)','areaSqFt', l.areaSqFt || '', 'number', 'step="1"')
+    + fld('Commencement','commencementDate', l.commencementDate, 'date')
+    + fld('Expiration','expirationDate', l.expirationDate, 'date')
+    + fld('Monthly rent','monthlyRent', l.monthlyRent || '', 'number', 'step="0.01"')
+    + fld('CAM / other monthly','camMonthly', l.camMonthly || '', 'number', 'step="0.01"')
+    + fld('Security deposit','securityDeposit', l.securityDeposit || '', 'number', 'step="0.01"')
+    + '<label class="fld">Status<select id="le-status">'
+    + (REC.statuses||['active']).map(st=>'<option value="'+esc(st)+'"'
+        + ((l.status||'active')===st ? ' selected':'')+'>'+esc(st)+'</option>').join('')
+    + '</select></label>'
+    + '</div>'
+    + '<label class="fld" style="margin-top:12px;">Notes<textarea id="le-note" rows="2" '
+    + 'style="width:100%;">'+esc(l.note||'')+'</textarea></label>'
+    + '<div style="margin-top:14px;display:flex;gap:10px;align-items:center;">'
+    + '<button class="btn" onclick="saveLease(\''+esc(salonNum)+'\')">Save lease</button>'
+    + '<button class="btn ghost" onclick="closeEditor()">Close</button>'
+    + '<span id="le-msg" style="font-size:12.5px;"></span></div>';
+
+  // ── Renewal options ──
+  h += '<div style="margin-top:20px;border-top:1px solid var(--border);padding-top:14px;">'
+    + '<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;'
+    + 'color:var(--text-muted);margin-bottom:4px;">Renewal options</div>'
+    + '<div class="hint" style="margin:0 0 10px;">The notice date is what the dashboard counts down to. Mark an option exercised or declined and it stops appearing.</div>';
+  if(!opts.length){
+    h += '<div class="muted" style="font-size:13px;padding:4px 0 10px;">None recorded.</div>';
+  }
+  opts.forEach(o=>{
+    h += '<div class="opt-row" id="op-'+esc(o.optionId)+'">'
+      + '<label class="fld">No.<input type="number" step="1" id="op-no-'+esc(o.optionId)+'" '
+      + 'value="'+esc(o.optionNo)+'"></label>'
+      + '<label class="fld">Notice by<input type="date" id="op-nb-'+esc(o.optionId)+'" '
+      + 'value="'+esc(o.noticeBy)+'"></label>'
+      + '<label class="fld">Effective from<input type="date" id="op-ef-'+esc(o.optionId)+'" '
+      + 'value="'+esc(o.effectiveFrom)+'"></label>'
+      + '<label class="fld">Through<input type="date" id="op-et-'+esc(o.optionId)+'" '
+      + 'value="'+esc(o.effectiveTo)+'"></label>'
+      + '<label class="fld">Decision<select id="op-ex-'+esc(o.optionId)+'">'
+      + [['','undecided'],['yes','exercised'],['no','declined']].map(x=>'<option value="'+x[0]+'"'
+          + (o.exercised===x[0]?' selected':'')+'>'+x[1]+'</option>').join('')
+      + '</select></label>'
+      + '<div style="display:flex;gap:6px;">'
+      + '<button class="btn ghost small" onclick="saveOption(\''+esc(salonNum)+'\',\''+esc(o.optionId)+'\')">Save</button>'
+      + '<button class="btn danger small" onclick="deleteOption(\''+esc(o.optionId)+'\')">\u00d7</button>'
+      + '</div></div>';
+  });
+  h += '<button class="btn ghost small" style="margin-top:10px;" '
+    + 'onclick="addOption(\''+esc(salonNum)+'\')">+ Add an option</button>';
+  h += '</div></div></div>';
+
+  $('lease-edit').innerHTML = h;
+  $('lease-edit').scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+function closeEditor(){ $('lease-edit').innerHTML = ''; }
+
+function saveLease(salonNum){
+  const v = id => { const el = $('le-'+id); return el ? el.value : undefined; };
+  const body = {
+    kind:'lease', salonNum: salonNum,
+    locationName: v('locationName'), landlord: v('landlord'), address: v('address'),
+    areaSqFt: v('areaSqFt'), commencementDate: v('commencementDate'),
+    expirationDate: v('expirationDate'), monthlyRent: v('monthlyRent'),
+    camMonthly: v('camMonthly'), securityDeposit: v('securityDeposit'),
+    status: v('status'), note: v('note'),
+  };
+  const msg = $('le-msg');
+  msg.textContent = 'Saving…'; msg.style.color = '';
+  fetch('/api/leases/records', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body) }).then(r=>r.json()).then(d=>{
+    if(!d.success){ msg.textContent = 'Save failed: '+(d.error||''); msg.style.color = '#b3261e'; return; }
+    msg.textContent = 'Saved.'; msg.style.color = '#1a5c0a';
+    loadRecords();
+  }).catch(e=>{ msg.textContent = 'Save failed: '+e.message; msg.style.color = '#b3261e'; });
+}
+
+function addOption(salonNum){
+  const existing = (REC.options||[]).filter(o=>o.salonNum===salonNum);
+  const next = existing.reduce((m,o)=>Math.max(m, Number(o.optionNo)||0), 0) + 1;
+  fetch('/api/leases/records', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ kind:'option', salonNum: salonNum, optionNo: next }) })
+    .then(r=>r.json()).then(d=>{
+      if(!d.success){ alert(d.error||'Could not add the option.'); return; }
+      // Reload, then reopen this salon so the new row is there to fill in.
+      fetch('/api/leases/records').then(r=>r.json()).then(x=>{
+        if(x.success){ REC = x; renderDash(); renderLeaseList(); editLease(salonNum); }
+      });
+    }).catch(e=>alert(e.message||e));
+}
+
+function saveOption(salonNum, optionId){
+  const v = pre => { const el = $('op-'+pre+'-'+optionId); return el ? el.value : undefined; };
+  fetch('/api/leases/records', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      kind:'option', salonNum: salonNum, optionId: optionId,
+      optionNo: v('no'), noticeBy: v('nb'), effectiveFrom: v('ef'),
+      effectiveTo: v('et'), exercised: v('ex'),
+    }) }).then(r=>r.json()).then(d=>{
+      if(!d.success){ alert(d.error||'Could not save the option.'); return; }
+      loadRecords();
+      const row = $('op-'+optionId);
+      if(row){ row.style.background = '#e6f4e0'; setTimeout(()=>{ row.style.background = ''; }, 900); }
+    }).catch(e=>alert(e.message||e));
+}
+
+function deleteOption(optionId){
+  if(!confirm('Delete this renewal option?')) return;
+  fetch('/api/leases/records?optionId='+encodeURIComponent(optionId), { method:'DELETE' })
+    .then(r=>r.json()).then(d=>{
+      if(!d.success){ alert(d.error||'Could not delete.'); return; }
+      const row = $('op-'+optionId); if(row) row.remove();
+      loadRecords();
     }).catch(e=>alert(e.message||e));
 }
 </script>
