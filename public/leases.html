@@ -114,7 +114,7 @@
              onclick="document.getElementById('picker').click()"
              ondragover="dropOver(event,true)" ondragleave="dropOver(event,false)" ondrop="onDrop(event)">
           <div class="big">Drop files here</div>
-          <div class="small">or click to choose &middot; PDF, images, Word or Excel &middot; up to 50 MB each</div>
+          <div class="small">or click to choose &middot; whole folders work too &middot; PDF, images, Word or Excel</div>
         </div>
         <input type="file" id="picker" multiple style="display:none;" onchange="onPick(event)">
 
@@ -173,6 +173,12 @@ const EXT_TYPE = {
   xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 };
 const ALLOWED = new Set(Object.values(EXT_TYPE));
+// Sent through our own route, which is capped by the platform at 4.5 MB.
+// Real lease paperwork lands far under this — Word files and modest PDFs.
+const DIRECT_MAX = 4 * 1024 * 1024;
+// The client-token path handles anything bigger, but only once
+// BLOB_READ_WRITE_TOKEN is set on the project. Until then a large file
+// fails with a sentence saying exactly that rather than a Vercel error.
 const MAX_BYTES = 50 * 1024 * 1024;
 
 function typeOf(file){
@@ -228,14 +234,33 @@ function dropOver(ev, on){
 function onDrop(ev){
   ev.preventDefault();
   $('drop').classList.remove('over');
-  const files = [];
-  const dt = ev.dataTransfer;
-  if(dt.items){
-    for(const it of dt.items){ if(it.kind === 'file'){ const f = it.getAsFile(); if(f) files.push(f); } }
-  } else {
-    for(const f of dt.files) files.push(f);
-  }
-  queue(files);
+  // A dropped FOLDER arrives as a 0-byte entry with no type, which used to
+  // queue itself and fail as "not a document type". Walk into it instead —
+  // a folder per location is the natural way to have this paperwork filed.
+  filesFromDrop(ev.dataTransfer).then(queue);
+}
+function filesFromDrop(dt){
+  // webkitGetAsEntry must be called before any await, while the drop event
+  // is still live, so collect the entries first and walk them after.
+  const entries = Array.from(dt.items || [])
+    .filter(it => it.kind === 'file')
+    .map(it => (it.webkitGetAsEntry ? it.webkitGetAsEntry() : null));
+  if(!entries.some(Boolean)) return Promise.resolve(Array.from(dt.files || []));
+  const out = [];
+  const walk = entry => new Promise(done => {
+    if(!entry) return done();
+    if(entry.isFile) return entry.file(f => { out.push(f); done(); }, () => done());
+    if(!entry.isDirectory) return done();
+    const reader = entry.createReader();
+    // readEntries hands back at most 100 at a time and signals the end with
+    // an empty batch, so it has to be called until it returns nothing.
+    const batch = () => reader.readEntries(es => {
+      if(!es.length) return done();
+      Promise.all(es.map(walk)).then(batch);
+    }, () => done());
+    batch();
+  });
+  return Promise.all(entries.map(walk)).then(() => out);
 }
 function onPick(ev){
   queue(Array.from(ev.target.files || []));
@@ -301,24 +326,62 @@ async function uploadOne(item){
     note: item.meta.note,
   };
   try{
-    const blob = await window.LeaseUpload.upload(item.file, meta, pct=>{
-      item.pct = pct; renderQueue();
-    });
-    // Blob calls the server back too, but that callback cannot reach a laptop
-    // and can lag in production. Confirming here means the row exists the
-    // moment the upload does; the write is keyed on pathname, so the two
-    // cannot produce duplicates.
-    const res = await fetch('/api/leases/files', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(Object.assign({ pathname: blob.pathname, sizeBytes: item.file.size }, meta))
-    }).then(r=>r.json());
-    if(!res.success) throw new Error(res.error || 'could not record the file');
+    if(item.file.size <= DIRECT_MAX){
+      // Straight through our own route. put() authenticates by OIDC on
+      // Vercel, so this needs nothing configured — which is why it is the
+      // default rather than the fallback.
+      await uploadDirect(item, meta);
+    } else {
+      const blob = await window.LeaseUpload.upload(item.file, meta, pct=>{
+        item.pct = pct; renderQueue();
+      });
+      // Blob calls the server back too, but that callback cannot reach a
+      // laptop and can lag in production. Confirming here means the row
+      // exists the moment the upload does; the write is keyed on pathname,
+      // so the two cannot produce duplicates.
+      const res = await fetch('/api/leases/files', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(Object.assign({ pathname: blob.pathname, sizeBytes: item.file.size }, meta))
+      }).then(r=>r.json());
+      if(!res.success) throw new Error(res.error || 'could not record the file');
+    }
     item.state = 'done'; item.pct = 100;
   }catch(e){
     item.state = 'error';
-    item.error = (e && e.message) ? e.message : 'upload failed';
+    let msg = (e && e.message) ? e.message : 'upload failed';
+    if(/client token/i.test(msg)){
+      msg = 'This file is over ' + sizeText(DIRECT_MAX) + ', which needs the direct-to-Blob '
+          + 'path, and that requires BLOB_READ_WRITE_TOKEN to be set on the Vercel project. '
+          + 'Everything smaller uploads without it.';
+    }
+    item.error = msg;
   }
   renderQueue();
+}
+
+// fetch() has no upload-progress event, so the direct path uses XHR. The
+// bytes go to our route, which puts them in the private store and writes
+// the metadata row in one go — no separate confirm call needed.
+function uploadDirect(item, meta){
+  return new Promise((resolve, reject) => {
+    const fd = new FormData();
+    fd.append('file', item.file);
+    Object.keys(meta).forEach(k => fd.append(k, meta[k] == null ? '' : meta[k]));
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/leases/upload/direct');
+    xhr.upload.onprogress = e => {
+      if(e.lengthComputable){ item.pct = (e.loaded / e.total) * 100; renderQueue(); }
+    };
+    xhr.onload = () => {
+      let d = null;
+      try{ d = JSON.parse(xhr.responseText); }catch(err){ d = null; }
+      if(xhr.status >= 200 && xhr.status < 300 && d && d.success) return resolve(d.file);
+      reject(new Error((d && d.error) || ('upload failed \u2014 HTTP ' + xhr.status)));
+    };
+    xhr.onerror = () => reject(new Error('network error during upload'));
+    xhr.onabort = () => reject(new Error('upload cancelled'));
+    xhr.send(fd);
+  });
 }
 
 function renderQueue(){
