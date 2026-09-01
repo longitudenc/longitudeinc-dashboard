@@ -173,6 +173,8 @@
           </label>
           <button class="btn" id="build-btn" onclick="build()">Build upload</button>
           <button class="btn ghost" id="dl-btn" onclick="download()" disabled>Download ADP file</button>
+          <button class="btn ghost" id="rec-btn" onclick="downloadReconciliation()" disabled
+            title="A per-salon CSV of everything that differs from SD3, and who caused it">Download reconciliation</button>
         </div>
         <div class="hint">
           Pulls the Payroll Consolidated report straight from SD3 for the Saturday–Friday week —
@@ -334,6 +336,7 @@ function onWeekChange(){
     }
   }catch(e){}
   $('dl-btn').disabled = true;
+  $('rec-btn').disabled = true;
   LAST_BUILD = null;
   $('build-out').innerHTML = '';
   $('week-sub').textContent = 'week ending ' + $('week-select').value;
@@ -375,6 +378,7 @@ function clearSavedBuild(){
   LAST_BUILD = null;
   $('build-out').innerHTML = '';
   $('dl-btn').disabled = true;
+  $('rec-btn').disabled = true;
 }
 
 function restoreBuild(){
@@ -395,6 +399,7 @@ function restoreBuild(){
   LAST_BUILD = saved.build;
   renderBuild(saved.build);
   $('dl-btn').disabled = false;
+  $('rec-btn').disabled = false;
 
   const when = (function(){
     try{
@@ -549,9 +554,20 @@ function build(){
       renderBuild(d);
       saveBuild(d);
       $('dl-btn').disabled = false;
+      $('rec-btn').disabled = false;
     })
     .catch(e=>{ $('build-out').innerHTML = '<div class="banner err"><b>Build failed.</b> '+esc(e.message)+'</div>'; })
     .finally(()=>{ btn.disabled = false; btn.textContent = 'Build upload'; });
+}
+
+// The reconciliation the office keeps by hand: one column per salon, one row
+// per component, and every correction attributed to the person who caused it.
+// Rebuilt server-side rather than serialised from this page, so the file can
+// never disagree with what the upload actually contains.
+function downloadReconciliation(){
+  const p = buildQuery();
+  p.delete('bonuses');   // the reconciliation is about SD3 differences, not bonus timing
+  window.location.href = '/api/office/payroll/reconcile?' + p.toString();
 }
 
 function download(){
