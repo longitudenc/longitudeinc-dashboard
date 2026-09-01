@@ -5,8 +5,12 @@
 // numbers can settle days after the week closes, so a rebuilt figure is not
 // necessarily the figure that was sent).
 //
-// Rows are written by the export route at the moment a file is downloaded —
-// that is when a week is actually processed. Preview never writes.
+// TWO records per week, deliberately kept apart:
+//   ADP_HISTORY   — a file was DOWNLOADED. A delivery receipt.
+//   ADP_FINALIZED — the week was AGREED. A decision.
+// A week can have either, both or neither: finalized but not yet sent, sent
+// without being finalized (which is worth seeing), or downloaded twice. This
+// merges them per week so the screen shows the week rather than the event.
 //
 //   GET ?limit=52   most recent weeks first
 
@@ -14,6 +18,8 @@ import { NextResponse } from 'next/server'
 import { requireOffice } from '@/lib/require-role'
 import { readSheet, rowsToObjects } from '@/lib/sheets'
 import { ADP_HISTORY_TAB } from '@/lib/adp-history'
+
+const FINALIZED_TAB = 'ADP_FINALIZED'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -77,7 +83,47 @@ export async function GET(request: Request) {
         downloadedBy: String(r.downloadedBy || ''),
       }))
 
-    return NextResponse.json({ success: true, history })
+    // Finalized weeks, including ones never downloaded — which is exactly the
+    // case that used to leave History empty after a week was signed off.
+    let finalRows: Record<string, any>[] = []
+    try { finalRows = rowsToObjects(await readSheet(FINALIZED_TAB)) } catch { finalRows = [] }
+    const finalByWeek = new Map<string, Record<string, any>>()
+    for (const r of finalRows) {
+      const w = String(r.weekEnd || '').trim()
+      if (w) finalByWeek.set(w, r)
+    }
+
+    const finalized = [...finalByWeek.values()].map(r => ({
+      weekEnd: String(r.weekEnd || ''),
+      weekStart: String(r.weekStart || ''),
+      payDate: String(r.payDate || ''),
+      employees: num(r.employees),
+      grossPay: num(r.grossPay),
+      tips: num(r.tips),
+      totalPay: num(r.totalPay),
+      overtimePay: num(r.overtimePay),
+      overtimeDelta: num(r.overtimeDelta),
+      sixDayDelta: num(r.sixDayDelta),
+      manualLines: num(r.manualLines),
+      manualTotal: num(r.manualTotal),
+      exceptions: num(r.exceptions),
+      finalizedAt: String(r.finalizedAt || ''),
+      finalizedBy: String(r.finalizedBy || ''),
+      note: String(r.note || ''),
+    })).sort((a, b) => b.weekEnd.localeCompare(a.weekEnd))
+
+    // One row per WEEK, whichever records it has.
+    const weeks = [...new Set([
+      ...history.map(h => h.weekEnd),
+      ...finalized.map(f => f.weekEnd),
+    ])].filter(Boolean).sort((a, b) => b.localeCompare(a)).slice(0, limit)
+      .map(weekEnd => ({
+        weekEnd,
+        download: history.find(h => h.weekEnd === weekEnd) || null,
+        finalized: finalized.find(f => f.weekEnd === weekEnd) || null,
+      }))
+
+    return NextResponse.json({ success: true, history, finalized, weeks })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     return NextResponse.json({ success: false, error: message }, { status: 500 })

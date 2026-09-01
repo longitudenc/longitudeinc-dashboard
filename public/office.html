@@ -1125,44 +1125,146 @@ function toggleEmp(tr){
 }
 
 // ── History ───────────────────────────────────────────────────
+
+// ── History ───────────────────────────────────────────────────
+// A week, not an event. Two separate things can be true about a week — it was
+// AGREED (finalized) and it was SENT (downloaded) — and either can happen
+// without the other. Finalizing without downloading used to leave this screen
+// empty, which read as "nothing happened" when something had.
+let HIST = { weeks: [], history: [], finalized: [] };
+
 function loadHistory(){
   fetch('/api/office/payroll/history?limit=52').then(r=>r.json()).then(d=>{
-    if(!d.success){ $('history-out').innerHTML = '<div class="banner err" style="margin:14px;">'+esc(d.error)+'</div>'; return; }
-    if(!d.history.length){
-      $('history-out').innerHTML = '<div class="body muted" style="padding:14px;">'
-        + 'No weeks downloaded yet. The first ADP file you download will appear here.</div>';
+    if(!d.success){
+      $('history-out').innerHTML = '<div class="banner err" style="margin:14px;">'+esc(d.error)+'</div>';
       return;
     }
-    let h = '<div class="scroll"><table><thead><tr>'
-      + '<th data-sort="text">Week ending</th><th data-sort="text">Pay date</th>'
-      + '<th data-sort="num" class="num">Staff</th><th data-sort="num" class="num">Hours</th>'
-      + '<th data-sort="num" class="num">Payroll cost</th><th data-sort="num" class="num">Tips</th>'
-      + '<th data-sort="num" class="num">Overtime</th><th data-sort="num" class="num">6-day net</th>'
-      + '<th data-sort="text">Downloaded</th><th>File</th>'
-      + '</tr></thead><tbody>';
-    d.history.forEach(r=>{
-      h += '<tr>'
-        + '<td><b>'+esc(r.weekEnd)+'</b>'+(r.forced?' <span class="pill err">forced</span>':'')+'</td>'
-        + '<td class="muted">'+esc(r.payDate)+'</td>'
-        + numTd(r.employees, r.employees)
-        + numTd(hrs(r.paidHours), r.paidHours)
-        + numTd(money(r.grossPay), r.grossPay)
-        + numTd(money(r.tips), r.tips)
-        + numTd(money(r.overtimePay), r.overtimePay)
-        + numTd((r.sixDayDelta>0?'+':'')+money(r.sixDayDelta), r.sixDayDelta,
-                r.sixDayDelta<0?'#b3261e':(r.sixDayDelta>0?'#1a5c0a':''))
-        + '<td class="muted">'+esc((r.downloadedAt||'').slice(0,10))+'<br>'
-        + '<span style="font-size:11px;">'+esc(r.downloadedBy||'')+'</span></td>'
-        + '<td>'+(r.filePath
-            ? '<a class="btn ghost small" href="/api/office/payroll/file?p='
-              + encodeURIComponent(r.filePath)+'">Download</a>'
-            : '<span class="muted" style="font-size:11.5px;">not kept</span>')+'</td>'
-        + '</tr>';
-    });
-    h += '</tbody></table></div>';
-    $('history-out').innerHTML = h;
-  }).catch(e=>{ $('history-out').innerHTML = '<div class="banner err" style="margin:14px;">'+esc(e.message)+'</div>'; });
+    HIST = { weeks: d.weeks || [], history: d.history || [], finalized: d.finalized || [] };
+    if(!HIST.weeks.length){
+      $('history-out').innerHTML = '<div class="body muted" style="padding:14px;">'
+        + 'Nothing recorded yet. A week appears here once it is finalized or its ADP file is downloaded.</div>';
+      return;
+    }
+    renderHistory();
+  }).catch(e=>{
+    $('history-out').innerHTML = '<div class="banner err" style="margin:14px;">'+esc(e.message||e)+'</div>';
+  });
 }
+
+function histWeek(weekEnd){
+  return {
+    week: HIST.weeks.find(w=>w.weekEnd===weekEnd) || null,
+    dl: HIST.history.find(h=>h.weekEnd===weekEnd) || null,
+    fin: HIST.finalized.find(f=>f.weekEnd===weekEnd) || null,
+  };
+}
+
+function renderHistory(sel){
+  const chosen = sel || (HIST.weeks[0] && HIST.weeks[0].weekEnd) || '';
+  let h = '<div class="body" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">'
+    + '<label style="font-size:12.5px;font-weight:600;">Week ending</label>'
+    + '<select id="hist-week" onchange="renderHistory(this.value)" style="min-width:200px;">'
+    + HIST.weeks.map(w=>{
+        const marks = (w.finalized ? ' ✓ finalized' : '') + (w.download ? ' · sent' : '');
+        return '<option value="'+esc(w.weekEnd)+'"'+(w.weekEnd===chosen?' selected':'')+'>'
+             + esc(fmtWeek(w.weekEnd)) + esc(marks) + '</option>';
+      }).join('')
+    + '</select></div>';
+
+  h += histDetailHtml(chosen);
+
+  // Every week, so a run of them can be scanned at once.
+  h += '<div class="card" style="margin-top:14px;"><h2>All weeks</h2><div class="body" style="padding:0;">'
+    + '<div class="scroll"><table><thead><tr>'
+    + '<th data-sort="text">Week ending</th><th data-sort="text">Finalized</th>'
+    + '<th data-sort="text">ADP file sent</th><th data-sort="num" class="num">Total pay</th>'
+    + '<th data-sort="num" class="num">Overtime</th><th data-sort="num" class="num">6-day net</th>'
+    + '<th></th></tr></thead><tbody>';
+  HIST.weeks.forEach(w=>{
+    const f = w.finalized, dl = w.download;
+    const total = f ? f.totalPay : (dl ? (dl.grossPay + dl.tips) : 0);
+    const ot = f ? f.overtimePay : (dl ? dl.overtimePay : 0);
+    const six = f ? f.sixDayDelta : (dl ? dl.sixDayDelta : 0);
+    h += '<tr>'
+      + '<td><b>'+esc(w.weekEnd)+'</b></td>'
+      + '<td>'+(f
+          ? '<span class="pill">yes</span> <span class="muted" style="font-size:11px;">'
+            + esc((f.finalizedAt||'').slice(0,10))+' '+esc(f.finalizedBy||'')+'</span>'
+          : '<span class="muted">no</span>')+'</td>'
+      + '<td>'+(dl
+          ? '<span class="muted" style="font-size:11.5px;">'+esc((dl.downloadedAt||'').slice(0,10))
+            + ' ' + esc(dl.downloadedBy||'') + '</span>'
+            + (dl.forced ? ' <span class="pill err">forced</span>' : '')
+          : '<span class="muted">not sent</span>')+'</td>'
+      + numTd(money(total), total)
+      + numTd(money(ot), ot)
+      + numTd((six>0?'+':'')+money(six), six, six<0?'#b3261e':(six>0?'#1a5c0a':''))
+      + '<td><button class="btn ghost small" onclick="renderHistory(\''+esc(w.weekEnd)+'\')">Open</button></td>'
+      + '</tr>';
+  });
+  h += '</tbody></table></div></div></div>';
+  $('history-out').innerHTML = h;
+}
+
+function histDetailHtml(weekEnd){
+  if(!weekEnd) return '';
+  const { dl, fin } = histWeek(weekEnd);
+  if(!dl && !fin) return '';
+
+  let h = '<div class="card"><h2>Week ending '+esc(weekEnd)+' <span class="sub">'
+        + (fin ? 'finalized' : 'downloaded, never finalized') + '</span></h2><div class="body">';
+
+  if(fin && !dl){
+    h += '<div class="banner" style="margin:0 0 12px;background:#eef7ee;border-color:#bcd9bc;">'
+       + '<b>Agreed, not yet sent.</b> This week was finalized but no ADP file has been downloaded.</div>';
+  } else if(dl && !fin){
+    h += '<div class="banner warn" style="margin:0 0 12px;">'
+       + '<b>Sent without being finalized.</b> The file went to ADP but the week was never '
+       + 'signed off here, so there is no record of who agreed the figures.</div>';
+  }
+
+  // Figures: prefer the finalized record — that is the agreed version.
+  const src = fin || dl;
+  const rows = [
+    ['Pay date', esc(src.payDate || '')],
+    ['People paid', esc(src.employees)],
+    ['Gross pay', money(src.grossPay)],
+    ['Tips', money(src.tips)],
+    ['Total pay', money(fin ? fin.totalPay : (dl.grossPay + dl.tips))],
+    ['Overtime in the file', money(src.overtimePay)],
+    ['Overtime vs SD3', (src.overtimeDelta>0?'+':'')+money(src.overtimeDelta)],
+    ['6-day vs SD3', (src.sixDayDelta>0?'+':'')+money(src.sixDayDelta)],
+  ];
+  if(fin){
+    rows.push(['Hand-keyed lines', fin.manualLines + (fin.manualLines ? ' · ' + money(fin.manualTotal) : '')]);
+    rows.push(['Finalized', esc(fin.finalizedAt||'') + ' by ' + esc(fin.finalizedBy||'')]);
+  }
+  if(dl){
+    rows.push(['Downloaded', esc(dl.downloadedAt||'') + ' by ' + esc(dl.downloadedBy||'')]);
+  }
+  h += '<table style="width:auto;min-width:380px;"><tbody>'
+     + rows.map(r=>'<tr><td class="muted">'+r[0]+'</td><td><b>'+r[1]+'</b></td></tr>').join('')
+     + '</tbody></table>';
+
+  // The two files.
+  h += '<div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">';
+  h += dl && dl.filePath
+    ? '<a class="btn" href="/api/office/payroll/file?p='+encodeURIComponent(dl.filePath)+'">ADP upload file</a>'
+    : '<button class="btn" disabled title="'
+      + (dl ? 'This download predates the file archive' : 'No ADP file has been downloaded for this week')
+      + '">ADP upload file</button>';
+  // The reconciliation is regenerated rather than stored: it describes what the
+  // build produces, so a stored copy could drift from the code that made it.
+  h += '<a class="btn ghost" href="/api/office/payroll/reconcile?weekEnd='+encodeURIComponent(weekEnd)+'">'
+     + 'Reconciliation CSV</a>';
+  h += '<span class="hint" style="margin:0;">The ADP file is the one that was sent. '
+     + 'The reconciliation is rebuilt now from the same week.</span>';
+  h += '</div>';
+
+  h += '</div></div>';
+  return h;
+}
+
 
 function stat(k,v,n){
   return '<div class="stat"><div class="k">'+esc(k)+'</div><div class="v">'+esc(v)+'</div>'
