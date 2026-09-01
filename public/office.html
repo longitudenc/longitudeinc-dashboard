@@ -280,6 +280,9 @@ fetch('/api/auth/me').then(r=>r.json()).then(me=>{
   $('tabs').style.display = 'flex';
   $('panel-build').classList.add('active');
   buildWeekOptions();
+  // buildWeekOptions() calls onWeekChange(), which clears the save, so the
+  // restore has to come after it.
+  restoreBuild();
   loadSettings();
 }).catch(()=>{ $('gate').innerHTML = 'Could not verify your session. <a href="/dashboard.html">Sign in</a>.'; });
 
@@ -322,10 +325,163 @@ function buildWeekOptions(){
   onWeekChange();
 }
 function onWeekChange(){
+  // A saved build belongs to the week that produced it -- drop it only when
+  // the week actually changes, not when the page first populates the list.
+  try{
+    const sv = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null');
+    if(sv && sv.build && sv.build.weekEnd !== $('week-select').value){
+      localStorage.removeItem(SAVE_KEY);
+    }
+  }catch(e){}
   $('dl-btn').disabled = true;
   LAST_BUILD = null;
   $('build-out').innerHTML = '';
   $('week-sub').textContent = 'week ending ' + $('week-select').value;
+}
+
+
+// ── Keep your place ───────────────────────────────────────────
+// A build costs a live SD3 pull and a minute of waiting, so losing it because
+// you checked something in another tab is expensive. The last successful build
+// is kept in this browser and restored on the way back in, with the settings
+// that produced it, so the page you left is the page you return to.
+//
+// Deliberately localStorage, not the server: this is YOUR working state, not a
+// record of what was sent. What actually matters — the manual lines — is
+// already saved server-side in ADP_MANUAL and does not depend on this.
+const SAVE_KEY = 'longitude.payroll.build.v1';
+// Captured NOW, at load. buildWeekOptions() calls onWeekChange(), which drops
+// a save belonging to a different week -- so reading it later would find the
+// save already gone.  Read once, here, before any of that runs.
+let SAVED_AT_LOAD = null;
+try{ SAVED_AT_LOAD = localStorage.getItem(SAVE_KEY); }catch(e){}
+
+function saveBuild(d){
+  try{
+    localStorage.setItem(SAVE_KEY, JSON.stringify({
+      savedAt: new Date().toISOString(),
+      query: buildQuery().toString(),
+      build: d
+    }));
+  }catch(e){
+    // Over quota, most likely. Not fatal — you just lose the resume, not the
+    // build sitting on screen.
+    try{ localStorage.removeItem(SAVE_KEY); }catch(_){}
+  }
+}
+
+function clearSavedBuild(){
+  try{ localStorage.removeItem(SAVE_KEY); }catch(e){}
+  LAST_BUILD = null;
+  $('build-out').innerHTML = '';
+  $('dl-btn').disabled = true;
+}
+
+function restoreBuild(){
+  let saved = null;
+  try{ saved = JSON.parse(SAVED_AT_LOAD || 'null'); }catch(e){ return false; }
+  if(!saved || !saved.build || !saved.build.weekEnd) return false;
+
+  // Put the controls back where they were, so "Build upload" repeats the same
+  // run rather than silently using different settings.
+  try{
+    const q = new URLSearchParams(saved.query || '');
+    if(q.get('weekEnd')) $('week-select').value = q.get('weekEnd');
+    if(q.get('punches')) $('punch-select').value = q.get('punches');
+    $('bonus-select').value = q.get('bonuses') === null ? '' : q.get('bonuses');
+    $('week-sub').textContent = 'week ending ' + $('week-select').value;
+  }catch(e){}
+
+  LAST_BUILD = saved.build;
+  renderBuild(saved.build);
+  $('dl-btn').disabled = false;
+
+  const when = (function(){
+    try{
+      const t = new Date(saved.savedAt);
+      return t.toLocaleString(undefined, {weekday:'short', hour:'numeric', minute:'2-digit'});
+    }catch(e){ return 'earlier'; }
+  })();
+  const bar = document.createElement('div');
+  bar.className = 'banner';
+  bar.style.cssText = 'margin:0 0 12px;';
+  bar.innerHTML = '<b>Picked up where you left off.</b> This build was made ' + esc(when)
+    + ' — the figures are from then, not from now. '
+    + '<button class="btn small" onclick="build()">Rebuild from SD3</button> '
+    + '<button class="btn ghost small" onclick="clearSavedBuild()">Start over</button>';
+  const host = $('build-out');
+  if(host) host.insertBefore(bar, host.firstChild);
+  SAVED_AT_LOAD = null;   // restored once; a later call should not repeat it
+  return true;
+}
+
+
+// ── 6-day: where the money is attributed ──────────────────────
+// A correction is a single figure on the review screen, but the money lands
+// across however many salons the person worked. Clicking the name opens that
+// split, plus the day-by-day hours the qualify/don't-qualify decision was made
+// on — which is the part you cannot check any other way.
+function toggleSixDetail(i){
+  const row = document.getElementById('six-d-' + i);
+  if(!row) return;
+  const open = row.style.display !== 'none';
+  row.style.display = open ? 'none' : 'table-row';
+  const car = document.getElementById('six-c-' + i);
+  if(car) car.textContent = open ? '▸' : '▾';
+}
+
+function sixDetailHtml(s){
+  const paid = s.sd3PaidBySalon || {};
+  const delta = s.deltaBySalon || {};
+  const salons = Array.from(new Set(Object.keys(paid).concat(Object.keys(delta)))).sort();
+
+  let h = '<div style="padding:12px 14px;background:#fafaf8;">';
+
+  // Where the correction lands, salon by salon.
+  if(salons.length){
+    h += '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;color:#666;margin-bottom:5px;">'
+       + 'WHERE IT LANDS</div>'
+       + '<table style="width:auto;min-width:340px;margin-bottom:14px;"><thead><tr>'
+       + '<th>Salon</th><th class="num">SD3 paid</th><th class="num">Change</th><th class="num">Net</th>'
+       + '</tr></thead><tbody>';
+    salons.forEach(function(sn){
+      const p = Number(paid[sn] || 0), dv = Number(delta[sn] || 0);
+      h += '<tr><td>' + esc(sn) + '</td>'
+         + numTd(money(p), p)
+         + numTd((dv > 0 ? '+' : '') + money(dv), dv, dv < 0 ? '#b3261e' : '#1a5c0a')
+         + numTd(money(p + dv), p + dv) + '</tr>';
+    });
+    h += '</tbody></table>';
+  } else {
+    h += '<div class="muted" style="margin-bottom:12px;">'
+       + 'No per-salon split recorded for this correction.</div>';
+  }
+
+  // The day-level evidence behind qualifying or not.
+  const days = s.days || [];
+  if(days.length){
+    h += '<div style="font-size:11px;font-weight:700;letter-spacing:.05em;color:#666;margin-bottom:5px;">'
+       + 'DAYS ON THE FLOOR <span style="font-weight:400;text-transform:none;letter-spacing:0;">'
+       + '— a day counts toward the six only if it reaches the minimum shift length'
+       + '</span></div>'
+       + '<table style="width:auto;min-width:340px;"><thead><tr>'
+       + '<th>Date</th><th class="num">Floor hours</th><th>Counts</th></tr></thead><tbody>';
+    days.forEach(function(d){
+      h += '<tr><td>' + esc(d.date) + '</td>'
+         + numTd(Number(d.floorHours || 0).toFixed(2), Number(d.floorHours || 0))
+         + '<td>' + (d.counted
+             ? '<span style="color:#1a5c0a;font-weight:600;">yes</span>'
+             : '<span style="color:#b3261e;font-weight:600;">no — short shift</span>')
+         + '</td></tr>';
+    });
+    h += '</tbody></table>';
+    h += '<div class="muted" style="margin-top:7px;font-size:12px;">'
+       + esc(s.qualifyingDays) + ' qualifying day' + (s.qualifyingDays === 1 ? '' : 's')
+       + ' · ' + Number(s.weekFloorHours || 0).toFixed(2) + ' floor hours for the week'
+       + (s.reason ? ' · ' + esc(s.reason) : '') + '</div>';
+  }
+  h += '</div>';
+  return h;
 }
 
 // ── Sortable tables ───────────────────────────────────────────
@@ -391,6 +547,7 @@ function build(){
       }
       LAST_BUILD = d;
       renderBuild(d);
+      saveBuild(d);
       $('dl-btn').disabled = false;
     })
     .catch(e=>{ $('build-out').innerHTML = '<div class="banner err"><b>Build failed.</b> '+esc(e.message)+'</div>'; })
@@ -562,15 +719,18 @@ function renderBuild(d){
        + '<th data-sort="num" class="num">SD3 paid</th>'
        + '<th data-sort="num" class="num">Net change</th><th data-sort="text">Why</th>'
        + '</tr></thead><tbody>';
-    moved.forEach(s=>{
+    moved.forEach((s,si)=>{
       const why = s.delta<0
         ? 'SD3 paid, but '+esc(s.reason||'does not qualify')
         : (s.sd3Paid===0 ? 'qualifies, but SD3 paid nothing (floater across salons)' : 'SD3 underpaid');
-      h += '<tr><td>'+esc(s.employeeName)+'</td>'
+      h += '<tr style="cursor:pointer;" onclick="toggleSixDetail('+si+')" title="Show the salons this lands on">'
+         + '<td><span id="six-c-'+si+'" style="color:#888;margin-right:5px;">▸</span>'+esc(s.employeeName)+'</td>'
          + numTd(money(s.amount), s.amount)
          + numTd(money(s.sd3Paid), s.sd3Paid)
          + numTd((s.delta>0?'+':'')+money(s.delta), s.delta, s.delta<0?'#b3261e':'#1a5c0a')
          + '<td class="muted">'+why+'</td></tr>';
+      h += '<tr id="six-d-'+si+'" style="display:none;"><td colspan="5" style="padding:0;">'
+         + sixDetailHtml(s) + '</td></tr>';
     });
     h += '</tbody></table></div>';
   }
