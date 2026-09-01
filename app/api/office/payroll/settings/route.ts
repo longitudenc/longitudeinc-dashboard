@@ -13,7 +13,7 @@
 
 import { NextResponse } from 'next/server'
 import { requireOffice, requireAdmin } from '@/lib/require-role'
-import { loadAdpSettings, defaultSettings, ADP_FIELDS } from '@/lib/adp-settings'
+import { loadAdpSettings, defaultSettings, ADP_FIELDS, ADP_EARNINGS_CODES } from '@/lib/adp-settings'
 import { readSheet, rowsToObjects, writeSheet } from '@/lib/sheets'
 
 export const runtime = 'nodejs'
@@ -26,6 +26,7 @@ const ADP_SALONS_TAB = 'ADP_SALONS'
 // stray field can't quietly become configuration.
 const RULE_KEYS = [
   'sixDayRate', 'sixDayMinDays', 'sixDayMinShiftHours', 'sixDayMinFloorHours',
+  'sixDayMode', 'sd3SixDayMinDays', 'sd3SixDayMinTotalHours',
   'breakMaxMinutes', 'breakMode', 'otThresholdHours', 'varianceAlertPct',
   'bonusPaycheckOfMonth', 'payDateOffsetDays',
 ] as const
@@ -48,6 +49,9 @@ export async function GET() {
       // Labels so the settings screen can name each code without duplicating
       // the field list in the client.
       fields: ADP_FIELDS.map(f => ({ key: f.key, label: f.label, slot: f.slot, isHours: f.isHours })),
+      // The company's real earnings codes, so the screen can offer them
+      // rather than asking someone to remember that 14 means VACATION.
+      earningsCodes: ADP_EARNINGS_CODES,
       canEdit: gate.access.role === 'owner' || gate.access.role === 'admin',
     })
   } catch (err) {

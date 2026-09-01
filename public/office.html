@@ -120,6 +120,9 @@
   .combo-opt.act{background:var(--accent-light);}
   .combo-opt .sub{color:var(--text-muted);font-size:11.5px;margin-left:6px;}
   .combo-opt.none{color:var(--text-muted);cursor:default;}
+  .code-desc{display:block;font-size:11px;margin-top:3px;}
+  .code-desc.muted{color:var(--text-muted);}
+  .code-desc.bad{color:#b3261e;font-weight:600;}
   .exc{display:flex;gap:9px;padding:8px 10px;border-bottom:1px solid #f1f3f1;font-size:13px;align-items:baseline;}
   .exc:last-child{border-bottom:none;}
   .loading{padding:40px;text-align:center;color:var(--text-muted);font-size:14px;}
@@ -250,6 +253,9 @@ let LAST_BUILD = null;
 let SETTINGS = null;
 let MANUAL_LINES = [];
 let SETTINGS_FIELDS = [];
+// The company's real ADP earnings codes, for naming a code and for spotting
+// one ADP does not have. Reference only — it never changes what is paid.
+let CODE_CATALOG = [];
 let ROSTER = { employees: [], sourceWeekEnd: '', loadedFor: '', activeSalons: [] };
 
 const $ = id => document.getElementById(id);
@@ -1079,12 +1085,24 @@ function payLinesHtml(e, d){
   h += '<tr class="sum"><td>Payroll + tips</td><td></td><td class="num">'+money(e.totalPay)+'</td></tr>';
   // A floater's cheque is one thing; the salon rows above split it up. Show the
   // split here so the two views visibly tie together.
-  if(many){
-    e.bySalon.forEach(b=>{
-      h += '<tr class="tips-line"><td>\u00b7 charged to salon '+esc(salonDisplayNum(b.salonNum))+'</td>'
+  // Shown for everybody, not just floaters: "which salon is this charged to"
+  // gets asked of every employee, and a one-row table with a total answers it
+  // without going back to the salon cards to add it up.
+  const bySalon = (e.bySalon || []).slice()
+    .sort((a,b)=>String(a.salonNum).localeCompare(String(b.salonNum)));
+  if(bySalon.length){
+    h += '<tr><td colspan="3" style="padding-top:9px;font-size:11px;font-weight:700;'
+       + 'text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);">By salon</td></tr>';
+    let bsHours = 0, bsPay = 0;
+    bySalon.forEach(b=>{
+      bsHours += Number(b.paidHours)||0; bsPay += Number(b.totalPay)||0;
+      h += '<tr class="tips-line"><td>· salon '+esc(salonDisplayNum(b.salonNum))+'</td>'
         + '<td class="num">'+hrs(b.paidHours)+' hrs</td>'
         + '<td class="num">'+money(b.totalPay)+'</td></tr>';
     });
+    h += '<tr class="sum"><td>Total across '+bySalon.length+' salon'+(bySalon.length===1?'':'s')
+       + '</td><td class="num">'+hrs(bsHours)+' hrs</td>'
+       + '<td class="num">'+money(bsPay)+'</td></tr>';
   }
   h += '</table>';
 
@@ -1304,11 +1322,21 @@ const COMBOS = {};
 function comboHtml(id, text, placeholder){
   return '<div class="combo"><input type="text" id="'+id+'" autocomplete="off"'
     + ' placeholder="'+esc(placeholder||'')+'" value="'+esc(text||'')+'"'
-    + ' oninput="comboFilter(\''+id+'\')" onfocus="comboFilter(\''+id+'\')"'
+    + ' oninput="comboInput(\''+id+'\')" onfocus="comboFocus(\''+id+'\')"'
     + ' onkeydown="comboKey(event,\''+id+'\')" onblur="comboClose(\''+id+'\')">'
     + '<div class="combo-menu" id="'+id+'-menu"></div></div>';
 }
-function comboInit(id, items, onPick){ COMBOS[id] = { items: items, onPick: onPick, hits: [], act: 0 }; }
+function comboInit(id, items, onPick){ COMBOS[id] = { items: items, onPick: onPick, hits: [], act: 0, picked: '' }; }
+// Focus used to reopen the entire list. The menu is absolutely positioned, so
+// it sat directly on top of the result just looked up — clicking the box to
+// check a spelling hid the answer. Reopen only when the box no longer holds
+// the name that produced what is on screen; typing always reopens.
+function comboInput(id){ const c = COMBOS[id]; if(c) c.picked = ''; comboFilter(id); }
+function comboFocus(id){
+  const c = COMBOS[id], el = $(id);
+  if(c && el && c.picked && el.value === c.picked) return;
+  comboFilter(id);
+}
 function comboFilter(id){
   const c = COMBOS[id], el = $(id), menu = $(id+'-menu');
   if(!c || !el || !menu) return;
@@ -1345,6 +1373,8 @@ function comboPick(ev, id, i){
   const c = COMBOS[id]; if(!c || !c.hits[i]) return;
   $(id+'-menu').classList.remove('open');
   c.onPick(c.hits[i]);
+  // Whatever onPick put in the box, so refocusing it does not reopen the list.
+  c.picked = $(id) ? $(id).value : '';
 }
 function comboClose(id){
   const menu = $(id+'-menu');
@@ -1528,6 +1558,7 @@ function loadSettings(){
   fetch('/api/office/payroll/settings').then(r=>r.json()).then(d=>{
     if(!d.success){ $('settings-out').innerHTML = '<div class="banner err">'+esc(d.error)+'</div>'; return; }
     SETTINGS = d.settings; CAN_EDIT_SETTINGS = !!d.canEdit; SETTINGS_FIELDS = d.fields || [];
+    CODE_CATALOG = d.earningsCodes || [];
     renderSettings(d);
   }).catch(e=>{ $('settings-out').innerHTML = '<div class="banner err">'+esc(e.message)+'</div>'; });
 }
@@ -1535,7 +1566,17 @@ function loadSettings(){
 function renderSettings(d){
   const s = d.settings, ro = CAN_EDIT_SETTINGS ? '' : ' disabled';
   const missing = Object.entries(s.codes).filter(([,v])=>!v).map(([k])=>k);
+  // Assigned to something ADP has no code for — a typo, or a code retired since.
+  const unknown = Object.entries(s.codes)
+    .filter(([,v])=>String(v||'').trim())
+    .filter(([,v])=>!CODE_CATALOG.some(c=>c.code.toLowerCase()===String(v).trim().toLowerCase()))
+    .map(([k,v])=>k+' \u2192 '+v);
   let h = '';
+  // One list, shared by every code box on the screen.
+  h += '<datalist id="adp-codes">'
+     + CODE_CATALOG.map(c=>'<option value="'+esc(c.code)+'">'
+         + esc(c.description || ('code '+c.code))+'</option>').join('')
+     + '</datalist>';
 
   if(!CAN_EDIT_SETTINGS){
     h += '<div class="banner info">These settings are read-only for the office role. '
@@ -1546,6 +1587,14 @@ function renderSettings(d){
        + ' not assigned yet:</b> '+missing.map(esc).join(', ')+'. '
        + 'Any pay that lands on an unassigned code blocks the upload rather than disappearing into ADP. '
        + 'The original workbook left these as “TBD”.</div>';
+  }
+
+  if(CODE_CATALOG.length && unknown.length){
+    h += '<div class="banner err"><b>'+unknown.length+' code'+(unknown.length===1?' is':'s are')
+       + ' not in your ADP earnings code list:</b> '+unknown.map(esc).join(', ')+'. '
+       + 'ADP rejects a code it does not have, so the upload would fail on these. '
+       + 'The list here was copied from Workforce Now and is missing entries at both '
+       + 'ends, so check against ADP before changing anything.</div>';
   }
 
   // Codes
@@ -1605,12 +1654,64 @@ h += '</div><div class="hint">Blank means \u201cnot assigned\u201d. Short breaks
   });
   h += '</tbody></table></div></div></div>';
 
+  // The codes themselves, so nobody has to open Workforce Now to check one.
+  if(CODE_CATALOG.length){
+    const used = {};
+    Object.entries(s.codes).forEach(([k,v])=>{
+      const c = String(v||'').trim().toLowerCase();
+      if(c) (used[c] || (used[c] = [])).push(k);
+    });
+    h += '<div class="card"><h2>ADP earnings code list <span class="sub">'
+       + CODE_CATALOG.length+' codes \u00b7 reference only</span></h2>'
+       + '<div class="body" style="padding:0;"><div class="scroll"><table><thead><tr>'
+       + '<th data-sort="text">Code</th><th data-sort="text">Description</th>'
+       + '<th data-sort="text">Type</th><th data-sort="text">Rate class</th>'
+       + '<th data-sort="text">In use</th><th data-sort="text">Used here for</th>'
+       + '</tr></thead><tbody>';
+    CODE_CATALOG.forEach(c=>{
+      const mine = used[c.code.toLowerCase()] || [];
+      h += '<tr><td><span class="code">'+esc(c.code)+'</span></td>'
+         + '<td>'+esc(c.description || '\u2014')+'</td>'
+         + '<td class="muted">'+esc(c.kind || '\u2014')+'</td>'
+         + '<td class="muted">'+esc(c.rateClass || '\u2014')+'</td>'
+         + '<td>'+(c.active?'Yes':'<span style="color:#b3261e;">No</span>')+'</td>'
+         + '<td class="muted">'+esc(mine.join(', ') || '\u2014')+'</td></tr>';
+    });
+    h += '</tbody></table></div><div class="hint">Copied from Workforce Now on '
+       + '1 Sep 2026. It began at code \u201c10\u201d and was cut off at XMS, so codes '
+       + 'sorting before or after those may be missing. '
+       + 'Changing a code above is what assigns pay to it; this table only names them.'
+       + '</div></div></div>';
+  }
+
   $('settings-out').innerHTML = h;
 }
 
 function codeInput(key,label,val,ro){
+  const d = codeDesc(val);
   return '<label class="fld">'+esc(label)
-       + '<input type="text" id="code-'+esc(key)+'" value="'+esc(val||'')+'" placeholder="not assigned"'+ro+'></label>';
+       + '<input type="text" id="code-'+esc(key)+'" list="adp-codes" value="'+esc(val||'')+'"'
+       + ' placeholder="not assigned" oninput="codeSync(\''+esc(key)+'\')"'+ro+'>'
+       + '<span class="code-desc '+d.cls+'" id="codedesc-'+esc(key)+'">'+esc(d.txt)+'</span></label>';
+}
+// What a code means, or that ADP does not list it. An unknown code is only a
+// warning: the catalogue was copied from a paginated screen and is known to be
+// missing entries at both ends, so it must never block a code that is real.
+function codeDesc(val){
+  const v = String(val||'').trim();
+  if(!v) return { txt:'not assigned', cls:'muted' };
+  if(!CODE_CATALOG.length) return { txt:'', cls:'muted' };
+  const c = CODE_CATALOG.find(x=>x.code.toLowerCase()===v.toLowerCase());
+  if(!c) return { txt:'not in the ADP earnings code list \u2014 check it', cls:'bad' };
+  return { txt: (c.description || 'no description in ADP')
+             + (c.active ? '' : ' \u2014 ADP lists this code as not in use'),
+           cls: c.active ? 'muted' : 'bad' };
+}
+function codeSync(key){
+  const el = $('code-'+key), out = $('codedesc-'+key);
+  if(!el || !out) return;
+  const d = codeDesc(el.value);
+  out.textContent = d.txt; out.className = 'code-desc '+d.cls;
 }
 function ruleInput(key,label,val,ro,step){
   return '<label class="fld">'+esc(label)

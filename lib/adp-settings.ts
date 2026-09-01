@@ -117,6 +117,74 @@ const DEFAULT_CODES: Record<string, string> = {
   stylistBonus: '',
 }
 
+/**
+ * Every earnings code that exists in our ADP company.
+ *
+ * Transcribed from the Earnings Codes list in Workforce Now on 2026-09-01.
+ * This is a REFERENCE list, not configuration: it does not decide what any
+ * field is paid on. It exists so the settings screen can offer real codes
+ * instead of a blank box, and can say that a code typed in by hand is not one
+ * ADP actually knows about.
+ *
+ * INCOMPLETE AT BOTH ENDS. The list was copied from a paginated screen that
+ * sorts codes as text: it began at "10", so any code sorting before that (a
+ * bare "1", for instance) is missing, and it was cut off mid-row at XMS, so
+ * anything after XMS is missing too. Add to it rather than trusting its
+ * absence — an unknown code here is reported as a warning, never a block.
+ */
+export interface AdpEarningsCode {
+  code: string
+  description: string
+  kind: 'Hours/Earnings' | 'Earnings' | ''
+  /** ADP rate class, as shown in Workforce Now. */
+  rateClass: string
+  /** Whether ADP lists the code as in use. */
+  active: boolean
+}
+
+export const ADP_EARNINGS_CODES: AdpEarningsCode[] = [
+  { code: '2', description: "Stylist Bonus", kind: 'Hours/Earnings', rateClass: '3 - Straight Time', active: true },
+  { code: '10', description: "INCENTIVE", kind: 'Hours/Earnings', rateClass: '3 - Straight Time', active: true },
+  { code: '11', description: "Incentive", kind: 'Hours/Earnings', rateClass: '3 - Straight Time', active: true },
+  { code: '12', description: "O/T", kind: 'Hours/Earnings', rateClass: '3 - Straight Time', active: true },
+  { code: '13', description: "PROD BONUS", kind: 'Hours/Earnings', rateClass: '3 - Straight Time', active: true },
+  { code: '14', description: "VACATION", kind: 'Hours/Earnings', rateClass: '3 - Straight Time', active: true },
+  { code: '15', description: "HOLIDAY", kind: 'Hours/Earnings', rateClass: '3 - Straight Time', active: true },
+  { code: '16', description: "PRODUCTIVITY", kind: 'Hours/Earnings', rateClass: '3 - Straight Time', active: true },
+  { code: '17', description: "RECEPTION", kind: 'Hours/Earnings', rateClass: '3 - Straight Time', active: true },
+  { code: '19', description: "RETURN BON", kind: 'Hours/Earnings', rateClass: '3 - Straight Time', active: true },
+  { code: '23', description: "GUARANTEE", kind: 'Hours/Earnings', rateClass: '3 - Straight Time', active: true },
+  { code: '37', description: "FLOOR", kind: 'Hours/Earnings', rateClass: '3 - Straight Time', active: true },
+  { code: '38', description: "ADMIN/CLOSING", kind: 'Hours/Earnings', rateClass: '3 - Straight Time', active: true },
+  { code: '39', description: "TRAINING", kind: 'Hours/Earnings', rateClass: '3 - Straight Time', active: true },
+  { code: 'ADT', description: "Admin/Training", kind: 'Earnings', rateClass: '3 - Straight Time', active: true },
+  { code: 'ADV', description: "", kind: 'Hours/Earnings', rateClass: '', active: false },
+  { code: 'CC', description: "Child care", kind: 'Earnings', rateClass: '3 - Straight Time', active: true },
+  { code: 'CEL', description: "CELL", kind: 'Hours/Earnings', rateClass: '4 - Straight Time', active: false },
+  { code: 'CP', description: "Cell Phone", kind: 'Earnings', rateClass: '3 - Straight Time', active: true },
+  { code: 'CT', description: "Card Tips", kind: 'Earnings', rateClass: '3 - Straight Time', active: true },
+  { code: 'GMA', description: "GM Admin", kind: 'Earnings', rateClass: '3 - Straight Time', active: true },
+  { code: 'GMB', description: "GM Bonus", kind: 'Earnings', rateClass: '3 - Straight Time', active: true },
+  { code: 'HSA', description: "HSA", kind: 'Hours/Earnings', rateClass: '3 - Straight Time', active: true },
+  { code: 'J', description: "", kind: 'Hours/Earnings', rateClass: '', active: false },
+  { code: 'MGR', description: "Manager Bonus", kind: 'Earnings', rateClass: '3 - Straight Time', active: true },
+  { code: 'MIL', description: "Mileage", kind: 'Earnings', rateClass: '3 - Straight Time', active: true },
+  { code: 'REF', description: "REFERRAL", kind: 'Earnings', rateClass: '3 - Straight Time', active: true },
+  { code: 'REG', description: "Regular Salary", kind: 'Earnings', rateClass: '3 - Straight Time', active: true },
+  { code: 'SEV', description: "SEVERANCE", kind: 'Earnings', rateClass: '4 - Straight Time', active: true },
+  { code: 'SL', description: "Student Loan", kind: 'Earnings', rateClass: '3 - Straight Time', active: true },
+  { code: 'T', description: "TIPS", kind: 'Hours/Earnings', rateClass: '3 - Straight Time', active: true },
+  { code: 'TRP', description: "", kind: 'Hours/Earnings', rateClass: '4 - Straight Time', active: false },
+  { code: 'XMS', description: "XMAS%", kind: 'Earnings', rateClass: '3 - Straight Time', active: true },
+]
+
+/** Look a code up in the catalogue, case-insensitively. */
+export function findEarningsCode(code: string): AdpEarningsCode | undefined {
+  const c = String(code ?? '').trim().toLowerCase()
+  if (!c) return undefined
+  return ADP_EARNINGS_CODES.find(e => e.code.toLowerCase() === c)
+}
+
 export interface AdpRules {
   // ── 6-day pay ──
   /** Dollars per floor hour once the week qualifies. */
