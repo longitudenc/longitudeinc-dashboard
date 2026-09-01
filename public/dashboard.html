@@ -10664,8 +10664,12 @@ const HUB_GROUPS = {
       { t:'Newsletter', d:'Build the monthly issue, then publish it for the team to read.',
         show:function(){ return ['owner','admin','office'].indexOf(String(SESSION.role||'')) >= 0; },
         href:'/newsletter.html' },
-      { t:'Leases', d:'Coming soon — lease terms, renewals and key dates.', cap:'view.payroll',
-        soon:true },
+      // owner/admin only, MIRRORING requireAdmin() in every /api/leases/* route.
+      // Not cap:'view.payroll' — that includes office, who would see the card and
+      // then be refused by the API. A lease carries rent, guarantees and landlord
+      // terms; it is a narrower thing than the payroll build.
+      { t:'Leases', d:'Lease documents — upload, file and pull one back up.',
+        show:function(){ return isAdminRole(); }, href:'/leases.html' },
     ],
   },
 };

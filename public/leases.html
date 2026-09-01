@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lease Manager · Longitude Inc</title>
+<link rel="icon" type="image/png" href="longitude-badge.png?v=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --primary:#048667; --primary-dark:#03654e; --accent:#9acb3a; --accent-light:#eaf5d8;
+    --border:#dfe3df; --bg:#f2f2f2; --text:#1a1a1a; --text-muted:#6b6b6b; --text-light:#999;
+    --wrn-bg:#fbe8e8; --wrn-text:#8a1a1a; --wrn-border:#e8a0a0;
+    --ok-bg:#e6f4e0; --ok-text:#1a5c0a; --ok-border:#a8d890;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'Poppins','Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;}
+  .app-header{background:var(--primary-dark);color:#fff;display:flex;align-items:center;gap:12px;padding:0 1.25rem;height:52px;}
+  .app-header h1{font-size:15px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap;}
+  .spacer{flex:1;}
+  .user-chip{font-size:12px;color:#bfe9d8;}
+  .back-link{color:#fff;font-size:12.5px;text-decoration:none;opacity:.9;}
+  .back-link:hover{text-decoration:underline;}
+  .content{max-width:1180px;margin:0 auto;padding:1.5rem 1.25rem 4rem;}
+  .card{background:#fff;border:1px solid var(--border);border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.05);margin-bottom:1.25rem;overflow:hidden;}
+  .card > h2{font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:#fff;background:var(--primary);padding:10px 14px;font-weight:600;display:flex;align-items:center;gap:10px;}
+  .card > h2 .sub{font-weight:400;text-transform:none;letter-spacing:0;color:#bfe9d8;font-size:11.5px;margin-left:auto;}
+  .card .body{padding:14px;}
+  label.fld{display:flex;flex-direction:column;gap:5px;font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);}
+  input[type=text],select,textarea{font-family:inherit;font-size:13px;padding:7px 9px;border:1px solid var(--border);border-radius:7px;background:#fff;color:var(--text);}
+  input[type=text]:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:-1px;}
+  .btn{font-family:inherit;font-size:13px;font-weight:500;padding:8px 14px;border-radius:8px;border:1px solid var(--primary);background:var(--primary);color:#fff;cursor:pointer;}
+  .btn:hover{background:var(--primary-dark);}
+  .btn.ghost{background:#fff;color:var(--primary-dark);}
+  .btn.ghost:hover{background:var(--accent-light);}
+  .btn.small{font-size:12px;padding:5px 9px;}
+  .btn.danger{border-color:#d9a0a0;color:#8a1a1a;background:#fff;}
+  .btn.danger:hover{background:var(--wrn-bg);}
+  .btn:disabled{opacity:.5;cursor:not-allowed;}
+  .banner{padding:10px 12px;border-radius:8px;font-size:13px;line-height:1.5;margin-bottom:12px;background:var(--accent-light);border:1px solid var(--border);}
+  .banner.err{background:var(--wrn-bg);border-color:var(--wrn-border);color:var(--wrn-text);}
+  .banner.ok{background:var(--ok-bg);border-color:var(--ok-border);color:var(--ok-text);}
+  .loading{padding:40px;text-align:center;color:var(--text-muted);font-size:14px;}
+  .hint{font-size:11.5px;color:var(--text-light);margin-top:5px;line-height:1.5;}
+  .filegrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;margin-bottom:14px;}
+
+  /* ── The drop target ── */
+  .drop{border:2px dashed #b9c8c1;border-radius:12px;background:#fafcfb;padding:34px 20px;text-align:center;cursor:pointer;transition:background .12s,border-color .12s;}
+  .drop:hover{border-color:var(--primary);background:var(--accent-light);}
+  .drop.over{border-color:var(--primary);background:var(--accent-light);border-style:solid;}
+  .drop .big{font-size:15px;font-weight:600;color:var(--primary-dark);margin-bottom:4px;}
+  .drop .small{font-size:12.5px;color:var(--text-muted);}
+
+  /* ── Upload queue ── */
+  .q{border-top:1px solid var(--border);margin-top:14px;padding-top:12px;}
+  .qrow{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #f1f3f1;font-size:13px;}
+  .qrow:last-child{border-bottom:none;}
+  .qname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .qsize{color:var(--text-muted);font-size:11.5px;white-space:nowrap;}
+  .qstat{font-size:11.5px;white-space:nowrap;min-width:64px;text-align:right;}
+  .qstat.ok{color:var(--ok-text);font-weight:600;}
+  .qstat.err{color:var(--wrn-text);font-weight:600;}
+  .bar{width:120px;height:6px;border-radius:4px;background:#e6ebe8;overflow:hidden;flex:none;}
+  .bar > i{display:block;height:100%;background:var(--primary);width:0;transition:width .15s;}
+  .qerr{font-size:11.5px;color:var(--wrn-text);padding:0 0 7px 0;}
+
+  .scroll{max-height:70vh;overflow:auto;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th{background:#f7f9f8;text-align:left;padding:8px 10px;font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--text-muted);border-bottom:1px solid var(--border);position:sticky;top:0;white-space:nowrap;}
+  td{padding:8px 10px;border-bottom:1px solid #f1f3f1;vertical-align:top;}
+  tr:last-child td{border-bottom:none;}
+  .muted{color:var(--text-muted);}
+  .pill{display:inline-block;font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:20px;background:var(--accent-light);color:var(--primary-dark);}
+  .nowrap{white-space:nowrap;}
+  @media(max-width:700px){ .content{padding:1rem .75rem;} .app-header{padding:0 .9rem;} .bar{width:70px;} }
+</style>
+</head>
+<body>
+
+<div class="app-header">
+  <h1>Lease Manager</h1>
+  <span class="spacer"></span>
+  <span class="user-chip" id="user-chip">…</span>
+  <a class="back-link" href="/dashboard.html">← Dashboard</a>
+</div>
+
+<div class="content">
+  <div id="gate" class="loading">Checking access…</div>
+
+  <div id="app" style="display:none;">
+
+    <div class="card">
+      <h2>Upload documents <span class="sub" id="up-sub">leases, amendments, abstracts, notices</span></h2>
+      <div class="body">
+        <div class="filegrid">
+          <label class="fld">Location
+            <input type="text" id="f-location" list="loc-list" placeholder="e.g. Ingram Plaza" oninput="onLocationTyped()">
+          </label>
+          <label class="fld">Unit #
+            <input type="text" id="f-unit" placeholder="e.g. 1449">
+          </label>
+          <label class="fld">Document type
+            <select id="f-doctype"></select>
+          </label>
+          <label class="fld">Note (optional)
+            <input type="text" id="f-note" placeholder="anything worth remembering">
+          </label>
+        </div>
+        <datalist id="loc-list"></datalist>
+
+        <div class="drop" id="drop"
+             onclick="document.getElementById('picker').click()"
+             ondragover="dropOver(event,true)" ondragleave="dropOver(event,false)" ondrop="onDrop(event)">
+          <div class="big">Drop files here</div>
+          <div class="small">or click to choose &middot; PDF, images, Word or Excel &middot; up to 50 MB each</div>
+        </div>
+        <input type="file" id="picker" multiple style="display:none;" onchange="onPick(event)">
+
+        <div class="hint">
+          Whatever is filled in above is applied to every file in the drop, so a batch for one
+          location files itself. It can be changed per document afterwards.
+        </div>
+
+        <div class="q" id="queue" style="display:none;"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Documents <span class="sub" id="doc-sub"></span></h2>
+      <div class="body" style="padding:10px 14px;">
+        <input type="text" id="search" placeholder="Filter by name, location, unit or type…"
+               style="width:100%;max-width:420px;" oninput="renderFiles()">
+      </div>
+      <div class="scroll" id="files-out"><div class="loading">Loading…</div></div>
+    </div>
+
+  </div>
+</div>
+
+<script src="/lease-upload.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+
+let SESSION = { email:'', role:'none' };
+let FILES = [];
+let DOC_TYPES = [];
+
+// The 16 Twin Dome locations, so filing a document is a pick rather than a
+// retype. Choosing one fills the unit number in. Typing anything else is fine —
+// this is a convenience, not a constraint, and nothing validates against it.
+const LOCATIONS = [
+  ['Ingram Plaza','1449'], ['Mayodan Shopping Center','4340'], ['Westchester Square','1971'],
+  ['North Elm Village','4313'], ['Tanglewood Commons','4314'], ['Clemmons Town Center','9229'],
+  ['Tarheel Plaza','4339'], ['Oak Summit','4309'], ['Union Cross','3844'],
+  ['Hanes Point','4317'], ['Wilkes Plaza','4341'], ['Cloverdale Plaza','4318'],
+  ['Lewisville Commons','4323'], ['Granite Towne Centre','4342'],
+  ['Mocksville Shopping Center','9672'], ['Walkertown Commons','4333'],
+];
+
+// A file dragged from some systems arrives with an empty type. The server
+// checks the content type it is told, so guess from the extension rather than
+// sending nothing and being refused.
+const EXT_TYPE = {
+  pdf:'application/pdf', jpg:'image/jpeg', jpeg:'image/jpeg', png:'image/png',
+  webp:'image/webp', heic:'image/heic', tif:'image/tiff', tiff:'image/tiff',
+  doc:'application/msword',
+  docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls:'application/vnd.ms-excel',
+  xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+};
+const ALLOWED = new Set(Object.values(EXT_TYPE));
+const MAX_BYTES = 50 * 1024 * 1024;
+
+function typeOf(file){
+  if(file.type && ALLOWED.has(file.type)) return file.type;
+  const dot = file.name.lastIndexOf('.');
+  const ext = dot > 0 ? file.name.slice(dot+1).toLowerCase() : '';
+  return EXT_TYPE[ext] || file.type || '';
+}
+function sizeText(n){
+  const b = Number(n)||0;
+  if(b >= 1048576) return (b/1048576).toFixed(1) + ' MB';
+  if(b >= 1024) return Math.round(b/1024) + ' KB';
+  return b + ' B';
+}
+function dateText(iso){
+  if(!iso) return '';
+  try{ return new Date(iso).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}); }
+  catch(e){ return String(iso).slice(0,10); }
+}
+
+// ── Access ────────────────────────────────────────────────────
+const ALLOWED_ROLES = ['owner','admin'];
+fetch('/api/auth/me').then(r=>r.json()).then(me=>{
+  if(!me || !me.access){
+    $('gate').innerHTML = 'Please <a href="/dashboard.html">sign in</a> to continue.';
+    return;
+  }
+  SESSION = { email: me.email||'', role: (me.access.role||'none') };
+  $('user-chip').textContent = SESSION.email || 'Unknown';
+  if(ALLOWED_ROLES.indexOf(SESSION.role) < 0){
+    $('gate').innerHTML = '<div class="banner err">The Lease Manager is limited to owners and '
+      + 'administrators. Your account is signed in as <b>'+esc(SESSION.role)+'</b>.</div>';
+    return;
+  }
+  $('gate').style.display = 'none';
+  $('app').style.display = '';
+  $('loc-list').innerHTML = LOCATIONS.map(l=>'<option value="'+esc(l[0])+'">').join('');
+  loadFiles();
+}).catch(e=>{ $('gate').innerHTML = '<div class="banner err">'+esc(e.message)+'</div>'; });
+
+/** Picking a known location fills its unit in, unless one was typed already. */
+function onLocationTyped(){
+  const v = $('f-location').value.trim().toLowerCase();
+  const hit = LOCATIONS.find(l => l[0].toLowerCase() === v);
+  if(hit && !$('f-unit').value.trim()) $('f-unit').value = hit[1];
+}
+
+// ── The drop target ───────────────────────────────────────────
+function dropOver(ev, on){
+  ev.preventDefault();
+  $('drop').classList.toggle('over', on);
+}
+function onDrop(ev){
+  ev.preventDefault();
+  $('drop').classList.remove('over');
+  const files = [];
+  const dt = ev.dataTransfer;
+  if(dt.items){
+    for(const it of dt.items){ if(it.kind === 'file'){ const f = it.getAsFile(); if(f) files.push(f); } }
+  } else {
+    for(const f of dt.files) files.push(f);
+  }
+  queue(files);
+}
+function onPick(ev){
+  queue(Array.from(ev.target.files || []));
+  ev.target.value = '';        // so the same file can be chosen twice
+}
+
+// ── Uploading ─────────────────────────────────────────────────
+let QUEUE = [];
+let QSEQ = 0;
+
+function queue(files){
+  if(!files.length) return;
+  // Read the filing fields ONCE, at drop time. Changing them mid-upload should
+  // not retroactively refile what is already going up.
+  const meta = {
+    location: $('f-location').value.trim(),
+    unit: $('f-unit').value.trim(),
+    docType: $('f-doctype').value,
+    note: $('f-note').value.trim(),
+  };
+  files.forEach(f => {
+    const item = { id: ++QSEQ, file: f, meta: meta, pct: 0, state: 'waiting', error: '' };
+    const ct = typeOf(f);
+    if(!ct || !ALLOWED.has(ct)){
+      item.state = 'error';
+      item.error = 'Not a document type this store accepts (PDF, image, Word or Excel).';
+    } else if(f.size > MAX_BYTES){
+      item.state = 'error';
+      item.error = 'Larger than the 50 MB limit — ' + sizeText(f.size) + '.';
+    } else {
+      item.contentType = ct;
+    }
+    QUEUE.push(item);
+  });
+  renderQueue();
+  runQueue();
+}
+
+let RUNNING = false;
+async function runQueue(){
+  if(RUNNING) return;
+  RUNNING = true;
+  try{
+    while(true){
+      const next = QUEUE.find(q => q.state === 'waiting');
+      if(!next) break;
+      await uploadOne(next);
+    }
+  } finally {
+    RUNNING = false;
+    loadFiles();
+  }
+}
+
+async function uploadOne(item){
+  item.state = 'uploading'; item.pct = 0; renderQueue();
+  const meta = {
+    fileName: item.file.name,
+    contentType: item.contentType,
+    location: item.meta.location,
+    unit: item.meta.unit,
+    docType: item.meta.docType,
+    note: item.meta.note,
+  };
+  try{
+    const blob = await window.LeaseUpload.upload(item.file, meta, pct=>{
+      item.pct = pct; renderQueue();
+    });
+    // Blob calls the server back too, but that callback cannot reach a laptop
+    // and can lag in production. Confirming here means the row exists the
+    // moment the upload does; the write is keyed on pathname, so the two
+    // cannot produce duplicates.
+    const res = await fetch('/api/leases/files', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(Object.assign({ pathname: blob.pathname, sizeBytes: item.file.size }, meta))
+    }).then(r=>r.json());
+    if(!res.success) throw new Error(res.error || 'could not record the file');
+    item.state = 'done'; item.pct = 100;
+  }catch(e){
+    item.state = 'error';
+    item.error = (e && e.message) ? e.message : 'upload failed';
+  }
+  renderQueue();
+}
+
+function renderQueue(){
+  const q = $('queue');
+  if(!QUEUE.length){ q.style.display = 'none'; q.innerHTML = ''; return; }
+  q.style.display = '';
+  const done = QUEUE.filter(x=>x.state==='done').length;
+  const bad = QUEUE.filter(x=>x.state==='error').length;
+  let h = '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">'
+    + '<b style="font-size:12px;">'+done+' of '+QUEUE.length+' uploaded'
+    + (bad? ' · '+bad+' failed':'')+'</b>'
+    + '<span style="flex:1;"></span>'
+    + '<button class="btn ghost small" onclick="clearQueue()">Clear</button></div>';
+  QUEUE.forEach(x=>{
+    const stat = x.state === 'done' ? '<span class="qstat ok">Uploaded</span>'
+      : x.state === 'error' ? '<span class="qstat err">Failed</span>'
+      : x.state === 'uploading' ? '<span class="qstat">'+Math.round(x.pct)+'%</span>'
+      : '<span class="qstat muted">Waiting</span>';
+    h += '<div class="qrow">'
+      + '<span class="qname">'+esc(x.file.name)+'</span>'
+      + '<span class="qsize">'+sizeText(x.file.size)+'</span>'
+      + (x.state==='uploading' ? '<span class="bar"><i style="width:'+x.pct+'%"></i></span>' : '')
+      + stat + '</div>';
+    if(x.error) h += '<div class="qerr">'+esc(x.error)+'</div>';
+  });
+  q.innerHTML = h;
+}
+function clearQueue(){
+  // Only finished rows: clearing mid-upload would hide work still running.
+  QUEUE = QUEUE.filter(x => x.state === 'uploading' || x.state === 'waiting');
+  renderQueue();
+}
+
+// ── The document list ─────────────────────────────────────────
+function loadFiles(){
+  fetch('/api/leases/files').then(r=>r.json()).then(d=>{
+    if(!d.success){ $('files-out').innerHTML = '<div class="banner err">'+esc(d.error)+'</div>'; return; }
+    FILES = d.files || [];
+    DOC_TYPES = d.docTypes || [];
+    const sel = $('f-doctype');
+    if(sel && !sel.options.length){
+      sel.innerHTML = DOC_TYPES.map(t=>'<option value="'+esc(t)+'">'+esc(t)+'</option>').join('');
+    }
+    renderFiles();
+  }).catch(e=>{ $('files-out').innerHTML = '<div class="banner err">'+esc(e.message)+'</div>'; });
+}
+
+function renderFiles(){
+  const term = ($('search').value||'').trim().toLowerCase();
+  const rows = FILES.filter(f => !term ||
+    (f.fileName+' '+f.location+' '+f.unit+' '+f.docType+' '+f.note).toLowerCase().indexOf(term) >= 0);
+
+  $('doc-sub').textContent = FILES.length
+    ? (rows.length === FILES.length ? FILES.length + ' documents'
+       : rows.length + ' of ' + FILES.length + ' documents')
+    : '';
+
+  if(!FILES.length){
+    $('files-out').innerHTML = '<div class="loading">Nothing uploaded yet. '
+      + 'Drop the first lease above and it will appear here.</div>';
+    return;
+  }
+  if(!rows.length){
+    $('files-out').innerHTML = '<div class="loading">Nothing matches that filter.</div>';
+    return;
+  }
+
+  let h = '<table><thead><tr><th>Document</th><th>Location</th><th>Unit</th><th>Type</th>'
+        + '<th>Size</th><th>Uploaded</th><th></th></tr></thead><tbody>';
+  rows.forEach(f=>{
+    const view = '/api/leases/files/view?fileId='+encodeURIComponent(f.fileId);
+    h += '<tr>'
+      + '<td><a href="'+view+'" target="_blank" rel="noopener noreferrer">'+esc(f.fileName)+'</a>'
+      + (f.note? '<div class="hint" style="margin-top:2px;">'+esc(f.note)+'</div>':'')+'</td>'
+      + '<td>'+esc(f.location||'—')+'</td>'
+      + '<td class="muted">'+esc(f.unit||'—')+'</td>'
+      + '<td>'+(f.docType? '<span class="pill">'+esc(f.docType)+'</span>':'')+'</td>'
+      + '<td class="muted nowrap">'+esc(sizeText(f.sizeBytes))+'</td>'
+      + '<td class="muted nowrap">'+esc(dateText(f.uploadedAt))
+      + '<div class="hint" style="margin-top:2px;">'+esc(f.uploadedBy||'')+'</div></td>'
+      + '<td class="nowrap">'
+      + '<a class="btn ghost small" style="text-decoration:none;" href="'+view+'&dl=1">Download</a> '
+      + '<button class="btn danger small" onclick="removeFile(\''+esc(f.fileId)+'\')">Delete</button>'
+      + '</td></tr>';
+  });
+  h += '</tbody></table>';
+  $('files-out').innerHTML = h;
+}
+
+function removeFile(fileId){
+  const f = FILES.find(x=>x.fileId===fileId);
+  if(!f) return;
+  if(!confirm('Delete "'+f.fileName+'"?\n\nThe document itself is removed, not just this row. '
+    + 'This cannot be undone.')) return;
+  fetch('/api/leases/files?fileId='+encodeURIComponent(fileId), { method:'DELETE' })
+    .then(r=>r.json()).then(d=>{
+      if(!d.success){ alert(d.error || 'Could not delete.'); return; }
+      loadFiles();
+    }).catch(e=>alert(e.message||e));
+}
+</script>
+</body>
+</html>
