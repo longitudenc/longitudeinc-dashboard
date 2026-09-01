@@ -4027,7 +4027,7 @@ function applyDailyLY(rows, lyRows){
   });
   return rows;
 }
-// �� Unified period model (Day / Week / Month / MTD / YTD / Custom) ���������
+// ── Unified period model (Day / Week / Month / MTD / YTD / Custom) ─────────
 // One period shared by the company All Salons table and the AM salon table,
 // mirroring the Market view's timeframe controls.
 //   day    -> daily rows for one date (+ -364d match for the LY columns)
@@ -4195,7 +4195,7 @@ function _periodSalonColsBase(){
   return out;
 }
 
-// �� Period comparison (small delta under each value, no extra columns) ����
+// ── Period comparison (small delta under each value, no extra columns) ────
 // Resolves from data already in memory for week / month / ytd / custom, so
 // turning Compare on costs zero extra API calls. Day + MTD are excluded: they
 // would need more SD_DAILY reads and that endpoint is already fragile.
@@ -4290,7 +4290,7 @@ function withCompare(cols){
 function setCompareMode(v){ S_compareMode=v; refreshPeriodViews(); }
 function setCmpDisplay(v){ S_cmpDisplay=v; refreshPeriodViews(); }
 
-// �� Period selector UI (mirrors the Market view's timeframe controls) ������
+// ── Period selector UI (mirrors the Market view's timeframe controls) ──────
 function renderPeriodControls(){
   const hosts=document.querySelectorAll('.period-controls'); if(!hosts.length) return;
   const box='font-size:12px;padding:4px 8px;border-radius:8px;border:1px solid var(--border);background:#fff;color:var(--text);cursor:pointer;';
@@ -4318,7 +4318,7 @@ function renderPeriodControls(){
           +opts([['delta','Difference'],['value','Actual']],S_cmpDisplay)+'</select>'
         : '')
     : '';
-const busy=S_periodBusy?'<span style="font-size:11px;color:var(--text-muted);">loading�</span>':'';
+const busy=S_periodBusy?'<span style="font-size:11px;color:var(--text-muted);">loading…</span>':'';
   const err=S_periodErr?'<span style="font-size:11px;color:#c0392b;">'+S_periodErr+'</span>':'';
   const html=lab('Period')+'<select onchange="setPeriodType(this.value)" style="'+box+'">'+opts(types,S_periodType)+'</select>'+picker+cmpSel+busy+err;
   hosts.forEach(h=>{ h.innerHTML=html; });
@@ -15404,7 +15404,7 @@ function paintHome(){
     .hc-li-when-big .hc-when-d{display:block;font-size:15px;font-weight:700;color:#03654e;}
     .hc-li-when-big .hc-when-t{display:block;font-size:12px;color:#048667;}
     .hc-li-when-big .hc-when-l{display:block;font-size:10px;color:var(--text-muted,#5c6b64);}
-    .hc-li-when .hc-when-t:before,.hc-li-when .hc-when-l:before{content:'  b7 ';}
+    .hc-li-when .hc-when-t:before,.hc-li-when .hc-when-l:before{content:' · ';}
     .hc-li-when-big .hc-when-t:before,.hc-li-when-big .hc-when-l:before{content:none;}
     .hc-li-signup{display:inline-block;margin-left:8px;background:#9acb3a;color:#0b2b22;
         border-radius:999px;padding:2px 10px;font-size:11px;font-weight:700;text-decoration:none;white-space:nowrap;}
