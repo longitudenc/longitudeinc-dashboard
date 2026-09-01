@@ -15,11 +15,15 @@
 //
 // Neither tab has to exist; a missing tab just means "use the defaults".
 //
-// THREE CODES ARE UNKNOWN. The workbook lists Shift Incentive, Stylist Bonus and
-// Mgr Bonus as "TBD" — nobody ever assigned them. They default to '' here, and
-// buildAdpUpload() refuses to silently emit a blank code: any pay landing on an
-// unset code is reported as a blocking exception instead. Fill them in on the
-// Settings tab of Office Tools when ADP tells you what they are.
+// The workbook left Shift Incentive, Stylist Bonus and 6-day pay as "TBD".
+// The owner assigned them on 2026-09-01 against the real ADP earnings code
+// list: stylist bonus on 2, and shift incentive and 6-day both on 11, the
+// same code All Other Incentives already uses.
+//
+// Short-break pay is still unassigned, and correctly so: breakMode is 'off',
+// and a code is only needed in 'separateCode' mode. buildAdpUpload() refuses
+// to silently emit a blank code — any pay landing on an unset one is a
+// blocking exception rather than money that disappears into ADP.
 // ---------------------------------------------------------------------------
 
 import { readSheet, rowsToObjects } from '@/lib/sheets'
@@ -105,16 +109,23 @@ const DEFAULT_CODES: Record<string, string> = {
   productivityIncentive: '16',
   productIncentive: '13',
   newReturnIncentive: '19',
-  shiftIncentive: '',      // TBD in the workbook
+  // 11 is also All Other Incentives. Deliberate: Pay Consol reports Shift
+  // Incentive in its own column, but it belongs in the same bucket, and that
+  // is where the office has always put it.
+  shiftIncentive: '11',
   allOtherIncentives: '11',
   cashCheckTips: 'T',
   chargeTips: 'CT',
-  // Lines this tool adds. sixDay and stylistBonus have no assigned code yet;
-  // shortBreak is unused while breakMode is 'off', and needs a code only if
-  // breaks are ever turned back on in 'separateCode' mode.
-  sixDay: '',
+  // Lines this tool adds.
+  //
+  // sixDay is read ONLY in sixDayMode 'add'. The live mode is 'net', which
+  // adjusts allOtherIncentives in place and never writes a separate line —
+  // so 6-day pay already rides on 11 today. Setting it here means 'add' mode
+  // would put it on the same code rather than failing for want of one.
+  sixDay: '11',
+  // Unassigned on purpose: breakMode is 'off', and only 'separateCode' needs it.
   shortBreak: '',
-  stylistBonus: '',
+  stylistBonus: '2',
 }
 
 /**
