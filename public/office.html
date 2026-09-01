@@ -112,9 +112,13 @@
   /* Type-ahead picker: an input with a filtered list under it. */
   .combo{position:relative;}
   .combo input{width:100%;}
-  .combo-menu{position:absolute;z-index:60;left:0;right:0;top:calc(100% + 2px);background:#fff;
+  /* Fixed, not absolute. An absolute menu is clipped away entirely by
+     .card{overflow:hidden} on the Find an employee card, and again by the
+     .scroll box the manual-earnings table sits in. Fixed escapes both; the
+     position is set from JS against the input, in comboPlace(). */
+  .combo-menu{position:fixed;z-index:200;background:#fff;
     border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 22px rgba(0,0,0,.14);
-    max-height:250px;overflow:auto;display:none;min-width:260px;}
+    overflow:auto;display:none;min-width:260px;}
   .combo-menu.open{display:block;}
   .combo-opt{padding:7px 10px;font-size:13px;cursor:pointer;white-space:nowrap;}
   .combo-opt.act{background:var(--accent-light);}
@@ -1345,7 +1349,38 @@ function comboFilter(id){
   c.act = 0;
   comboPaint(id);
   menu.classList.add('open');
+  comboPlace(id);
 }
+// A fixed menu carries no layout relationship to its input, so it is placed
+// by hand: under the box, or above it when the bottom of the window is
+// closer than the menu is tall.
+function comboPlace(id){
+  const el = $(id), menu = $(id + '-menu');
+  if(!el || !menu) return;
+  const r = el.getBoundingClientRect();
+  const below = window.innerHeight - r.bottom - 12;
+  const above = r.top - 12;
+  const flip = below < 160 && above > below;
+  menu.style.left = Math.round(r.left) + 'px';
+  menu.style.width = Math.round(Math.max(r.width, 260)) + 'px';
+  menu.style.maxHeight = Math.round(Math.max(120, Math.min(250, flip ? above : below))) + 'px';
+  if(flip){
+    menu.style.top = 'auto';
+    menu.style.bottom = Math.round(window.innerHeight - r.top + 2) + 'px';
+  } else {
+    menu.style.bottom = 'auto';
+    menu.style.top = Math.round(r.bottom + 2) + 'px';
+  }
+}
+// Capture phase, so scrolling an inner box (the manual table) counts too.
+['scroll','resize'].forEach(function(ev){
+  window.addEventListener(ev, function(){
+    Object.keys(COMBOS).forEach(function(id){
+      const m = $(id + '-menu');
+      if(m && m.classList.contains('open')) comboPlace(id);
+    });
+  }, true);
+});
 function comboPaint(id){
   const c = COMBOS[id], menu = $(id+'-menu');
   menu.innerHTML = c.hits.length
