@@ -28,7 +28,8 @@ export const ANNOUNCEMENT_COLUMNS = [
 // events are 'morning' or 'TBD' and forcing HH:MM would lose that.
 // `signupUrl` turns an event into a volunteer sign-up.
 export const DATE_COLUMNS = [
-  'id', 'title', 'date', 'time', 'endDate', 'category', 'note', 'signupUrl', 'audience',
+  'id', 'title', 'date', 'time', 'endDate', 'showFrom', 'address',
+  'category', 'note', 'signupUrl', 'audience',
 ] as const
 
 export const LINK_COLUMNS = [
@@ -103,7 +104,9 @@ export interface ImportantDate {
   title: string
   date: string
   time?: string             // free text, e.g. '10:00 AM' or 'after close'
-  endDate: string
+  endDate: string           // a multi-day event ENDS here
+  showFrom?: string         // appears on Home from here; blank = as soon as it exists
+  address?: string          // optional, for events people travel to
   signupUrl?: string        // optional volunteer / RSVP sign-up link
   category: string
   note: string
@@ -179,6 +182,8 @@ export async function getImportantDates(role: Role | string, horizonDays = 120):
         date,
         endDate,
         time: norm(r.time),
+        showFrom: normalizeDate(r.showFrom),
+        address: norm(r.address),
         category: norm(r.category),
         note: norm(r.note),
         signupUrl: norm(r.signupUrl),
@@ -190,6 +195,8 @@ export async function getImportantDates(role: Role | string, horizonDays = 120):
     .filter(d => d.id && d.title && d.date)
     .filter(d => audienceAllows(d.audience, role))
     .filter(d => {
+      // Not due to appear yet.
+      if (d.showFrom && d.showFrom > today) return false
       const effectiveEnd = d.endDate || d.date
       if (effectiveEnd < today) return false          // fully past
       return d.daysAway <= horizonDays

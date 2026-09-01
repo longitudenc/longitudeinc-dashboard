@@ -256,7 +256,9 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c =>
   ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 // Negatives read as -$32.80, not $-32.80 — clawbacks show up all over this page.
-const money = n => { const v = Number(n)||0; return (v<0?'-$':'$') + Math.abs(v).toFixed(2); };
+const money = n => { const v = Number(n)||0;
+  return (v<0?'-$':'$') + Math.abs(v)
+    .toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2}); };
 const hrs = n => (Number(n)||0).toFixed(2);
 // The API sends real booleans, but a value read straight off a sheet arrives as
 // the STRING "false" — which is truthy, and would tick every box.
@@ -340,6 +342,8 @@ function onWeekChange(){
   $('dl-btn').disabled = true;
   $('rec-btn').disabled = true;
   $('fin-btn').disabled = true;
+  FINAL_STATE = { weekEnd: '', finalized: false, record: null };
+  syncFinalizeBtn();
   LAST_BUILD = null;
   $('build-out').innerHTML = '';
   $('week-sub').textContent = 'week ending ' + $('week-select').value;
@@ -402,6 +406,9 @@ function restoreBuild(){
 
   LAST_BUILD = saved.build;
   renderBuild(saved.build);
+  // Ask whether this week is locked. Restoring skipped this, which is why
+  // Unlock went missing on a build picked back up after a reload.
+  checkFinalized(saved.build.weekEnd, function(){ renderBuild(saved.build); });
   $('dl-btn').disabled = false;
   $('rec-btn').disabled = false;
   $('fin-btn').disabled = false;
@@ -514,6 +521,16 @@ function checkFinalized(weekEnd, then){
       then && then();
     })
     .catch(() => { FINAL_STATE = { weekEnd: weekEnd, finalized: false, record: null }; then && then(); });
+}
+
+// The Finalize button and the lock banner are two views of one fact, so they
+// are driven from the same place. Offering "Finalize" on a week already
+// finalized only leads to a confirm dialog whose one outcome is an error.
+function syncFinalizeBtn(){
+  const b = $('fin-btn');
+  if(!b) return;
+  const locked = !!(FINAL_STATE.finalized && FINAL_STATE.weekEnd === $('week-select').value);
+  b.style.display = locked ? 'none' : '';
 }
 
 function finalizeBannerHtml(){
@@ -683,6 +700,7 @@ function renderBuild(d){
   // The lock state leads, because whether this week is already agreed changes
   // how you read everything under it.
   h += finalizeBannerHtml();
+  syncFinalizeBtn();
 
   // ── Banners ──
   if(blocking.length){

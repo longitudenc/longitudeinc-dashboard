@@ -55,6 +55,8 @@ function shapeItem(kind: Kind, raw: any, existing: Record<string, any> | null, e
     // Free text, deliberately NOT normalised: "morning" and "after close" are
     // real answers and a time parser would throw them away.
     set('time', str(raw.time, 60))
+    set('showFrom', normalizeDate(raw.showFrom))
+    set('address', str(raw.address, 300))
     set('endDate', normalizeDate(raw.endDate))
     set('category', str(raw.category, 100))
     set('note', str(raw.note, 2000))

@@ -7953,16 +7953,21 @@ function setTrendWindow(w){
 // rendered content (so printed numbers can never diverge from the screen) in a
 // clean, sidebar-free print window. This same content is what the email pipeline
 // will send, so it stays the single source of truth for a manager statement.
-function printManagerCards(){
+function printManagerCard(snum){ printManagerCards(snum); }
+
+function printManagerCards(onlySalon){
   // One full card per manager (renderMgrSalonCard) for the selected period, each
   // on its own page — the sheet you hand each manager showing exactly how they did.
   const pk = S_coMgrPeriod || ((ssPeriodsInRange().slice(-1)[0]||{}).periodKey);
   const ssP = (S_salonSummaryPeriods||[]).find(x=>x.periodKey===pk);
   if(!ssP){ alert('Open the Manager Bonus view and pick a period first.'); return; }
   const periodLbl = normPeriodLabel(ssP.periodLabel);
-  const salons = (ssP.salons||[]).map(s=>s.salonNum).filter(Boolean)
+  let salons = (ssP.salons||[]).map(s=>s.salonNum).filter(Boolean)
     .sort((a,b)=>parseInt(a)-parseInt(b));
-  if(!salons.length){ alert('No salons in this period.'); return; }
+  // Printing ONE card is the same job with a shorter list — an area manager
+  // handing a card to one manager should not get a different-looking sheet.
+  if(onlySalon){ salons = salons.filter(sn => String(sn) === String(onlySalon)); }
+  if(!salons.length){ alert(onlySalon ? 'No bonus data for that salon in this period.' : 'No salons in this period.'); return; }
   const pages = salons.map(snum=>{
     let inner='';
     try{
@@ -9843,6 +9848,8 @@ function renderMgrSalonCard(snum, salonRow, result, mgrInfo, bonusMgrRow, isAMFa
         <div style="font-size:13px;color:var(--text);margin-top:5px;">Manager: <strong>${(mgrInfo&&mgrInfo.globalId&&!isAMFallback)?stylistLink(mgrInfo.globalId,mgrName):mgrName}</strong>${mgrWarning}</div>
       </div>
       <div style="text-align:right;min-width:150px;">
+        <button class="btn btn-secondary btn-sm no-print" onclick="event.stopPropagation();printManagerCard('${snum}')"
+          title="Print just this manager’s card" style="float:right;margin:-2px 0 6px 8px;font-size:11px;padding:4px 10px;">&#128424; Print</button>
         <div style="font-size:28px;font-weight:800;color:${barColor};line-height:1;">${fmtMoney(finalPayout)}</div>
         <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">of ${fmtMoney(totalPotential)} potential</div>
         <div style="width:100%;max-width:160px;height:8px;background:#eee;border-radius:4px;margin:7px 0 4px auto;overflow:hidden;">
@@ -15492,10 +15499,11 @@ function paintHome(){
           ? `<span class="hc-li-more">Click for more details</span>`
           : (sub?`<span class="hc-li-sub">${hEsc(sub)}</span>`:'')}</span>
       <span class="hc-li-when${_clickable?' hc-li-when-big':''}">
-        <span class="hc-when-d">${hEsc(hMonthAbbr(dt.date))} ${hEsc(hDayNum(dt.date))}</span>
+        <span class="hc-when-d">${hEsc(hMonthAbbr(dt.date))} ${hEsc(hDayNum(dt.date))}
+          ${(dt.endDate && dt.endDate !== dt.date) ? ' – ' + hEsc(hMonthAbbr(dt.endDate)) + ' ' + hEsc(hDayNum(dt.endDate)) : ''}</span>
         ${dt.time?`<span class="hc-when-t">${hEsc(dt.time)}</span>`:''}
         ${lbl?`<span class="hc-when-l">${lbl}</span>`:''}</span>
-      ${dt.signupUrl?`<a class="hc-li-signup" href="${hEsc(dt.signupUrl)}" target="_blank" rel="noopener noreferrer">Sign up</a>`:''}
+      ${dt.signupUrl?`<a class="hc-li-signup" href="${hEsc(dt.signupUrl)}" onclick="event.stopPropagation()">Sign up</a>`:''}
       ${(canEdit && !dt.auto)?`<span class="hc-li-act"><button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();openHomeEditor('date','${hEsc(dt.id)}')">Edit</button><button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();deleteHomeItem('date','${hEsc(dt.id)}')">Delete</button></span>`:''}
     </div>`;
   };
@@ -15593,6 +15601,11 @@ function openEventDetail(id){
     + (dt.category ? '<div style="display:inline-block;background:#eef4f1;color:#03654e;border-radius:999px;'
         + 'padding:2px 10px;font-size:11px;font-weight:700;margin-bottom:8px;">' + hEsc(dt.category) + '</div>' : '')
     + '<div style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">' + hEsc(when) + '</div>'
+    + (dt.address
+        ? '<div style="font-size:13px;margin-bottom:12px;">&#128205; '
+          + '<a href="https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(dt.address) + '" '
+          + 'target="_blank" rel="noopener noreferrer">' + hEsc(dt.address) + '</a></div>'
+        : '')
     + (dt.note
         ? '<div style="font-size:14px;line-height:1.55;white-space:pre-wrap;margin-bottom:16px;">' + hEsc(dt.note) + '</div>'
         : '<div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">No further details.</div>')
@@ -15651,10 +15664,14 @@ function openHomeEditor(kind, id){
       + AUD(item.audience);
   } else if(kind==='date'){
     body = F('Title','title','text',item.title)
-      + F('Date','date','date',item.date)
+      + F('Event date','date','date',item.date)
       // Free text, not a time input: 'morning' and 'after close' are real answers.
       + F('Time','time','text',item.time,'placeholder="e.g. 10:00 AM, or after close"')
-      + F('End Date','endDate','date',item.endDate)
+      + F('Ends on','endDate','date',item.endDate)
+      + `<div class="ff-help" style="margin:-11px 0 15px;">Only for something spanning more than one day.</div>`
+      + F('Start showing on Home','showFrom','date',item.showFrom)
+      + `<div class="ff-help" style="margin:-11px 0 15px;">Optional. Leave blank to show it straight away — use this instead of backdating the event date.</div>`
+      + F('Address','address','text',item.address,'placeholder="Optional — where it is happening"')
       + F('Category','category','text',item.category,'placeholder="e.g. Training, Payroll, Holiday"')
       + F('Note','note','textarea',item.note)
       + F('Sign-up link','signupUrl','text',item.signupUrl,'placeholder="https://... volunteer or RSVP form"')
@@ -15763,7 +15780,9 @@ function saveHomeItem(kind, id){
     const p=document.getElementById('he-pinned');
     Object.assign(item,{title:v('title'),body:v('body'),imageUrl:v('imageUrl'),pinned:!!(p&&p.checked),startDate:v('startDate'),endDate:v('endDate'),audience});
   } else if(kind==='date'){
-    Object.assign(item,{title:v('title'),date:v('date'),time:v('time'),endDate:v('endDate'),category:v('category'),note:v('note'),signupUrl:v('signupUrl'),audience});
+    Object.assign(item,{title:v('title'),date:v('date'),time:v('time'),endDate:v('endDate'),
+      showFrom:v('showFrom'),address:v('address'),
+      category:v('category'),note:v('note'),signupUrl:v('signupUrl'),audience});
   } else {
     Object.assign(item,{label:v('label'),url:v('url'),icon:v('icon'),category:v('category'),sortOrder:v('sortOrder'),audience});
   }

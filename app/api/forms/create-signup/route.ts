@@ -48,7 +48,9 @@ export async function POST(req: NextRequest) {
     }
 
     const formId = signupIdFor(eventId)
-    const url = `/?form=${encodeURIComponent(formId)}`
+    // /dashboard.html, NOT "/" — "/" is the public marketing page, which drops
+    // the query string and never reaches the ?form= handler.
+    const url = `/dashboard.html?form=${encodeURIComponent(formId)}`
 
     // Already exists? Hand back the same link. Read fresh: FormDefs is in
     // NO_CACHE_TABS, but being explicit costs nothing and this is a
