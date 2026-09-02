@@ -86,6 +86,23 @@
     text-decoration:underline;cursor:pointer;padding:0;}
   .rowlink{cursor:pointer;}
   .rowlink:hover{background:var(--accent-light);}
+  .shead{background:var(--primary-dark);color:#fff;border-radius:12px 12px 0 0;padding:16px 18px;}
+  .shead h1{font-size:19px;font-weight:700;}
+  .shead .sub{font-size:12.5px;color:#bfe9d8;margin-top:2px;}
+  .stabs{display:flex;gap:2px;background:#fff;border:1px solid var(--border);border-top:none;
+    border-radius:0 0 12px 12px;padding:0 10px;margin-bottom:1.25rem;overflow-x:auto;}
+  .stab{font-family:inherit;font-size:13px;font-weight:500;padding:11px 14px;border:none;
+    background:none;color:var(--text-muted);cursor:pointer;border-bottom:3px solid transparent;white-space:nowrap;}
+  .stab:hover{color:var(--primary-dark);}
+  .stab.on{color:var(--primary-dark);font-weight:600;border-bottom-color:var(--primary);}
+  .gap{display:flex;gap:10px;padding:10px 14px;border-bottom:1px solid #f1f3f1;align-items:flex-start;font-size:13px;}
+  .gap:last-child{border-bottom:none;}
+  .gap .tag{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+    padding:2px 7px;border-radius:20px;flex:none;margin-top:1px;}
+  .gap.blocking .tag{background:var(--wrn-bg);color:var(--wrn-text);}
+  .gap.warning .tag{background:var(--cau-bg,#fdf6e0);color:var(--cau-text,#7a5a00);}
+  .gap .fix{font-size:11.5px;color:var(--text-muted);margin-top:2px;}
+  tr.now td{background:var(--accent-light);font-weight:600;}
   .askbox{display:flex;gap:8px;flex-wrap:wrap;}
   .askbox input{flex:1;min-width:260px;}
   .opt-row{display:grid;grid-template-columns:70px 1fr 1fr 1fr 90px auto;gap:8px;align-items:end;
@@ -257,6 +274,14 @@ function sizeText(n){
   if(b >= 1048576) return (b/1048576).toFixed(1) + ' MB';
   if(b >= 1024) return Math.round(b/1024) + ' KB';
   return b + ' B';
+}
+/** 2026-11-01 -> "Nov 1, 2026". Used everywhere a date is shown. */
+function fmtDate(iso){
+  const s = String(iso||'').trim();
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(s)) return s || '\u2014';
+  const [y,m,d] = s.split('-').map(Number);
+  const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return MON[m-1] + ' ' + d + ', ' + y;
 }
 function dateText(iso){
   if(!iso) return '';
@@ -606,9 +631,22 @@ function renderDash(){
      + '</div></div>';
 
   // ── Action items ──
-  const acts = REC.actions || [];
+  // Rent increases are folded in rather than given their own card: the
+  // question this screen answers is "what is coming at me", and a step-up
+  // in rent belongs in that answer next to a notice deadline.
+  const rentActs = (REC.rentChanges||[]).map(r=>({
+    kind:'rent', salonNum:r.salonNum, date:r.startDate, daysAway:r.daysAway,
+    monthsAway: Math.floor(r.daysAway/30),
+    severity: r.daysAway <= 45 ? 'urgent' : 'soon',
+    headline: 'Rent ' + (r.delta>0?'increases':'decreases') + ' to ' + money(r.to) + '/mo',
+    detail: 'From ' + money(r.from) + ' to ' + money(r.to) + ' \u2014 '
+      + (r.delta>0?'+':'') + money(r.delta) + '/mo (' + (r.delta>0?'+':'') + r.pct + '%), '
+      + 'effective ' + fmtDate(r.startDate) + '.',
+  }));
+  const acts = (REC.actions || []).concat(rentActs)
+    .sort((a,b)=>String(a.date).localeCompare(String(b.date)));
   h += '<div class="card"><h2>Action items <span class="sub">'
-     + (acts.length ? acts.length + ' needing attention' : 'nothing due in the next 12 months')
+     + (acts.length ? acts.length + ' coming up' : 'nothing due in the next 12 months')
      + '</span></h2>';
   if(!acts.length){
     h += '<div class="body muted" style="font-size:13px;">No notice deadlines or expirations inside the next 12 months.</div>';
@@ -621,7 +659,7 @@ function renderDash(){
         + '</div>'
         + '<div class="dt"><b>'+esc(a.headline)+'.</b> '+esc(a.detail)+'</div></div>'
         + '<div class="when">'+esc(timeLeft(a.monthsAway, a.daysAway))+'<br>'
-        + '<span style="font-weight:400;color:var(--text-muted);">'+esc(a.date)+'</span></div></div>';
+        + '<span style="font-weight:400;color:var(--text-muted);">'+esc(fmtDate(a.date))+'</span></div></div>';
     });
   }
   h += '</div>';
@@ -637,6 +675,30 @@ function renderDash(){
      + stat('Records entered', num0(P.recordsPresent) + ' / ' + num0(P.recordsExpected), 'salons with a lease record')
      + '</div></div>';
 
+  // ── What is missing ──
+  // Deliberately prominent. A lease dashboard that looks complete while
+  // half the portfolio has no record is worse than one that admits it.
+  const G = REC.gaps || [];
+  const blocking = G.filter(g=>g.severity==='blocking');
+  const noRecord = G.filter(g=>g.kind==='no-record');
+  const other = G.filter(g=>g.severity!=='blocking' && g.kind!=='no-record');
+  if(G.length){
+    h += '<div class="card"><h2>Missing information <span class="sub">'
+       + (blocking.length ? blocking.length+' to fix \u00b7 ' : '')
+       + (G.length-blocking.length)+' incomplete</span></h2>';
+    blocking.forEach(g=>{ h += gapRow(g); });
+    other.slice(0, 12).forEach(g=>{ h += gapRow(g); });
+    if(other.length > 12){
+      h += '<div class="body muted" style="font-size:12.5px;">'+(other.length-12)
+        + ' more on individual salons.</div>';
+    }
+    if(noRecord.length){
+      h += '<div class="body"><div class="hint"><b>'+noRecord.length+' salons have no lease record at all:</b> '
+        + noRecord.map(g=>esc(salonLabel(g.salonNum))).join(', ')+'</div></div>';
+    }
+    h += '</div>';
+  }
+
   // ── Expiration timeline ──
   const T = REC.timeline || [];
   if(T.length){
@@ -651,11 +713,14 @@ function renderDash(){
         + '<td><b>'+esc(salonLabel(l.salonNum))+'</b>'
         + (l.locationName ? '<div class="hint" style="margin-top:1px;">'+esc(l.locationName)+'</div>' : '')
         + '</td>'
-        + '<td class="nowrap">'+esc(l.expirationDate || '\u2014')+'</td>'
+        + '<td class="nowrap">'+esc(fmtDate(l.expirationDate))+'</td>'
         + '<td class="nowrap">'+esc(timeLeft(l.monthsLeft, l.monthsLeft == null ? null : l.monthsLeft * 30))+'</td>'
         + '<td class="nowrap"><span class="prog"><i style="width:'+pr+'%"></i></span> '
         + '<span class="muted" style="font-size:11px;">'+pr+'%</span></td>'
-        + '<td class="num">'+esc(l.monthlyRent ? money(l.monthlyRent) : '\u2014')+'</td>'
+        + '<td class="num">'+esc((l.currentRent != null ? l.currentRent : l.monthlyRent)
+            ? money(l.currentRent != null ? l.currentRent : l.monthlyRent) : '\u2014')
+        + (l.camMonthlyTotal ? '<div class="hint">+'+money(l.camMonthlyTotal)+' NNN</div>' : '')
+        + '</td>'
         + '<td class="num">'+esc(l.rentPerSfYr ? money(l.rentPerSfYr) : '\u2014')+'</td>'
         + '<td class="num">'+esc(l.areaSqFt ? num0(l.areaSqFt) + ' SF' : '\u2014')+'</td>'
         + '<td class="muted">'+esc(l.landlord || '\u2014')+'</td></tr>';
@@ -684,7 +749,7 @@ function renderLeaseList(){
     const opts = (REC.options||[]).filter(o=>o.salonNum===sn.num);
     h += '<tr>'
       + '<td><b>'+esc(sn.num+' '+sn.name)+'</b></td>'
-      + '<td class="nowrap">'+esc(l && l.expirationDate ? l.expirationDate : '\u2014')+'</td>'
+      + '<td class="nowrap">'+esc(l && l.expirationDate ? fmtDate(l.expirationDate) : '\u2014')+'</td>'
       + '<td class="num">'+esc(l && l.monthlyRent ? money(l.monthlyRent) : '\u2014')+'</td>'
       + '<td class="num">'+esc(l && l.areaSqFt ? num0(l.areaSqFt)+' SF' : '\u2014')+'</td>'
       + '<td>'+(opts.length ? opts.length : '<span class="muted">\u2014</span>')+'</td>'
@@ -884,80 +949,219 @@ function openSalon(num){
   window.scrollTo(0, 0);
 }
 
+let S_SALON_TAB = 'overview';
+function salonTab(t){ S_SALON_TAB = t; renderSalon(); }
+
 function renderSalon(){
   const num = S_SALON;
   const l = (REC.leases||[]).find(x=>x.salonNum===num);
-  const opts = (REC.options||[]).filter(o=>o.salonNum===num);
-  const contacts = (REC.contacts||[]).filter(c=>c.salonNum===num);
-  const clauses = (REC.clauses||[]).filter(c=>c.salonNum===num);
-  const docs = (FILES||[]).filter(f=>f.salonNum===num);
   const t = (REC.timeline||[]).find(x=>x.salonNum===num);
+  const myGaps = (REC.gaps||[]).filter(g=>g.salonNum===num);
 
-  let h = '<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap;">'
-    + '<button class="btn ghost small" onclick="showPanel(\'dash\')">\u2190 Dashboard</button>'
-    + '<div style="font-size:19px;font-weight:700;color:var(--primary-dark);">'
-    + esc(salonLabel(num))+'</div>'
-    + (l && l.locationName ? '<div class="muted">'+esc(l.locationName)+'</div>' : '')
-    + (l ? '<span class="pill">'+esc(l.status)+'</span>' : '')
+  // ── Header ──
+  let h = '<div class="shead"><div style="display:flex;align-items:flex-start;gap:12px;">'
+    + '<div><h1>'+esc(salonLabel(num))+'</h1>'
+    + '<div class="sub">'+esc((l && l.address) || (l && l.locationName) || 'no address recorded')+'</div></div>'
     + '<span style="flex:1;"></span>'
-    + '<button class="btn ghost small" onclick="showPanel(\'leases\');editLease(\''+esc(num)+'\')">Edit record</button>'
-    + '</div>';
+    + '<button class="btn ghost small" onclick="showPanel(\'dash\')">Close</button>'
+    + '</div></div>';
 
-  // ── Overview ──
+  const TABS = [['overview','Overview'],['financials','Financials'],
+                ['clauses','Clauses & Amendments'],['documents','Documents']];
+  h += '<div class="stabs">' + TABS.map(x=>'<button class="stab'+(S_SALON_TAB===x[0]?' on':'')+'" '
+    + 'onclick="salonTab(\''+x[0]+'\')">'+esc(x[1])+'</button>').join('') + '</div>';
+
+  if(S_SALON_TAB === 'overview')        h += salonOverview(num, l, t, myGaps);
+  else if(S_SALON_TAB === 'financials') h += salonFinancials(num, l, myGaps);
+  else if(S_SALON_TAB === 'clauses')    h += salonClauses(num);
+  else                                  h += salonDocuments(num);
+
+  $('salon-out').innerHTML = h;
+}
+
+/** Anything incomplete about this salon, said plainly. */
+function gapsHtml(list, title){
+  if(!list.length) return '';
+  let h = '<div class="card"><h2>'+esc(title)+' <span class="sub">'+list.length+'</span></h2>';
+  list.forEach(g=>{
+    h += '<div class="gap '+esc(g.severity)+'">'
+      + '<span class="tag">'+(g.severity==='blocking'?'Fix':'Missing')+'</span>'
+      + '<div><div>'+esc(g.message)+'</div><div class="fix">'+esc(g.fix)+'</div></div></div>';
+  });
+  return h + '</div>';
+}
+
+function salonOverview(num, l, t, myGaps){
   if(!l){
-    h += '<div class="banner">No lease record for this salon yet. '
+    return '<div class="banner">No lease record for this salon yet. '
       + '<button class="lnk" onclick="showPanel(\'leases\');editLease(\''+esc(num)+'\')">Add one</button>'
-      + ' and the summary below fills in.</div>';
-  } else {
-    const total = (Number(l.monthlyRent)||0) + (Number(l.camMonthly)||0);
-    h += '<div class="card"><h2>Overview</h2><div class="kv">'
-      + kv('Landlord', l.landlord || '\u2014')
-      + kv('Address', l.address || '\u2014')
-      + kv('Area', l.areaSqFt ? num0(l.areaSqFt)+' SF' : '\u2014')
-      + kv('Term', (l.commencementDate||'?')+' \u2192 '+(l.expirationDate||'?'))
-      + kv('Time left', t ? timeLeft(t.monthsLeft, t.monthsLeft==null?null:t.monthsLeft*30) : '\u2014')
-      + kv('Term elapsed', t ? Math.round(t.termProgress)+'%' : '\u2014')
-      + kv('Minimum rent', l.monthlyRent ? money(l.monthlyRent)+' /mo' : '\u2014')
-      + kv('CAM / NNN', l.camMonthly ? money(l.camMonthly)+' /mo' : 'not recorded')
-      + kv('Total monthly', total ? money(total) : '\u2014')
-      + kv('$/SF/yr (rent)', t && t.rentPerSfYr ? money(t.rentPerSfYr) : '\u2014')
-      + kv('Security deposit', l.securityDeposit ? money(l.securityDeposit) : 'none recorded')
-      + kv('Renewal options', opts.length ? String(opts.length) : 'none')
-      + '</div></div>';
-    if(l.note){
-      h += '<div class="card"><h2>Notes</h2><div class="body" style="white-space:pre-wrap;font-size:12.5px;line-height:1.6;">'+esc(l.note)+'</div></div>';
-    }
+      + ' and this fills in.</div>';
   }
-
-  // ── Options ──
+  const opts = (REC.options||[]).filter(o=>o.salonNum===num);
+  const rent = t && t.currentRent != null ? t.currentRent : l.monthlyRent;
+  const cam = t && t.camMonthlyTotal != null ? t.camMonthlyTotal : 0;
+  let h = gapsHtml(myGaps, 'Needs attention');
+  h += '<div class="card"><h2>Overview</h2><div class="kv">'
+    + kv('Landlord', l.landlord || '\u2014')
+    + kv('Address', l.address || '\u2014')
+    + kv('Area', l.areaSqFt ? num0(l.areaSqFt)+' SF' : '\u2014')
+    + kv('Term', fmtDate(l.commencementDate)+' \u2192 '+fmtDate(l.expirationDate))
+    + kv('Time left', t ? timeLeft(t.monthsLeft, t.monthsLeft==null?null:t.monthsLeft*30) : '\u2014')
+    + kv('Term elapsed', t ? Math.round(t.termProgress)+'%' : '\u2014')
+    + kv('Rent today', rent ? money(rent)+' /mo' : '\u2014')
+    + kv('CAM / NNN', cam ? money(cam)+' /mo' : 'not recorded')
+    + kv('Total monthly', (rent||cam) ? money((rent||0)+(cam||0)) : '\u2014')
+    + kv('$/SF/yr (rent)', (rent && l.areaSqFt) ? money(rent*12/l.areaSqFt) : '\u2014')
+    + kv('Security deposit', l.securityDeposit ? money(l.securityDeposit) : 'none recorded')
+    + kv('Renewal options', opts.length ? String(opts.length) : 'none')
+    + '</div></div>';
   if(opts.length){
     h += '<div class="card"><h2>Renewal options</h2><div class="scroll"><table><thead><tr>'
       + '<th>Option</th><th>Notice by</th><th>Effective</th><th>Through</th><th>Decision</th>'
       + '</tr></thead><tbody>';
     opts.forEach(o=>{
-      h += '<tr><td>'+esc(o.optionNo)+'</td><td class="nowrap">'+esc(o.noticeBy||'\u2014')+'</td>'
-        + '<td class="nowrap">'+esc(o.effectiveFrom||'\u2014')+'</td>'
-        + '<td class="nowrap">'+esc(o.effectiveTo||'\u2014')+'</td>'
-        + '<td>'+esc(o.exercised === 'yes' ? 'exercised' : o.exercised === 'no' ? 'declined' : 'undecided')
-        + '</td></tr>';
+      h += '<tr><td>'+esc(o.optionNo)+'</td><td class="nowrap">'+esc(fmtDate(o.noticeBy))+'</td>'
+        + '<td class="nowrap">'+esc(fmtDate(o.effectiveFrom))+'</td>'
+        + '<td class="nowrap">'+esc(fmtDate(o.effectiveTo))+'</td>'
+        + '<td>'+esc(o.exercised==='yes'?'exercised':o.exercised==='no'?'declined':'undecided')+'</td></tr>';
     });
     h += '</tbody></table></div></div>';
   }
+  if(l.note){
+    h += '<div class="card"><h2>Notes</h2><div class="body" style="white-space:pre-wrap;font-size:12.5px;line-height:1.65;max-width:62ch;">'+esc(l.note)+'</div></div>';
+  }
+  return h;
+}
 
-  // ── Clauses ──
-  h += '<div class="card"><h2>Important clauses <span class="sub">'
-    + (clauses.length ? clauses.length + ' recorded' : 'none recorded yet')+'</span></h2>';
+function salonFinancials(num, l, myGaps){
+  const steps = (REC.steps||[]).filter(s=>s.salonNum===num);
+  const charges = (REC.charges||[]).filter(c=>c.salonNum===num);
+  const today = REC.today;
+  const money2 = v => money(v);
+  let h = gapsHtml(myGaps.filter(g=>/rent|cam/.test(g.kind)), 'Financial gaps');
+
+  // ── Rent schedule ──
+  h += '<div class="card"><h2>Rent schedule <span class="sub">'
+    + (steps.length ? steps.length+' steps' : 'none recorded')+'</span></h2>';
+  if(!steps.length){
+    h += '<div class="body muted" style="font-size:13px;">No rent schedule recorded, so an increase cannot be warned about ahead of time.</div>';
+  } else {
+    h += '<div class="scroll"><table><thead><tr><th>From</th><th>To</th>'
+      + '<th class="num">Monthly</th><th class="num">Annual</th><th class="num">$/SF/yr</th>'
+      + '<th>Change</th></tr></thead><tbody>';
+    steps.forEach((s,i)=>{
+      const prev = i > 0 ? steps[i-1].monthlyRent : 0;
+      const d = prev ? s.monthlyRent - prev : 0;
+      const isNow = s.startDate <= today && (!s.endDate || s.endDate >= today);
+      h += '<tr'+(isNow?' class="now"':'')+'>'
+        + '<td class="nowrap">'+esc(fmtDate(s.startDate))+(isNow?' <span class="pill">now</span>':'')+'</td>'
+        + '<td class="nowrap">'+esc(fmtDate(s.endDate))+'</td>'
+        + '<td class="num">'+money2(s.monthlyRent)+'</td>'
+        + '<td class="num">'+money2(s.monthlyRent*12)+'</td>'
+        + '<td class="num">'+(l && l.areaSqFt ? money2(s.monthlyRent*12/l.areaSqFt) : '\u2014')+'</td>'
+        + '<td class="nowrap">'+(d ? (d>0?'+':'')+money2(d)+' <span class="muted" style="font-size:11px;">('
+          + (d>0?'+':'')+(Math.round(d/prev*1000)/10)+'%)</span>' : '\u2014')+'</td></tr>';
+    });
+    h += '</tbody></table></div>';
+    const srcs = [...new Set(steps.map(s=>s.source).filter(Boolean))];
+    if(srcs.length) h += '<div class="body"><div class="hint">From '+esc(srcs.join('; '))+'</div></div>';
+  }
+  h += '</div>';
+
+  // ── CAM / NNN, broken out ──
+  h += '<div class="card"><h2>CAM / NNN by year <span class="sub">'
+    + (charges.length ? charges.length+' year'+(charges.length===1?'':'s')+' recorded' : 'none recorded')
+    + '</span></h2>';
+  if(!charges.length){
+    h += '<div class="body"><div class="banner" style="margin:0;"><b>No CAM figures recorded.</b> The monthly obligation shown for this salon is base rent only, so it is understated. Landlords normally send a reconciliation or escrow letter each autumn with next year\u2019s monthly amounts \u2014 upload it and record the components here.</div></div>';
+  } else {
+    h += '<div class="scroll"><table><thead><tr><th>Year</th><th>From</th>'
+      + '<th class="num">CAM</th><th class="num">Tax</th><th class="num">Insurance</th>'
+      + '<th class="num">Waste</th><th class="num">Other</th><th class="num">Total /mo</th>'
+      + '<th class="num">Total /yr</th></tr></thead><tbody>';
+    const yr = Number(String(today).slice(0,4));
+    charges.forEach(c=>{
+      const tot = Number(c.total)||0;
+      h += '<tr'+(c.year===yr?' class="now"':'')+'>'
+        + '<td><b>'+esc(c.year)+'</b>'+(c.year===yr?' <span class="pill">current</span>':'')+'</td>'
+        + '<td class="nowrap">'+esc(fmtDate(c.effectiveFrom))+'</td>'
+        + '<td class="num">'+money2(c.cam)+'</td><td class="num">'+money2(c.tax)+'</td>'
+        + '<td class="num">'+money2(c.insurance)+'</td><td class="num">'+money2(c.waste)+'</td>'
+        + '<td class="num">'+money2(c.other)+'</td>'
+        + '<td class="num"><b>'+money2(tot)+'</b></td>'
+        + '<td class="num">'+money2(tot*12)+'</td></tr>';
+    });
+    h += '</tbody></table></div>';
+    const notes = charges.filter(c=>c.note || c.source);
+    if(notes.length){
+      h += '<div class="body">' + notes.map(c=>'<div class="hint"><b>'+esc(c.year)+'</b> '
+        + esc([c.source, c.note].filter(Boolean).join(' \u00b7 '))+'</div>').join('') + '</div>';
+    }
+  }
+  h += '</div>';
+  return h;
+}
+
+function salonClauses(num){
+  const clauses = (REC.clauses||[]).filter(c=>c.salonNum===num);
+  const amend = (FILES||[]).filter(f=>f.salonNum===num &&
+    /lease|amendment|abstract/i.test(f.docType||''));
+
+  let h = '<div class="card"><h2>Important clauses <span class="sub">'
+    + (clauses.length ? clauses.length+' recorded' : 'none recorded')+'</span></h2>';
   if(!clauses.length){
-    h += '<div class="body muted" style="font-size:13px;">Nothing recorded. Clauses are what make the question box on the dashboard useful \u2014 each one keeps a plain-English summary alongside the lease\u2019s own words.</div>';
+    h += '<div class="body muted" style="font-size:13px;">Nothing recorded, so questions about this lease cannot be answered. Each clause keeps a plain-English summary next to the lease\u2019s own words.</div>';
   } else {
     clauses.slice().sort((a,b)=>a.topic.localeCompare(b.topic))
       .forEach((c,i)=>{ h += clauseHtml(c, num+'-'+i, false); });
   }
   h += '</div>';
 
-  // ── Contacts ──
+  h += '<div class="card"><h2>Leases &amp; amendments <span class="sub">'
+    + (amend.length ? amend.length+' on file' : 'none on file')+'</span></h2>';
+  if(!amend.length){
+    h += '<div class="body muted" style="font-size:13px;">Nothing filed under Lease, Amendment or Abstract for this salon.</div>';
+  } else {
+    h += '<div class="scroll"><table><thead><tr><th>Document</th><th>Type</th><th>Uploaded</th>'
+      + '<th></th></tr></thead><tbody>';
+    amend.forEach(f=>{
+      const v = '/api/leases/files/view?fileId='+encodeURIComponent(f.fileId);
+      h += '<tr><td><a href="'+v+'" target="_blank" rel="noopener noreferrer">'+esc(f.fileName)+'</a></td>'
+        + '<td><span class="pill">'+esc(f.docType||'')+'</span></td>'
+        + '<td class="muted nowrap">'+esc(fmtDate((f.uploadedAt||'').slice(0,10)))+'</td>'
+        + '<td class="nowrap"><a class="btn ghost small" style="text-decoration:none;" href="'+v+'&dl=1">Download</a></td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+  return h + '</div>';
+}
+
+function salonDocuments(num){
+  const docs = (FILES||[]).filter(f=>f.salonNum===num);
+  const contacts = (REC.contacts||[]).filter(c=>c.salonNum===num);
+
+  let h = '<div class="card"><h2>Documents <span class="sub">'
+    + (docs.length ? docs.length+' filed here' : 'none filed here')+'</span></h2><div class="body">'
+    + '<button class="btn" onclick="uploadForSalon(\''+esc(num)+'\')">Upload for this salon</button>'
+    + '<div class="hint">Opens the Documents tab with this salon already picked, so the batch files itself.</div></div>';
+  if(docs.length){
+    h += '<div class="scroll"><table><thead><tr><th>Document</th><th>Type</th><th>Size</th>'
+      + '<th>Uploaded</th><th></th></tr></thead><tbody>';
+    docs.forEach(f=>{
+      const v = '/api/leases/files/view?fileId='+encodeURIComponent(f.fileId);
+      h += '<tr><td><a href="'+v+'" target="_blank" rel="noopener noreferrer">'+esc(f.fileName)+'</a>'
+        + (f.note ? '<div class="hint">'+esc(f.note)+'</div>' : '')+'</td>'
+        + '<td>'+(f.docType?'<span class="pill">'+esc(f.docType)+'</span>':'')+'</td>'
+        + '<td class="muted nowrap">'+esc(sizeText(f.sizeBytes))+'</td>'
+        + '<td class="muted nowrap">'+esc(fmtDate((f.uploadedAt||'').slice(0,10)))+'</td>'
+        + '<td class="nowrap"><a class="btn ghost small" style="text-decoration:none;" href="'+v+'&dl=1">Download</a></td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+  h += '</div>';
+
   h += '<div class="card"><h2>Contacts <span class="sub">'
-    + (contacts.length ? contacts.length + ' on file' : 'none on file')+'</span></h2>';
+    + (contacts.length ? contacts.length+' on file' : 'none on file')+'</span></h2>';
   if(!contacts.length){
     h += '<div class="body muted" style="font-size:13px;">Nobody recorded for this landlord yet.</div>';
   } else {
@@ -965,39 +1169,31 @@ function renderSalon(){
       + '<th>Phone</th><th>Address</th></tr></thead><tbody>';
     contacts.forEach(c=>{
       h += '<tr><td><span class="pill">'+esc(c.role||'\u2014')+'</span></td>'
-        + '<td><b>'+esc(c.org||'')+'</b>'+(c.name ? '<div>'+esc(c.name)+'</div>' : '')
-        + (c.note ? '<div class="hint">'+esc(c.note)+'</div>' : '')+'</td>'
-        + '<td>'+(c.email ? '<a href="mailto:'+esc(c.email)+'">'+esc(c.email)+'</a>' : '\u2014')+'</td>'
+        + '<td><b>'+esc(c.org||'')+'</b>'+(c.name?'<div>'+esc(c.name)+'</div>':'')
+        + (c.note?'<div class="hint">'+esc(c.note)+'</div>':'')+'</td>'
+        + '<td>'+(c.email?'<a href="mailto:'+esc(c.email)+'">'+esc(c.email)+'</a>':'\u2014')+'</td>'
         + '<td class="nowrap">'+esc(c.phone||'\u2014')+'</td>'
         + '<td class="muted">'+esc(c.address||'\u2014')+'</td></tr>';
     });
     h += '</tbody></table></div>';
   }
-  h += '</div>';
+  return h + '</div>';
+}
 
-  // ── Documents ──
-  h += '<div class="card"><h2>Documents <span class="sub">'
-    + (docs.length ? docs.length + ' filed to this salon' : 'none filed to this salon')+'</span></h2>';
-  if(!docs.length){
-    h += '<div class="body muted" style="font-size:13px;">Nothing filed here yet. Uploads are matched by the salon picked at drop time, so anything uploaded without a salon will not appear.</div>';
-  } else {
-    h += '<div class="scroll"><table><thead><tr><th>Document</th><th>Type</th><th>Size</th>'
-      + '<th>Uploaded</th><th></th></tr></thead><tbody>';
-    docs.forEach(f=>{
-      const view = '/api/leases/files/view?fileId='+encodeURIComponent(f.fileId);
-      h += '<tr><td><a href="'+view+'" target="_blank" rel="noopener noreferrer">'
-        + esc(f.fileName)+'</a></td>'
-        + '<td>'+(f.docType ? '<span class="pill">'+esc(f.docType)+'</span>' : '')+'</td>'
-        + '<td class="muted nowrap">'+esc(sizeText(f.sizeBytes))+'</td>'
-        + '<td class="muted nowrap">'+esc(dateText(f.uploadedAt))+'</td>'
-        + '<td class="nowrap"><a class="btn ghost small" style="text-decoration:none;" '
-        + 'href="'+view+'&dl=1">Download</a></td></tr>';
-    });
-    h += '</tbody></table></div>';
-  }
-  h += '</div>';
+/** Jump to the upload screen with this salon already selected. */
+function uploadForSalon(num){
+  showPanel('docs');
+  const sel = $('f-salon');
+  if(sel) sel.value = num;
+  const drop = $('drop');
+  if(drop) drop.scrollIntoView({behavior:'smooth', block:'center'});
+}
 
-  $('salon-out').innerHTML = h;
+function gapRow(g){
+  return '<div class="gap '+esc(g.severity)+' rowlink" onclick="openSalon(\''+esc(g.salonNum)+'\')">'
+    + '<span class="tag">'+(g.severity==='blocking'?'Fix':'Missing')+'</span>'
+    + '<div><div><b>'+esc(salonLabel(g.salonNum))+'</b> \u2014 '+esc(g.message)+'</div>'
+    + '<div class="fix">'+esc(g.fix)+'</div></div></div>';
 }
 
 function kv(k, v){

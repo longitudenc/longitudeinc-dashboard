@@ -21,6 +21,7 @@
 import { NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/require-role'
 import { SALON_NAMES } from '@/lib/config'
+import { listFiles } from '@/lib/leases'
 import {
   listLeases, listOptions, upsertLease, upsertOption, removeLease, removeOption,
   actionItems, portfolio, rentPerSfYr, termProgress, todayISO,
@@ -30,6 +31,10 @@ import {
   listContacts, listClauses, upsertContact, upsertClause,
   removeContact, removeClause, askClauses, CLAUSE_TOPICS, CONTACT_ROLES,
 } from '@/lib/lease-detail'
+import {
+  listSteps, listCharges, upsertStep, upsertCharge, removeStep, removeCharge,
+  currentStep, nextStep, chargeTotal, upcomingRentChanges, gaps,
+} from '@/lib/lease-money'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -42,9 +47,16 @@ export async function GET() {
   try {
     const today = todayISO()
     // Fresh: this screen is read straight after saving from it.
-    const [leases, options, contacts, clauses] = await Promise.all([
+    const [leases, options, contacts, clauses, steps, charges] = await Promise.all([
       listLeases(true), listOptions(true), listContacts(true), listClauses(true),
+      listSteps(true), listCharges(true),
     ])
+    // Which salons have documents, for the gap report. Cheap: the tab is
+    // metadata only, never the files themselves.
+    let docSalons: string[] = []
+    try {
+      docSalons = [...new Set((await listFiles()).map(f => f.salonNum).filter(Boolean))]
+    } catch { docSalons = [] }
     const salonNums = Object.keys(SALON_NAMES).sort()
 
     // Fill the display name from the salon list when the record has none, so a
@@ -56,12 +68,21 @@ export async function GET() {
     const timeline = leases
       .filter(l => l.status === 'active' || l.status === 'month-to-month')
       .sort((a, b) => (a.expirationDate || '9999').localeCompare(b.expirationDate || '9999'))
-      .map(l => ({
-        ...l,
-        rentPerSfYr: rentPerSfYr(l),
-        termProgress: termProgress(l, today),
-        monthsLeft: l.expirationDate ? monthsBetween(today, l.expirationDate) : null,
-      }))
+      .map(l => {
+        const cur = currentStep(steps, l.salonNum, today)
+        const nxt = nextStep(steps, l.salonNum, today)
+        const ch = charges.filter(c => c.salonNum === l.salonNum).slice(-1)[0] || null
+        return {
+          ...l,
+          rentPerSfYr: rentPerSfYr(l),
+          termProgress: termProgress(l, today),
+          monthsLeft: l.expirationDate ? monthsBetween(today, l.expirationDate) : null,
+          currentRent: cur ? cur.monthlyRent : null,
+          nextRent: nxt ? { startDate: nxt.startDate, monthlyRent: nxt.monthlyRent } : null,
+          camYear: ch ? ch.year : null,
+          camMonthlyTotal: ch ? chargeTotal(ch) : null,
+        }
+      })
 
     return NextResponse.json({
       success: true,
@@ -73,6 +94,14 @@ export async function GET() {
       portfolio: portfolio(leases, today, salonNums),
       contacts,
       clauses,
+      steps,
+      charges: charges.map(c => ({ ...c, total: chargeTotal(c) })),
+      rentChanges: upcomingRentChanges(steps, salonNums, today, 60),
+      gaps: gaps({
+        leases, steps, charges, allSalons: salonNums, today,
+        clauseSalons: [...new Set(clauses.map(c => c.salonNum))],
+        docSalons,
+      }),
       salons: salonNums.map(num => ({ num, name: SALON_NAMES[num] })),
       clauseTopics: [...CLAUSE_TOPICS],
       contactRoles: [...CONTACT_ROLES],
@@ -89,6 +118,41 @@ export async function POST(req: Request) {
   try {
     const body = await req.json()
     const kind = S(body?.kind, 20)
+
+    if (kind === 'step') {
+      const salonNum = S(body?.salonNum, 20)
+      if (!salonNum) return NextResponse.json({ success: false, error: 'salonNum is required' }, { status: 400 })
+      const step = await upsertStep({
+        stepId: S(body?.stepId, 60) || undefined,
+        salonNum,
+        startDate: body?.startDate !== undefined ? S(body.startDate, 40) : undefined,
+        endDate: body?.endDate !== undefined ? S(body.endDate, 40) : undefined,
+        monthlyRent: body?.monthlyRent !== undefined ? Number(String(body.monthlyRent).replace(/[$,\s]/g, '')) || 0 : undefined,
+        source: body?.source !== undefined ? S(body.source, 300) : undefined,
+        note: body?.note !== undefined ? S(body.note, 500) : undefined,
+      })
+      return NextResponse.json({ success: true, step })
+    }
+
+    if (kind === 'charge') {
+      const salonNum = S(body?.salonNum, 20)
+      if (!salonNum) return NextResponse.json({ success: false, error: 'salonNum is required' }, { status: 400 })
+      const money = (v: unknown) => Number(String(v ?? '').replace(/[$,\s]/g, '')) || 0
+      const charge = await upsertCharge({
+        chargeId: S(body?.chargeId, 60) || undefined,
+        salonNum,
+        year: body?.year !== undefined ? Number(body.year) || 0 : undefined,
+        effectiveFrom: body?.effectiveFrom !== undefined ? S(body.effectiveFrom, 40) : undefined,
+        cam: body?.cam !== undefined ? money(body.cam) : undefined,
+        tax: body?.tax !== undefined ? money(body.tax) : undefined,
+        insurance: body?.insurance !== undefined ? money(body.insurance) : undefined,
+        waste: body?.waste !== undefined ? money(body.waste) : undefined,
+        other: body?.other !== undefined ? money(body.other) : undefined,
+        source: body?.source !== undefined ? S(body.source, 300) : undefined,
+        note: body?.note !== undefined ? S(body.note, 500) : undefined,
+      })
+      return NextResponse.json({ success: true, charge })
+    }
 
     if (kind === 'contact') {
       const salonNum = S(body?.salonNum, 20)
@@ -187,6 +251,10 @@ export async function DELETE(req: Request) {
   if (!gate.ok) return gate.response
   try {
     const url = new URL(req.url)
+    const stepId = S(url.searchParams.get('stepId'), 60)
+    if (stepId) return NextResponse.json({ success: true, removed: await removeStep(stepId) })
+    const chargeId = S(url.searchParams.get('chargeId'), 60)
+    if (chargeId) return NextResponse.json({ success: true, removed: await removeCharge(chargeId) })
     const contactId = S(url.searchParams.get('contactId'), 60)
     if (contactId) {
       return NextResponse.json({ success: true, removed: await removeContact(contactId) })

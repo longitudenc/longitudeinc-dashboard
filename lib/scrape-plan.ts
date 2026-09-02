@@ -182,6 +182,14 @@ export function planForDate(todayIso?: string, hourUtc?: number): PlannedJob[] {
     jobs.push({ name: 'payroll-pace', path: '/api/report/payroll-pace', query: '' })
   }
 
+  // 7b. DAILY -- the lease alert email. Same first-run-only guard as the
+  //     payroll-pace mail above, for the same reason: scrapes are idempotent,
+  //     an email is not. The route itself sends NOTHING when nothing is due,
+  //     so a quiet day costs one HTTP call and no inbox noise.
+  if (hourUtc === undefined || hourUtc < 12) {
+    jobs.push({ name: 'lease-alerts', path: '/api/cron/lease-alerts', query: '' })
+  }
+
   // 8. ALWAYS LAST — verify the data actually arrived. Deliberately takes no
   //    date: it checks yesterday in EASTERN time, which is the day the scrape
   //    endpoints themselves target, so the check and the scrape always agree.
