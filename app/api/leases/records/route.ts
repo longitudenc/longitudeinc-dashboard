@@ -26,6 +26,10 @@ import {
   actionItems, portfolio, rentPerSfYr, termProgress, todayISO,
   monthsBetween, LEASE_STATUSES,
 } from '@/lib/lease-records'
+import {
+  listContacts, listClauses, upsertContact, upsertClause,
+  removeContact, removeClause, askClauses, CLAUSE_TOPICS, CONTACT_ROLES,
+} from '@/lib/lease-detail'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -38,7 +42,9 @@ export async function GET() {
   try {
     const today = todayISO()
     // Fresh: this screen is read straight after saving from it.
-    const [leases, options] = await Promise.all([listLeases(true), listOptions(true)])
+    const [leases, options, contacts, clauses] = await Promise.all([
+      listLeases(true), listOptions(true), listContacts(true), listClauses(true),
+    ])
     const salonNums = Object.keys(SALON_NAMES).sort()
 
     // Fill the display name from the salon list when the record has none, so a
@@ -65,7 +71,11 @@ export async function GET() {
       timeline,
       actions: actionItems(leases, options, today),
       portfolio: portfolio(leases, today, salonNums),
+      contacts,
+      clauses,
       salons: salonNums.map(num => ({ num, name: SALON_NAMES[num] })),
+      clauseTopics: [...CLAUSE_TOPICS],
+      contactRoles: [...CONTACT_ROLES],
       statuses: [...LEASE_STATUSES],
     })
   } catch (e: any) {
@@ -79,6 +89,53 @@ export async function POST(req: Request) {
   try {
     const body = await req.json()
     const kind = S(body?.kind, 20)
+
+    if (kind === 'contact') {
+      const salonNum = S(body?.salonNum, 20)
+      if (!salonNum) {
+        return NextResponse.json({ success: false, error: 'salonNum is required' }, { status: 400 })
+      }
+      const contact = await upsertContact({
+        contactId: S(body?.contactId, 60) || undefined,
+        salonNum,
+        role: body?.role !== undefined ? S(body.role, 60) : undefined,
+        org: body?.org !== undefined ? S(body.org, 200) : undefined,
+        name: body?.name !== undefined ? S(body.name, 120) : undefined,
+        email: body?.email !== undefined ? S(body.email, 200) : undefined,
+        phone: body?.phone !== undefined ? S(body.phone, 60) : undefined,
+        address: body?.address !== undefined ? S(body.address, 300) : undefined,
+        note: body?.note !== undefined ? S(body.note, 500) : undefined,
+      })
+      return NextResponse.json({ success: true, contact })
+    }
+
+    if (kind === 'clause') {
+      const salonNum = S(body?.salonNum, 20)
+      if (!salonNum) {
+        return NextResponse.json({ success: false, error: 'salonNum is required' }, { status: 400 })
+      }
+      const clause = await upsertClause({
+        clauseId: S(body?.clauseId, 60) || undefined,
+        salonNum,
+        topic: body?.topic !== undefined ? S(body.topic, 60) : undefined,
+        summary: body?.summary !== undefined ? S(body.summary, 1000) : undefined,
+        // The lease’s own words. Generous, because a clause quoted in
+        // part is a clause that can mislead.
+        text: body?.text !== undefined ? S(body.text, 8000) : undefined,
+        sourceDoc: body?.sourceDoc !== undefined ? S(body.sourceDoc, 300) : undefined,
+        section: body?.section !== undefined ? S(body.section, 80) : undefined,
+        note: body?.note !== undefined ? S(body.note, 1000) : undefined,
+      })
+      return NextResponse.json({ success: true, clause })
+    }
+
+    if (kind === 'ask') {
+      // Retrieval over recorded clauses — see askClauses() for why this is
+      // not a language model.
+      const clauses = await listClauses()
+      const answer = askClauses(S(body?.question, 500), clauses, Object.keys(SALON_NAMES))
+      return NextResponse.json({ success: true, ...answer })
+    }
 
     if (kind === 'option') {
       const salonNum = S(body?.salonNum, 20)
@@ -130,6 +187,14 @@ export async function DELETE(req: Request) {
   if (!gate.ok) return gate.response
   try {
     const url = new URL(req.url)
+    const contactId = S(url.searchParams.get('contactId'), 60)
+    if (contactId) {
+      return NextResponse.json({ success: true, removed: await removeContact(contactId) })
+    }
+    const clauseId = S(url.searchParams.get('clauseId'), 60)
+    if (clauseId) {
+      return NextResponse.json({ success: true, removed: await removeClause(clauseId) })
+    }
     const optionId = S(url.searchParams.get('optionId'), 60)
     if (optionId) {
       return NextResponse.json({ success: true, removed: await removeOption(optionId) })

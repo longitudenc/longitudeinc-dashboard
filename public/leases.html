@@ -69,6 +69,25 @@
   .prog > i{display:block;height:100%;background:var(--primary);}
   .num{text-align:right;font-variant-numeric:tabular-nums;}
   .lg{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;}
+  .kv{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:1px;background:var(--border);}
+  .kv > div{background:#fff;padding:10px 12px;}
+  .kv .k{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);}
+  .kv .v{font-size:14px;font-weight:600;margin-top:2px;word-break:break-word;}
+  .cl{padding:12px 14px;border-bottom:1px solid #f1f3f1;}
+  .cl:last-child{border-bottom:none;}
+  .cl .top{display:flex;gap:9px;align-items:baseline;flex-wrap:wrap;}
+  .cl .sum{font-size:13.5px;margin-top:5px;line-height:1.55;}
+  .cl .src{font-size:11px;color:var(--text-light);margin-top:5px;}
+  .cl .verb{display:none;margin-top:8px;padding:10px 12px;background:#f7f9f8;
+    border-left:3px solid var(--primary);border-radius:0 6px 6px 0;font-size:12.5px;
+    line-height:1.6;white-space:pre-wrap;}
+  .cl.open .verb{display:block;}
+  .lnk{background:none;border:none;color:var(--primary-dark);font:inherit;font-size:11.5px;
+    text-decoration:underline;cursor:pointer;padding:0;}
+  .rowlink{cursor:pointer;}
+  .rowlink:hover{background:var(--accent-light);}
+  .askbox{display:flex;gap:8px;flex-wrap:wrap;}
+  .askbox input{flex:1;min-width:260px;}
   .opt-row{display:grid;grid-template-columns:70px 1fr 1fr 1fr 90px auto;gap:8px;align-items:end;
     padding:9px 0;border-bottom:1px solid #f1f3f1;}
   @media(max-width:820px){ .opt-row{grid-template-columns:1fr 1fr;} }
@@ -132,6 +151,11 @@
     <!-- ── Lease records ─────────────────────────────────────── -->
     <div class="panel" id="panel-leases">
       <div id="leases-out"><div class="loading">Loading…</div></div>
+    </div>
+
+    <!-- ── One salon, drilled into ───────────────────────────── -->
+    <div class="panel" id="panel-salon">
+      <div id="salon-out"></div>
     </div>
 
     <!-- ── Documents ─────────────────────────────────────────── -->
@@ -500,7 +524,10 @@ function renderFiles(){
     h += '<tr>'
       + '<td><a href="'+view+'" target="_blank" rel="noopener noreferrer">'+esc(f.fileName)+'</a>'
       + (f.note? '<div class="hint" style="margin-top:2px;">'+esc(f.note)+'</div>':'')+'</td>'
-      + '<td>'+esc(f.salonNum ? salonLabel(f.salonNum) : (f.location||'—'))+'</td>'
+      + '<td>'+(f.salonNum
+          ? '<button class="lnk" onclick="openSalon(\''+esc(f.salonNum)+'\')">'
+            + esc(salonLabel(f.salonNum))+'</button>'
+          : esc(f.location||'\u2014'))+'</td>'
       + '<td>'+(f.docType? '<span class="pill">'+esc(f.docType)+'</span>':'')+'</td>'
       + '<td class="muted nowrap">'+esc(sizeText(f.sizeBytes))+'</td>'
       + '<td class="muted nowrap">'+esc(dateText(f.uploadedAt))
@@ -568,6 +595,16 @@ function renderDash(){
     h += '<div class="banner"><b>No lease records yet.</b> The documents are stored, but a dashboard needs the terms inside them \u2014 expiration, rent, area, and the renewal notice deadlines. Open <b>Lease records</b> and add the first one.</div>';
   }
 
+  // ── Ask ──
+  h += '<div class="card"><h2>Ask about a lease</h2><div class="body">'
+     + '<div class="askbox">'
+     + '<input type="text" id="ask-q" onkeydown="askKey(event)" '
+     + 'placeholder="e.g. what is the assignment clause for 2554">'
+     + '<button class="btn" onclick="runAsk()">Ask</button></div>'
+     + '<div class="hint">Searches the clauses recorded against each salon and shows them with the document they came from. It only ever returns text taken from a real lease \u2014 it cannot make one up.</div>'
+     + '<div id="ask-out"></div>'
+     + '</div></div>';
+
   // ── Action items ──
   const acts = REC.actions || [];
   h += '<div class="card"><h2>Action items <span class="sub">'
@@ -577,7 +614,8 @@ function renderDash(){
     h += '<div class="body muted" style="font-size:13px;">No notice deadlines or expirations inside the next 12 months.</div>';
   } else {
     acts.forEach(a=>{
-      h += '<div class="act sev-'+esc(a.severity)+'"><span class="dot"></span><div>'
+      h += '<div class="act sev-'+esc(a.severity)+' rowlink" '
+        + 'onclick="openSalon(\''+esc(a.salonNum)+'\')"><span class="dot"></span><div>'
         + '<div class="hd">'+esc(salonLabel(a.salonNum))
         + (a.locationName ? ' \u2014 ' + esc(a.locationName) : '')
         + '</div>'
@@ -609,7 +647,7 @@ function renderDash(){
        + '<th>Landlord</th></tr></thead><tbody>';
     T.forEach(l=>{
       const pr = Math.round(l.termProgress || 0);
-      h += '<tr>'
+      h += '<tr class="rowlink" onclick="openSalon(\''+esc(l.salonNum)+'\')">'
         + '<td><b>'+esc(salonLabel(l.salonNum))+'</b>'
         + (l.locationName ? '<div class="hint" style="margin-top:1px;">'+esc(l.locationName)+'</div>' : '')
         + '</td>'
@@ -651,7 +689,9 @@ function renderLeaseList(){
       + '<td class="num">'+esc(l && l.areaSqFt ? num0(l.areaSqFt)+' SF' : '\u2014')+'</td>'
       + '<td>'+(opts.length ? opts.length : '<span class="muted">\u2014</span>')+'</td>'
       + '<td class="muted">'+esc(l ? (l.landlord || '\u2014') : '\u2014')+'</td>'
-      + '<td class="nowrap"><button class="btn ghost small" onclick="editLease(\''+esc(sn.num)+'\')">'
+      + '<td class="nowrap">'
+      + (l ? '<button class="btn ghost small" onclick="openSalon(\''+esc(sn.num)+'\')">Open</button> ' : '')
+      + '<button class="btn ghost small" onclick="editLease(\''+esc(sn.num)+'\')">'
       + (l ? 'Edit' : 'Add') + '</button></td></tr>';
   });
   h += '</tbody></table></div></div><div id="lease-edit"></div>';
@@ -786,6 +826,182 @@ function deleteOption(optionId){
       const row = $('op-'+optionId); if(row) row.remove();
       loadRecords();
     }).catch(e=>alert(e.message||e));
+}
+
+// ── Ask a question of the recorded clauses ────────────────────────
+// Retrieval, not a language model: it finds clauses somebody recorded from a
+// real document and shows them, source named. It cannot invent a provision.
+function runAsk(){
+  const q = ($('ask-q').value || '').trim();
+  const out = $('ask-out');
+  if(!q){ out.innerHTML = ''; return; }
+  out.innerHTML = '<div class="loading" style="padding:16px;">Looking…</div>';
+  fetch('/api/leases/records', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ kind:'ask', question:q }) })
+    .then(r=>r.json()).then(d=>{
+      if(!d.success){ out.innerHTML = '<div class="banner err">'+esc(d.error||'')+'</div>'; return; }
+      const hits = d.hits || [];
+      if(!hits.length){
+        out.innerHTML = '<div class="banner">Nothing recorded matches that. '
+          + (d.salonNum ? 'Salon '+esc(salonLabel(d.salonNum))+' has '
+              + (REC.clauses||[]).filter(c=>c.salonNum===d.salonNum).length + ' clauses on file. '
+            : 'No salon number in the question, so it searched them all. ')
+          + 'Clauses are added per salon under Lease records.</div>';
+        return;
+      }
+      let h = '<div class="hint" style="margin:10px 0 4px;">'+hits.length+' clause'
+        + (hits.length===1?'':'s')+' recorded'
+        + (d.salonNum ? ' for '+esc(salonLabel(d.salonNum)) : ' across all salons')+'.</div>';
+      hits.slice(0, 8).forEach((c,i)=>{ h += clauseHtml(c, 'ask'+i, !d.salonNum); });
+      out.innerHTML = h;
+    }).catch(e=>{ out.innerHTML = '<div class="banner err">'+esc(e.message)+'</div>'; });
+}
+function askKey(ev){ if(ev.key === 'Enter') runAsk(); }
+
+/** One clause: the plain-English line, with the lease’s own words a click away. */
+function clauseHtml(c, domId, showSalon){
+  return '<div class="cl" id="cl-'+esc(domId)+'">'
+    + '<div class="top"><span class="pill">'+esc(c.topic || 'Clause')+'</span>'
+    + (showSalon ? '<b style="font-size:12.5px;">'+esc(salonLabel(c.salonNum))+'</b>' : '')
+    + (c.section ? '<span class="muted" style="font-size:11.5px;">section '+esc(c.section)+'</span>' : '')
+    + '</div>'
+    + (c.summary ? '<div class="sum">'+esc(c.summary)+'</div>' : '')
+    + (c.note ? '<div class="sum" style="color:#8a1a1a;">'+esc(c.note)+'</div>' : '')
+    + '<div class="src">'+esc(c.sourceDoc || 'source not recorded')
+    + (c.text ? ' \u00b7 <button class="lnk" onclick="toggleClause(\''+esc(domId)+'\')">show the lease\u2019s words</button>' : '')
+    + '</div>'
+    + (c.text ? '<div class="verb">'+esc(c.text)+'</div>' : '')
+    + '</div>';
+}
+function toggleClause(domId){ const el = $('cl-'+domId); if(el) el.classList.toggle('open'); }
+
+// ── One salon, drilled into ───────────────────────────────────────
+let S_SALON = '';
+function openSalon(num){
+  S_SALON = String(num);
+  showPanel('salon');
+  renderSalon();
+  window.scrollTo(0, 0);
+}
+
+function renderSalon(){
+  const num = S_SALON;
+  const l = (REC.leases||[]).find(x=>x.salonNum===num);
+  const opts = (REC.options||[]).filter(o=>o.salonNum===num);
+  const contacts = (REC.contacts||[]).filter(c=>c.salonNum===num);
+  const clauses = (REC.clauses||[]).filter(c=>c.salonNum===num);
+  const docs = (FILES||[]).filter(f=>f.salonNum===num);
+  const t = (REC.timeline||[]).find(x=>x.salonNum===num);
+
+  let h = '<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap;">'
+    + '<button class="btn ghost small" onclick="showPanel(\'dash\')">\u2190 Dashboard</button>'
+    + '<div style="font-size:19px;font-weight:700;color:var(--primary-dark);">'
+    + esc(salonLabel(num))+'</div>'
+    + (l && l.locationName ? '<div class="muted">'+esc(l.locationName)+'</div>' : '')
+    + (l ? '<span class="pill">'+esc(l.status)+'</span>' : '')
+    + '<span style="flex:1;"></span>'
+    + '<button class="btn ghost small" onclick="showPanel(\'leases\');editLease(\''+esc(num)+'\')">Edit record</button>'
+    + '</div>';
+
+  // ── Overview ──
+  if(!l){
+    h += '<div class="banner">No lease record for this salon yet. '
+      + '<button class="lnk" onclick="showPanel(\'leases\');editLease(\''+esc(num)+'\')">Add one</button>'
+      + ' and the summary below fills in.</div>';
+  } else {
+    const total = (Number(l.monthlyRent)||0) + (Number(l.camMonthly)||0);
+    h += '<div class="card"><h2>Overview</h2><div class="kv">'
+      + kv('Landlord', l.landlord || '\u2014')
+      + kv('Address', l.address || '\u2014')
+      + kv('Area', l.areaSqFt ? num0(l.areaSqFt)+' SF' : '\u2014')
+      + kv('Term', (l.commencementDate||'?')+' \u2192 '+(l.expirationDate||'?'))
+      + kv('Time left', t ? timeLeft(t.monthsLeft, t.monthsLeft==null?null:t.monthsLeft*30) : '\u2014')
+      + kv('Term elapsed', t ? Math.round(t.termProgress)+'%' : '\u2014')
+      + kv('Minimum rent', l.monthlyRent ? money(l.monthlyRent)+' /mo' : '\u2014')
+      + kv('CAM / NNN', l.camMonthly ? money(l.camMonthly)+' /mo' : 'not recorded')
+      + kv('Total monthly', total ? money(total) : '\u2014')
+      + kv('$/SF/yr (rent)', t && t.rentPerSfYr ? money(t.rentPerSfYr) : '\u2014')
+      + kv('Security deposit', l.securityDeposit ? money(l.securityDeposit) : 'none recorded')
+      + kv('Renewal options', opts.length ? String(opts.length) : 'none')
+      + '</div></div>';
+    if(l.note){
+      h += '<div class="card"><h2>Notes</h2><div class="body" style="white-space:pre-wrap;font-size:12.5px;line-height:1.6;">'+esc(l.note)+'</div></div>';
+    }
+  }
+
+  // ── Options ──
+  if(opts.length){
+    h += '<div class="card"><h2>Renewal options</h2><div class="scroll"><table><thead><tr>'
+      + '<th>Option</th><th>Notice by</th><th>Effective</th><th>Through</th><th>Decision</th>'
+      + '</tr></thead><tbody>';
+    opts.forEach(o=>{
+      h += '<tr><td>'+esc(o.optionNo)+'</td><td class="nowrap">'+esc(o.noticeBy||'\u2014')+'</td>'
+        + '<td class="nowrap">'+esc(o.effectiveFrom||'\u2014')+'</td>'
+        + '<td class="nowrap">'+esc(o.effectiveTo||'\u2014')+'</td>'
+        + '<td>'+esc(o.exercised === 'yes' ? 'exercised' : o.exercised === 'no' ? 'declined' : 'undecided')
+        + '</td></tr>';
+    });
+    h += '</tbody></table></div></div>';
+  }
+
+  // ── Clauses ──
+  h += '<div class="card"><h2>Important clauses <span class="sub">'
+    + (clauses.length ? clauses.length + ' recorded' : 'none recorded yet')+'</span></h2>';
+  if(!clauses.length){
+    h += '<div class="body muted" style="font-size:13px;">Nothing recorded. Clauses are what make the question box on the dashboard useful \u2014 each one keeps a plain-English summary alongside the lease\u2019s own words.</div>';
+  } else {
+    clauses.slice().sort((a,b)=>a.topic.localeCompare(b.topic))
+      .forEach((c,i)=>{ h += clauseHtml(c, num+'-'+i, false); });
+  }
+  h += '</div>';
+
+  // ── Contacts ──
+  h += '<div class="card"><h2>Contacts <span class="sub">'
+    + (contacts.length ? contacts.length + ' on file' : 'none on file')+'</span></h2>';
+  if(!contacts.length){
+    h += '<div class="body muted" style="font-size:13px;">Nobody recorded for this landlord yet.</div>';
+  } else {
+    h += '<div class="scroll"><table><thead><tr><th>Role</th><th>Who</th><th>Email</th>'
+      + '<th>Phone</th><th>Address</th></tr></thead><tbody>';
+    contacts.forEach(c=>{
+      h += '<tr><td><span class="pill">'+esc(c.role||'\u2014')+'</span></td>'
+        + '<td><b>'+esc(c.org||'')+'</b>'+(c.name ? '<div>'+esc(c.name)+'</div>' : '')
+        + (c.note ? '<div class="hint">'+esc(c.note)+'</div>' : '')+'</td>'
+        + '<td>'+(c.email ? '<a href="mailto:'+esc(c.email)+'">'+esc(c.email)+'</a>' : '\u2014')+'</td>'
+        + '<td class="nowrap">'+esc(c.phone||'\u2014')+'</td>'
+        + '<td class="muted">'+esc(c.address||'\u2014')+'</td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+  h += '</div>';
+
+  // ── Documents ──
+  h += '<div class="card"><h2>Documents <span class="sub">'
+    + (docs.length ? docs.length + ' filed to this salon' : 'none filed to this salon')+'</span></h2>';
+  if(!docs.length){
+    h += '<div class="body muted" style="font-size:13px;">Nothing filed here yet. Uploads are matched by the salon picked at drop time, so anything uploaded without a salon will not appear.</div>';
+  } else {
+    h += '<div class="scroll"><table><thead><tr><th>Document</th><th>Type</th><th>Size</th>'
+      + '<th>Uploaded</th><th></th></tr></thead><tbody>';
+    docs.forEach(f=>{
+      const view = '/api/leases/files/view?fileId='+encodeURIComponent(f.fileId);
+      h += '<tr><td><a href="'+view+'" target="_blank" rel="noopener noreferrer">'
+        + esc(f.fileName)+'</a></td>'
+        + '<td>'+(f.docType ? '<span class="pill">'+esc(f.docType)+'</span>' : '')+'</td>'
+        + '<td class="muted nowrap">'+esc(sizeText(f.sizeBytes))+'</td>'
+        + '<td class="muted nowrap">'+esc(dateText(f.uploadedAt))+'</td>'
+        + '<td class="nowrap"><a class="btn ghost small" style="text-decoration:none;" '
+        + 'href="'+view+'&dl=1">Download</a></td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+  h += '</div>';
+
+  $('salon-out').innerHTML = h;
+}
+
+function kv(k, v){
+  return '<div><div class="k">'+esc(k)+'</div><div class="v">'+esc(v)+'</div></div>';
 }
 </script>
 </body>
