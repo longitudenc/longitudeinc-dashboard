@@ -44,6 +44,17 @@ export const dynamic = 'force-dynamic'
 
 const S = (v: unknown, max = 300) => String(v ?? '').trim().slice(0, max)
 
+/**
+ * Salon order everywhere on this screen: by NUMBER, smallest first.
+ *
+ * Compared as numbers rather than as strings so the order does not quietly
+ * break the day a salon number is not four digits — "982" sorts before "1304"
+ * numerically and after it as text. The string compare is the tie-break, so
+ * anything non-numeric still lands somewhere stable rather than at 0.
+ */
+const bySalonNum = (a: string, b: string) =>
+  (Number(a) || 0) - (Number(b) || 0) || a.localeCompare(b)
+
 export async function GET() {
   const gate = await requireAdmin()
   if (!gate.ok) return gate.response
@@ -62,7 +73,10 @@ export async function GET() {
     try {
       docSalons = [...new Set((await listFiles()).map(f => f.salonNum).filter(Boolean))]
     } catch { docSalons = [] }
-    const salonNums = Object.keys(SALON_NAMES).sort()
+    const salonNums = Object.keys(SALON_NAMES).sort(bySalonNum)
+    // The sheet keeps whatever order rows were written in; the screen does not
+    // inherit it. Sorted once here so every list built from `leases` agrees.
+    leases.sort((a, b) => bySalonNum(a.salonNum, b.salonNum))
 
     // Fill the display name from the salon list when the record has none, so a
     // half-entered lease still reads as a place rather than a bare number.
@@ -70,9 +84,12 @@ export async function GET() {
       if (!l.locationName) l.locationName = SALON_NAMES[l.salonNum] || ''
     }
 
+    // By salon number, not by expiration date. What is coming at you soonest is
+    // already the Action items card's job; this table is the one you scan to
+    // find a salon you have in mind, and for that the number is the index.
     const timeline = leases
       .filter(l => l.status === 'active' || l.status === 'month-to-month')
-      .sort((a, b) => (a.expirationDate || '9999').localeCompare(b.expirationDate || '9999'))
+      .sort((a, b) => bySalonNum(a.salonNum, b.salonNum))
       .map(l => {
         const cur = currentStep(steps, l.salonNum, today)
         const nxt = nextStep(steps, l.salonNum, today)
