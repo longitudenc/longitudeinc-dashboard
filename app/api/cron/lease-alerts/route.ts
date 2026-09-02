@@ -27,6 +27,7 @@ import { sendAlert } from '@/lib/alert'
 import { SALON_NAMES, salonDisplay } from '@/lib/config'
 import { listLeases, listOptions, actionItems, todayISO } from '@/lib/lease-records'
 import { listSteps, upcomingRentChanges } from '@/lib/lease-money'
+import { leaseAlertRecipients, maskEmail } from '@/lib/lease-settings'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -62,7 +63,9 @@ export async function GET(req: NextRequest) {
 
   try {
     const today = todayISO()
-    const [leases, options, steps] = await Promise.all([listLeases(), listOptions(), listSteps()])
+    const [leases, options, steps, who] = await Promise.all([
+      listLeases(), listOptions(), listSteps(), leaseAlertRecipients(),
+    ])
     const salonNums = Object.keys(SALON_NAMES)
 
     const rent = upcomingRentChanges(steps, salonNums, today, RENT_WINDOW_DAYS)
@@ -78,9 +81,8 @@ export async function GET(req: NextRequest) {
     if (dry) {
       return NextResponse.json({
         ok: true, dryRun: true, today,
-        recipients: (process.env.ALERT_EMAIL || '').split(',').map(x=>x.trim()).filter(Boolean)
-          .map(e => { const at = e.indexOf('@'); return at < 1 ? '(malformed)' : e.slice(0, Math.min(2, at)) + '***' + e.slice(at) }),
-        alertEmailSet: !!process.env.ALERT_EMAIL,
+        recipients: who.recipients.map(maskEmail),
+        recipientSource: who.source,
         resendKeySet: !!process.env.RESEND_API_KEY,
         counts: { rent: rent.length, notices: notices.length, expiries: expiries.length },
         rent, notices, expiries,
@@ -148,7 +150,7 @@ export async function GET(req: NextRequest) {
         </p>
       </div>`
 
-    const sent = await sendAlert('Lease Manager — what is coming', html)
+    const sent = await sendAlert('Lease Manager — what is coming', html, who.recipients)
     // Report WHO it went to (local part masked) and the sender. Asking
     // "where does this email go" should not mean reading env vars in a
     // dashboard — hitting this URL answers it.
@@ -158,6 +160,7 @@ export async function GET(req: NextRequest) {
       reason: sent.reason,
       from: sent.from,
       to: sent.to,
+      recipientSource: who.source,
       counts: { rent: rent.length, notices: notices.length, expiries: expiries.length },
     })
   } catch (e: any) {

@@ -729,6 +729,29 @@ function renderDash(){
     h += '</tbody></table></div></div>';
   }
 
+  // ── Who gets told ──
+  // Kept on this screen rather than in an env var: the people who care about
+  // a lease deadline are not the people who care about a failed scrape, and
+  // that list changes.
+  const rec = REC.alertRecipients || [];
+  const srcLabel = { 'lease settings':'set here', 'LEASE_ALERT_EMAIL':'from LEASE_ALERT_EMAIL',
+    'ALERT_EMAIL':'falling back to the operational address (ALERT_EMAIL)', 'none':'nobody' };
+  h += '<div class="card"><h2>Deadline alerts</h2><div class="body">'
+    + '<label class="fld" style="max-width:520px;">Email lease alerts to'
+    + '<input type="text" id="al-email" value="'
+    + esc((REC.settings && REC.settings.alertEmail) || '')+'" '
+    + 'placeholder="name@example.com, second@example.com"></label>'
+    + '<div style="margin-top:11px;display:flex;gap:10px;align-items:center;">'
+    + '<button class="btn" onclick="saveAlertEmail()">Save</button>'
+    + '<span id="al-msg" style="font-size:12.5px;"></span></div>'
+    + '<div class="hint">'
+    + (rec.length
+        ? 'Going to <b>' + rec.map(esc).join('</b>, <b>') + '</b> \u2014 '
+          + esc(srcLabel[REC.alertRecipientSource] || REC.alertRecipientSource)
+        : '<b style="color:#b3261e;">Nothing is being sent</b> \u2014 no address is set here and no fallback is configured.')
+    + '<br>Separate several addresses with commas. Sent only when a rent step, notice deadline or expiry is close, so a quiet inbox means nothing is due.</div>'
+    + '</div></div>';
+
   $('dash-out').innerHTML = h;
 }
 
@@ -1188,6 +1211,21 @@ function uploadForSalon(num){
   if(sel) sel.value = num;
   const drop = $('drop');
   if(drop) drop.scrollIntoView({behavior:'smooth', block:'center'});
+}
+
+function saveAlertEmail(){
+  const msg = $('al-msg');
+  msg.textContent = 'Saving…'; msg.style.color = '';
+  fetch('/api/leases/records', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ kind:'settings', alertEmail: $('al-email').value }) })
+    .then(r=>r.json()).then(d=>{
+      if(!d.success){ msg.textContent = 'Save failed: '+(d.error||''); msg.style.color = '#b3261e'; return; }
+      // Re-read so the resolved recipient line reflects what was just saved,
+      // including a value that fell through to a fallback.
+      loadRecords();
+      msg.textContent = (d.alertRecipients||[]).length ? 'Saved.' : 'Saved, but no valid address was found.';
+      msg.style.color = (d.alertRecipients||[]).length ? '#1a5c0a' : '#b3261e';
+    }).catch(e=>{ msg.textContent = 'Save failed: '+e.message; msg.style.color = '#b3261e'; });
 }
 
 function gapRow(g){

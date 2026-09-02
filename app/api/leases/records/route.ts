@@ -35,6 +35,9 @@ import {
   listSteps, listCharges, upsertStep, upsertCharge, removeStep, removeCharge,
   currentStep, nextStep, chargeTotal, upcomingRentChanges, gaps,
 } from '@/lib/lease-money'
+import {
+  readSettings, writeSettings, leaseAlertRecipients, maskEmail,
+} from '@/lib/lease-settings'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -53,6 +56,8 @@ export async function GET() {
     ])
     // Which salons have documents, for the gap report. Cheap: the tab is
     // metadata only, never the files themselves.
+    const settings = await readSettings(true)
+    const who = await leaseAlertRecipients(settings)
     let docSalons: string[] = []
     try {
       docSalons = [...new Set((await listFiles()).map(f => f.salonNum).filter(Boolean))]
@@ -103,6 +108,11 @@ export async function GET() {
         docSalons,
       }),
       salons: salonNums.map(num => ({ num, name: SALON_NAMES[num] })),
+      settings,
+      // Masked, and with the layer that supplied them named, so "no email
+      // arrived" can be told apart from "it went to the wrong list".
+      alertRecipients: who.recipients.map(maskEmail),
+      alertRecipientSource: who.source,
       clauseTopics: [...CLAUSE_TOPICS],
       contactRoles: [...CONTACT_ROLES],
       statuses: [...LEASE_STATUSES],
@@ -118,6 +128,19 @@ export async function POST(req: Request) {
   try {
     const body = await req.json()
     const kind = S(body?.kind, 20)
+
+    if (kind === 'settings') {
+      const saved = await writeSettings({
+        alertEmail: body?.alertEmail !== undefined ? S(body.alertEmail, 500) : undefined,
+        alertNote: body?.alertNote !== undefined ? S(body.alertNote, 300) : undefined,
+      } as any)
+      const now = await leaseAlertRecipients(saved)
+      return NextResponse.json({
+        success: true, settings: saved,
+        alertRecipients: now.recipients.map(maskEmail),
+        alertRecipientSource: now.source,
+      })
+    }
 
     if (kind === 'step') {
       const salonNum = S(body?.salonNum, 20)

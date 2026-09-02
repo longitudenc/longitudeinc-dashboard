@@ -31,29 +31,39 @@ function maskEmail(e: string): string {
   return e.slice(0, Math.min(2, at)) + '***' + e.slice(at)
 }
 
-/** Email an operational alert. Never throws; reports why it did not send. */
-export async function sendAlert(subject: string, html: string): Promise<AlertResult> {
+/**
+ * Email an operational alert. Never throws; reports why it did not send.
+ *
+ * `to` overrides ALERT_EMAIL. It exists because not every alert has the same
+ * audience: a failed scrape goes to whoever runs the system, a lease deadline
+ * goes to whoever signs the lease, and those are not the same list.
+ */
+export async function sendAlert(
+  subject: string,
+  html: string,
+  to?: string[],
+): Promise<AlertResult> {
   try {
-    const to = recipients()
+    const recips = to && to.length ? to : recipients()
     if (!process.env.RESEND_API_KEY) {
       console.warn('[alert] skipped: RESEND_API_KEY not set')
       return { sent: false, reason: 'RESEND_API_KEY is not set' }
     }
-    if (to.length === 0) {
+    if (recips.length === 0) {
       console.warn('[alert] skipped: ALERT_EMAIL not set')
-      return { sent: false, reason: 'ALERT_EMAIL is not set, or not visible to this deployment' }
+      return { sent: false, reason: 'no recipients: ALERT_EMAIL is not set, or not visible to this deployment' }
     }
     const resend = new Resend(process.env.RESEND_API_KEY)
-    const res: any = await resend.emails.send({ from: FROM, to, subject, html })
+    const res: any = await resend.emails.send({ from: FROM, to: recips, subject, html })
     // Resend RESOLVES with { data, error } rather than rejecting, so an
     // unverified sender domain or a bad key would otherwise vanish here.
     if (res && res.error) {
       const reason = String(res.error.message || res.error.name || JSON.stringify(res.error))
       console.error('[alert] rejected by Resend:', reason)
-      return { sent: false, reason, recipients: to.length, from: FROM, to: to.map(maskEmail) }
+      return { sent: false, reason, recipients: recips.length, from: FROM, to: recips.map(maskEmail) }
     }
     console.log(`[alert] sent: ${subject}`)
-    return { sent: true, recipients: to.length, from: FROM, to: to.map(maskEmail) }
+    return { sent: true, recipients: recips.length, from: FROM, to: recips.map(maskEmail) }
   } catch (e: any) {
     const reason = String(e?.message || e)
     console.error('[alert] send failed:', reason)
