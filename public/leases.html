@@ -137,6 +137,22 @@
   .muted{color:var(--text-muted);}
   .pill{display:inline-block;font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:20px;background:var(--accent-light);color:var(--primary-dark);}
   .nowrap{white-space:nowrap;}
+  /* Renegotiation punch list */
+  .ask{padding:11px 14px;border-bottom:1px solid #f1f3f1;font-size:13px;}
+  .ask:last-child{border-bottom:none;}
+  .ask.done{opacity:.5;}
+  .ask .hd{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+  .sv{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;padding:2px 7px;border-radius:4px;}
+  .sv.high{background:var(--wrn-bg);color:var(--wrn-text);}
+  .sv.medium{background:#fdf6e0;color:#7a5a00;}
+  .sv.low{background:#eef2ef;color:#5a6b62;}
+  .ask .lab{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-light);}
+  .ask .cur{color:var(--text-muted);line-height:1.5;margin-top:1px;}
+  .ask .want{line-height:1.5;margin-top:1px;}
+  .ask .prec{margin-top:5px;font-size:11.5px;}
+  .ask .acts{margin-top:6px;display:flex;gap:8px;align-items:center;}
+  .whenbar{padding:9px 14px;background:#f7f9f8;border-bottom:1px solid var(--border);
+    display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;font-size:12.5px;}
   @media(max-width:700px){ .content{padding:1rem .75rem;} .app-header{padding:0 .9rem;} .bar{width:70px;} }
 </style>
 </head>
@@ -152,6 +168,7 @@
 <div class="tabs" id="tabs" style="display:none;">
   <button class="tab active" data-panel="dash" onclick="showPanel('dash')">Dashboard</button>
   <button class="tab" data-panel="leases" onclick="showPanel('leases')">Lease records</button>
+  <button class="tab" data-panel="reneg" onclick="showPanel('reneg')">Renegotiation</button>
   <button class="tab" data-panel="docs" onclick="showPanel('docs')">Documents</button>
 </div>
 
@@ -168,6 +185,11 @@
     <!-- ── Lease records ─────────────────────────────────────── -->
     <div class="panel" id="panel-leases">
       <div id="leases-out"><div class="loading">Loading…</div></div>
+    </div>
+
+    <!-- ── Renegotiation punch list ──────────────────────────── -->
+    <div class="panel" id="panel-reneg">
+      <div id="reneg-out"><div class="loading">Loading…</div></div>
     </div>
 
     <!-- ── One salon, drilled into ───────────────────────────── -->
@@ -609,6 +631,7 @@ function loadRecords(){
     if(!SALONS.length) SALONS = d.salons || [];
     renderDash();
     renderLeaseList();
+    renderReneg();
   }).catch(e=>{ $('dash-out').innerHTML = '<div class="banner err">'+esc(e.message)+'</div>'; });
 }
 
@@ -963,6 +986,181 @@ function clauseHtml(c, domId, showSalon){
     + '</div>';
 }
 function toggleClause(domId){ const el = $('cl-'+domId); if(el) el.classList.toggle('open'); }
+
+// ── Renegotiation punch list ──────────────────────────────────────
+// What is wrong with each lease, and what to ask for instead, ordered by WHEN
+// the conversation happens rather than by how bad the term is — a severe ask
+// on a lease running to 2035 is not urgent yet.
+//
+// The precedent line is the reason this screen exists. "Publix agreed to this
+// at Mint Hill" is an argument a landlord has to answer; "we would prefer a
+// cap" is one they can decline. Everything here is designed to be read out
+// loud in a renewal call.
+let R_EDIT = null;      // askId being edited, '' for a new row, null = closed
+
+const SEV_LABEL = { high:'High', medium:'Medium', low:'Low' };
+const ST_LABEL  = { '':'Open', raised:'Raised', won:'Won', conceded:'Conceded', dropped:'Dropped' };
+
+function renderReneg(){
+  const plan = REC.plan || [], issues = REC.issues || [], asks = REC.asks || [];
+  let h = '';
+
+  if(!asks.length){
+    h += '<div class="banner"><b>Nothing recorded yet.</b> This is the list of terms worth '
+      + 'changing at renewal — what the lease says now, what to ask for, and which of our '
+      + 'own leases already has the better wording to point at.</div>';
+  }
+
+  h += askForm();
+
+  // ── By salon, in the order the conversations happen ──
+  h += '<div class="card"><h2>By salon <span class="sub">soonest conversation first</span></h2>';
+  if(!plan.length){
+    h += '<div class="body muted" style="font-size:13px;">No asks recorded against any salon.</div>';
+  } else {
+    plan.forEach(p=>{
+      const when = p.nextDate
+        ? (p.nextKind==='notice' ? 'Renewal notice ' : 'Lease expires ') + fmtDate(p.nextDate)
+        : 'No date known';
+      h += '<div class="whenbar">'
+        + '<b>'+esc(salonLabel(p.salonNum))+'</b>'
+        + (p.locationName ? '<span class="muted">'+esc(p.locationName)+'</span>' : '')
+        + '<span style="flex:1;"></span>'
+        + '<span>'+esc(when)+'</span>'
+        + '<span class="pill">'+esc(timeLeft(p.daysAway==null?null:Math.floor(p.daysAway/30), p.daysAway))+'</span>'
+        + (p.openHigh ? '<span class="sv high">'+p.openHigh+' high</span>' : '')
+        + '<span class="muted">'+p.openTotal+' open</span>'
+        + '</div>';
+      p.asks.forEach(a=>{ h += askRow(a); });
+    });
+  }
+  h += '</div>';
+
+  // ── The same problem, seen across the portfolio ──
+  if(issues.length){
+    h += '<div class="card"><h2>By issue <span class="sub">who else has it, and who already gave us better</span></h2>'
+      + '<div class="scroll"><table><thead><tr>'
+      + '<th>Issue</th><th></th><th>Salons</th><th>Precedent in our own leases</th><th>The ask</th>'
+      + '</tr></thead><tbody>';
+    issues.forEach(g=>{
+      h += '<tr>'
+        + '<td><b>'+esc(g.issue)+'</b>'
+        + (g.topic ? '<div class="hint" style="margin-top:1px;">'+esc(g.topic)+'</div>' : '')+'</td>'
+        + '<td><span class="sv '+esc(g.severity)+'">'+esc(SEV_LABEL[g.severity]||g.severity)+'</span></td>'
+        + '<td class="nowrap">'+g.salons.map(s=>'<button class="lnk" onclick="openSalon(\''+esc(s)+'\')">'+esc(s)+'</button>').join(' ')+'</td>'
+        + '<td class="nowrap">'+(g.precedents.length
+            ? g.precedents.map(s=>'<button class="lnk" onclick="openSalon(\''+esc(s)+'\')">'+esc(s)+'</button>').join(' ')
+            : '<span class="muted">— none of ours is better</span>')+'</td>'
+        + '<td class="muted">'+esc(g.ask)+'</td></tr>';
+    });
+    h += '</tbody></table></div></div>';
+  }
+
+  $('reneg-out').innerHTML = h;
+}
+
+function askRow(a){
+  const done = (a.status==='won' || a.status==='dropped');
+  const prec = String(a.precedent||'').split(/[,;/]/).map(x=>x.trim()).filter(Boolean);
+  return '<div class="ask'+(done?' done':'')+'">'
+    + '<div class="hd">'
+    + '<span class="sv '+esc(a.severity)+'">'+esc(SEV_LABEL[a.severity]||a.severity)+'</span>'
+    + '<b>'+esc(a.issue)+'</b>'
+    + (a.topic ? '<span class="muted" style="font-size:11.5px;">'+esc(a.topic)+'</span>' : '')
+    + (a.status ? '<span class="pill">'+esc(ST_LABEL[a.status]||a.status)+'</span>' : '')
+    + '</div>'
+    + (a.current ? '<div class="cur"><span class="lab">Now</span> '+esc(a.current)+'</div>' : '')
+    + (a.ask ? '<div class="want"><span class="lab">Ask</span> '+esc(a.ask)+'</div>' : '')
+    + (a.note ? '<div class="cur">'+esc(a.note)+'</div>' : '')
+    + (prec.length
+        ? '<div class="prec"><span class="lab">Precedent</span> '
+          + prec.map(s=>'<button class="lnk" onclick="openSalon(\''+esc(s)+'\')">'+esc(salonLabel(s))+'</button>').join(' · ')
+          + '</div>'
+        : '')
+    + '<div class="acts">'
+    + '<select onchange="setAskStatus(\''+esc(a.askId)+'\', this.value)" style="font-size:11.5px;padding:3px 6px;">'
+    + ['','raised','won','conceded','dropped'].map(s=>'<option value="'+s+'"'+(s===a.status?' selected':'')+'>'
+        + esc(ST_LABEL[s])+'</option>').join('')
+    + '</select>'
+    + '<button class="lnk" onclick="editAsk(\''+esc(a.askId)+'\')">Edit</button>'
+    + '<button class="lnk" onclick="deleteAsk(\''+esc(a.askId)+'\')">Remove</button>'
+    + '</div></div>';
+}
+
+function askForm(){
+  if(R_EDIT === null){
+    return '<div class="card"><div class="body">'
+      + '<button class="btn" onclick="editAsk(\'\')">Add an ask</button>'
+      + '<span class="hint" style="margin-left:10px;">One row per term worth changing. '
+      + 'Fill in the precedent and it becomes something a landlord has to answer.</span>'
+      + '</div></div>';
+  }
+  const a = (REC.asks||[]).find(x=>x.askId===R_EDIT) || {};
+  const salons = REC.salons || SALONS || [];
+  const sel = (id,label,list,cur)=> '<label class="fld">'+esc(label)
+    + '<select id="'+id+'">'+list.map(o=>'<option value="'+esc(o[0])+'"'
+        +(String(o[0])===String(cur||'')?' selected':'')+'>'+esc(o[1])+'</option>').join('')+'</select></label>';
+  const txt = (id,label,val,ph)=> '<label class="fld">'+esc(label)
+    + '<input type="text" id="'+id+'" value="'+esc(val||'')+'" placeholder="'+esc(ph||'')+'"></label>';
+  const area = (id,label,val,ph)=> '<label class="fld" style="margin-top:12px;">'+esc(label)
+    + '<textarea id="'+id+'" rows="2" style="width:100%;" placeholder="'+esc(ph||'')+'">'+esc(val||'')+'</textarea></label>';
+
+  return '<div class="card"><h2>'+(R_EDIT?'Edit ask':'Add an ask')+'</h2><div class="body">'
+    + '<div class="filegrid">'
+    + sel('ak-salon','Salon', salons.map(s=>[s.num, s.num+' '+s.name]), a.salonNum)
+    + txt('ak-issue','Issue', a.issue, 'e.g. No exclusive')
+    + sel('ak-topic','Topic', [['','—']].concat((REC.clauseTopics||[]).map(t=>[t,t])), a.topic)
+    + sel('ak-sev','Severity', (REC.askSeverities||['high','medium','low']).map(s=>[s, SEV_LABEL[s]||s]), a.severity||'medium')
+    + txt('ak-prec','Precedent salons', a.precedent, 'e.g. 3058, 3062, 3685')
+    + sel('ak-status','Status', ['','raised','won','conceded','dropped'].map(s=>[s, ST_LABEL[s]]), a.status)
+    + '</div>'
+    + area('ak-current','What the lease says now', a.current, 'One sentence.')
+    + area('ak-ask','What to ask for', a.ask, 'The actual words to put in front of the landlord.')
+    + area('ak-note','Note', a.note, '')
+    + '<div style="margin-top:12px;display:flex;gap:10px;align-items:center;">'
+    + '<button class="btn" onclick="saveAsk()">Save</button>'
+    + '<button class="btn ghost" onclick="cancelAsk()">Cancel</button>'
+    + '<span id="ak-msg" style="font-size:12.5px;"></span></div>'
+    + '</div></div>';
+}
+
+function editAsk(askId){ R_EDIT = askId; renderReneg(); window.scrollTo(0,0); }
+function cancelAsk(){ R_EDIT = null; renderReneg(); }
+
+function saveAsk(){
+  const v = id => { const el = $(id); return el ? el.value.trim() : ''; };
+  const salonNum = v('ak-salon'), issue = v('ak-issue');
+  if(!salonNum || !issue){ $('ak-msg').textContent = 'Salon and issue are both required.'; return; }
+  postAsk({
+    askId: R_EDIT || undefined, salonNum, issue,
+    topic: v('ak-topic'), severity: v('ak-sev'), precedent: v('ak-prec'),
+    status: v('ak-status'), current: v('ak-current'), ask: v('ak-ask'), note: v('ak-note'),
+  }, () => { R_EDIT = null; });
+}
+
+/** Status changes save straight away — it is a one-click field, not a form. */
+function setAskStatus(askId, status){
+  const a = (REC.asks||[]).find(x=>x.askId===askId);
+  if(!a) return;
+  postAsk({ askId, salonNum: a.salonNum, status });
+}
+
+function postAsk(body, after){
+  fetch('/api/leases/records', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(Object.assign({ kind:'renegotiation' }, body)),
+  }).then(r=>r.json()).then(d=>{
+    if(!d.success){ const m = $('ak-msg'); if(m) m.textContent = d.error || 'Save failed.'; return; }
+    if(after) after();
+    loadRecords();
+  }).catch(e=>{ const m = $('ak-msg'); if(m) m.textContent = e.message; });
+}
+
+function deleteAsk(askId){
+  if(!confirm('Remove this ask?')) return;
+  fetch('/api/leases/records?askId='+encodeURIComponent(askId), { method:'DELETE' })
+    .then(r=>r.json()).then(()=>{ R_EDIT = null; loadRecords(); });
+}
 
 // ── One salon, drilled into ───────────────────────────────────────
 let S_SALON = '';

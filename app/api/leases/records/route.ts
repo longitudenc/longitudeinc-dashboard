@@ -38,6 +38,10 @@ import {
 import {
   readSettings, writeSettings, leaseAlertRecipients, maskEmail,
 } from '@/lib/lease-settings'
+import {
+  listAsks, upsertAsk, removeAsk, renegotiationPlan, issueGroups,
+  ASK_SEVERITIES,
+} from '@/lib/lease-asks'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -61,9 +65,9 @@ export async function GET() {
   try {
     const today = todayISO()
     // Fresh: this screen is read straight after saving from it.
-    const [leases, options, contacts, clauses, steps, charges] = await Promise.all([
+    const [leases, options, contacts, clauses, steps, charges, asks] = await Promise.all([
       listLeases(true), listOptions(true), listContacts(true), listClauses(true),
-      listSteps(true), listCharges(true),
+      listSteps(true), listCharges(true), listAsks(true),
     ])
     // Which salons have documents, for the gap report. Cheap: the tab is
     // metadata only, never the files themselves.
@@ -133,6 +137,13 @@ export async function GET() {
       clauseTopics: [...CLAUSE_TOPICS],
       contactRoles: [...CONTACT_ROLES],
       statuses: [...LEASE_STATUSES],
+      // The renegotiation punch list, plus the two views that make it useful:
+      // per salon in the order the conversations actually happen, and per
+      // issue across the portfolio so a precedent elsewhere can be cited.
+      asks,
+      plan: renegotiationPlan(asks, leases, options, today),
+      issues: issueGroups(asks),
+      askSeverities: [...ASK_SEVERITIES],
     })
   } catch (e: any) {
     return NextResponse.json({ success: false, error: String(e?.message || e) }, { status: 500 })
@@ -233,6 +244,29 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: true, clause })
     }
 
+    // NOTE: 'ask' below is the question box. This one — the renegotiation
+    // punch list — is deliberately called something else so the two cannot
+    // be confused at the call site.
+    if (kind === 'renegotiation') {
+      const salonNum = S(body?.salonNum, 20)
+      if (!salonNum) {
+        return NextResponse.json({ success: false, error: 'salonNum is required' }, { status: 400 })
+      }
+      const saved = await upsertAsk({
+        askId: S(body?.askId, 60) || undefined,
+        salonNum,
+        issue: body?.issue !== undefined ? S(body.issue, 120) : undefined,
+        topic: body?.topic !== undefined ? S(body.topic, 60) : undefined,
+        severity: body?.severity !== undefined ? S(body.severity, 20) : undefined,
+        current: body?.current !== undefined ? S(body.current, 2000) : undefined,
+        ask: body?.ask !== undefined ? S(body.ask, 2000) : undefined,
+        precedent: body?.precedent !== undefined ? S(body.precedent, 200) : undefined,
+        status: body?.status !== undefined ? S(body.status, 20) : undefined,
+        note: body?.note !== undefined ? S(body.note, 2000) : undefined,
+      })
+      return NextResponse.json({ success: true, ask: saved })
+    }
+
     if (kind === 'ask') {
       // Retrieval over recorded clauses — see askClauses() for why this is
       // not a language model.
@@ -306,6 +340,10 @@ export async function DELETE(req: Request) {
     const optionId = S(url.searchParams.get('optionId'), 60)
     if (optionId) {
       return NextResponse.json({ success: true, removed: await removeOption(optionId) })
+    }
+    const askId = S(url.searchParams.get('askId'), 60)
+    if (askId) {
+      return NextResponse.json({ success: true, removed: await removeAsk(askId) })
     }
     const salonNum = S(url.searchParams.get('salonNum'), 20)
     if (!salonNum) {
