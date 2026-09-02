@@ -25,7 +25,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { sendAlert } from '@/lib/alert'
 import { SALON_NAMES, salonDisplay } from '@/lib/config'
-import { listLeases, listOptions, actionItems, todayISO, daysBetween } from '@/lib/lease-records'
+import { listLeases, listOptions, actionItems, todayISO } from '@/lib/lease-records'
 import { listSteps, upcomingRentChanges } from '@/lib/lease-money'
 
 export const runtime = 'nodejs'
@@ -72,6 +72,20 @@ export async function GET(req: NextRequest) {
     const acts = actionItems(leases, options, today, 12)
     const notices = acts.filter(a => a.kind === 'notice' && a.daysAway <= NOTICE_WINDOW_DAYS)
     const expiries = acts.filter(a => a.kind === 'expiry' && a.daysAway <= EXPIRY_WINDOW_DAYS)
+
+    // ?dry=1 reports what WOULD be sent, and to whom, without sending.
+    const dry = new URL(req.url).searchParams.get('dry') === '1'
+    if (dry) {
+      return NextResponse.json({
+        ok: true, dryRun: true, today,
+        recipients: (process.env.ALERT_EMAIL || '').split(',').map(x=>x.trim()).filter(Boolean)
+          .map(e => { const at = e.indexOf('@'); return at < 1 ? '(malformed)' : e.slice(0, Math.min(2, at)) + '***' + e.slice(at) }),
+        alertEmailSet: !!process.env.ALERT_EMAIL,
+        resendKeySet: !!process.env.RESEND_API_KEY,
+        counts: { rent: rent.length, notices: notices.length, expiries: expiries.length },
+        rent, notices, expiries,
+      })
+    }
 
     if (!rent.length && !notices.length && !expiries.length) {
       return NextResponse.json({ ok: true, sent: false, reason: 'nothing due' })
@@ -135,10 +149,15 @@ export async function GET(req: NextRequest) {
       </div>`
 
     const sent = await sendAlert('Lease Manager — what is coming', html)
+    // Report WHO it went to (local part masked) and the sender. Asking
+    // "where does this email go" should not mean reading env vars in a
+    // dashboard — hitting this URL answers it.
     return NextResponse.json({
       ok: true,
       sent: sent.sent,
       reason: sent.reason,
+      from: sent.from,
+      to: sent.to,
       counts: { rent: rent.length, notices: notices.length, expiries: expiries.length },
     })
   } catch (e: any) {

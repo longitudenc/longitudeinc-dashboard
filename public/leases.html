@@ -197,7 +197,7 @@
              onclick="document.getElementById('picker').click()"
              ondragover="dropOver(event,true)" ondragleave="dropOver(event,false)" ondrop="onDrop(event)">
           <div class="big">Drop files here</div>
-          <div class="small">or click to choose &middot; whole folders work too &middot; PDF, images, Word or Excel</div>
+          <div class="small">or click to choose &middot; whole folders work too &middot; PDF, images, Word, Excel or CSV</div>
         </div>
         <input type="file" id="picker" multiple style="display:none;" onchange="onPick(event)">
 
@@ -253,6 +253,7 @@ const EXT_TYPE = {
   docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   xls:'application/vnd.ms-excel',
   xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  csv:'text/csv', txt:'text/plain',
 };
 const ALLOWED = new Set(Object.values(EXT_TYPE));
 // Sent through our own route, which is capped by the platform at 4.5 MB.
@@ -372,7 +373,7 @@ function queue(files){
     const ct = typeOf(f);
     if(!ct || !ALLOWED.has(ct)){
       item.state = 'error';
-      item.error = 'Not a document type this store accepts (PDF, image, Word or Excel).';
+      item.error = 'Not a document type this store accepts (PDF, image, Word, Excel or CSV).';
     } else if(f.size > MAX_BYTES){
       item.state = 'error';
       item.error = 'Larger than the 50 MB limit — ' + sizeText(f.size) + '.';

@@ -48,6 +48,7 @@ const EXT_TYPE: Record<string, string> = {
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   xls: 'application/vnd.ms-excel',
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  csv: 'text/csv', txt: 'text/plain',
 }
 
 function contentTypeFor(file: File, declared: string): string {

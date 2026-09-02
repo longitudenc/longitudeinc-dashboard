@@ -60,6 +60,9 @@ export const ALLOWED_CONTENT_TYPES = new Set([
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/vnd.ms-excel',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  // Landlords send CAM reconciliations as CSV about as often as XLSX.
+  'text/csv',
+  'text/plain',
 ])
 
 /** Generous, but not unbounded — a 200 MB "lease" is a mistake, not a lease. */
