@@ -185,6 +185,7 @@
 <div class="tabs" id="tabs" style="display:none;">
   <button class="tab active" data-panel="dash" onclick="showPanel('dash')">Dashboard</button>
   <button class="tab" data-panel="leases" onclick="showPanel('leases')">Lease records</button>
+  <button class="tab" data-panel="gaps" onclick="showPanel('gaps')">Missing information</button>
   <button class="tab" data-panel="reneg" onclick="showPanel('reneg')">Renegotiation</button>
   <button class="tab" data-panel="docs" onclick="showPanel('docs')">Documents</button>
 </div>
@@ -205,6 +206,10 @@
     </div>
 
     <!-- ── Renegotiation punch list ──────────────────────────── -->
+    <div class="panel" id="panel-gaps">
+      <div id="gaps-out"><div class="loading">Loading&hellip;</div></div>
+    </div>
+
     <div class="panel" id="panel-reneg">
       <div id="reneg-out"><div class="loading">Loading…</div></div>
     </div>
@@ -417,24 +422,44 @@ function filesFromDrop(dt){
     .map(it => (it.webkitGetAsEntry ? it.webkitGetAsEntry() : null));
   if(!entries.some(Boolean)) return Promise.resolve(Array.from(dt.files || []));
   const out = [];
-  const walk = entry => new Promise(done => {
+  // Carry the folder name down with each file. A folder per location is how
+  // this paperwork already lives on disk, and the folder is a far better
+  // signal of which salon a document belongs to than the filename — plenty of
+  // leases are just called "Great Clips Executed Lease.pdf".
+  const walk = (entry, folder) => new Promise(done => {
     if(!entry) return done();
-    if(entry.isFile) return entry.file(f => { out.push(f); done(); }, () => done());
+    if(entry.isFile) return entry.file(f => { out.push({ file: f, folder: folder }); done(); }, () => done());
     if(!entry.isDirectory) return done();
+    const here = folder || entry.name;
     const reader = entry.createReader();
     // readEntries hands back at most 100 at a time and signals the end with
     // an empty batch, so it has to be called until it returns nothing.
     const batch = () => reader.readEntries(es => {
       if(!es.length) return done();
-      Promise.all(es.map(walk)).then(batch);
+      Promise.all(es.map(e => walk(e, here))).then(batch);
     }, () => done());
     batch();
   });
-  return Promise.all(entries.map(walk)).then(() => out);
+  return Promise.all(entries.map(e => walk(e, ''))).then(() => out);
 }
 function onPick(ev){
-  queue(Array.from(ev.target.files || []));
+  queue(Array.from(ev.target.files || []).map(f => ({ file: f, folder: '' })));
   ev.target.value = '';        // so the same file can be chosen twice
+}
+
+/**
+ * The salon a piece of text names, if any.
+ *
+ * Deliberately strict: exactly four digits with no digit either side, and it
+ * must be a salon we actually operate. That keeps "2023.11.28_Great Clips
+ * _Assignment.docx" and "11515FP-FINAL.pdf" out, which a looser match would
+ * happily file against salon 2023.
+ */
+function salonFromText(t){
+  const m = String(t||'').match(/(^|[^0-9])(\d{4})([^0-9]|$)/);
+  if(!m) return '';
+  const list = REC.salons || SALONS || [];
+  return list.some(x => String(x.num) === m[2]) ? m[2] : '';
 }
 
 // ── Uploading ─────────────────────────────────────────────────
@@ -445,14 +470,21 @@ function queue(files){
   if(!files.length) return;
   // Read the filing fields ONCE, at drop time. Changing them mid-upload should
   // not retroactively refile what is already going up.
-  const salonNum = $('f-salon').value;
-  const meta = {
-    salonNum: salonNum,
-    location: salonNum ? salonLabel(salonNum) : '',
-    docType: $('f-doctype').value,
-    note: $('f-note').value.trim(),
-  };
-  files.forEach(f => {
+  const picked = $('f-salon').value;
+  const docType = $('f-doctype').value;
+  const note = $('f-note').value.trim();
+  files.forEach(entry => {
+    const f = entry.file || entry;                     // tolerate a bare File
+    // Picked salon wins; then the folder it came from; then the filename.
+    // Dropping ten location folders at once should file all ten correctly
+    // without touching the dropdown between drops.
+    const salonNum = picked || salonFromText(entry.folder) || salonFromText(f.name);
+    const meta = {
+      salonNum: salonNum,
+      location: salonNum ? salonLabel(salonNum) : '',
+      docType: docType,
+      note: note,
+    };
     const item = { id: ++QSEQ, file: f, meta: meta, pct: 0, state: 'waiting', error: '' };
     const ct = typeOf(f);
     if(!ct || !ALLOWED.has(ct)){
@@ -693,6 +725,7 @@ function loadRecords(){
     if(!SALONS.length) SALONS = d.salons || [];
     renderDash();
     renderLeaseList();
+    renderGaps();
     renderReneg();
   }).catch(e=>{ $('dash-out').innerHTML = '<div class="banner err">'+esc(e.message)+'</div>'; });
 }
@@ -834,34 +867,23 @@ function renderDash(){
      + stat('Records entered', num0(P.recordsPresent) + ' / ' + num0(P.recordsExpected), 'salons with a lease record')
      + '</div></div>';
 
-  // ── What is missing ──
-  // Deliberately prominent. A lease dashboard that looks complete while
-  // half the portfolio has no record is worse than one that admits it.
-  const G = REC.gaps || [];
-  const blocking = G.filter(g=>g.severity==='blocking');
-  const noRecord = G.filter(g=>g.kind==='no-record');
-  const other = G.filter(g=>g.severity!=='blocking' && g.kind!=='no-record');
-  if(G.length){
-    h += '<div class="card"><h2>Missing information <span class="sub">'
-       + (blocking.length ? blocking.length+' to fix \u00b7 ' : '')
-       + (G.length-blocking.length)+' incomplete</span></h2>';
-    blocking.forEach(g=>{ h += gapRow(g); });
-    other.slice(0, 12).forEach(g=>{ h += gapRow(g); });
-    if(other.length > 12){
-      h += '<div class="body muted" style="font-size:12.5px;">'+(other.length-12)
-        + ' more on individual salons.</div>';
-    }
-    if(noRecord.length){
-      h += '<div class="body"><div class="hint"><b>'+noRecord.length+' salons have no lease record at all:</b> '
-        + noRecord.map(g=>esc(salonLabel(g.salonNum))).join(', ')+'</div></div>';
-    }
-    h += '</div>';
-  }
-
   // ── Who gets told ──
   // Kept on this screen rather than in an env var: the people who care about
   // a lease deadline are not the people who care about a failed scrape, and
   // that list changes.
+  // A pointer rather than the list itself: the gap report is a working list,
+  // not a status, and it belongs on a screen you open deliberately.
+  const G2 = REC.gaps || [];
+  if(G2.length){
+    const blocking = G2.filter(g=>g.severity==='blocking').length;
+    h += '<div class="card"><div class="body"><div class="hint">'
+      + '<b>' + G2.length + ' item' + (G2.length===1?'':'s') + ' outstanding</b>'
+      + (blocking ? ' — <b style="color:#b3261e;">' + blocking + ' to fix</b>' : '')
+      + ' across the portfolio. '
+      + '<button class="lnk" onclick="showPanel(\'gaps\')">Open Missing information</button>'
+      + '</div></div></div>';
+  }
+
   const rec = REC.alertRecipients || [];
   const srcLabel = { 'lease settings':'set here', 'LEASE_ALERT_EMAIL':'from LEASE_ALERT_EMAIL',
     'ALERT_EMAIL':'falling back to the operational address (ALERT_EMAIL)', 'none':'nobody' };
@@ -890,6 +912,68 @@ function msHeadline(m){
   return m.kind === 'expiry'
     ? when + ' until the lease expires'
     : when + ' until the option ' + (m.optionNo ? m.optionNo + ' ' : '') + 'notice deadline';
+}
+
+/**
+ * The gap report, on its own screen.
+ *
+ * It moved off the dashboard because it is a working list rather than a
+ * status: you open it to decide what to chase this week, and it is long by
+ * design. A lease dashboard that looks complete while half the portfolio has
+ * no CAM figure recorded is worse than one that admits it.
+ */
+function renderGaps(){
+  let h = '';
+  // ── What is missing ──
+  // Deliberately prominent. A lease dashboard that looks complete while
+  // half the portfolio has no record is worse than one that admits it.
+  const G = REC.gaps || [];
+  const blocking = G.filter(g=>g.severity==='blocking');
+  const noRecord = G.filter(g=>g.kind==='no-record');
+  const other = G.filter(g=>g.severity!=='blocking' && g.kind!=='no-record');
+  if(G.length){
+    if(blocking.length){
+      h += '<div class="card"><h2>To fix <span class="sub">'+blocking.length
+         + ' item'+(blocking.length===1?'':'s')+' where the record is wrong or unusable</span></h2>';
+      blocking.forEach(g=>{ h += gapRow(g); });
+      h += '</div>';
+    }
+
+    // Grouped by what is missing rather than by salon, because the work is
+    // done that way: one email to a landlord covers a salon, but one decision
+    // covers a category \u2014 chase every stale CAM figure in an afternoon.
+    if(other.length){
+      const byKind = {};
+      other.forEach(g=>{ (byKind[g.kind] = byKind[g.kind] || []).push(g); });
+      const kinds = Object.keys(byKind).sort((a,b)=>byKind[b].length-byKind[a].length);
+      h += '<div class="card"><h2>Incomplete <span class="sub">'+other.length
+         + ' across '+kinds.length+' categor'+(kinds.length===1?'y':'ies')+'</span></h2>';
+      kinds.forEach(k=>{
+        const rows = byKind[k];
+        h += '<div class="whenbar"><b>'+esc(rows[0].message.replace(/\.$/,''))+'</b>'
+           + '<span style="flex:1;"></span><span class="pill">'+rows.length+' salon'
+           + (rows.length===1?'':'s')+'</span></div>';
+        rows.forEach(g=>{ h += gapRow(g); });
+      });
+      h += '</div>';
+    }
+
+    if(noRecord.length){
+      h += '<div class="card"><h2>No lease record at all <span class="sub">'
+        + noRecord.length+' salon'+(noRecord.length===1?'':'s')+'</span></h2>'
+        + '<div class="body"><div class="hint">'
+        + noRecord.map(g=>'<button class="lnk" onclick="openSalon(\''+esc(g.salonNum)+'\')">'
+            + esc(salonLabel(g.salonNum))+'</button>').join(' &middot; ')
+        + '</div></div></div>';
+    }
+  }
+
+  if(!h){
+    h = '<div class="card"><div class="body muted" style="font-size:13px;">Nothing outstanding '
+      + '— every salon has a lease record, a rent schedule that covers today, CAM figures '
+      + 'for this year, clauses recorded and documents on file.</div></div>';
+  }
+  $('gaps-out').innerHTML = h;
 }
 
 function stat(k, v, n){
