@@ -42,6 +42,7 @@ import {
   listAsks, upsertAsk, removeAsk, renegotiationPlan, issueGroups,
   ASK_SEVERITIES,
 } from '@/lib/lease-asks'
+import { milestonesFor, sentLedger } from '@/lib/lease-notices'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -144,6 +145,12 @@ export async function GET() {
       plan: renegotiationPlan(asks, leases, options, today),
       issues: issueGroups(asks),
       askSeverities: [...ASK_SEVERITIES],
+      // Scheduled reminders. Anything whose deadline has already passed is
+      // dropped — the Action items panel covers those, and a reminder about a
+      // date behind you is noise.
+      milestones: milestonesFor(leases, options, today, await sentLedger(true))
+        .filter(m => m.daysUntilTarget >= 0)
+        .sort((a, b) => a.dueDate.localeCompare(b.dueDate)),
     })
   } catch (e: any) {
     return NextResponse.json({ success: false, error: String(e?.message || e) }, { status: 500 })

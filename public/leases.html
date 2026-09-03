@@ -153,6 +153,20 @@
   .ask .acts{margin-top:6px;display:flex;gap:8px;align-items:center;}
   .whenbar{padding:9px 14px;background:#f7f9f8;border-bottom:1px solid var(--border);
     display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;font-size:12.5px;}
+  /* Long recorded notes, unwrapped into readable paragraphs */
+  .prose{font-size:13px;line-height:1.7;max-width:76ch;}
+  .prose p{margin:0 0 13px;}
+  .prose p:last-child{margin-bottom:0;}
+  .prose .lead{color:var(--primary-dark);letter-spacing:.01em;}
+  /* Scheduled reminders */
+  .ms{display:flex;gap:11px;padding:10px 14px;border-bottom:1px solid #f1f3f1;
+    align-items:baseline;font-size:13px;}
+  .ms:last-child{border-bottom:none;}
+  .ms .tag{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+    padding:2px 7px;border-radius:4px;white-space:nowrap;background:#eef2ef;color:#4a5c53;}
+  .ms.due .tag{background:var(--wrn-bg);color:var(--wrn-text);}
+  .ms.done{opacity:.55;}
+  .ms .when{margin-left:auto;text-align:right;white-space:nowrap;font-size:12px;color:var(--text-muted);}
   @media(max-width:700px){ .content{padding:1rem .75rem;} .app-header{padding:0 .9rem;} .bar{width:70px;} }
 </style>
 </head>
@@ -299,12 +313,57 @@ function sizeText(n){
   return b + ' B';
 }
 /** 2026-11-01 -> "Nov 1, 2026". Used everywhere a date is shown. */
+/** Dates read mm/dd/yyyy everywhere on this screen \u2014 including inside notes. */
 function fmtDate(iso){
   const s = String(iso||'').trim();
   if(!/^\d{4}-\d{2}-\d{2}$/.test(s)) return s || '\u2014';
-  const [y,m,d] = s.split('-').map(Number);
-  const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  return MON[m-1] + ' ' + d + ', ' + y;
+  const [y,m,d] = s.split('-');
+  return m + '/' + d + '/' + y;
+}
+
+/**
+ * The same conversion, applied to dates sitting inside prose.
+ *
+ * Abstractions are written with ISO dates because they sort and compare, and
+ * because that is how they are stored. Nobody reads them that way, so they are
+ * rewritten at the last possible moment \u2014 on the way to the screen.
+ */
+function usDates(s){
+  return String(s==null?'':s).replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, '$2/$3/$1');
+}
+
+/** Escape for display, with dates converted. Use for any recorded text. */
+function txt(s){ return esc(usDates(s)); }
+
+/**
+ * A lease note, rendered as something a person will actually read.
+ *
+ * The notes are long by design \u2014 they carry what is wrong with a lease, not
+ * just what it says \u2014 and they arrive as paragraphs separated by blank lines,
+ * hard-wrapped from the source. Printed raw that is a wall of ragged text.
+ *
+ * So: unwrap each paragraph, and promote the leading run of capitals that
+ * opens most of them to a coloured lead-in. The convention in the notes is
+ * that the first sentence in capitals is the finding and the rest is the
+ * explanation, which is exactly the shape a reader wants to skim.
+ */
+function prose(text){
+  const paras = String(text==null?'':text).split(/\n\s*\n/)
+    .map(function(p){ return p.replace(/\s*\n\s*/g, ' ').trim(); })
+    .filter(Boolean);
+  if(!paras.length) return '';
+  return '<div class="prose">' + paras.map(function(p){
+    // At least twelve characters with no lowercase in them, ending at a full
+    // stop, colon or em dash. Anything starting in mixed case fails at the
+    // first lowercase letter, which is what keeps ordinary prose out.
+    const m = p.match(/^([^a-z]{12,}?)([.:\u2014]\s+|$)/);
+    if(m && m[1].trim()){
+      const lead = m[1].trim() + (m[2].trim() === ':' ? ':' : '');
+      const rest = p.slice(m[0].length).trim();
+      return '<p><b class="lead">' + txt(lead) + '</b>' + (rest ? ' ' + txt(rest) : '') + '</p>';
+    }
+    return '<p>' + txt(p) + '</p>';
+  }).join('') + '</div>';
 }
 function dateText(iso){
   if(!iso) return '';
@@ -644,6 +703,36 @@ function renderDash(){
     h += '<div class="banner"><b>No lease records yet.</b> The documents are stored, but a dashboard needs the terms inside them \u2014 expiration, rent, area, and the renewal notice deadlines. Open <b>Lease records</b> and add the first one.</div>';
   }
 
+  // ── Expiration timeline ──
+  const T = REC.timeline || [];
+  if(T.length){
+    h += '<div class="card"><h2>Lease expiration timeline <span class="sub">by salon number</span></h2>'
+       + '<div class="scroll"><table><thead><tr>'
+       + '<th>Salon</th><th>Expiration</th><th>Time left</th><th>Term</th>'
+       + '<th class="num">Monthly rent</th><th class="num">$/SF/yr</th><th class="num">Area</th>'
+       + '<th>Landlord</th></tr></thead><tbody>';
+    T.forEach(l=>{
+      const pr = Math.round(l.termProgress || 0);
+      h += '<tr class="rowlink" onclick="openSalon(\''+esc(l.salonNum)+'\')">'
+        + '<td><b>'+esc(salonLabel(l.salonNum))+'</b>'
+        + (l.locationName ? '<div class="hint" style="margin-top:1px;">'+esc(l.locationName)+'</div>' : '')
+        + '</td>'
+        + '<td class="nowrap">'+esc(fmtDate(l.expirationDate))+'</td>'
+        + '<td class="nowrap">'+esc(timeLeft(l.monthsLeft, l.monthsLeft == null ? null : l.monthsLeft * 30))+'</td>'
+        + '<td class="nowrap"><span class="prog"><i style="width:'+pr+'%"></i></span> '
+        + '<span class="muted" style="font-size:11px;">'+pr+'%</span></td>'
+        + '<td class="num">'+esc((l.currentRent != null ? l.currentRent : l.monthlyRent)
+            ? money(l.currentRent != null ? l.currentRent : l.monthlyRent) : '\u2014')
+        + (l.camMonthlyTotal ? '<div class="hint">+'+money(l.camMonthlyTotal)+' NNN</div>' : '')
+        + '</td>'
+        + '<td class="num">'+esc(l.rentPerSfYr ? money(l.rentPerSfYr) : '\u2014')+'</td>'
+        + '<td class="num">'+esc(l.areaSqFt ? num0(l.areaSqFt) + ' SF' : '\u2014')+'</td>'
+        + '<td class="muted">'+esc(l.landlord || '\u2014')+'</td></tr>';
+    });
+    h += '</tbody></table></div></div>';
+  }
+
+
   // ── Ask ──
   h += '<div class="card"><h2>Ask about a lease</h2><div class="body">'
      + '<div class="askbox">'
@@ -681,10 +770,53 @@ function renderDash(){
         + '<div class="hd">'+esc(salonLabel(a.salonNum))
         + (a.locationName ? ' \u2014 ' + esc(a.locationName) : '')
         + '</div>'
-        + '<div class="dt"><b>'+esc(a.headline)+'.</b> '+esc(a.detail)+'</div></div>'
+        + '<div class="dt"><b>'+txt(a.headline)+'.</b> '+txt(a.detail)+'</div></div>'
         + '<div class="when">'+esc(timeLeft(a.monthsAway, a.daysAway))+'<br>'
         + '<span style="font-weight:400;color:var(--text-muted);">'+esc(fmtDate(a.date))+'</span></div></div>';
     });
+  }
+  h += '</div>';
+
+  // ── Scheduled reminders ──
+  // Milestones that fire ONCE, computed backwards from the deadline they
+  // protect. This is the same list the nightly email works from, so what
+  // lands in the inbox is never a surprise — and a reminder that has already
+  // been sent shows here as sent rather than disappearing.
+  const allMs = REC.milestones || [];
+  const msTodo = allMs.filter(m => !m.sentAt);
+  const msDone = allMs.filter(m => m.sentAt && m.status === 'sent');
+  h += '<div class="card"><h2>Scheduled reminders <span class="sub">'
+     + (msTodo.length ? msTodo.length + ' still to send' : 'none outstanding')
+     + (msDone.length ? ' · ' + msDone.length + ' sent' : '')
+     + '</span></h2>';
+  if(!allMs.length){
+    h += '<div class="body muted" style="font-size:13px;">Nothing scheduled — reminders need a recorded '
+      + 'expiration date or an undecided renewal option.</div>';
+  } else {
+    msTodo.slice(0, 10).forEach(m=>{
+      const due = m.daysUntilDue <= 0;
+      h += '<div class="ms'+(due?' due':'')+' rowlink" onclick="openSalon(\''+esc(m.salonNum)+'\')">'
+        + '<span class="tag">'+esc(m.months === 1 ? '1 mo' : m.months + ' mo')+'</span>'
+        + '<div><b>'+esc(salonLabel(m.salonNum))+'</b> — '+esc(msHeadline(m))
+        + ' on <b>'+esc(fmtDate(m.targetDate))+'</b>'
+        + '<div class="fix">'+(due
+            ? 'Due to send — goes out on the next nightly run'
+            : 'Sends ' + esc(fmtDate(m.dueDate)))+'</div></div>'
+        + '<div class="when">'+esc(timeLeft(Math.floor(m.daysUntilDue/30), m.daysUntilDue))+'</div></div>';
+    });
+    if(msTodo.length > 10){
+      h += '<div class="body muted" style="font-size:12.5px;">'+(msTodo.length-10)+' more further out.</div>';
+    }
+    msDone.slice(-3).forEach(m=>{
+      h += '<div class="ms done"><span class="tag">sent</span>'
+        + '<div><b>'+esc(salonLabel(m.salonNum))+'</b> — '+esc(msHeadline(m))
+        + ' on '+esc(fmtDate(m.targetDate))+'</div>'
+        + '<div class="when">'+esc(fmtDate(String(m.sentAt).slice(0,10)))+'</div></div>';
+    });
+    h += '<div class="body"><div class="hint">Expiries are flagged <b>12 months</b> and again at '
+      + '<b>9 months</b>; option notice deadlines at <b>3 months</b> and again at <b>1 month</b>. '
+      + 'Each one is emailed once and then recorded, so nothing repeats and nothing is lost if a '
+      + 'night is missed. Recipients are set under Deadline alerts below.</div></div>';
   }
   h += '</div>';
 
@@ -723,35 +855,6 @@ function renderDash(){
     h += '</div>';
   }
 
-  // ── Expiration timeline ──
-  const T = REC.timeline || [];
-  if(T.length){
-    h += '<div class="card"><h2>Lease expiration timeline <span class="sub">by salon number</span></h2>'
-       + '<div class="scroll"><table><thead><tr>'
-       + '<th>Salon</th><th>Expiration</th><th>Time left</th><th>Term</th>'
-       + '<th class="num">Monthly rent</th><th class="num">$/SF/yr</th><th class="num">Area</th>'
-       + '<th>Landlord</th></tr></thead><tbody>';
-    T.forEach(l=>{
-      const pr = Math.round(l.termProgress || 0);
-      h += '<tr class="rowlink" onclick="openSalon(\''+esc(l.salonNum)+'\')">'
-        + '<td><b>'+esc(salonLabel(l.salonNum))+'</b>'
-        + (l.locationName ? '<div class="hint" style="margin-top:1px;">'+esc(l.locationName)+'</div>' : '')
-        + '</td>'
-        + '<td class="nowrap">'+esc(fmtDate(l.expirationDate))+'</td>'
-        + '<td class="nowrap">'+esc(timeLeft(l.monthsLeft, l.monthsLeft == null ? null : l.monthsLeft * 30))+'</td>'
-        + '<td class="nowrap"><span class="prog"><i style="width:'+pr+'%"></i></span> '
-        + '<span class="muted" style="font-size:11px;">'+pr+'%</span></td>'
-        + '<td class="num">'+esc((l.currentRent != null ? l.currentRent : l.monthlyRent)
-            ? money(l.currentRent != null ? l.currentRent : l.monthlyRent) : '\u2014')
-        + (l.camMonthlyTotal ? '<div class="hint">+'+money(l.camMonthlyTotal)+' NNN</div>' : '')
-        + '</td>'
-        + '<td class="num">'+esc(l.rentPerSfYr ? money(l.rentPerSfYr) : '\u2014')+'</td>'
-        + '<td class="num">'+esc(l.areaSqFt ? num0(l.areaSqFt) + ' SF' : '\u2014')+'</td>'
-        + '<td class="muted">'+esc(l.landlord || '\u2014')+'</td></tr>';
-    });
-    h += '</tbody></table></div></div>';
-  }
-
   // ── Who gets told ──
   // Kept on this screen rather than in an env var: the people who care about
   // a lease deadline are not the people who care about a failed scrape, and
@@ -776,6 +879,14 @@ function renderDash(){
     + '</div></div>';
 
   $('dash-out').innerHTML = h;
+}
+
+/** How a scheduled reminder reads. Mirrors milestoneHeadline() on the server. */
+function msHeadline(m){
+  const when = m.months === 1 ? 'One month' : m.months + ' months';
+  return m.kind === 'expiry'
+    ? when + ' until the lease expires'
+    : when + ' until the option ' + (m.optionNo ? m.optionNo + ' ' : '') + 'notice deadline';
 }
 
 function stat(k, v, n){
@@ -977,12 +1088,12 @@ function clauseHtml(c, domId, showSalon){
     + (showSalon ? '<b style="font-size:12.5px;">'+esc(salonLabel(c.salonNum))+'</b>' : '')
     + (c.section ? '<span class="muted" style="font-size:11.5px;">section '+esc(c.section)+'</span>' : '')
     + '</div>'
-    + (c.summary ? '<div class="sum">'+esc(c.summary)+'</div>' : '')
-    + (c.note ? '<div class="sum" style="color:#8a1a1a;">'+esc(c.note)+'</div>' : '')
-    + '<div class="src">'+esc(c.sourceDoc || 'source not recorded')
+    + (c.summary ? '<div class="sum">'+txt(c.summary)+'</div>' : '')
+    + (c.note ? '<div class="sum" style="color:#8a1a1a;">'+txt(c.note)+'</div>' : '')
+    + '<div class="src">'+txt(c.sourceDoc || 'source not recorded')
     + (c.text ? ' \u00b7 <button class="lnk" onclick="toggleClause(\''+esc(domId)+'\')">show the lease\u2019s words</button>' : '')
     + '</div>'
-    + (c.text ? '<div class="verb">'+esc(c.text)+'</div>' : '')
+    + (c.text ? '<div class="verb">'+txt(c.text)+'</div>' : '')
     + '</div>';
 }
 function toggleClause(domId){ const el = $('cl-'+domId); if(el) el.classList.toggle('open'); }
@@ -997,6 +1108,7 @@ function toggleClause(domId){ const el = $('cl-'+domId); if(el) el.classList.tog
 // cap" is one they can decline. Everything here is designed to be read out
 // loud in a renewal call.
 let R_EDIT = null;      // askId being edited, '' for a new row, null = closed
+let R_SALON = '';       // '' = every salon, in the order they come up
 
 const SEV_LABEL = { high:'High', medium:'Medium', low:'Low' };
 const ST_LABEL  = { '':'Open', raised:'Raised', won:'Won', conceded:'Conceded', dropped:'Dropped' };
@@ -1014,11 +1126,31 @@ function renderReneg(){
   h += askForm();
 
   // ── By salon, in the order the conversations happen ──
-  h += '<div class="card"><h2>By salon <span class="sub">soonest conversation first</span></h2>';
-  if(!plan.length){
-    h += '<div class="body muted" style="font-size:13px;">No asks recorded against any salon.</div>';
+  // The filter matters more than it looks: seventy asks across seventeen
+  // salons is a reference document, not a working list. Picking one salon
+  // turns it into the page you take into the call.
+  const shown = R_SALON ? plan.filter(p => p.salonNum === R_SALON) : plan;
+  const withAsks = plan.map(p => [p.salonNum, salonLabel(p.salonNum)
+    + '  (' + p.openTotal + ' open' + (p.openHigh ? ', ' + p.openHigh + ' high' : '') + ')']);
+  h += '<div class="card"><h2>By salon <span class="sub">'
+     + (R_SALON ? esc(salonLabel(R_SALON)) : 'soonest conversation first')
+     + '</span></h2>'
+     + '<div class="whenbar"><label class="fld" style="flex-direction:row;align-items:center;gap:8px;">Salon'
+     + '<select onchange="setRSalon(this.value)" style="font-size:12.5px;padding:4px 8px;">'
+     + [['', 'All salons  (' + plan.reduce((n,p)=>n+p.openTotal,0) + ' open)']].concat(withAsks)
+        .map(o=>'<option value="'+esc(o[0])+'"'+(String(o[0])===R_SALON?' selected':'')+'>'
+          + esc(o[1])+'</option>').join('')
+     + '</select></label>'
+     + (R_SALON ? '<button class="lnk" onclick="setRSalon(\'\')">Show all</button>' : '')
+     + '<span style="flex:1;"></span>'
+     + (R_SALON ? '<button class="btn ghost small" onclick="openSalon(\''+esc(R_SALON)+'\')">Open salon</button>' : '')
+     + '</div>';
+  if(!shown.length){
+    h += '<div class="body muted" style="font-size:13px;">'
+      + (plan.length ? 'Nothing recorded against that salon yet.' : 'No asks recorded against any salon.')
+      + '</div>';
   } else {
-    plan.forEach(p=>{
+    shown.forEach(p=>{
       const when = p.nextDate
         ? (p.nextKind==='notice' ? 'Renewal notice ' : 'Lease expires ') + fmtDate(p.nextDate)
         : 'No date known';
@@ -1037,12 +1169,19 @@ function renderReneg(){
   h += '</div>';
 
   // ── The same problem, seen across the portfolio ──
-  if(issues.length){
-    h += '<div class="card"><h2>By issue <span class="sub">who else has it, and who already gave us better</span></h2>'
+  // Filtered to the chosen salon when one is picked, because the point of
+  // this table in a negotiation is "who else has my problem, and which of our
+  // landlords has already conceded it" — not the whole portfolio at once.
+  const shownIssues = R_SALON ? issues.filter(g => g.salons.indexOf(R_SALON) >= 0) : issues;
+  if(shownIssues.length){
+    h += '<div class="card"><h2>By issue <span class="sub">'
+       + (R_SALON ? 'the ' + shownIssues.length + ' affecting ' + esc(salonLabel(R_SALON))
+                  : 'who else has it, and who already gave us better')
+       + '</span></h2>'
       + '<div class="scroll"><table><thead><tr>'
       + '<th>Issue</th><th></th><th>Salons</th><th>Precedent in our own leases</th><th>The ask</th>'
       + '</tr></thead><tbody>';
-    issues.forEach(g=>{
+    shownIssues.forEach(g=>{
       h += '<tr>'
         + '<td><b>'+esc(g.issue)+'</b>'
         + (g.topic ? '<div class="hint" style="margin-top:1px;">'+esc(g.topic)+'</div>' : '')+'</td>'
@@ -1051,7 +1190,7 @@ function renderReneg(){
         + '<td class="nowrap">'+(g.precedents.length
             ? g.precedents.map(s=>'<button class="lnk" onclick="openSalon(\''+esc(s)+'\')">'+esc(s)+'</button>').join(' ')
             : '<span class="muted">— none of ours is better</span>')+'</td>'
-        + '<td class="muted">'+esc(g.ask)+'</td></tr>';
+        + '<td class="muted">'+txt(g.ask)+'</td></tr>';
     });
     h += '</tbody></table></div></div>';
   }
@@ -1069,9 +1208,9 @@ function askRow(a){
     + (a.topic ? '<span class="muted" style="font-size:11.5px;">'+esc(a.topic)+'</span>' : '')
     + (a.status ? '<span class="pill">'+esc(ST_LABEL[a.status]||a.status)+'</span>' : '')
     + '</div>'
-    + (a.current ? '<div class="cur"><span class="lab">Now</span> '+esc(a.current)+'</div>' : '')
-    + (a.ask ? '<div class="want"><span class="lab">Ask</span> '+esc(a.ask)+'</div>' : '')
-    + (a.note ? '<div class="cur">'+esc(a.note)+'</div>' : '')
+    + (a.current ? '<div class="cur"><span class="lab">Now</span> '+txt(a.current)+'</div>' : '')
+    + (a.ask ? '<div class="want"><span class="lab">Ask</span> '+txt(a.ask)+'</div>' : '')
+    + (a.note ? '<div class="cur">'+txt(a.note)+'</div>' : '')
     + (prec.length
         ? '<div class="prec"><span class="lab">Precedent</span> '
           + prec.map(s=>'<button class="lnk" onclick="openSalon(\''+esc(s)+'\')">'+esc(salonLabel(s))+'</button>').join(' · ')
@@ -1095,7 +1234,7 @@ function askForm(){
       + 'Fill in the precedent and it becomes something a landlord has to answer.</span>'
       + '</div></div>';
   }
-  const a = (REC.asks||[]).find(x=>x.askId===R_EDIT) || {};
+  const a = (REC.asks||[]).find(x=>x.askId===R_EDIT) || { salonNum: R_SALON };
   const salons = REC.salons || SALONS || [];
   const sel = (id,label,list,cur)=> '<label class="fld">'+esc(label)
     + '<select id="'+id+'">'+list.map(o=>'<option value="'+esc(o[0])+'"'
@@ -1124,6 +1263,7 @@ function askForm(){
     + '</div></div>';
 }
 
+function setRSalon(num){ R_SALON = String(num||''); renderReneg(); }
 function editAsk(askId){ R_EDIT = askId; renderReneg(); window.scrollTo(0,0); }
 function cancelAsk(){ R_EDIT = null; renderReneg(); }
 
@@ -1208,7 +1348,7 @@ function gapsHtml(list, title){
   list.forEach(g=>{
     h += '<div class="gap '+esc(g.severity)+'">'
       + '<span class="tag">'+(g.severity==='blocking'?'Fix':'Missing')+'</span>'
-      + '<div><div>'+esc(g.message)+'</div><div class="fix">'+esc(g.fix)+'</div></div></div>';
+      + '<div><div>'+txt(g.message)+'</div><div class="fix">'+txt(g.fix)+'</div></div></div>';
   });
   return h + '</div>';
 }
@@ -1250,7 +1390,7 @@ function salonOverview(num, l, t, myGaps){
     h += '</tbody></table></div></div>';
   }
   if(l.note){
-    h += '<div class="card"><h2>Notes</h2><div class="body" style="white-space:pre-wrap;font-size:12.5px;line-height:1.65;max-width:62ch;">'+esc(l.note)+'</div></div>';
+    h += '<div class="card"><h2>Notes</h2><div class="body" >'+prose(l.note)+'</div></div>';
   }
   return h;
 }
@@ -1286,7 +1426,7 @@ function salonFinancials(num, l, myGaps){
     });
     h += '</tbody></table></div>';
     const srcs = [...new Set(steps.map(s=>s.source).filter(Boolean))];
-    if(srcs.length) h += '<div class="body"><div class="hint">From '+esc(srcs.join('; '))+'</div></div>';
+    if(srcs.length) h += '<div class="body"><div class="hint">From '+txt(srcs.join('; '))+'</div></div>';
   }
   h += '</div>';
 
@@ -1317,7 +1457,7 @@ function salonFinancials(num, l, myGaps){
     const notes = charges.filter(c=>c.note || c.source);
     if(notes.length){
       h += '<div class="body">' + notes.map(c=>'<div class="hint"><b>'+esc(c.year)+'</b> '
-        + esc([c.source, c.note].filter(Boolean).join(' \u00b7 '))+'</div>').join('') + '</div>';
+        + txt([c.source, c.note].filter(Boolean).join(' \u00b7 '))+'</div>').join('') + '</div>';
     }
   }
   h += '</div>';
@@ -1392,10 +1532,10 @@ function salonDocuments(num){
     contacts.forEach(c=>{
       h += '<tr><td><span class="pill">'+esc(c.role||'\u2014')+'</span></td>'
         + '<td><b>'+esc(c.org||'')+'</b>'+(c.name?'<div>'+esc(c.name)+'</div>':'')
-        + (c.note?'<div class="hint">'+esc(c.note)+'</div>':'')+'</td>'
+        + (c.note?'<div class="hint">'+txt(c.note)+'</div>':'')+'</td>'
         + '<td>'+(c.email?'<a href="mailto:'+esc(c.email)+'">'+esc(c.email)+'</a>':'\u2014')+'</td>'
         + '<td class="nowrap">'+esc(c.phone||'\u2014')+'</td>'
-        + '<td class="muted">'+esc(c.address||'\u2014')+'</td></tr>';
+        + '<td class="muted">'+txt(c.address||'\u2014')+'</td></tr>';
     });
     h += '</tbody></table></div>';
   }
@@ -1429,8 +1569,8 @@ function saveAlertEmail(){
 function gapRow(g){
   return '<div class="gap '+esc(g.severity)+' rowlink" onclick="openSalon(\''+esc(g.salonNum)+'\')">'
     + '<span class="tag">'+(g.severity==='blocking'?'Fix':'Missing')+'</span>'
-    + '<div><div><b>'+esc(salonLabel(g.salonNum))+'</b> \u2014 '+esc(g.message)+'</div>'
-    + '<div class="fix">'+esc(g.fix)+'</div></div></div>';
+    + '<div><div><b>'+esc(salonLabel(g.salonNum))+'</b> \u2014 '+txt(g.message)+'</div>'
+    + '<div class="fix">'+txt(g.fix)+'</div></div></div>';
 }
 
 function kv(k, v){

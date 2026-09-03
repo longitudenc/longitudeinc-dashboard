@@ -28,6 +28,9 @@ import { SALON_NAMES, salonDisplay } from '@/lib/config'
 import { listLeases, listOptions, actionItems, todayISO } from '@/lib/lease-records'
 import { listSteps, upcomingRentChanges } from '@/lib/lease-money'
 import { leaseAlertRecipients, maskEmail } from '@/lib/lease-settings'
+import {
+  milestonesFor, sentLedger, dueNow, recordSent, milestoneHeadline,
+} from '@/lib/lease-notices'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -63,12 +66,17 @@ export async function GET(req: NextRequest) {
 
   try {
     const today = todayISO()
-    const [leases, options, steps, who] = await Promise.all([
-      listLeases(), listOptions(), listSteps(), leaseAlertRecipients(),
+    const [leases, options, steps, who, ledger] = await Promise.all([
+      listLeases(), listOptions(), listSteps(), leaseAlertRecipients(), sentLedger(true),
     ])
     const salonNums = Object.keys(SALON_NAMES)
 
     const rent = upcomingRentChanges(steps, salonNums, today, RENT_WINDOW_DAYS)
+
+    // The once-only milestones: 12 and 9 months before an expiry, 3 and 1
+    // before an option notice deadline. See lib/lease-notices.ts for why these
+    // are kept apart from the rolling windows below.
+    const due = dueNow(milestonesFor(leases, options, today, ledger), today)
 
     // actionItems() already knows which options are still undecided and which
     // leases are live — reuse it rather than writing the rule twice.
@@ -84,12 +92,26 @@ export async function GET(req: NextRequest) {
         recipients: who.recipients.map(maskEmail),
         recipientSource: who.source,
         resendKeySet: !!process.env.RESEND_API_KEY,
-        counts: { rent: rent.length, notices: notices.length, expiries: expiries.length },
+        counts: {
+          rent: rent.length, notices: notices.length, expiries: expiries.length,
+          milestones: due.send.length, superseded: due.supersede.length,
+        },
+        // Nothing is written to the ledger on a dry run, so this can be hit
+        // repeatedly without burning the reminders it is describing.
+        milestones: due.send, superseded: due.supersede,
         rent, notices, expiries,
       })
     }
 
-    if (!rent.length && !notices.length && !expiries.length) {
+    if (!rent.length && !notices.length && !expiries.length && !due.send.length) {
+      // Even with nothing to send, earlier milestones overtaken by a later one
+      // are retired so they cannot fire late and out of order.
+      if (due.supersede.length) {
+        await recordSent(due.supersede.map(m => ({
+          milestone: m, status: 'superseded', sentTo: '',
+          note: 'A later milestone for the same deadline was reached first.',
+        })))
+      }
       return NextResponse.json({ ok: true, sent: false, reason: 'nothing due' })
     }
 
@@ -102,6 +124,26 @@ export async function GET(req: NextRequest) {
         <td style="padding:7px 12px 7px 0;font:14px system-ui;color:${colour};">${left}</td>
         <td style="padding:7px 0;font:600 13px system-ui;white-space:nowrap;text-align:right;">${right}</td>
       </tr>`)
+
+    // Milestones lead, because they are the only part of this email that will
+    // not be repeated tomorrow. Everything below is a rolling status.
+    if (due.send.length) {
+      section('Scheduled reminders — sent once')
+      for (const m of due.send) {
+        const late = m.dueDate < today
+        item(
+          `<b>${salonDisplay(m.salonNum)}</b>${m.locationName ? ' — ' + m.locationName : ''}<br>`
+          + `<span style="font-size:13px;">${milestoneHeadline(m)} on ${fmtDate(m.targetDate)}.</span>`
+          + (late
+            ? `<br><span style="font-size:12px;color:#a06300;">This reminder was due ${fmtDate(m.dueDate)}`
+              + ` and is being sent late.</span>`
+            : ''),
+          `${m.daysUntilTarget} days<br>`
+          + `<span style="font-weight:400;color:#6b6b6b;">${fmtDate(m.targetDate)}</span>`,
+          m.kind === 'notice' ? '#b3261e' : '#1a1a1a',
+        )
+      }
+    }
 
     if (rent.length) {
       section(`Rent changing within ${RENT_WINDOW_DAYS} days`)
@@ -151,6 +193,24 @@ export async function GET(req: NextRequest) {
       </div>`
 
     const sent = await sendAlert('Lease Manager — what is coming', html, who.recipients)
+
+    // Write the ledger ONLY on a confirmed send. Recording first and then
+    // failing to deliver would retire a reminder that nobody ever read, and
+    // these are the reminders that cost money to miss.
+    let recorded = 0
+    if (sent.sent) {
+      recorded = await recordSent([
+        ...due.send.map(m => ({
+          milestone: m, status: 'sent', sentTo: (sent.to || []).join(', '),
+          note: milestoneHeadline(m),
+        })),
+        ...due.supersede.map(m => ({
+          milestone: m, status: 'superseded', sentTo: '',
+          note: 'A later milestone for the same deadline was reached first.',
+        })),
+      ])
+    }
+
     // Report WHO it went to (local part masked) and the sender. Asking
     // "where does this email go" should not mean reading env vars in a
     // dashboard — hitting this URL answers it.
@@ -161,7 +221,11 @@ export async function GET(req: NextRequest) {
       from: sent.from,
       to: sent.to,
       recipientSource: who.source,
-      counts: { rent: rent.length, notices: notices.length, expiries: expiries.length },
+      milestonesRecorded: recorded,
+      counts: {
+        rent: rent.length, notices: notices.length, expiries: expiries.length,
+        milestones: due.send.length, superseded: due.supersede.length,
+      },
     })
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: String(e?.message || e) }, { status: 500 })
