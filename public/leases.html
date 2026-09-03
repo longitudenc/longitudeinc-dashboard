@@ -158,6 +158,9 @@
   .prose p{margin:0 0 13px;}
   .prose p:last-child{margin-bottom:0;}
   .prose .lead{color:var(--primary-dark);letter-spacing:.01em;}
+  .planwrap{background:#f7f9f8;border-top:1px solid var(--border);border-bottom:1px solid var(--border);}
+  .planwrap iframe{display:block;width:100%;height:min(70vh,620px);border:0;}
+  .planwrap img{display:block;width:100%;height:auto;max-height:min(70vh,620px);object-fit:contain;}
   /* Scheduled reminders */
   .ms{display:flex;gap:11px;padding:10px 14px;border-bottom:1px solid #f1f3f1;
     align-items:baseline;font-size:13px;}
@@ -1312,7 +1315,7 @@ function openSalon(num){
 }
 
 let S_SALON_TAB = 'overview';
-function salonTab(t){ S_SALON_TAB = t; renderSalon(); }
+function salonTab(t){ S_SALON_TAB = t; C_EDIT = null; renderSalon(); }
 
 function renderSalon(){
   const num = S_SALON;
@@ -1329,13 +1332,15 @@ function renderSalon(){
     + '</div></div>';
 
   const TABS = [['overview','Overview'],['financials','Financials'],
-                ['clauses','Clauses & Amendments'],['documents','Documents']];
+                ['clauses','Clauses & Amendments'],['contacts','Contacts'],
+                ['documents','Documents']];
   h += '<div class="stabs">' + TABS.map(x=>'<button class="stab'+(S_SALON_TAB===x[0]?' on':'')+'" '
     + 'onclick="salonTab(\''+x[0]+'\')">'+esc(x[1])+'</button>').join('') + '</div>';
 
   if(S_SALON_TAB === 'overview')        h += salonOverview(num, l, t, myGaps);
   else if(S_SALON_TAB === 'financials') h += salonFinancials(num, l, myGaps);
   else if(S_SALON_TAB === 'clauses')    h += salonClauses(num);
+  else if(S_SALON_TAB === 'contacts')   h += salonContacts(num);
   else                                  h += salonDocuments(num);
 
   $('salon-out').innerHTML = h;
@@ -1389,6 +1394,31 @@ function salonOverview(num, l, t, myGaps){
     });
     h += '</tbody></table></div></div>';
   }
+  // ── The floor plan ──
+  // A lease is a set of numbers until you can see the box they describe.
+  // Shown from the most recently uploaded plan drawing, whether or not anyone
+  // ever filed it against the salon — see salonFiles().
+  const plans = planFiles(num);
+  if(plans.length){
+    const p = plans[0];
+    const v = '/api/leases/files/view?fileId='+encodeURIComponent(p.fileId);
+    const isImg = /^image\//.test(String(p.contentType||''));
+    h += '<div class="card"><h2>Floor plan <span class="sub">'
+      + esc(p.fileName) + (plans.length>1 ? ' · ' + (plans.length-1) + ' older' : '')
+      + '</span></h2>'
+      + '<div class="planwrap">'
+      + (isImg
+          ? '<img src="'+v+'" alt="'+esc(p.fileName)+'">'
+          : '<iframe src="'+v+'#view=FitH&toolbar=0" title="'+esc(p.fileName)+'" loading="lazy"></iframe>')
+      + '</div>'
+      + '<div class="body"><div class="hint">Uploaded '+esc(fmtDate((p.uploadedAt||'').slice(0,10)))
+      + (String(p.salonNum||'').trim() ? '' : ' &mdash; not yet filed against this salon, matched by filename')
+      + '. <a href="'+v+'" target="_blank" rel="noopener noreferrer">Open full size</a>'
+      + (plans.length>1 ? ' &middot; <button class="lnk" onclick="salonTab(\'documents\')">see all '
+          + plans.length + ' plans</button>' : '')
+      + '</div></div></div>';
+  }
+
   if(l.note){
     h += '<div class="card"><h2>Notes</h2><div class="body" >'+prose(l.note)+'</div></div>';
   }
@@ -1498,48 +1528,178 @@ function salonClauses(num){
   return h + '</div>';
 }
 
+/**
+ * Every document that belongs to a salon, whether or not it has been filed.
+ *
+ * `filed` is the real answer \u2014 someone picked this salon at upload time.
+ * `loose` is the pragmatic one: documents uploaded before filing existed, or
+ * dropped in a hurry, almost always carry the salon number in the filename.
+ * Surfacing them here with a one-click File button is how the backlog gets
+ * cleared, rather than by anyone opening the Documents screen and working
+ * through twelve rows.
+ */
+function salonFiles(num){
+  const n = String(num||'');
+  const all = FILES || [];
+  const filed = all.filter(f => String(f.salonNum||'').trim() === n);
+  const near = new RegExp('(^|[^0-9])' + n + '([^0-9]|$)');
+  const loose = all.filter(f => !String(f.salonNum||'').trim() && near.test(String(f.fileName||'')));
+  return { filed: filed, loose: loose, all: filed.concat(loose) };
+}
+
+/** Anything that looks like a plan drawing, newest upload first. */
+function planFiles(num){
+  return salonFiles(num).all
+    .filter(f => /floor\s*-?\s*plan|site\s*-?\s*plan|space\s*plan|\bplan\b/i.test(String(f.fileName||''))
+              || /plan/i.test(String(f.docType||'')))
+    .sort((a,b) => String(b.uploadedAt||'').localeCompare(String(a.uploadedAt||'')));
+}
+
+/** One document row, used by both the plan list and the documents table. */
+function docRow(f, showFile, num){
+  const v = '/api/leases/files/view?fileId='+encodeURIComponent(f.fileId);
+  return '<tr><td><a href="'+v+'" target="_blank" rel="noopener noreferrer">'+esc(f.fileName)+'</a>'
+    + (f.note ? '<div class="hint">'+txt(f.note)+'</div>' : '')+'</td>'
+    + '<td>'+(f.docType?'<span class="pill">'+esc(f.docType)+'</span>':'')+'</td>'
+    + '<td class="muted nowrap">'+esc(sizeText(f.sizeBytes))+'</td>'
+    + '<td class="muted nowrap">'+esc(fmtDate((f.uploadedAt||'').slice(0,10)))+'</td>'
+    + '<td class="nowrap"><a class="btn ghost small" style="text-decoration:none;" href="'+v+'&dl=1">Download</a>'
+    + (showFile ? ' <button class="btn ghost small" onclick="fileToSalon(\''+esc(f.pathname)+'\',\''+esc(num)+'\')">File here</button>' : '')
+    + '</td></tr>';
+}
+
 function salonDocuments(num){
-  const docs = (FILES||[]).filter(f=>f.salonNum===num);
-  const contacts = (REC.contacts||[]).filter(c=>c.salonNum===num);
+  const F = salonFiles(num);
 
   let h = '<div class="card"><h2>Documents <span class="sub">'
-    + (docs.length ? docs.length+' filed here' : 'none filed here')+'</span></h2><div class="body">'
+    + (F.filed.length ? F.filed.length+' filed here' : 'none filed here')
+    + (F.loose.length ? ' \u00b7 '+F.loose.length+' unfiled match' + (F.loose.length===1?'':'es') : '')
+    + '</span></h2><div class="body">'
     + '<button class="btn" onclick="uploadForSalon(\''+esc(num)+'\')">Upload for this salon</button>'
     + '<div class="hint">Opens the Documents tab with this salon already picked, so the batch files itself.</div></div>';
-  if(docs.length){
+  if(F.filed.length){
     h += '<div class="scroll"><table><thead><tr><th>Document</th><th>Type</th><th>Size</th>'
       + '<th>Uploaded</th><th></th></tr></thead><tbody>';
-    docs.forEach(f=>{
-      const v = '/api/leases/files/view?fileId='+encodeURIComponent(f.fileId);
-      h += '<tr><td><a href="'+v+'" target="_blank" rel="noopener noreferrer">'+esc(f.fileName)+'</a>'
-        + (f.note ? '<div class="hint">'+esc(f.note)+'</div>' : '')+'</td>'
-        + '<td>'+(f.docType?'<span class="pill">'+esc(f.docType)+'</span>':'')+'</td>'
-        + '<td class="muted nowrap">'+esc(sizeText(f.sizeBytes))+'</td>'
-        + '<td class="muted nowrap">'+esc(fmtDate((f.uploadedAt||'').slice(0,10)))+'</td>'
-        + '<td class="nowrap"><a class="btn ghost small" style="text-decoration:none;" href="'+v+'&dl=1">Download</a></td></tr>';
-    });
+    F.filed.forEach(f=>{ h += docRow(f, false, num); });
     h += '</tbody></table></div>';
   }
   h += '</div>';
+
+  if(F.loose.length){
+    h += '<div class="card"><h2>Unfiled, but named for this salon '
+      + '<span class="sub">'+F.loose.length+' found</span></h2>'
+      + '<div class="body"><div class="hint">These were uploaded without a salon picked, and their '
+      + 'filenames contain <b>'+esc(num)+'</b>. Check each one is really this salon, then file it \u2014 '
+      + 'a filed document counts towards the gap report and shows on this tab.</div></div>'
+      + '<div class="scroll"><table><thead><tr><th>Document</th><th>Type</th><th>Size</th>'
+      + '<th>Uploaded</th><th></th></tr></thead><tbody>';
+    F.loose.forEach(f=>{ h += docRow(f, true, num); });
+    h += '</tbody></table></div></div>';
+  }
+
+  if(!F.all.length){
+    h += '<div class="card"><div class="body muted" style="font-size:13px;">Nothing uploaded for this '
+      + 'salon yet. Until the lease and its amendments are in the store, everything recorded about this '
+      + 'salon rests on documents nobody else can open.</div></div>';
+  }
+  return h;
+}
+
+/** File an already-uploaded document against a salon, in place. */
+function fileToSalon(pathname, num){
+  fetch('/api/leases/files', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ pathname: pathname, salonNum: num }) })
+    .then(r=>r.json()).then(d=>{
+      if(!d.success){ alert('Could not file it: '+(d.error||'')); return; }
+      loadFiles();                 // refresh FILES, then repaint this salon
+      setTimeout(renderSalon, 400);
+    }).catch(e=>alert(e.message));
+}
+
+// \u2500\u2500 Contacts, on their own tab and editable \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+let C_EDIT = null;      // contactId being edited, '' for a new row, null = closed
+
+function salonContacts(num){
+  const contacts = (REC.contacts||[]).filter(c=>c.salonNum===num);
+  let h = '';
+
+  if(C_EDIT !== null) h += contactForm(num);
+  else h += '<div class="card"><div class="body">'
+    + '<button class="btn" onclick="editContact(\'\')">Add a contact</button>'
+    + '<span class="hint" style="margin-left:10px;">Who to call, and what they are good for. '
+    + 'The note is the useful part \u2014 "sends the escrow letter", "never signed the amendment".</span>'
+    + '</div></div>';
 
   h += '<div class="card"><h2>Contacts <span class="sub">'
     + (contacts.length ? contacts.length+' on file' : 'none on file')+'</span></h2>';
   if(!contacts.length){
     h += '<div class="body muted" style="font-size:13px;">Nobody recorded for this landlord yet.</div>';
-  } else {
-    h += '<div class="scroll"><table><thead><tr><th>Role</th><th>Who</th><th>Email</th>'
-      + '<th>Phone</th><th>Address</th></tr></thead><tbody>';
-    contacts.forEach(c=>{
-      h += '<tr><td><span class="pill">'+esc(c.role||'\u2014')+'</span></td>'
-        + '<td><b>'+esc(c.org||'')+'</b>'+(c.name?'<div>'+esc(c.name)+'</div>':'')
-        + (c.note?'<div class="hint">'+txt(c.note)+'</div>':'')+'</td>'
-        + '<td>'+(c.email?'<a href="mailto:'+esc(c.email)+'">'+esc(c.email)+'</a>':'\u2014')+'</td>'
-        + '<td class="nowrap">'+esc(c.phone||'\u2014')+'</td>'
-        + '<td class="muted">'+txt(c.address||'\u2014')+'</td></tr>';
-    });
-    h += '</tbody></table></div>';
+    return h + '</div>';
   }
-  return h + '</div>';
+  h += '<div class="scroll"><table><thead><tr><th>Role</th><th>Who</th><th>Email</th>'
+    + '<th>Phone</th><th>Address</th><th></th></tr></thead><tbody>';
+  contacts.forEach(c=>{
+    h += '<tr><td><span class="pill">'+esc(c.role||'\u2014')+'</span></td>'
+      + '<td><b>'+esc(c.org||'')+'</b>'+(c.name?'<div>'+esc(c.name)+'</div>':'')
+      + (c.note?'<div class="hint">'+txt(c.note)+'</div>':'')+'</td>'
+      + '<td>'+(c.email?'<a href="mailto:'+esc(c.email)+'">'+esc(c.email)+'</a>':'\u2014')+'</td>'
+      + '<td class="nowrap">'+esc(c.phone||'\u2014')+'</td>'
+      + '<td class="muted">'+txt(c.address||'\u2014')+'</td>'
+      + '<td class="nowrap"><button class="lnk" onclick="editContact(\''+esc(c.contactId)+'\')">Edit</button> '
+      + '<button class="lnk" onclick="deleteContact(\''+esc(c.contactId)+'\')">Remove</button></td></tr>';
+  });
+  return h + '</tbody></table></div></div>';
+}
+
+function contactForm(num){
+  const c = (REC.contacts||[]).find(x=>x.contactId===C_EDIT) || { salonNum: num };
+  const box = 'font-size:13px;';
+  const sel = (id,label,list,cur)=> '<label class="fld">'+esc(label)
+    + '<select id="'+id+'" style="'+box+'">'+list.map(o=>'<option value="'+esc(o)+'"'
+        +(String(o)===String(cur||'')?' selected':'')+'>'+esc(o||'\u2014')+'</option>').join('')+'</select></label>';
+  const t = (id,label,val,ph)=> '<label class="fld">'+esc(label)
+    + '<input type="text" id="'+id+'" value="'+esc(val||'')+'" placeholder="'+esc(ph||'')+'"></label>';
+  return '<div class="card"><h2>'+(C_EDIT?'Edit contact':'Add a contact')+'</h2><div class="body">'
+    + '<div class="filegrid">'
+    + sel('ct-role','Role', [''].concat(REC.contactRoles||['Landlord','Property manager','Billing','Maintenance','Broker','Legal','Other']), c.role)
+    + t('ct-org','Organisation', c.org, 'e.g. Regency Centers')
+    + t('ct-name','Name', c.name, '')
+    + t('ct-email','Email', c.email, '')
+    + t('ct-phone','Phone', c.phone, '')
+    + '</div>'
+    + '<label class="fld" style="margin-top:12px;">Address<input type="text" id="ct-address" '
+    + 'style="width:100%;" value="'+esc(c.address||'')+'"></label>'
+    + '<label class="fld" style="margin-top:12px;">Note<textarea id="ct-note" rows="2" style="width:100%;" '
+    + 'placeholder="What they are actually good for.">'+esc(c.note||'')+'</textarea></label>'
+    + '<div style="margin-top:12px;display:flex;gap:10px;align-items:center;">'
+    + '<button class="btn" onclick="saveContact(\''+esc(num)+'\')">Save</button>'
+    + '<button class="btn ghost" onclick="cancelContact()">Cancel</button>'
+    + '<span id="ct-msg" style="font-size:12.5px;"></span></div></div></div>';
+}
+
+function editContact(contactId){ C_EDIT = contactId; renderSalon(); window.scrollTo(0,0); }
+function cancelContact(){ C_EDIT = null; renderSalon(); }
+
+function saveContact(num){
+  const v = id => { const el = $(id); return el ? el.value.trim() : ''; };
+  if(!v('ct-org') && !v('ct-name')){
+    $('ct-msg').textContent = 'Give it an organisation or a name.'; return;
+  }
+  $('ct-msg').textContent = 'Saving\u2026';
+  fetch('/api/leases/records', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ kind:'contact', contactId: C_EDIT || undefined, salonNum: num,
+      role: v('ct-role'), org: v('ct-org'), name: v('ct-name'), email: v('ct-email'),
+      phone: v('ct-phone'), address: v('ct-address'), note: v('ct-note') }) })
+    .then(r=>r.json()).then(d=>{
+      if(!d.success){ $('ct-msg').textContent = d.error || 'Save failed.'; return; }
+      C_EDIT = null; loadRecords(); setTimeout(renderSalon, 400);
+    }).catch(e=>{ const m=$('ct-msg'); if(m) m.textContent = e.message; });
+}
+
+function deleteContact(contactId){
+  if(!confirm('Remove this contact?')) return;
+  fetch('/api/leases/records?contactId='+encodeURIComponent(contactId), { method:'DELETE' })
+    .then(r=>r.json()).then(()=>{ C_EDIT = null; loadRecords(); setTimeout(renderSalon, 400); });
 }
 
 /** Jump to the upload screen with this salon already selected. */
