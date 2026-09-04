@@ -6,16 +6,29 @@ export interface AMConfig {
   salons: string[]
 }
  
+// These `salons` lists are a FALLBACK. The maintained salon -> AM mapping is the
+// `am` column on the SalonRoster tab, which is what currentSalonsForAm() in
+// lib/auth-roles.ts actually reads, and what the client rebuilds from at
+// runtime. They are kept in step here so the fallback is not a lie -- they had
+// drifted badly enough that three salons appeared to have no manager at all.
 export const AMS: Record<string, AMConfig> = {
   cassi:     { name: 'Cassi Sharpe',       init: 'CS', color: '#a03030', globalId: '2014-0001-6376', salons: ['3015','3058','4138'] },
-  dawn:      { name: 'Dawn Bowersox',      init: 'DB', color: '#2a6a9a', globalId: '2014-0001-6880', salons: ['3062','3071','9489'] },
-  luann:     { name: 'Luann Wetherington', init: 'LW', color: '#6b3fa0', globalId: '2014-0001-5804', salons: ['1304','3043','3545','8725'] },
+  luann:     { name: 'Luann Wetherington', init: 'LW', color: '#6b3fa0', globalId: '2014-0001-5804', salons: ['1304','3043','3545','9489'] },
   dana:      { name: 'Dana Gainous',       init: 'DG', color: '#2a7a4a', globalId: '2014-0001-2977', salons: ['3025','3027','7728'] },
-  bridgette: { name: 'Bridgette Stout',    init: 'BS', color: '#9a5a2a', globalId: '2014-0001-5799', salons: ['3053','3685','9689'] },
-  kayla:     { name: 'Kayla Medlin',       init: 'KM', color: '#8a2a80', globalId: '2014-0001-2984', salons: [] },
+  bridgette: { name: 'Bridgette Stout',    init: 'BS', color: '#9a5a2a', globalId: '2014-0001-5799', salons: ['3053','3062','3685','9689'] },
+  // Kayla is the catch-all: any active salon with no named manager. The client
+  // resolves her at render time as "not in NAMED" rather than from this list,
+  // so it stays empty there -- but resolveAccess() reads the roster, where
+  // these four now carry am = kayla.
+  kayla:     { name: 'Kayla Medlin',       init: 'KM', color: '#8a2a80', globalId: '2014-0001-2984', salons: ['2554','3045','3071','9478'] },
+  // Dawn Bowersox is no longer an area manager. The entry stays so historical
+  // views -- scored weeks, past bonus periods -- can still resolve her name,
+  // initials and colour; she is out of AM_ORDER so she no longer appears as a
+  // current one. The roster reassigned 3062 to Bridgette and 9489 to Luann.
+  dawn:      { name: 'Dawn Bowersox',      init: 'DB', color: '#2a6a9a', globalId: '2014-0001-6880', salons: [] },
 }
- 
-export const AM_ORDER = ['cassi','dawn','luann','dana','bridgette','kayla'] as const
+
+export const AM_ORDER = ['cassi','luann','dana','bridgette','kayla'] as const
  
 export const SALON_NAMES: Record<string, string> = {
   '1304': 'Hilltop',   '2554': 'Carmel',     '3015': 'Food Lion',
