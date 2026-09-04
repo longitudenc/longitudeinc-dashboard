@@ -850,6 +850,31 @@ function tHead(key, cls){
     + '</button></th>';
 }
 
+// The `landlord` field is one string carrying several things: the entity, its
+// state of formation, who signs for it, who it succeeded, and where to write.
+// That is right for the record — it is what the documents say — but it is 50
+// to 220 characters, and dropping all of it into a table cell or a one-line
+// summary buries the only part you are usually looking for.
+//
+// Every value follows the same shape: the entity name, then a bracket, an em
+// dash or "c/o", then the detail. So the split is a cut at the first of those.
+const LL_CUT = [' (', ' — ', ' c/o ', ', successor', ', through', ', by '];
+function llSplit(s){
+  const full = String(s == null ? '' : s).trim();
+  if(!full) return { name: '', detail: '' };
+  let at = -1;
+  for(const m of LL_CUT){
+    const i = full.indexOf(m);
+    if(i > 0 && (at < 0 || i < at)) at = i;
+  }
+  if(at < 0) return { name: full, detail: '' };
+  // Trailing comma or semicolon only. A trailing FULL STOP is usually part of
+  // the name - "Regency Centers, L.P." and "Publix Super Markets, Inc." both
+  // end in one, and trimming it renames the counterparty.
+  return { name: full.slice(0, at).replace(/[,;]\s*$/, ''), detail: full.slice(at).trim() };
+}
+const llName = s => llSplit(s).name || '—';
+
 /** "6 mo", "31 mo", or "8 days ago" once it is behind us. */
 function timeLeft(months, days){
   if(days == null) return '—';
@@ -907,7 +932,7 @@ function renderDash(){
         + '</td>'
         + '<td class="num">'+esc(l.rentPerSfYr ? money(l.rentPerSfYr) : '\u2014')+'</td>'
         + '<td class="num">'+esc(l.areaSqFt ? num0(l.areaSqFt) + ' SF' : '\u2014')+'</td>'
-        + '<td class="muted">'+esc(l.landlord || '\u2014')+'</td></tr>';
+        + '<td class="muted" title="'+esc(l.landlord||'')+'">'+esc(llName(l.landlord))+'</td></tr>';
     });
     h += '</tbody></table></div></div>';
   }
@@ -1142,7 +1167,8 @@ function renderLeaseList(){
       + '<td class="num">'+esc(l && l.monthlyRent ? money(l.monthlyRent) : '\u2014')+'</td>'
       + '<td class="num">'+esc(l && l.areaSqFt ? num0(l.areaSqFt)+' SF' : '\u2014')+'</td>'
       + '<td>'+(opts.length ? opts.length : '<span class="muted">\u2014</span>')+'</td>'
-      + '<td class="muted">'+esc(l ? (l.landlord || '\u2014') : '\u2014')+'</td>'
+      + '<td class="muted" title="'+esc(l ? (l.landlord||'') : '')+'">'
+      + esc(l ? llName(l.landlord) : '\u2014')+'</td>'
       + '<td class="nowrap">'
       + (l ? '<button class="btn ghost small" onclick="openSalon(\''+esc(sn.num)+'\')">Open</button> ' : '')
       + '<button class="btn ghost small" onclick="editLease(\''+esc(sn.num)+'\')">'
@@ -1597,8 +1623,8 @@ function salonOverview(num, l, t, myGaps){
   const cam = t && t.camMonthlyTotal != null ? t.camMonthlyTotal : 0;
   let h = gapsHtml(myGaps, 'Needs attention');
   h += '<div class="card"><h2>Overview</h2><div class="kv">'
-    + kv('Landlord', l.landlord || '\u2014')
-    + kv('Address', l.address || '\u2014')
+    + kv('Landlord', llName(l.landlord))
+    + kv('Premises', l.address || '\u2014')
     + kv('Area', l.areaSqFt ? num0(l.areaSqFt)+' SF' : '\u2014')
     + kv('Term', fmtDate(l.commencementDate)+' \u2192 '+fmtDate(l.expirationDate))
     + kv('Time left', t ? timeLeft(t.monthsLeft, t.monthsLeft==null?null:t.monthsLeft*30) : '\u2014')
@@ -1849,7 +1875,19 @@ let C_EDIT = null;      // contactId being edited, '' for a new row, null = clos
 
 function salonContacts(num){
   const contacts = (REC.contacts||[]).filter(c=>c.salonNum===num);
+  const lease = (REC.leases||[]).find(x=>x.salonNum===num) || {};
   let h = '';
+
+  // The landlord entity in full, here rather than in the Overview. WHO the
+  // landlord is belongs in the summary; where to write to them, who signs for
+  // them and which company they succeeded is reference you come looking for.
+  const ll = llSplit(lease.landlord);
+  if(ll.name){
+    h += '<div class="card"><h2>Landlord <span class="sub">as named in the lease</span></h2>'
+      + '<div class="body"><div style="font-size:15px;font-weight:600;">'+esc(ll.name)+'</div>'
+      + (ll.detail ? '<div class="hint" style="margin-top:4px;">'+txt(ll.detail)+'</div>' : '')
+      + '</div></div>';
+  }
 
   if(C_EDIT !== null) h += contactForm(num);
   else h += '<div class="card"><div class="body">'
