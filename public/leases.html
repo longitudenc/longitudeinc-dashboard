@@ -278,6 +278,12 @@ let SESSION = { email:'', role:'none' };
 let FILES = [];
 let DOC_TYPES = [];
 
+// The Documents row currently open for editing, by fileId.
+//
+// One at a time. An open editor is unsaved state, and two of them side by side
+// is a way to lose whichever you looked away from.
+let F_EDIT = null;
+
 // OUR salons, served by /api/leases/files straight from lib/config, so there
 // is one list rather than a copy here that drifts. What gets recorded is the
 // salon NUMBER: that is what a lease record joins on.
@@ -676,11 +682,84 @@ function renderFiles(){
       + '<div class="hint" style="margin-top:2px;">'+esc(f.uploadedBy||'')+'</div></td>'
       + '<td class="nowrap">'
       + '<a class="btn ghost small" style="text-decoration:none;" href="'+view+'&dl=1">Download</a> '
+      + '<button class="btn ghost small" onclick="editFile(\''+esc(f.fileId)+'\')">Edit</button> '
       + '<button class="btn danger small" onclick="removeFile(\''+esc(f.fileId)+'\')">Delete</button>'
       + '</td></tr>';
+    if(F_EDIT === f.fileId) h += fileEditRow(f);
   });
   h += '</tbody></table>';
   $('files-out').innerHTML = h;
+}
+
+/**
+ * The inline editor for one document's filing.
+ *
+ * Only the descriptive fields are here. fileId, pathname, uploadedAt and
+ * uploadedBy are identity — upsertFile() keeps whatever was written first, so
+ * offering them would be offering a control that does nothing.
+ *
+ * The name matters more than it looks. What a document IS ("3015 Amendment -
+ * Fourth, term to 2030-12-30") is not what the landlord's system called it
+ * ("Lease Extension Agreement - Great Clips, Rock Hill, SC #2537 (1).pdf"),
+ * and the store is only searchable if the first one is what is written down.
+ */
+function fileEditRow(f){
+  const salonOpts = '<option value="">— not filed —</option>'
+    + SALONS.map(x => '<option value="'+esc(x.num)+'"'
+        + (String(f.salonNum||'') === x.num ? ' selected' : '') + '>'
+        + esc(x.num+' '+x.name)+'</option>').join('');
+  const typeOpts = '<option value="">— none —</option>'
+    + DOC_TYPES.map(t => '<option value="'+esc(t)+'"'
+        + (String(f.docType||'') === t ? ' selected' : '') + '>'+esc(t)+'</option>').join('');
+  return '<tr><td colspan="6" style="background:rgba(0,0,0,.03);">'
+    + '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;padding:4px 0;">'
+    + '<label style="flex:3 1 320px;">Name<br><input id="fe-name" type="text" style="width:100%;" '
+      + 'value="'+esc(f.fileName)+'"></label>'
+    + '<label style="flex:1 1 180px;">Salon<br><select id="fe-salon" style="width:100%;">'
+      + salonOpts+'</select></label>'
+    + '<label style="flex:1 1 150px;">Type<br><select id="fe-type" style="width:100%;">'
+      + typeOpts+'</select></label>'
+    + '<label style="flex:2 1 240px;">Note<br><input id="fe-note" type="text" style="width:100%;" '
+      + 'value="'+esc(f.note||'')+'"></label>'
+    + '<div class="nowrap">'
+    + '<button class="btn small" onclick="saveFileMeta(\''+esc(f.fileId)+'\')">Save</button> '
+    + '<button class="btn ghost small" onclick="cancelFileEdit()">Cancel</button>'
+    + '</div></div>'
+    + '<div class="hint" style="margin-top:4px;">Renaming changes what this store shows. '
+      + 'The file on your computer is untouched.</div>'
+    + '</td></tr>';
+}
+
+function editFile(fileId){ F_EDIT = fileId; renderFiles(); }
+function cancelFileEdit(){ F_EDIT = null; renderFiles(); }
+
+/**
+ * Save the filing. Keyed on pathname, like every other write to this tab, so
+ * the Blob callback and this call cannot produce two rows for one upload.
+ */
+function saveFileMeta(fileId){
+  const f = FILES.find(x => x.fileId === fileId);
+  if(!f) return;
+  const name = ($('fe-name').value || '').trim();
+  if(!name){ alert('A document needs a name.'); return; }
+  const salonNum = $('fe-salon').value;
+  fetch('/api/leases/files', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      pathname: f.pathname,
+      fileName: name,
+      salonNum: salonNum,
+      // Keep location in step with the salon, or a refiled document keeps
+      // showing the place it was first (wrongly) attributed to.
+      location: salonNum ? salonLabel(salonNum) : '',
+      docType: $('fe-type').value,
+      note: ($('fe-note').value || '').trim(),
+    }),
+  }).then(r=>r.json()).then(d=>{
+    if(!d.success){ alert(d.error || 'Could not save.'); return; }
+    F_EDIT = null;
+    loadFiles();
+  }).catch(e=>alert(e.message||e));
 }
 
 function removeFile(fileId){
