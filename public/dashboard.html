@@ -16672,13 +16672,63 @@ function pointsRows(){
   }).filter(p=>{
     if(scope && !scope.has(p.homeSalon)) return false;
     if(S_pointsSearch && !p.name.toLowerCase().includes(S_pointsSearch.toLowerCase())) return false;
+    // ARCHIVED BY DEFAULT. This list answers "who is at risk", and leavers and
+    // people sitting on nothing are not. Both come straight back the moment you
+    // search or set a date range -- a rehire question is exactly "what did this
+    // person do last time", and it has to stay answerable.
+    if(!S_pointsSearch && !S_pointsFrom && !S_pointsTo){
+      if(p.inactive) return false;
+      if(p.active === 0) return false;
+    }
     return true;
   }).sort((a,b)=> b.active-a.active || a.name.localeCompare(b.name));
 }
+// Points dates, in MM/DD/YYYY to match the Lease Manager and the office habit.
+// Split off the string rather than parsed, so a date can never shift a day
+// across a timezone on its way to being displayed.
+function pDate(iso){
+  const s=String(iso||'').trim();
+  const m=s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? (m[2]+'/'+m[3]+'/'+m[1]) : (s||'');
+}
+
+// When a violation stops counting.
+//
+// activeDiscPoints() counts an event while (evalMonth - incidentMonth) is 1
+// through 12 -- the penalty starts the month AFTER the incident and runs a
+// full twelve. So a June 2025 incident counts July 2025 through June 2026 and
+// is gone from July 2026: incident month plus THIRTEEN, not twelve.
+//
+// Deliberately a month, not a day. The window is computed in whole months, so
+// printing "07/01/2026" would claim a precision the rule does not have.
+function pDropOffKey(iso){
+  const mk = discMonthKey(iso);
+  return mk === null ? null : mk + 13;
+}
+function pDropOff(iso){
+  const k = pDropOffKey(iso);
+  if(k === null) return '';
+  return new Date(Date.UTC(Math.floor(k/12), k%12, 1))
+    .toLocaleDateString('en-US',{month:'short',year:'numeric',timeZone:'UTC'});
+}
+function pHasDropped(iso, curKey){
+  const k = pDropOffKey(iso);
+  return k !== null && periodSortKey(curKey) >= k;
+}
+
 function renderPoints(){
   const host=document.getElementById('forms-points'); if(!host) return;
   if(!_discLoaded){ host.innerHTML='<div class="no-data">Loading points&hellip;</div>'; loadDiscPoints(()=>renderPoints()); return; }
   const people=pointsRows();
+  const curKey=periodKeyFromWeekEnd(new Date().toISOString().slice(0,10));
+  // Say what is being withheld, and how to get at it. A filtered list that does
+  // not admit it is filtered is how someone concludes a leaver has no record.
+  const archiving = !S_pointsSearch && !S_pointsFrom && !S_pointsTo;
+  const hiddenNote = '<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">'
+    + (archiving
+        ? 'Showing people carrying active points. Leavers and anyone at zero are hidden - search a name, or set a date range, to bring them back.'
+        : 'Searching everyone, leavers and zero-point records included.')
+    + '</div>';
   const controls=`<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
       <input type="text" class="ff-input" style="max-width:220px;" placeholder="🔍  Search person…" value="${hEsc(S_pointsSearch)}" oninput="setPointsField('search',this.value)">
       <label class="ff-label" style="margin:0;">From</label><input type="date" class="ff-input" style="max-width:158px;" value="${hEsc(S_pointsFrom)}" onchange="setPointsField('from',this.value)">
@@ -16686,32 +16736,43 @@ function renderPoints(){
       <button class="btn btn-secondary btn-sm" onclick="exportPointsCSV()">⬇ Export CSV</button>
     </div>
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">Active total = points in the rolling 12 months (what drives eligibility). Tap a person for their history.</div>`;
-  if(!people.length){ host.innerHTML=controls+'<div class="no-data"><div class="no-data-icon">📋</div>No points on record for your people.</div>'; return; }
+  if(!people.length){ host.innerHTML=controls+hiddenNote+'<div class="no-data"><div class="no-data-icon">📋</div>No points on record for your people.</div>'; return; }
   const body=people.map(p=>{
     const flag = p.active>=6 ? '<span style="background:#c0392b;color:#fff;border-radius:6px;padding:2px 7px;font-size:11px;font-weight:700;margin-left:8px;white-space:nowrap;">⚠ Raise blocked (6+)</span>'
               : p.active>=4 ? '<span style="background:#e67e22;color:#fff;border-radius:6px;padding:2px 7px;font-size:11px;font-weight:700;margin-left:8px;white-space:nowrap;">⚠ Bonus blocked (4+)</span>' : '';
     const termed = p.inactive ? '<span style="background:#999;color:#fff;border-radius:6px;padding:1px 6px;font-size:10px;margin-left:6px;">termed</span>' : '';
-    const hist=p.events.length ? p.events.map(e=>`<tr><td style="white-space:nowrap;">${hEsc(e.date||'')}</td><td>${hEsc(e.reason||'')}</td><td style="text-align:right;">${hEsc(String(e.points||''))}</td></tr>`).join('')
-      : '<tr><td colspan="3" style="color:var(--text-muted);">No violations in the selected range.</td></tr>';
+    const hist=p.events.length ? p.events.map(e=>{
+      const gone = pHasDropped(e.date, curKey);
+      return `<tr${gone?' style="opacity:.55;"':''}>`
+        + `<td style="white-space:nowrap;">${hEsc(pDate(e.date))}</td>`
+        + `<td>${hEsc(e.reason||'')}</td>`
+        + `<td style="text-align:right;">${hEsc(String(e.points||''))}</td>`
+        + `<td style="white-space:nowrap;text-align:right;color:var(--text-muted);font-size:12px;">`
+        + `${gone?'dropped ':'drops '}${hEsc(pDropOff(e.date))}</td></tr>`;
+    }).join('')
+      : '<tr><td colspan="4" style="color:var(--text-muted);">No violations in the selected range.</td></tr>';
     return `<div class="table-card" style="margin-bottom:8px;">
       <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;cursor:pointer;" onclick="const h=this.nextElementSibling;h.style.display=h.style.display==='none'?'block':'none';">
         <div><strong>${hEsc(p.name)}</strong>${p.homeSalon?` <span style="color:var(--text-muted);font-size:12px;">· ${hEsc(p.homeSalon)}</span>`:''}${termed}${flag}</div>
         <div style="font-weight:700;font-size:15px;white-space:nowrap;">${p.active} pts</div>
       </div>
-      <div style="display:none;padding:0 12px 10px;"><table class="data-table"><thead><tr><th>Date</th><th>Violation</th><th style="text-align:right;">Pts</th></tr></thead><tbody>${hist}</tbody></table></div>
+      <div style="display:none;padding:0 12px 10px;"><table class="data-table"><thead><tr><th>Date</th><th>Violation</th><th style="text-align:right;">Pts</th><th style="text-align:right;">Falls off</th></tr></thead><tbody>${hist}</tbody></table></div>
     </div>`;
   }).join('');
-  host.innerHTML=controls+body;
+  host.innerHTML=controls+hiddenNote+body;
 }
 function setPointsField(which,v){ if(which==='search')S_pointsSearch=v||''; else if(which==='from')S_pointsFrom=v||''; else if(which==='to')S_pointsTo=v||''; renderPoints(); }
 function exportPointsCSV(){
   const people=pointsRows();
-  const header=['Employee','Home Salon','Active Points (12mo)','Bonus Blocked','Raise Blocked','Violation Date','Violation','Points'];
+  const header=['Employee','Home Salon','Status','Active Points (12mo)','Bonus Blocked','Raise Blocked','Violation Date','Violation','Points','Falls Off'];
   const lines=[header.map(csvCell).join(',')];
   people.forEach(p=>{
     const bb=p.active>=4?'Yes':'', rb=p.active>=6?'Yes':'';
-    if(!p.events.length){ lines.push([p.name,p.homeSalon,p.active,bb,rb,'','',''].map(csvCell).join(',')); }
-    else p.events.forEach(e=>lines.push([p.name,p.homeSalon,p.active,bb,rb,e.date||'',e.reason||'',e.points||''].map(csvCell).join(',')));
+    const st = p.inactive ? 'Termed' : 'Active';
+    if(!p.events.length){ lines.push([p.name,p.homeSalon,st,p.active,bb,rb,'','','',''].map(csvCell).join(',')); }
+    else p.events.forEach(e=>lines.push(
+      [p.name,p.homeSalon,st,p.active,bb,rb,pDate(e.date),e.reason||'',e.points||'',pDropOff(e.date)]
+        .map(csvCell).join(',')));
   });
   const blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8;'});
   const url=URL.createObjectURL(blob), a=document.createElement('a');
