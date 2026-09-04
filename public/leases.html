@@ -787,6 +787,69 @@ const money = n => '$' + (Number(n)||0).toLocaleString(undefined,{minimumFractio
 const money0 = n => '$' + Math.round(Number(n)||0).toLocaleString();
 const num0 = n => Math.round(Number(n)||0).toLocaleString();
 
+// How the expiration timeline is sorted.
+//
+// Salon number ascending by default, matching the order the server sends. That
+// is deliberate: what is coming at you soonest is the Action items card's job,
+// so this table is the one you scan to find a salon you already have in mind,
+// and for that the number is the index. Sorting is for asking a different
+// question of the same rows — which lease is dearest, which runs out first.
+let T_SORT = { key: 'salonNum', dir: 1 };
+
+// Numeric columns open biggest-first, text and dates smallest-first. That is
+// what each one is normally being asked: "which is the most expensive" but
+// "which expires soonest".
+const T_COLS = {
+  salonNum:      { label: 'Salon',        num: true,  first: 1,  get: l => Number(l.salonNum) },
+  expirationDate:{ label: 'Expiration',   num: false, first: 1,  get: l => l.expirationDate || '' },
+  monthsLeft:    { label: 'Time left',    num: true,  first: 1,  get: l => l.monthsLeft },
+  termProgress:  { label: 'Term',         num: true,  first: -1, get: l => l.termProgress },
+  rent:          { label: 'Monthly rent', num: true,  first: -1,
+                   get: l => l.currentRent != null ? l.currentRent : l.monthlyRent },
+  rentPerSfYr:   { label: '$/SF/yr',      num: true,  first: -1, get: l => l.rentPerSfYr },
+  areaSqFt:      { label: 'Area',         num: true,  first: -1, get: l => l.areaSqFt },
+  landlord:      { label: 'Landlord',     num: false, first: 1,  get: l => l.landlord || '' },
+};
+
+/**
+ * Sort a copy of the timeline. A blank always sorts last, whichever way the
+ * column is pointing — a lease with no expiration date recorded is missing
+ * information, not the soonest to expire, and floating it to the top would
+ * read as exactly the wrong thing.
+ */
+function sortedTimeline(rows){
+  const c = T_COLS[T_SORT.key] || T_COLS.salonNum;
+  const missing = v => v == null || v === '' || (c.num && !Number.isFinite(Number(v)));
+  return rows.slice().sort((a, b) => {
+    const x = c.get(a), y = c.get(b);
+    if(missing(x) && missing(y)) return Number(a.salonNum) - Number(b.salonNum);
+    if(missing(x)) return 1;
+    if(missing(y)) return -1;
+    const d = c.num ? (Number(x) - Number(y)) : String(x).localeCompare(String(y));
+    // Salon number is the tie-break everywhere, so equal values keep a stable,
+    // meaningful order rather than whatever the previous sort happened to leave.
+    return (d * T_SORT.dir) || (Number(a.salonNum) - Number(b.salonNum));
+  });
+}
+
+function timelineSort(key){
+  if(!T_COLS[key]) return;
+  if(T_SORT.key === key) T_SORT.dir = -T_SORT.dir;
+  else T_SORT = { key: key, dir: T_COLS[key].first };
+  renderDash();
+}
+
+/** One sortable header cell, carrying the arrow for the active column. */
+function tHead(key, cls){
+  const c = T_COLS[key];
+  const on = T_SORT.key === key;
+  return '<th' + (cls ? ' class="' + cls + '"' : '') + '>'
+    + '<button class="lnk" style="font:inherit;color:inherit;" '
+    + 'onclick="event.stopPropagation();timelineSort(\'' + key + '\')">'
+    + esc(c.label) + (on ? (T_SORT.dir === 1 ? ' ▲' : ' ▼') : '')
+    + '</button></th>';
+}
+
 /** "6 mo", "31 mo", or "8 days ago" once it is behind us. */
 function timeLeft(months, days){
   if(days == null) return '—';
@@ -821,12 +884,14 @@ function renderDash(){
   // ── Expiration timeline ──
   const T = REC.timeline || [];
   if(T.length){
-    h += '<div class="card"><h2>Lease expiration timeline <span class="sub">by salon number</span></h2>'
+    const sortedBy = (T_COLS[T_SORT.key] || T_COLS.salonNum).label.toLowerCase();
+    h += '<div class="card"><h2>Lease expiration timeline <span class="sub">sorted by '
+       + esc(sortedBy) + (T_SORT.dir === 1 ? '' : ', high to low') + '</span></h2>'
        + '<div class="scroll"><table><thead><tr>'
-       + '<th>Salon</th><th>Expiration</th><th>Time left</th><th>Term</th>'
-       + '<th class="num">Monthly rent</th><th class="num">$/SF/yr</th><th class="num">Area</th>'
-       + '<th>Landlord</th></tr></thead><tbody>';
-    T.forEach(l=>{
+       + tHead('salonNum') + tHead('expirationDate') + tHead('monthsLeft') + tHead('termProgress')
+       + tHead('rent','num') + tHead('rentPerSfYr','num') + tHead('areaSqFt','num')
+       + tHead('landlord') + '</tr></thead><tbody>';
+    sortedTimeline(T).forEach(l=>{
       const pr = Math.round(l.termProgress || 0);
       h += '<tr class="rowlink" onclick="openSalon(\''+esc(l.salonNum)+'\')">'
         + '<td><b>'+esc(salonLabel(l.salonNum))+'</b>'
