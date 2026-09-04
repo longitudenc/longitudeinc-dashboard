@@ -307,15 +307,20 @@ export function canViewSubmission(sub: Submission, access: Access, email: string
 export function canReviewSubmission(
   sub: Submission, access: Access, responseView: string[] = [], email = '',
 ): boolean {
-  // AN AUTHOR NEVER ACTIONS THEIR OWN REQUEST. The comment above has always
-  // said so, but nothing enforced it: forms/submit stamps a submission with
-  // the submitter's own salon, so for an AM or manager salonInScope was
-  // ALWAYS true on their own request and they could approve it themselves.
-  // It escalates to someone else now, which is the point of an approval.
+  // AN AUTHOR DOES NOT ACTION THEIR OWN REQUEST -- unless there is nobody above
+  // them. forms/submit stamps a submission with the submitter's own salon, so
+  // for an AM or manager salonInScope was ALWAYS true on their own request and
+  // they could approve it themselves. That escalates now, which is the point.
+  //
+  // Owner and admin are exempt, because for them the rule has no escalation to
+  // offer: they ARE the top of it. Blocking them made an owner-submitted
+  // approval permanently unactionable, and -- because the client hides the
+  // whole Requests tab when nothing is reviewable -- made it invisible too.
   const mine =
     (!!access.globalId && sub.submittedByGid === access.globalId) ||
     (!!email && sub.submittedByEmail.toLowerCase() === email.toLowerCase())
-  if (mine) return false
+  const terminal = access.role === 'owner' || access.role === 'admin'
+  if (mine && !terminal) return false
 
   const scope = (access.salons || []).map(s => String(s).trim())
   const salonInScope = !!sub.salonNum && scope.includes(sub.salonNum)

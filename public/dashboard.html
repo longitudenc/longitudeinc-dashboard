@@ -15841,10 +15841,13 @@ function loadForms(cb){
     FORMS_DEFS = defs.forms || [];
     FORMS_SUBS = subs.submissions || [];
     FORM_FAVS  = Array.isArray(favs && favs.keys) ? favs.keys : [];
-    // Reveal the review queue only when this person can actually action something.
-    const anyReview = FORMS_SUBS.some(s=>s.canReview);
+    // Reveal Requests when there is anything to SEE, not only anything to
+    // action. Keying it on canReview hid the tab from anyone whose whole view
+    // is read-only -- a manager looking at their salon's responses, or an owner
+    // whose only submissions are their own -- and took the per-form responses
+    // list with it, which they are entitled to.
     const qb=document.getElementById('ftb-queue');
-    if(qb) qb.style.display = anyReview ? '' : 'none';
+    if(qb) qb.style.display = FORMS_SUBS.length ? '' : 'none';
     const pb=document.getElementById('ftb-points');
     if(pb) pb.style.display = (isAdminRole()||isAMRole()) ? '' : 'none';
     showFormsTab(S_formsTab);
