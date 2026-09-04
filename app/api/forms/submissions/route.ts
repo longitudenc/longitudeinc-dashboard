@@ -42,7 +42,9 @@ export async function GET(req: Request) {
 
     const isAdmin = gate.access.role === 'owner' || gate.access.role === 'admin'
     const myGid = String(gate.access.globalId || '').trim()
-    const myEmail = String(gate.email || '').trim().toLowerCase()
+    // effectiveEmail, like the two checks above, so "mine" means the person
+    // being viewed as rather than the owner doing the viewing.
+    const myEmail = String(gate.effectiveEmail || '').trim().toLowerCase()
 
     const submissions = visible
       .sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || ''))

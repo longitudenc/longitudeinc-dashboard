@@ -16553,9 +16553,13 @@ function renderMySubmissions(){
 
 function renderReviewQueue(){
   const host=document.getElementById('forms-queue'); if(!host) return;
+  // Two different questions on one screen. `reviewable` drives Needs Action and
+  // Resolved -- what is waiting on YOU. The dropdown below lists every form you
+  // can see responses for, which is a wider set: an author sees their own
+  // submissions there without being able to action them.
   const reviewable=FORMS_SUBS.filter(s=>s.canReview);
-  const ids=[...new Set(reviewable.map(s=>s.formId))].map(fid=>({fid,
-      title:((FORMS_DEFS.find(f=>f.formId===fid)||{}).title)||((reviewable.find(s=>s.formId===fid)||{}).formTitle)||fid}))
+  const ids=[...new Set(FORMS_SUBS.map(s=>s.formId))].map(fid=>({fid,
+      title:((FORMS_DEFS.find(f=>f.formId===fid)||{}).title)||((FORMS_SUBS.find(s=>s.formId===fid)||{}).formTitle)||fid}))
     .sort((a,b)=>a.title.localeCompare(b.title));
   const filter=`<div style="margin-bottom:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
       <label class="ff-label" style="margin:0;">View</label>
@@ -16579,7 +16583,12 @@ function setReqFormFilter(v){ S_reqFormFilter=v||''; renderReviewQueue(); }
 // FORMS-RESPONSES-v1 — a spreadsheet view of every response to one form (scoped
 // to what you can review), with CSV export. Columns are the form's own fields.
 function responsesFor(formId){
-  return FORMS_SUBS.filter(s=>s.canReview && s.formId===formId)
+  // Guarded by who can SEE responses, not by who can act on them. Everything in
+  // FORMS_SUBS already passed filterSubmissions() on the server, so formId is
+  // the only filter needed here -- and keying this off canReview instead would
+  // drop a person's OWN submissions out of the list, since an author cannot
+  // review their own.
+  return FORMS_SUBS.filter(s=>s.formId===formId)
     .slice().sort((a,b)=>String(b.submittedAt||'').localeCompare(String(a.submittedAt||'')));
 }
 function responsesColumns(formId){
