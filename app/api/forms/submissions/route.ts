@@ -32,7 +32,10 @@ export async function GET(req: Request) {
       const arr = commentsBySub.get(c.submissionId)
       if (arr) arr.push(c); else commentsBySub.set(c.submissionId, [c])
     }
-    let visible = filterSubmissions(all, gate.access, gate.email, defs)
+    // effectiveEmail so viewing and reviewing agree under View As -- with
+    // gate.email an owner impersonating a manager was matched on their OWN
+    // address, so "my submissions" showed the owner's, not the manager's.
+    let visible = filterSubmissions(all, gate.access, gate.effectiveEmail, defs)
 
     if (formId) visible = visible.filter(s => s.formId === formId)
     if (status) visible = visible.filter(s => s.status === status)
@@ -60,7 +63,7 @@ export async function GET(req: Request) {
         reviewNote: s.reviewNote,
         // Drives whether the client shows review controls. The server re-checks
         // this on write regardless — this is only to avoid dead buttons.
-        canReview: canReviewSubmission(s, gate.access, rvMap.get(s.formId) || []),
+        canReview: canReviewSubmission(s, gate.access, rvMap.get(s.formId) || [], gate.effectiveEmail),
         // Match by ID OR email, so owner/admin accounts (no globalId) still see their own.
         isMine: (!!myGid && s.submittedByGid === myGid) || (!!myEmail && s.submittedByEmail.toLowerCase() === myEmail),
         comments: commentsBySub.get(s.submissionId) || [],

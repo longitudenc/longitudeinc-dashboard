@@ -16,6 +16,7 @@ import { NextResponse } from 'next/server'
 import { getEmployeeProfiles } from '@/lib/sheets'
 import { AMS } from '@/lib/config'
 import { requireSignedIn } from '@/lib/require-role'
+import { seesEmployee } from '@/lib/scope-filter'
 
 const str = (v: unknown) => String(v ?? '').trim()
 
@@ -31,6 +32,12 @@ export async function GET() {
         salon: str(r.homeStoreNum),
       }))
       .filter((e: any) => e.name && e.globalId)
+      // SECURITY: this list is what the forms `employee` field draws on, so a
+      // manager does need it -- but it used to return every active employee
+      // company-wide, which is also the lookup table that turns a globalId
+      // into a name for every other per-employee read. Scope it to the people
+      // the caller actually manages.
+      .filter((e: any) => seesEmployee(gate.access, e.globalId, e.salon))
 
     // Area managers are Users-tab logins, not roster employees, so they are not
     // guaranteed a profile row — add any that are missing.

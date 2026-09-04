@@ -52,7 +52,10 @@ export async function POST(req: Request) {
     }
     const defs = await getFormDefs()
     const rv = defs.find(d => d.formId === target.formId)?.responseView || []
-    if (!canReviewSubmission(target, gate.access, rv)) {
+    // effectiveEmail, not email: under View As the person being impersonated is
+    // who the rule must be applied to, or an owner viewing as a manager could
+    // approve a request that manager raised.
+    if (!canReviewSubmission(target, gate.access, rv, gate.effectiveEmail)) {
       return NextResponse.json({ success: false, error: 'insufficient permissions' }, { status: 403 })
     }
 

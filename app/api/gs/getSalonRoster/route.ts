@@ -13,7 +13,7 @@
 
 import { NextResponse } from 'next/server'
 import { readSheet, rowsToObjects } from '@/lib/sheets'
-import { requireSignedIn } from '@/lib/require-role'
+import { requireAdmin } from '@/lib/require-role'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -21,7 +21,12 @@ export const dynamic = 'force-dynamic'
 const SALON_ROSTER_TAB = 'SalonRoster'
 
 export async function GET() {
-  const gate = await requireSignedIn(); if (!gate.ok) return gate.response
+  // SECURITY: raised from requireSignedIn. This returns the whole estate --
+  // every salon, its area manager, status and notes -- and NOTHING in the
+  // client calls it: the browser gets its roster inside getAllData, which is
+  // scoped. An unused route handing the org chart to any stylist with a login
+  // is pure downside.
+  const gate = await requireAdmin(); if (!gate.ok) return gate.response
   try {
     const raw = await readSheet(SALON_ROSTER_TAB)
     const rows = rowsToObjects(raw)

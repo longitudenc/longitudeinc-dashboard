@@ -11,8 +11,9 @@
 // Tolerates a missing tab (returns empty) so getAllData / reviews never error.
 
 import { NextResponse } from 'next/server'
-import { readSheet, rowsToObjects } from '@/lib/sheets'
+import { readSheet, rowsToObjects, getEmployeeProfiles } from '@/lib/sheets'
 import { requireSignedIn } from '@/lib/require-role'
+import { seesEmployee } from '@/lib/scope-filter'
 
 export async function GET() {
   const gate = await requireSignedIn(); if (!gate.ok) return gate.response
@@ -36,13 +37,27 @@ export async function GET() {
       }))
       .filter((e) => e.globalId && e.points > 0 && e.date)
 
+    // SECURITY: this route returned EVERY disciplinary event company-wide --
+    // name, points, date and the free-text reason -- to anyone with a login.
+    // The Points tab is hidden in the client until a rule reveals it, but the
+    // data had already been fetched into the browser, so that was decoration.
+    // Scope it here, where it counts.
+    const profiles = await getEmployeeProfiles()
+    const homeSalonOf = new Map<string, string>()
+    for (const pr of profiles as any[]) {
+      const gid = String(pr.globalId || '').trim()
+      if (gid) homeSalonOf.set(gid, String(pr.homeStoreNum || '').trim())
+    }
+    const visible = events.filter((e) =>
+      seesEmployee(gate.access, e.globalId, homeSalonOf.get(e.globalId) || ''))
+
     // Group by globalId for convenient client lookup
     const byEmp: Record<string, any[]> = {}
-    for (const e of events) {
+    for (const e of visible) {
       ;(byEmp[e.globalId] ||= []).push(e)
     }
 
-    return NextResponse.json({ success: true, events, byEmp })
+    return NextResponse.json({ success: true, events: visible, byEmp })
   } catch (e: any) {
     return NextResponse.json({ success: false, error: e.message, events: [], byEmp: {} })
   }

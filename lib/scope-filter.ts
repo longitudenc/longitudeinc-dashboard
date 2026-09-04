@@ -184,6 +184,33 @@ export function scopeDaily(
  * "a manager sees their own store" is a deliberate ACCESS EXPANSION and belongs
  * with the capability model — not in a change whose job is closing holes.
  */
+/**
+ * May this person see the employee homed at `homeSalon`?
+ *
+ * The single rule behind every per-employee read: disciplinary points,
+ * performance reviews, and the employee picker that forms draw on. Those three
+ * routes each used to answer it differently, or not at all, so they are now
+ * required to agree.
+ *
+ * You can ALWAYS see yourself. That is what lets a stylist read their own
+ * review without opening the door to anyone else's, and it is why the globalId
+ * check comes before the role check rather than after.
+ *
+ * Anyone not owner/admin/viewer and not scoped to a salon sees nobody. Office
+ * and maintenance are deliberately in that group: they act on forms addressed
+ * to them, which carry their own visibility rules, and have no reason to read
+ * the HR record of someone they will never manage.
+ */
+export function seesEmployee(access: Access, globalId: string, homeSalon: string): boolean {
+  if (seesEverything(access)) return true
+  const gid = String(globalId || '').trim()
+  if (gid && gid === String(access.globalId || '').trim()) return true
+  if (access.role === 'area_manager' || access.role === 'manager') {
+    return amSalonSet(access).has(String(homeSalon || '').trim())
+  }
+  return false
+}
+
 export function scopeSalonRows<T extends { salonNum?: any }>(rows: T[], access: Access): T[] {
   if (seesEverything(access)) return rows
   if (access.role === 'area_manager' || access.role === 'manager') {

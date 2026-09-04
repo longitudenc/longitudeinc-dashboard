@@ -276,7 +276,14 @@ function roleSeesTags(role: string, responseView: string[], salonInScope: boolea
 
   if (role === 'owner' || role === 'admin') return true  // both see everything
   if (role === 'viewer') return false                    // viewers never see responses
-  if (role === 'area_manager' || role === 'manager') return amDefault && salonInScope
+  if (role === 'area_manager') return amDefault && salonInScope
+  // MANAGER IS SUBMIT-ONLY. They used to share the area_manager branch, which
+  // meant enabling managers would silently hand every one of them every
+  // request raised at their salon -- including any form whose responseView is
+  // blank, because blank defaults to 'am'. A manager still always sees what
+  // they submitted themselves; that comes from the `mine` check in
+  // canViewSubmission, not from here.
+  if (role === 'manager') return false
   if (role === 'office') return t.includes('office')
   if (role === 'maintenance') return t.includes('maintenance')
   return false
@@ -295,7 +302,19 @@ export function canViewSubmission(sub: Submission, access: Access, email: string
 
 // Who may CHANGE a submission's status. Deliberately narrower than viewing:
 // authors can see their own request but must not approve it themselves.
-export function canReviewSubmission(sub: Submission, access: Access, responseView: string[] = []): boolean {
+export function canReviewSubmission(
+  sub: Submission, access: Access, responseView: string[] = [], email = '',
+): boolean {
+  // AN AUTHOR NEVER ACTIONS THEIR OWN REQUEST. The comment above has always
+  // said so, but nothing enforced it: forms/submit stamps a submission with
+  // the submitter's own salon, so for an AM or manager salonInScope was
+  // ALWAYS true on their own request and they could approve it themselves.
+  // It escalates to someone else now, which is the point of an approval.
+  const mine =
+    (!!access.globalId && sub.submittedByGid === access.globalId) ||
+    (!!email && sub.submittedByEmail.toLowerCase() === email.toLowerCase())
+  if (mine) return false
+
   const scope = (access.salons || []).map(s => String(s).trim())
   const salonInScope = !!sub.salonNum && scope.includes(sub.salonNum)
   return roleSeesTags(access.role, responseView, salonInScope)
