@@ -16465,7 +16465,7 @@ function submissionRows(list, showWho, ctx){
         <td><strong>${hEsc(s.formTitle)}</strong><div style="font-size:11.5px;color:var(--text-muted);max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${hEsc(s.summary)}</div></td>
         ${showWho?`<td>${hEsc(fmtName(s.submittedByName||''))}</td>`:''}
         <td>${hEsc(s.salonNum||'—')}</td>
-        <td>${hEsc(s.submittedAt?hFmtDate(s.submittedAt.slice(0,10),true):'—')}</td>
+        <td>${hEsc(s.submittedAt?pDate(s.submittedAt.slice(0,10)):'—')}</td>
         <td>${statusPill(s.status, formWorkflow(s.formId))}</td>
         <td style="text-align:right;"><button class="btn btn-secondary btn-sm" onclick="toggleSubmission('${hEsc(k)}')">Details</button></td>
       </tr>
@@ -16494,8 +16494,11 @@ function submissionDetail(s, ctx){
       let shown=Array.isArray(v)?v.join(', '):v;
       // Employee picker stores a globalId — show the name back to the reader.
       if(f.type==='employee'){
+        // Name only. The globalId is how the value is STORED, not something a
+        // reader needs -- it only appears as a fallback when the roster has no
+        // profile for it, where it is the last identifying thing left.
         const p=(INACTIVE_MAP||{})[v];
-        shown = p&&p.name ? fmtName(p.name)+' ('+v+')' : v;
+        shown = p&&p.name ? fmtName(p.name) : v;
       }
       dl += `<dt>${hEsc(f.label)}</dt><dd>${hEsc(shown)}</dd>`;
     });
@@ -16646,7 +16649,7 @@ function renderResponsesTable(formId){
   if(!rows.length) return '<div class="no-data"><div class="no-data-icon">📭</div>No responses yet.</div>';
   const head=`<th>Submitted</th><th>By</th><th>Salon</th><th>Status</th>`+fields.map(f=>`<th>${hEsc(f.label)}</th>`).join('');
   const body=rows.map(s=>`<tr>
-      <td style="white-space:nowrap;">${hEsc(s.submittedAt?hFmtDate(s.submittedAt.slice(0,10),true):'—')}</td>
+      <td style="white-space:nowrap;">${hEsc(s.submittedAt?pDate(s.submittedAt.slice(0,10)):'—')}</td>
       <td>${hEsc(fmtName(s.submittedByName||''))}</td>
       <td>${hEsc(s.salonNum||'—')}</td>
       <td>${statusPill(s.status, formWorkflow(s.formId))}</td>
@@ -16661,7 +16664,7 @@ function exportResponsesCSV(formId){
   const def=FORMS_DEFS.find(f=>f.formId===formId);
   const header=['Submitted','Submitted By','Salon','Status'].concat(fields.map(f=>f.label));
   const lines=[header.map(csvCell).join(',')];
-  rows.forEach(s=>{ lines.push([s.submittedAt||'',s.submittedByName||'',s.salonNum||'',s.status||'']
+  rows.forEach(s=>{ lines.push([s.submittedAt?pDate(s.submittedAt.slice(0,10)):'',s.submittedByName||'',s.salonNum||'',s.status||'']
     .concat(fields.map(f=>respCell(f,(s.data||{})[f.fieldKey]))).map(csvCell).join(',')); });
   const blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8;'});
   const url=URL.createObjectURL(blob), a=document.createElement('a');
@@ -16694,7 +16697,7 @@ function openRequestDeepLink(id){
 // FORMS-POINTS-v1 — disciplinary points by person, scoped to the viewer's people
 // (admins: everyone; AM: anyone whose HOME STORE is one of theirs). Live 12-month
 // active total, 4/6 eligibility flags, per-person history, filters, CSV export.
-let S_pointsSearch='', S_pointsFrom='', S_pointsTo='';
+let S_pointsSearch='', S_pointsFrom='', S_pointsTo='', S_pointsArchived=false;
 function pointsScopeSalons(){
   if(isAdminRole()) return null; // null = everyone
   const amId=String(USER_AM_ID||'').replace(/["']/g,'').trim().toLowerCase();
@@ -16724,7 +16727,7 @@ function pointsRows(){
     // people sitting on nothing are not. Both come straight back the moment you
     // search or set a date range -- a rehire question is exactly "what did this
     // person do last time", and it has to stay answerable.
-    if(!S_pointsSearch && !S_pointsFrom && !S_pointsTo){
+    if(!S_pointsArchived && !S_pointsSearch && !S_pointsFrom && !S_pointsTo){
       if(p.inactive) return false;
       if(p.active === 0) return false;
     }
@@ -16771,16 +16774,20 @@ function renderPoints(){
   const curKey=periodKeyFromWeekEnd(new Date().toISOString().slice(0,10));
   // Say what is being withheld, and how to get at it. A filtered list that does
   // not admit it is filtered is how someone concludes a leaver has no record.
-  const archiving = !S_pointsSearch && !S_pointsFrom && !S_pointsTo;
+  const archiving = !S_pointsArchived && !S_pointsSearch && !S_pointsFrom && !S_pointsTo;
   const hiddenNote = '<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">'
     + (archiving
-        ? 'Showing people carrying active points. Leavers and anyone at zero are hidden - search a name, or set a date range, to bring them back.'
-        : 'Searching everyone, leavers and zero-point records included.')
+        ? 'Showing people carrying active points. Leavers and anyone at zero are hidden - tick Show archived, search a name, or set a date range to bring them back.'
+        : 'Showing everyone, including leavers and zero-point records. Leavers carry a termed tag.')
     + '</div>';
   const controls=`<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
       <input type="text" class="ff-input" style="max-width:220px;" placeholder="🔍  Search person…" value="${hEsc(S_pointsSearch)}" oninput="setPointsField('search',this.value)">
       <label class="ff-label" style="margin:0;">From</label><input type="date" class="ff-input" style="max-width:158px;" value="${hEsc(S_pointsFrom)}" onchange="setPointsField('from',this.value)">
       <label class="ff-label" style="margin:0;">To</label><input type="date" class="ff-input" style="max-width:158px;" value="${hEsc(S_pointsTo)}" onchange="setPointsField('to',this.value)">
+      <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer;white-space:nowrap;">
+        <input type="checkbox" ${S_pointsArchived?'checked':''} onchange="setPointsField('archived',this.checked)">
+        Show archived (leavers &amp; zero&#8209;point)
+      </label>
       <button class="btn btn-secondary btn-sm" onclick="exportPointsCSV()">⬇ Export CSV</button>
     </div>
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">Active total = points in the rolling 12 months (what drives eligibility). Tap a person for their history.</div>`;
@@ -16809,7 +16816,13 @@ function renderPoints(){
   }).join('');
   host.innerHTML=controls+hiddenNote+body;
 }
-function setPointsField(which,v){ if(which==='search')S_pointsSearch=v||''; else if(which==='from')S_pointsFrom=v||''; else if(which==='to')S_pointsTo=v||''; renderPoints(); }
+function setPointsField(which,v){
+  if(which==='search')        S_pointsSearch=v||'';
+  else if(which==='from')     S_pointsFrom=v||'';
+  else if(which==='to')       S_pointsTo=v||'';
+  else if(which==='archived') S_pointsArchived=!!v;
+  renderPoints();
+}
 function exportPointsCSV(){
   const people=pointsRows();
   const header=['Employee','Home Salon','Status','Active Points (12mo)','Bonus Blocked','Raise Blocked','Violation Date','Violation','Points','Falls Off'];
