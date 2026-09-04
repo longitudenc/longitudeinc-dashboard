@@ -90,17 +90,34 @@ export async function POST(request: Request) {
   // Preserve good full names: a truncated export (e.g. "North Point ...") must
   // not overwrite the complete name already stored for a salon.
   const priorNames: Record<string, string> = {}
+  // Coordinates are STICKY, for the same reason names are.
+  //
+  // The weekly export carries no coordinates of its own; the CI script joins
+  // them on from a separate file keyed by salon number and posts '' for any
+  // salon missing from it. That empty string then overwrites whatever was
+  // there — which is how a salon resolved by hand through
+  // /api/market/resolve-places (the &lat=&lng= and &query= override modes
+  // exist precisely to place a salon the coords file does not know about)
+  // silently lost its position again at the next ingest, and dropped off the
+  // map. The script already guards the case where the WHOLE coords file is
+  // missing; this is the same guard per salon.
+  const priorCoords: Record<string, { lat: string; lng: string }> = {}
   try {
     const prior = rowsToObjects((await readSheet(MARKET_TAB)) || [])
     for (const p of prior) {
       const psn = String(p.salonNum ?? '').trim()
+      if (!psn) continue
       const pnm = String(p.name ?? '').trim()
-      if (psn && pnm && !pnm.endsWith('...')) priorNames[psn] = pnm
+      if (pnm && !pnm.endsWith('...')) priorNames[psn] = pnm
+      const plat = String(p.lat ?? '').trim()
+      const plng = String(p.lng ?? '').trim()
+      if (plat && plng) priorCoords[psn] = { lat: plat, lng: plng }
     }
   } catch { /* first run / empty tab */ }
 
   const objects: Record<string, any>[] = []
   let skipped = 0
+  let coordsPreserved = 0
   for (const r of rows) {
     if (!Array.isArray(r)) { skipped++; continue }
     const src: Record<string, any> = {}
@@ -115,6 +132,17 @@ export async function POST(request: Request) {
     o.salonNum = salonNum
     const nm = String(o.name ?? '').trim()
     if ((!nm || nm.endsWith('...')) && priorNames[salonNum]) o.name = priorNames[salonNum]
+
+    // Only an incoming pair of real coordinates may move a salon. A blank pair
+    // means "the coords file did not know this salon", which is not the same
+    // as "this salon has no location".
+    const inLat = String(o.lat ?? '').trim()
+    const inLng = String(o.lng ?? '').trim()
+    if ((!inLat || !inLng) && priorCoords[salonNum]) {
+      o.lat = priorCoords[salonNum].lat
+      o.lng = priorCoords[salonNum].lng
+      coordsPreserved++
+    }
     objects.push(o)
   }
 
@@ -135,7 +163,8 @@ export async function POST(request: Request) {
     const durationMs = Date.now() - startedAt
     console.log(
       `[market/ingest] ✓ ${weekEnding} — ${objects.length} rows ` +
-      `(${inserted} inserted, ${updated} updated, ${skipped} skipped), ${durationMs}ms`
+      `(${inserted} inserted, ${updated} updated, ${skipped} skipped, ` +
+      `${coordsPreserved} coords preserved), ${durationMs}ms`
     )
     return NextResponse.json({
       ok: true,
@@ -145,6 +174,7 @@ export async function POST(request: Request) {
       inserted,
       updated,
       skipped,
+      coordsPreserved,
       durationMs,
     })
   } catch (err) {
