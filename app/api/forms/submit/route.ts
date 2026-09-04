@@ -127,8 +127,14 @@ export async function POST(req: Request) {
       })
     } catch (e: any) { console.error('[submit] notify failed:', e?.message) }
 
-    // Disciplinary form → also record a points event in the tracker (best-effort).
-    if (def.formId === 'discipline') {
+    // Disciplinary form -> also record a points event in the tracker.
+    //
+    // ONLY when the form is not approval-gated. If its workflow is 'approval'
+    // the points are recorded when it is approved (see forms/status), because
+    // the whole reason to gate a write-up is that it might be refused -- and
+    // points that land at submit time have already blocked a bonus at 4 and a
+    // raise at 6 before anyone has agreed the write-up was fair.
+    if (def.formId === 'discipline' && String(def.workflow || '').toLowerCase() !== 'approval') {
       try {
         const violation = String(clean.violation || '')
         const isOther = /^other\b/i.test(violation)
@@ -138,6 +144,7 @@ export async function POST(req: Request) {
           globalId: String(clean.employee || '').trim(),
           points, reason,
           date: String(clean.violationDate || '').trim(),
+          sourceSubmissionId: row.submissionId,
         })
       } catch (e: any) { console.error('[submit] disc event failed:', e?.message) }
     }

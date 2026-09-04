@@ -267,7 +267,9 @@ export async function getSubmissions(): Promise<Submission[]> {
 // for the scoped roles only: 'am' (the salon's area manager), 'office'
 // (Laura/Brandy), 'maintenance' (the handyman). Blank defaults to 'am'.
 // Legacy 'standard' is read as 'am'.
-function roleSeesTags(role: string, responseView: string[], salonInScope: boolean): boolean {
+function roleSeesTags(
+  role: string, responseView: string[], salonInScope: boolean, forAction = false,
+): boolean {
   const t = (responseView || []).map(x => {
     const v = String(x).toLowerCase().trim()
     return v === 'standard' ? 'am' : v
@@ -277,13 +279,13 @@ function roleSeesTags(role: string, responseView: string[], salonInScope: boolea
   if (role === 'owner' || role === 'admin') return true  // both see everything
   if (role === 'viewer') return false                    // viewers never see responses
   if (role === 'area_manager') return amDefault && salonInScope
-  // MANAGER IS SUBMIT-ONLY. They used to share the area_manager branch, which
-  // meant enabling managers would silently hand every one of them every
-  // request raised at their salon -- including any form whose responseView is
-  // blank, because blank defaults to 'am'. A manager still always sees what
-  // they submitted themselves; that comes from the `mine` check in
-  // canViewSubmission, not from here.
-  if (role === 'manager') return false
+  // A MANAGER READS, BUT DOES NOT ACT. They see their salon's responses on the
+  // same terms an area manager does -- useful for "has anyone reported this
+  // already?" -- but every status button belongs to the AM above them, so
+  // forAction is where they stop. Note this DOES mean a manager sees anything
+  // filed about their salon on a form whose responseView is blank, since blank
+  // means 'am': check the audience of anything sensitive before enabling them.
+  if (role === 'manager') return !forAction && amDefault && salonInScope
   if (role === 'office') return t.includes('office')
   if (role === 'maintenance') return t.includes('maintenance')
   return false
@@ -317,7 +319,7 @@ export function canReviewSubmission(
 
   const scope = (access.salons || []).map(s => String(s).trim())
   const salonInScope = !!sub.salonNum && scope.includes(sub.salonNum)
-  return roleSeesTags(access.role, responseView, salonInScope)
+  return roleSeesTags(access.role, responseView, salonInScope, true)
 }
 
 export function filterSubmissions(subs: Submission[], access: Access, email: string, defs: FormDef[] = []): Submission[] {

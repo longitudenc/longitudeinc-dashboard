@@ -19,6 +19,32 @@ import { TAB_DEFS, DEFS_COLUMNS } from '@/lib/forms'
 // that notify additionally accepts real email addresses.
 const GROUP_TAGS = new Set(['am', 'office', 'maintenance', 'owner'])
 const WORKFLOWS = new Set(['ticket', 'approval', 'record'])
+
+// Roles that may be named in `audience` -- who can OPEN and submit a form.
+// Deliberately not every Role: 'viewer' is read-only by definition and would
+// be misleading here, and blank/'all' already covers everyone.
+const AUDIENCE_ROLES = new Set([
+  'owner', 'admin', 'area_manager', 'manager', 'stylist', 'office', 'maintenance',
+])
+
+function cleanAudience(list: any): string[] {
+  if (!Array.isArray(list)) return []
+  const out: string[] = []
+  for (const raw of list) {
+    const v = String(raw).trim().toLowerCase()
+    if (!v) continue
+    // 'all' is a whole answer on its own; anything beside it is noise.
+    if (v === 'all') return ['all']
+    if (AUDIENCE_ROLES.has(v) && !out.includes(v)) out.push(v)
+  }
+  // OWNER AND ADMIN ARE ALWAYS IN. audienceAllows() has no bypass for them, and
+  // the "Manage access" dialog is drawn from /api/forms/defs, which is itself
+  // audience-filtered -- so saving an audience without them would hide the form
+  // from the only screen that could put them back. Nobody should be able to
+  // lock themselves out of a form's settings by editing that form's settings.
+  for (const r of ['owner', 'admin']) if (!out.includes(r)) out.unshift(r)
+  return out
+}
 const isEmail = (v: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)
 
 function cleanList(list: any, allowEmail: boolean): string[] {
@@ -50,6 +76,9 @@ export async function POST(req: Request) {
     const notify = cleanList(body?.notify, true)               // tags + emails
     const wfIn = String(body?.workflow || '').trim().toLowerCase()
     const workflow = WORKFLOWS.has(wfIn) ? wfIn : ''
+    // Only touched when the caller actually sends it, so a client that does not
+    // know about audience yet cannot blank it by omission.
+    const audience = body?.audience !== undefined ? cleanAudience(body.audience) : undefined
 
     // Re-read raw rows so every untouched column round-trips exactly.
     const raw = rowsToObjects(await readSheet(TAB_DEFS))
@@ -57,7 +86,13 @@ export async function POST(req: Request) {
     const rows = raw.map(r => {
       if (String(r.formId || '').trim() === formId) {
         found = true
-        return { ...r, responseView: responseView.join(', '), notify: notify.join(', '), workflow }
+        return {
+          ...r,
+          responseView: responseView.join(', '),
+          notify: notify.join(', '),
+          workflow,
+          ...(audience !== undefined ? { audience: audience.join(', ') } : {}),
+        }
       }
       return r
     })
@@ -71,7 +106,7 @@ export async function POST(req: Request) {
     ])
 
     // Return the cleaned arrays so the dialog can update its local copy.
-    return NextResponse.json({ success: true, formId, responseView, notify, workflow })
+    return NextResponse.json({ success: true, formId, responseView, notify, workflow, ...(audience !== undefined ? { audience } : {}) })
   } catch (e: any) {
     return NextResponse.json({ success: false, error: e.message }, { status: 500 })
   }

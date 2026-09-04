@@ -16,6 +16,7 @@
 import { NextResponse } from 'next/server'
 import { requireSignedIn } from '@/lib/require-role'
 import { readSheet, rowsToObjects, writeSheet } from '@/lib/sheets'
+import { recordDisciplinaryEvent, parseViolationPoints, removeDisciplinaryEventsBySubmission } from '@/lib/disc-points'
 import {
   getSubmissions,
   canReviewSubmission,
@@ -87,7 +88,40 @@ export async function POST(req: Request) {
       ...rows.map(r => SUBS_COLUMNS.map(c => String((r as any)[c] ?? ''))),
     ])
 
-    return NextResponse.json({ success: true, submissionId, status })
+    // APPROVAL-GATED DISCIPLINE. When a write-up needs approving, the points
+    // follow the decision rather than the submission: recorded on approve,
+    // taken back on anything else. Reversal matters as much as the write --
+    // points gate a bonus at 4 and a raise at 6, so a write-up that was denied
+    // and left its points behind is quietly costing someone money.
+    //
+    // Keyed on sourceSubmissionId, so approving twice cannot double-count.
+    let discPoints: string | undefined
+    if (target.formId === 'discipline') {
+      const wf = String(defs.find(d => d.formId === 'discipline')?.workflow || '').toLowerCase()
+      if (wf === 'approval') {
+        try {
+          await removeDisciplinaryEventsBySubmission(submissionId)
+          if (status === 'approved') {
+            const d: any = target.data || {}
+            const violation = String(d.violation || '')
+            const isOther = /^other/i.test(violation)
+            const points = isOther ? (Number(d.otherPoints) || 0) : parseViolationPoints(violation)
+            const reason = isOther ? (String(d.otherViolation || '').trim() || 'Other violation') : violation
+            await recordDisciplinaryEvent({
+              globalId: String(d.employee || '').trim(),
+              points, reason,
+              date: String(d.violationDate || '').trim(),
+              sourceSubmissionId: submissionId,
+            })
+            discPoints = points ? `${points} point(s) recorded in the tracker.` : undefined
+          } else {
+            discPoints = 'Any points from this write-up have been removed from the tracker.'
+          }
+        } catch (e: any) { console.error('[status] disc points failed:', e?.message) }
+      }
+    }
+
+    return NextResponse.json({ success: true, submissionId, status, discPoints })
   } catch (e: any) {
     return NextResponse.json({ success: false, error: e.message }, { status: 500 })
   }

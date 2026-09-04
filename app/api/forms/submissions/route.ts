@@ -9,8 +9,12 @@
 // auth credential in this app — they must not travel to other users' browsers.
 
 import { NextResponse } from 'next/server'
-import { requireSignedIn } from '@/lib/require-role'
-import { getSubmissions, filterSubmissions, canReviewSubmission, getFormDefs, getComments } from '@/lib/forms'
+import { readSheet, rowsToObjects, writeSheet } from '@/lib/sheets'
+import { requireSignedIn, requireAdmin } from '@/lib/require-role'
+import {
+  getSubmissions, filterSubmissions, canReviewSubmission, getFormDefs, getComments,
+  TAB_SUBS, TAB_COMMENTS,
+} from '@/lib/forms'
 
 export async function GET(req: Request) {
   const gate = await requireSignedIn()
@@ -74,5 +78,73 @@ export async function GET(req: Request) {
     return NextResponse.json({ success: true, submissions, count: submissions.length })
   } catch (e: any) {
     return NextResponse.json({ success: true, submissions: [], count: 0, warning: e.message })
+  }
+}
+
+/**
+ * Delete one submission, and the comment thread hanging off it.
+ *
+ *   DELETE ?submissionId=f_xxxx
+ *
+ * Owner/admin only, deliberately narrower than reviewing: an area manager may
+ * decide a request is denied, but making it never have happened is a different
+ * power. Mostly this exists to clear out test rows.
+ *
+ * NOT a status change. `denied` and `closed` already say "this was considered
+ * and refused" and are the right answer nearly always; this is for rows that
+ * should never have existed. It does not tombstone, because a test submission
+ * nobody should see again is exactly what a tombstone would keep showing.
+ *
+ * A discipline submission ALSO wrote a row to DiscPoints, which this does not
+ * touch -- that tab is the tracker's own record and is edited from the Points
+ * screen. The response says so, so the caller is told rather than left to
+ * discover a stray event later.
+ */
+export async function DELETE(req: Request) {
+  const gate = await requireAdmin()
+  if (!gate.ok) return gate.response
+
+  try {
+    const submissionId = String(new URL(req.url).searchParams.get('submissionId') || '').trim()
+    if (!submissionId) {
+      return NextResponse.json({ success: false, error: 'submissionId is required' }, { status: 400 })
+    }
+
+    const all = await getSubmissions()
+    const target = all.find(s => s.submissionId === submissionId)
+    if (!target) {
+      return NextResponse.json({ success: false, error: 'submission not found' }, { status: 404 })
+    }
+
+    // Read-modify-write over a shared tab, so read fresh.
+    const rawSubs = rowsToObjects(await readSheet(TAB_SUBS, undefined, { fresh: true }))
+    const headSubs = Object.keys(rawSubs[0] || {})
+    const keptSubs = rawSubs.filter(r => String(r.submissionId || '').trim() !== submissionId)
+    if (headSubs.length) {
+      await writeSheet(TAB_SUBS, [headSubs, ...keptSubs.map(r => headSubs.map(h => String(r[h] ?? '')))])
+    }
+
+    // Comments too, or the thread outlives the thing it was about.
+    let commentsRemoved = 0
+    try {
+      const rawC = rowsToObjects(await readSheet(TAB_COMMENTS, undefined, { fresh: true }))
+      const headC = Object.keys(rawC[0] || {})
+      const keptC = rawC.filter(r => String(r.submissionId || '').trim() !== submissionId)
+      commentsRemoved = rawC.length - keptC.length
+      if (headC.length && commentsRemoved) {
+        await writeSheet(TAB_COMMENTS, [headC, ...keptC.map(r => headC.map(h => String(r[h] ?? '')))])
+      }
+    } catch { /* no comments tab yet */ }
+
+    return NextResponse.json({
+      success: true,
+      submissionId,
+      commentsRemoved,
+      note: target.formId === 'discipline'
+        ? 'This was a discipline submission. Its DiscPoints event was NOT removed - clear that from the Points screen if it was a test.'
+        : undefined,
+    })
+  } catch (e: any) {
+    return NextResponse.json({ success: false, error: e.message }, { status: 500 })
   }
 }

@@ -16055,6 +16055,8 @@ function openAccessDialog(formId){
   const notify = (f.notify||[]).map(x=>String(x).toLowerCase());
   const emails = (f.notify||[]).filter(x=>String(x).includes('@'));
   const wf = String(f.workflow||'').toLowerCase();
+  const aud = (f.audience||[]).map(x=>String(x).toLowerCase());
+  const audAll = aud.length===0 || aud.includes('all');
   const has = (arr,v)=>arr.includes(v);
   const cb = (id,label,checked)=>`<label style="display:flex;align-items:center;gap:9px;padding:5px 0;cursor:pointer;"><input type="checkbox" id="${id}" ${checked?'checked':''}><span>${label}</span></label>`;
 
@@ -16066,7 +16068,15 @@ function openAccessDialog(formId){
       <div style="font-size:17px;font-weight:600;">Manage access</div>
       <div style="font-size:12.5px;color:var(--text-muted);margin-bottom:16px;">${hEsc(f.icon)} ${hEsc(f.title)}</div>
 
-      <div style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin-bottom:2px;">Who can see responses</div>
+      <div style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin-bottom:2px;">Who can submit this form</div>
+      ${cb('aca-am','Area managers',audAll||has(aud,'area_manager'))}
+      ${cb('aca-mgr','Salon managers',audAll||has(aud,'manager'))}
+      ${cb('aca-office','Office (Laura, Brandy)',audAll||has(aud,'office'))}
+      ${cb('aca-maint','Maintenance (handyman)',audAll||has(aud,'maintenance'))}
+      ${cb('aca-stylist','Stylists',audAll||has(aud,'stylist'))}
+      <div style="font-size:11.5px;color:var(--text-muted);margin:2px 0 0;">Owner and admins can always submit, and always keep access to these settings.</div>
+
+      <div style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin:16px 0 2px;">Who can see responses</div>
       ${cb('acv-am',"Salon's area manager",has(view,'am'))}
       ${cb('acv-office','Office (Laura, Brandy)',has(view,'office'))}
       ${cb('acv-maint','Maintenance (handyman)',has(view,'maintenance'))}
@@ -16110,13 +16120,20 @@ function saveAccess(formId){
   if(g('acn-maint').checked)   notify.push('maintenance');
   if(g('acn-owner').checked)   notify.push('owner');
   String(g('acn-email').value||'').split(/[,;\s]+/).map(s=>s.trim()).filter(s=>s.includes('@')).forEach(e=>notify.push(e));
+  // Owner and admin are re-added server-side, so they cannot be dropped here.
+  const audience=[];
+  if(g('aca-am').checked)      audience.push('area_manager');
+  if(g('aca-mgr').checked)     audience.push('manager');
+  if(g('aca-office').checked)  audience.push('office');
+  if(g('aca-maint').checked)   audience.push('maintenance');
+  if(g('aca-stylist').checked) audience.push('stylist');
   const workflow=((g('acf-workflow')||{}).value)||'';
   const btn=g('access-save'), msg=g('access-msg');
   if(btn){ btn.disabled=true; btn.textContent='Saving…'; }
-  fetch('/api/forms/access',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({formId,responseView:view,notify,workflow})})
+  fetch('/api/forms/access',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({formId,responseView:view,notify,workflow,audience})})
     .then(r=>r.json()).then(res=>{
       if(!res.success){ if(msg) msg.textContent=res.error||'Save failed'; if(btn){btn.disabled=false;btn.textContent='Save';} return; }
-      const f=FORMS_DEFS.find(x=>x.formId===formId); if(f){ f.responseView=res.responseView; f.notify=res.notify; f.workflow=res.workflow; }
+      const f=FORMS_DEFS.find(x=>x.formId===formId); if(f){ f.responseView=res.responseView; f.notify=res.notify; f.workflow=res.workflow; if(res.audience) f.audience=res.audience; }
       closeAccessDialog();
     }).catch(e=>{ if(msg) msg.textContent=e.message; if(btn){btn.disabled=false;btn.textContent='Save';} });
 }
@@ -16425,6 +16442,19 @@ function statusPill(st, wf){
   return `<span class="status-pill st-${hEsc(st)}">${hEsc(label)}</span>`;
 }
 
+// Remove a submission and its comment thread. Owner/admin only -- the server
+// re-checks with requireAdmin, so this is just about not showing a dead button.
+function deleteSubmission(submissionId, title){
+  if(!confirm('Delete "'+title+'" permanently?\n\nThe submission and its comments are removed. '
+    + 'This cannot be undone. To record that a request was refused, use Deny instead.')) return;
+  fetch('/api/forms/submissions?submissionId='+encodeURIComponent(submissionId),{method:'DELETE'})
+    .then(r=>r.json()).then(res=>{
+      if(!res.success){ alert(res.error||'Could not delete.'); return; }
+      if(res.note) alert(res.note);
+      loadForms();
+    }).catch(e=>alert(e.message||e));
+}
+
 function submissionRows(list, showWho, ctx){
   ctx=ctx||'';
   if(!list.length) return '<div class="no-data"><div class="no-data-icon">📭</div>Nothing here yet.</div>';
@@ -16491,6 +16521,15 @@ function submissionDetail(s, ctx){
       <label class="ff-label">Note (optional)</label>
       <input class="ff-input" id="rn-${hEsc(k)}" value="${hEsc(s.reviewNote||'')}" style="margin-bottom:9px;">
       <div style="display:flex;gap:8px;flex-wrap:wrap;">${btns}</div></div>`;
+  }
+
+  // Deleting is owner/admin only and deliberately apart from the workflow
+  // buttons: 'Denied' and 'Done' are outcomes, this is for rows that should
+  // never have existed. Mostly test submissions.
+  if(isAdminRole()){
+    dl += `<div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--border);display:flex;justify-content:flex-end;">
+      <button class="btn btn-sm" style="background:none;border:1px solid var(--border);color:#c0392b;"
+        onclick="deleteSubmission('${sid}','${hEsc(String(s.formTitle||'this submission'))}')">Delete permanently</button></div>`;
   }
   dl += `<div id="cmts-${hEsc(k)}" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);">${renderCommentThread(s, k)}</div>`;
   return dl;
