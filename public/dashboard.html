@@ -15832,10 +15832,15 @@ function switchToForms(){
 function loadForms(cb){
   Promise.all([
     fetch('/api/forms/defs').then(r=>r.json()).catch(()=>({forms:[]})),
-    fetch('/api/forms/submissions').then(r=>r.json()).catch(()=>({submissions:[]}))
-  ]).then(([defs,subs])=>{
+    fetch('/api/forms/submissions').then(r=>r.json()).catch(()=>({submissions:[]})),
+    // Pins ride along with the same load. A failure here resolves to none
+    // rather than rejecting, so an unreachable Favorites tab cannot stop the
+    // forms screen from opening.
+    fetch('/api/favorites?kind=form').then(r=>r.json()).catch(()=>({keys:[]}))
+  ]).then(([defs,subs,favs])=>{
     FORMS_DEFS = defs.forms || [];
     FORMS_SUBS = subs.submissions || [];
+    FORM_FAVS  = Array.isArray(favs && favs.keys) ? favs.keys : [];
     // Reveal the review queue only when this person can actually action something.
     const anyReview = FORMS_SUBS.some(s=>s.canReview);
     const qb=document.getElementById('ftb-queue');
@@ -15864,6 +15869,35 @@ function showFormsTab(name){
   if(name==='points') renderPoints();
 }
 
+// FORM-FAVORITES-v1 — per-person pins, loaded once when the forms screen opens.
+// Held as a plain array so order is the order they were pinned; the server
+// returns them oldest-first and the screen does not re-sort them.
+let FORM_FAVS = [];
+function loadFormFavs(cb){
+  fetch('/api/favorites?kind=form').then(r=>r.json()).then(r=>{
+    FORM_FAVS = (r && r.success && Array.isArray(r.keys)) ? r.keys : [];
+    if(cb) cb();
+  }).catch(()=>{ FORM_FAVS = []; if(cb) cb(); });
+}
+function isFormFav(formId){ return FORM_FAVS.indexOf(formId) >= 0; }
+
+// Optimistic: the star flips immediately and is put back if the write fails.
+// Pinning is not worth a spinner, but it is worth being honest when it breaks.
+function toggleFormFav(formId){
+  const was = isFormFav(formId);
+  FORM_FAVS = was ? FORM_FAVS.filter(k=>k!==formId) : FORM_FAVS.concat([formId]);
+  renderFormsList();
+  const done = r => { if(r && r.success && Array.isArray(r.keys)){ FORM_FAVS = r.keys; renderFormsList(); } };
+  const fail = () => { FORM_FAVS = was ? FORM_FAVS.concat([formId]) : FORM_FAVS.filter(k=>k!==formId); renderFormsList(); };
+  if(was){
+    fetch('/api/favorites?kind=form&key='+encodeURIComponent(formId),{method:'DELETE'})
+      .then(r=>r.json()).then(done).catch(fail);
+  } else {
+    fetch('/api/favorites',{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({kind:'form',key:formId})}).then(r=>r.json()).then(done).catch(fail);
+  }
+}
+
 function renderFormsList(){
   S_activeForm=null;
   const host=document.getElementById('forms-new'); if(!host) return;
@@ -15879,11 +15913,21 @@ function renderFormsList(){
   const search = FORMS_DEFS.length > 6
     ? `<input type="text" class="ff-input" id="forms-search" placeholder="🔍  Search forms…" oninput="filterFormsList(this.value)" style="max-width:340px;margin-bottom:16px;">`
     : '';
-  host.innerHTML = search + '<div class="forms-grid" id="forms-grid">' + FORMS_DEFS.slice().sort((a,b)=>String(a.title||'').localeCompare(String(b.title||''))).map(f=>`
+  // Pinned first, in the order they were pinned; everything else alphabetical
+  // behind them. Two sorted groups rather than one sort, so a pin never has to
+  // compete with a title for position.
+  const favs = FORMS_DEFS.filter(f=>isFormFav(f.formId))
+    .sort((a,b)=>FORM_FAVS.indexOf(a.formId)-FORM_FAVS.indexOf(b.formId));
+  const rest = FORMS_DEFS.filter(f=>!isFormFav(f.formId))
+    .sort((a,b)=>String(a.title||'').localeCompare(String(b.title||'')));
+  host.innerHTML = search + '<div class="forms-grid" id="forms-grid">' + favs.concat(rest).map(f=>`
     <button class="form-tile" data-search="${hEsc(((f.title||'')+' '+(f.description||'')).toLowerCase())}" onclick="openForm('${hEsc(f.formId)}')" style="position:relative;">
       <div class="ft-icon">${hEsc(f.icon)}</div>
       <div class="ft-title">${hEsc(f.title)}</div>
       <div class="ft-desc">${hEsc(f.description)}</div>
+      <span role="button" title="${isFormFav(f.formId)?'Unpin this form':'Pin to the top'}"
+        onclick="event.stopPropagation();toggleFormFav('${hEsc(f.formId)}')"
+        style="position:absolute;top:8px;left:8px;width:28px;height:28px;border-radius:50%;cursor:pointer;font-size:15px;line-height:28px;text-align:center;${isFormFav(f.formId)?'':'opacity:.3;'}">${isFormFav(f.formId)?'★':'☆'}</span>
       ${isAdminRole()?      `<span role="button" title="Edit questions" onclick="event.stopPropagation();openFieldsDialog('${hEsc(f.formId)}')" style="position:absolute;top:8px;right:42px;width:28px;height:28px;border-radius:50%;border:1px solid var(--border);background:var(--surface,#fff);cursor:pointer;font-size:14px;line-height:26px;text-align:center;">✏️</span>`+`<span role="button" title="Manage access" onclick="event.stopPropagation();openAccessDialog('${hEsc(f.formId)}')" style="position:absolute;top:8px;right:8px;width:28px;height:28px;border-radius:50%;border:1px solid var(--border);background:var(--surface,#fff);cursor:pointer;font-size:14px;line-height:26px;text-align:center;">⚙️</span>`:''}
     </button>`).join('') + '</div>'
     + '<div id="forms-noresult" style="display:none;color:var(--text-muted);padding:14px 4px;">No forms match that search.</div>';
