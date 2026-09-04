@@ -16502,6 +16502,45 @@ function deleteSubmission(submissionId, title){
     }).catch(e=>alert(e.message||e));
 }
 
+// A submission's one-line summary, built for READING rather than for storage.
+//
+// The stored `summary` column is every field in sort order, so a time-off
+// request opened with "Employee: 2014-0001-2984 | Salon: 3015 | Request Type:"
+// and the dates -- the whole point of the request -- fell past the ellipsis.
+// Rebuilding it here also repairs rows submitted before this existed, which
+// fixing only the writer would not.
+//
+// Dates first and emphasised, then the short fields. Free text is left out
+// entirely: a reason is worth reading in Details and worth nothing truncated
+// at 40 characters.
+function subSummary(s){
+  const def=FORMS_DEFS.find(f=>f.formId===s.formId);
+  const fields=(def&&def.fields)||[];
+  if(!fields.length) return hEsc(s.summary||'');
+  const data=s.data||{};
+  const filled=f=>{ const v=data[f.fieldKey]; return !(v===undefined||v===null||v===''||(Array.isArray(v)&&!v.length)); };
+  const show=f=>{
+    const v=data[f.fieldKey];
+    if(f.type==='employee'){ const p=(INACTIVE_MAP||{})[v]; return p&&p.name?fmtName(p.name):String(v); }
+    if(f.type==='date') return pDate(v);
+    if(f.type==='photo') return (Array.isArray(v)?v.length:0)+' photo'+((Array.isArray(v)&&v.length===1)?'':'s');
+    return Array.isArray(v)?v.join(', '):String(v);
+  };
+  const dates=fields.filter(f=>f.type==='date'&&filled(f));
+  const rest=fields.filter(f=>f.type!=='date'&&f.type!=='section'&&f.type!=='textarea'&&filled(f));
+  let out='';
+  if(dates.length){
+    // Two dates on one form are a range far more often than they are two
+    // unrelated facts, and an arrow reads faster than two labels.
+    const txt = dates.length===2 ? show(dates[0])+' → '+show(dates[1])
+              : dates.map(show).join(', ');
+    out += '<strong style="color:var(--text);">'+hEsc(txt)+'</strong>';
+  }
+  const tail=rest.map(f=>hEsc(show(f))).filter(Boolean).join(' · ');
+  if(tail) out += (out ? ' · ' : '') + tail;
+  return out || hEsc(s.summary||'');
+}
+
 function submissionRows(list, showWho, ctx){
   ctx=ctx||'';
   if(!list.length) return '<div class="no-data"><div class="no-data-icon">📭</div>Nothing here yet.</div>';
@@ -16509,7 +16548,7 @@ function submissionRows(list, showWho, ctx){
       <th>Form</th>${showWho?'<th>Submitted By</th>':''}<th>Salon</th><th>Submitted</th><th>Status</th><th></th>
     </tr></thead><tbody>` + list.map(s=>{ const k=ctx+s.submissionId; return `
       <tr>
-        <td><strong>${hEsc(s.formTitle)}</strong><div style="font-size:11.5px;color:var(--text-muted);max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${hEsc(s.summary)}</div></td>
+        <td><strong>${hEsc(s.formTitle)}</strong><div style="font-size:11.5px;color:var(--text-muted);max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${subSummary(s)}</div></td>
         ${showWho?`<td>${hEsc(fmtName(s.submittedByName||''))}</td>`:''}
         <td>${hEsc(s.salonNum||'—')}</td>
         <td>${hEsc(s.submittedAt?pDate(s.submittedAt.slice(0,10)):'—')}</td>
@@ -16539,6 +16578,7 @@ function submissionDetail(s, ctx){
         return;
       }
       let shown=Array.isArray(v)?v.join(', '):v;
+      if(f.type==='date') shown=pDate(v);
       // Employee picker stores a globalId — show the name back to the reader.
       if(f.type==='employee'){
         // Name only. The globalId is how the value is STORED, not something a
