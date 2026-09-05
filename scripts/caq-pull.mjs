@@ -214,6 +214,37 @@ async function doLogin(page) {
     log('pick-an-account -> use another'); await pick.click().catch(() => {}); await page.waitForTimeout(1500)
   }
 
+  // POWER BI'S OWN EMAIL GATE, which comes BEFORE the hand-off to Microsoft.
+  //
+  //   "Enter your work or school email, we'll check if you need to create a
+  //    new account."  [Email]  [Submit]
+  //
+  // It lives on app.powerbi.com/singleSignOn and its box is input[type=text] --
+  // no type=email, no name=loginfmt, no #i0116. The Azure AD selectors below
+  // therefore never matched it, and the script sat waiting sixty seconds at a
+  // form it could have filled in at once, then reported the missing field it
+  // went on to look for rather than the one in front of it.
+  if (/app\.powerbi\.com\/singleSignOn/i.test(page.url())) {
+    const gate = page.locator('input[type="text"], input[type="email"]').first()
+    if (await gate.isVisible({ timeout: 20000 }).catch(() => false)) {
+      log('Power BI SSO gate - entering email')
+      await gate.fill(PBI_USER)
+      // This page has a real Submit button and does not respond to Enter as
+      // reliably, so click it when it is there and fall back to Enter.
+      const submit = page.getByRole('button', { name: /^submit$/i }).first()
+      if (await submit.isVisible({ timeout: 4000 }).catch(() => false)) {
+        await submit.click().catch(() => {})
+      } else {
+        await gate.press('Enter').catch(() => {})
+      }
+      // Submitting hands off to Microsoft; wait for the URL to actually leave.
+      await page.waitForURL(u => !/app\.powerbi\.com\/singleSignOn/i.test(String(u)),
+        { timeout: 60000 }).catch(() => {})
+      await page.waitForTimeout(2000)
+      await shot(page, 'after-sso-gate')
+    }
+  }
+
   // Email — submit with Enter (posts the form directly; avoids clicking a hidden
   // or not-yet-enabled submit button).
   const email = page.locator('input[type="email"], input[name="loginfmt"], #i0116').first()
@@ -231,10 +262,11 @@ async function doLogin(page) {
     // from "the login page loaded but the field moved", and worth saying so
     // plainly rather than pressing on to look for a password box.
     if (/app\.powerbi\.com\/singleSignOn/i.test(page.url())) {
-      log('DIAGNOSIS: still on the Power BI singleSignOn hand-off - it never redirected to Microsoft sign-in.')
-      log('  Likeliest causes, in order: the sign-in is being blocked as automated;')
-      log('  a conditional-access / MFA policy now applies to this account; or the')
-      log('  account is disabled or its password expired. The page text logged above usually says which.')
+      log('DIAGNOSIS: still on the Power BI singleSignOn hand-off.')
+      log('  This page carries its own email box (input[type=text]) and a Submit button,')
+      log('  handled above. If we are still here, that gate did not accept the address:')
+      log('  check the page text logged above, then whether the account is disabled,')
+      log('  its password expired, or a conditional-access policy now applies.')
       // A hand-off that stalls sometimes has a button waiting on a click.
       const go = page.getByRole('button', { name: /sign in|continue|next/i }).first()
       if (await go.isVisible({ timeout: 3000 }).catch(() => false)) {
