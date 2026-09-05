@@ -12,7 +12,7 @@
 //   fetch('/api/forms/seed', {method:'POST'}).then(r=>r.json()).then(console.log)
 
 import { NextResponse } from 'next/server'
-import { requireAdmin } from '@/lib/require-role'
+import {requireCapability} from '@/lib/require-role'
 import { readSheet, rowsToObjects, appendSheet, ensureTab } from '@/lib/sheets'
 import { TAB_DEFS, TAB_FIELDS, TAB_SUBS, DEFS_COLUMNS, FIELDS_COLUMNS, SUBS_COLUMNS } from '@/lib/forms'
 import {
@@ -114,7 +114,7 @@ async function ensureHeader(tab: string, columns: readonly string[]): Promise<bo
 }
 
 export async function POST() {
-  const gate = await requireAdmin()
+  const gate = await requireCapability('manage.forms')
   if (!gate.ok) return gate.response
 
   try {

@@ -10692,10 +10692,11 @@ const HUB_GROUPS = {
         show:_navPerfUser, dest:{ company:_coGo('standouts') } },
       { t:'Flexibility & Reliability', d:'Availability and dependability across the team.',
         show:_navPerfUser, href:'/flexibility_reliability_tool.html' },
-      // No capability for this one yet -- see lib/capabilities.ts. `show` mirrors
-      // the reveal rule on the #ftb-points tab exactly.
+      // CAPABILITIES-v3: view.points, which is a SCREEN capability -- the rows
+      // behind it are scoped by seesEmployee() in /api/gs/getDiscPoints either
+      // way, and everyone can always see their own.
       { t:'Disciplinary points', d:'Active points, flags and per-person history.',
-        show:function(){ return isAdminRole() || isAMRole(); },
+        cap:'view.points',
         go:function(){ switchToForms(); showFormsTab('points'); } },
     ],
   },
@@ -11461,6 +11462,172 @@ function accAddRow(){
   tb.insertAdjacentHTML('beforeend', _accRow(null, (ACCESS_DATA && ACCESS_DATA.validRoles) || []));
 }
 
+// == Who can see what =======================================================
+// CAPABILITIES-v3.
+//
+// One grid: capabilities down, roles across. It exists because the honest
+// answer to "who can see the supply catalogue" used to be "read six route
+// files and a role list in this page", and nobody should have to do that to
+// feel sure a stylist cannot open a lease.
+//
+// A tick here is a rule for the whole ROLE, saved as a `role:<name>` row in the
+// same Capabilities tab that holds per-person exceptions. A person's own row
+// still wins over their role's, so an exception made for a reason survives a
+// later change to the role.
+//
+// The kind tag matters and is not decoration:
+//   data    the API refuses without it. Unticking it means the rows never
+//           leave the server.
+//   screen  it chooses which screen appears; the endpoint behind it is scoped
+//           per person anyway. Unticking it means "not in the menu".
+// Calling both of those "access" without saying which is how people end up
+// believing a screen toggle is a security boundary.
+
+const ROLE_SHORT = {
+  owner:'Owner', admin:'Admin', viewer:'Viewer', area_manager:'AM',
+  manager:'Manager', office:'Office', stylist:'Stylist', maintenance:'Maint'
+};
+
+function renderCapMatrix(){
+  const d = ACCESS_DATA || {};
+  const meta = (d.capabilityMeta || []).map(function(m){
+    return Object.assign({}, m, { needs: (d.capabilityRequires || {})[m.key] || '' });
+  });
+  const roles = d.roles || [];
+  const have = d.roleCaps || {};
+  if(!meta.length || !roles.length) return '';
+
+  const th = 'padding:6px 7px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;'
+    + 'color:var(--text-muted);text-align:center;font-weight:700;';
+  let head = '<th style="' + th + 'text-align:left;position:sticky;left:0;background:var(--surface,#fff);z-index:2;min-width:210px;">Capability</th>';
+  roles.forEach(function(r){
+    head += '<th style="' + th + 'width:66px;">' + _accEsc(ROLE_SHORT[r] || r) + '</th>';
+  });
+
+  let body = '', lastGroup = '';
+  meta.forEach(function(m){
+    if(m.group !== lastGroup){
+      lastGroup = m.group;
+      body += '<tr><td colspan="' + (roles.length + 1) + '" style="padding:12px 7px 3px;font-size:10px;'
+        + 'font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);'
+        + 'position:sticky;left:0;background:var(--surface,#fff);">' + _accEsc(m.group) + '</td></tr>';
+    }
+    const tag = m.kind === 'data'
+      ? '<span title="The API refuses without it" style="font-size:9.5px;font-weight:700;color:#0a5236;background:var(--exc-bg,#e6f4e0);border-radius:9px;padding:1px 6px;">data</span>'
+      : '<span title="Chooses which screen appears; the rows behind it are scoped per person anyway" style="font-size:9.5px;font-weight:700;color:#7a5b00;background:var(--grw-bg,#fdf6e0);border-radius:9px;padding:1px 6px;">screen</span>';
+    body += '<tr>'
+      + '<td style="padding:6px 7px;border-top:1px solid var(--border);position:sticky;left:0;'
+        + 'background:var(--surface,#fff);z-index:1;">'
+        + '<div style="font-size:12px;font-weight:600;">' + _accEsc(m.label) + ' ' + tag + '</div>'
+        + '<div style="font-size:10.5px;color:var(--text-muted);" title="' + _accEsc(m.enforcedOn || '') + '">'
+        + _accEsc(m.description) + '</div></td>';
+    roles.forEach(function(r){
+      const on = (have[r] || []).indexOf(m.key) >= 0;
+      // The owner cannot be locked out of the panel that unlocks everything.
+      const locked = (r === 'owner' && m.key === 'manage.access');
+      body += '<td style="padding:6px 7px;text-align:center;border-top:1px solid var(--border);">'
+        + '<input type="checkbox" class="cm-box" data-role="' + _accEsc(r) + '" data-cap="' + _accEsc(m.key) + '"'
+        + (m.needs ? ' data-needs="' + _accEsc(m.needs) + '"' : '')
+        + (on ? ' checked' : '') + (locked ? ' disabled title="Owners always keep this"' : '')
+        + ' onchange="cmDeps(this)" style="width:15px;height:15px;accent-color:var(--primary);cursor:pointer;">'
+        + '</td>';
+    });
+    body += '</tr>';
+  });
+
+  let fixed = '';
+  (d.fixedGates || []).forEach(function(g){
+    fixed += '<tr><td style="' + _ACC_TD + 'font-weight:600;">' + _accEsc(g.what) + '</td>'
+      + '<td style="' + _ACC_TD + '">' + _accEsc(g.who) + '</td>'
+      + '<td style="' + _ACC_TD + 'color:var(--text-muted);font-size:11px;">' + _accEsc(g.where) + '</td></tr>';
+  });
+
+  // A row of empty boxes for `manager` would otherwise read as "managers see
+  // nothing", which is wrong and would send somebody granting capabilities
+  // nobody needs. What everyone gets WITHOUT a capability is the baseline this
+  // grid sits on top of, so it has to be stated next to it.
+  return '<div style="font-size:12px;font-weight:700;margin:4px 0 2px;">Who can see what'
+    + '<span style="font-weight:400;color:var(--text-muted);"> &mdash; a tick is a rule for the whole role. '
+    + 'One person\'s own exception still overrides their role, and is set with the &#9881; button below.</span></div>'
+    + '<div style="font-size:11.5px;background:#f4f7f6;border:1px solid var(--border);border-radius:8px;'
+    + 'padding:9px 12px;margin-bottom:9px;line-height:1.55;">'
+    + '<b>Everyone who can sign in already gets, with no capability ticked:</b> their own home page; '
+    + 'the forms their role is the audience for, and their own submissions and comments; their own '
+    + 'disciplinary points; and salon numbers for the salons in their scope. '
+    + '<span style="color:var(--text-muted);">The grid below adds screens and data ON TOP of that. '
+    + 'An empty column is not &quot;sees nothing&quot; &mdash; it is &quot;nothing beyond their own salon '
+    + 'and their own record&quot;.</span></div>'
+    + '<div style="overflow-x:auto;border:1px solid var(--border);border-radius:9px;">'
+    + '<table style="width:100%;border-collapse:collapse;font-size:12px;background:var(--surface,#fff);">'
+    + '<thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>'
+    + '<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'
+    + '<button class="btn btn-primary btn-sm" onclick="saveCapMatrix()">&#128190; Save role access</button>'
+    + '<button class="btn btn-sm" onclick="loadAccessPanel()">Discard changes</button>'
+    + '<span id="cm-msg" style="font-size:11px;color:var(--text-muted);"></span></div>'
+    + (fixed
+        ? '<div style="font-size:12px;font-weight:700;margin:16px 0 4px;">Not a toggle, by design'
+          + '<span style="font-weight:400;color:var(--text-muted);"> &mdash; these are fixed in code. '
+          + 'Listed so nothing about access is invisible.</span></div>'
+          + '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;">'
+          + _accHead(['What','Who','Where it is enforced']) + '<tbody>' + fixed + '</tbody></table></div>'
+        : '');
+}
+
+// Same pairing rule as the per-person dialog, applied down a single column: you
+// cannot give a role an edit without the view it needs.
+function cmDeps(box){
+  const role = box.getAttribute('data-role');
+  const cap = box.getAttribute('data-cap');
+  const req = (ACCESS_DATA && ACCESS_DATA.capabilityRequires) || {};
+  const inCol = {};
+  Array.prototype.slice.call(document.querySelectorAll('.cm-box[data-role="' + role + '"]'))
+    .forEach(function(b){ inCol[b.getAttribute('data-cap')] = b; });
+  if(box.checked && req[cap] && inCol[req[cap]]) inCol[req[cap]].checked = true;
+  if(!box.checked){
+    Object.keys(req).forEach(function(k){
+      if(req[k] === cap && inCol[k]) inCol[k].checked = false;
+    });
+  }
+}
+
+// Only the roles whose column actually changed are written, so a stray click
+// on an unrelated row does not rewrite eight roles' worth of rows.
+async function saveCapMatrix(){
+  const msg = document.getElementById('cm-msg');
+  const set = function(t, ok){ if(msg){ msg.textContent = t; msg.style.color = ok ? '#0a5236' : '#b3261e'; } };
+  const roles = (ACCESS_DATA && ACCESS_DATA.roles) || [];
+  const before = (ACCESS_DATA && ACCESS_DATA.roleCaps) || {};
+
+  const changed = [];
+  roles.forEach(function(r){
+    const now = Array.prototype.slice.call(document.querySelectorAll('.cm-box[data-role="' + r + '"]'))
+      .filter(function(b){ return b.checked; })
+      .map(function(b){ return b.getAttribute('data-cap'); });
+    const was = (before[r] || []).slice().sort().join(',');
+    if(now.slice().sort().join(',') !== was) changed.push({ role: r, caps: now });
+  });
+
+  if(!changed.length){ set('Nothing changed.', true); return; }
+  set('Saving ' + changed.length + ' role' + (changed.length === 1 ? '' : 's') + '…', true);
+  try{
+    for(const c of changed){
+      const r = await fetch('/api/admin/capabilities', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(c)
+      }).then(function(x){ return x.json(); });
+      if(!r || !r.success) throw new Error((r && r.error) || ('could not save ' + c.role));
+    }
+    await loadAccessPanel();
+    const m2 = document.getElementById('cm-msg');
+    if(m2){
+      m2.textContent = 'Saved. Changes take effect within 15 seconds.';
+      m2.style.color = '#0a5236';
+    }
+  }catch(e){
+    set(String(e.message || e), false);
+  }
+}
+
 function renderAccessPanel(){
   const host = document.getElementById('access-panel');
   if(!host || !ACCESS_DATA) return;
@@ -11476,6 +11643,7 @@ function renderAccessPanel(){
   });
 
   let html = '<div style="margin-bottom:8px;">' + counts + '</div>';
+  html += renderCapMatrix();
 
   html += '<div style="font-size:12px;font-weight:700;margin:10px 0 4px;">Assigned roles'
         + '<span style="font-weight:400;color:var(--text-muted);"> &mdash; the Users tab. Checked first, so a person listed here keeps this role whatever the employee tables say.</span></div>';
@@ -11584,7 +11752,7 @@ function accOpenCaps(email){
   const entry = (ACCESS_DATA.entries || []).filter(function(e){ return e.email === email; })[0];
   if(!entry) return;
   const meta = ACCESS_DATA.capabilityMeta || [];
-  const defaults = (ACCESS_DATA.roleDefaults || {})[entry.role] || [];
+  const defaults = (ACCESS_DATA.roleCaps || ACCESS_DATA.roleDefaults || {})[entry.role] || [];
   const have = new Set(entry.caps || []);
   const isDefault = new Set(defaults);
   const scopeText = (entry.salons && entry.salons.length)
@@ -11614,11 +11782,15 @@ function accOpenCaps(email){
       ? '<span style="color:var(--text-muted);font-size:10px;">default</span>'
       : '<span style="color:#b06a00;font-size:10px;font-weight:700;">' + (on ? 'granted' : 'revoked') + '</span>';
     const dep = requires[m.key] ? ' data-needs="' + _accEsc(requires[m.key]) + '"' : '';
+    const kind = m.kind === 'screen'
+      ? '<span title="Chooses which screen appears; the rows behind it are scoped per person anyway" style="font-size:9.5px;font-weight:700;color:#7a5b00;background:var(--grw-bg,#fdf6e0);border-radius:9px;padding:1px 6px;">screen</span>'
+      : '<span title="The API refuses without it" style="font-size:9.5px;font-weight:700;color:#0a5236;background:var(--exc-bg,#e6f4e0);border-radius:9px;padding:1px 6px;">data</span>';
     rows += '<label style="display:flex;gap:8px;align-items:flex-start;padding:7px 4px;border-bottom:1px solid var(--border);cursor:pointer;">'
       + '<input type="checkbox" class="cap-box" data-cap="' + _accEsc(m.key) + '"' + dep
       + (on ? ' checked' : '') + ' onchange="accCapDeps(this)" style="margin-top:2px;">'
-      + '<span style="flex:1;"><b style="font-size:12px;">' + _accEsc(m.label) + '</b> ' + tag
-      + '<br><span style="font-size:11px;color:var(--text-muted);">' + _accEsc(m.description) + '</span></span>'
+      + '<span style="flex:1;"><b style="font-size:12px;">' + _accEsc(m.label) + '</b> ' + kind + ' ' + tag
+      + '<br><span style="font-size:11px;color:var(--text-muted);" title="' + _accEsc(m.enforcedOn || '') + '">'
+      + _accEsc(m.description) + '</span></span>'
       + '</label>';
   });
 
@@ -16189,7 +16361,7 @@ function loadForms(cb){
     const qb=document.getElementById('ftb-queue');
     if(qb) qb.style.display = FORMS_SUBS.length ? '' : 'none';
     const pb=document.getElementById('ftb-points');
-    if(pb) pb.style.display = (isAdminRole()||isAMRole()) ? '' : 'none';
+    if(pb) pb.style.display = canSeePoints() ? '' : 'none';
     showFormsTab(S_formsTab);
     if(cb) cb();
   });
@@ -16439,6 +16611,12 @@ function saveFieldsDialog(){
 
 // manage.forms is what POST /api/forms/access checks. Owner and admin hold it
 // by default -- the same two roles requireAdmin allowed before.
+// Mirrors the card above, and both now read the capability rather than a
+// role list that had to be repeated identically in two places.
+function canSeePoints(){
+  return SESSION_CAPS.size ? hasCap('view.points') : (isAdminRole() || isAMRole());
+}
+
 function canManageFormSettings(){
   return SESSION_CAPS.size ? hasCap('manage.forms') : isAdminRole();
 }
@@ -17083,7 +17261,7 @@ function submissionDetail(s, ctx){
   // Deleting is owner/admin only and deliberately apart from the workflow
   // buttons: those record an outcome, this is for rows that should never have
   // existed. Mostly test submissions.
-  if(isAdminRole()){
+  if(SESSION_CAPS.size ? hasCap('delete.submissions') : isAdminRole()){
     dl += `<div style="margin-top:12px;display:flex;justify-content:flex-end;">
       <button class="sub-del"
         onclick="deleteSubmission('${sid}','${hEsc(String(s.formTitle||'this submission'))}','${hEsc(s.formId)}')">Delete permanently</button></div>`;

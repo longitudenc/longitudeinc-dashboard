@@ -10,7 +10,7 @@
 
 import { NextResponse } from 'next/server'
 import { readSheet, rowsToObjects, writeSheet } from '@/lib/sheets'
-import { requireSignedIn, requireAdmin } from '@/lib/require-role'
+import {requireSignedIn, requireCapability} from '@/lib/require-role'
 import {
   getSubmissions, filterSubmissions, canReviewSubmission, getFormDefs, getComments,
   TAB_SUBS, TAB_COMMENTS,
@@ -112,7 +112,7 @@ export async function GET(req: Request) {
  * discover a stray event later.
  */
 export async function DELETE(req: Request) {
-  const gate = await requireAdmin()
+  const gate = await requireCapability('delete.submissions')
   if (!gate.ok) return gate.response
 
   try {

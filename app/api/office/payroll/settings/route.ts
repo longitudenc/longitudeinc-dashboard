@@ -12,7 +12,7 @@
 //   POST { rules?, codes?, salons? }   partial update, merged over what's stored
 
 import { NextResponse } from 'next/server'
-import { requireOffice, requireAdmin } from '@/lib/require-role'
+import {requireCapability} from '@/lib/require-role'
 import { loadAdpSettings, defaultSettings, ADP_FIELDS, ADP_EARNINGS_CODES } from '@/lib/adp-settings'
 import { readSheet, rowsToObjects, writeSheet } from '@/lib/sheets'
 
@@ -37,7 +37,7 @@ const CODE_KEYS = [
 ]
 
 export async function GET() {
-  const gate = await requireOffice()
+  const gate = await requireCapability('view.payroll')
   if (!gate.ok) return gate.response
 
   try {
@@ -61,7 +61,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const gate = await requireAdmin()
+  const gate = await requireCapability('edit.settings')
   if (!gate.ok) return gate.response
 
   let body: any

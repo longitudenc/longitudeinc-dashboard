@@ -15,7 +15,7 @@
 
 import { NextResponse } from 'next/server'
 import { get } from '@vercel/blob'
-import { requireOffice } from '@/lib/require-role'
+import {requireCapability} from '@/lib/require-role'
 import { readSheet, rowsToObjects } from '@/lib/sheets'
 import { ADP_HISTORY_TAB } from '@/lib/adp-history'
 
@@ -23,7 +23,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 export async function GET(request: Request) {
-  const gate = await requireOffice()
+  const gate = await requireCapability('view.payroll')
   if (!gate.ok) return gate.response
 
   const pathname = (new URL(request.url).searchParams.get('p') || '').trim()

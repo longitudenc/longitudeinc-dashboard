@@ -19,7 +19,7 @@
 // back rather than a duplicate, so double-clicking the button is harmless.
 
 import { NextRequest, NextResponse } from 'next/server'
-import { requireAdmin } from '@/lib/require-role'
+import {requireCapability} from '@/lib/require-role'
 import { readSheet, appendSheet, rowsToObjects } from '@/lib/sheets'
 import { TAB_DEFS, TAB_FIELDS, DEFS_COLUMNS, FIELDS_COLUMNS } from '@/lib/forms'
 
@@ -36,7 +36,7 @@ function signupIdFor(eventId: string): string {
 }
 
 export async function POST(req: NextRequest) {
-  const gate = await requireAdmin()
+  const gate = await requireCapability('manage.forms')
   if (!gate.ok) return gate.response
 
   try {

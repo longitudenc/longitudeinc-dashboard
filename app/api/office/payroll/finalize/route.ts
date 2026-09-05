@@ -20,7 +20,7 @@
 // lock nobody can undo just gets worked around.
 
 import { NextRequest, NextResponse } from 'next/server'
-import { requireOffice } from '@/lib/require-role'
+import {requireCapability} from '@/lib/require-role'
 import { runPayrollBuild } from '@/lib/adp-run'
 import { readSheet, rowsToObjects, upsertSheet } from '@/lib/sheets'
 
@@ -45,7 +45,7 @@ async function readAll(): Promise<Record<string, any>[]> {
 }
 
 export async function GET(req: NextRequest) {
-  const gate = await requireOffice()
+  const gate = await requireCapability('view.payroll')
   if (!gate.ok) return gate.response
   const weekEnd = S(new URL(req.url).searchParams.get('weekEnd'))
   const rows = await readAll()
@@ -54,7 +54,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const gate = await requireOffice()
+  const gate = await requireCapability('view.payroll')
   if (!gate.ok) return gate.response
 
   try {
@@ -111,7 +111,7 @@ export async function POST(req: NextRequest) {
  * from the tab rather than being edited in place.
  */
 export async function DELETE(req: NextRequest) {
-  const gate = await requireOffice()
+  const gate = await requireCapability('view.payroll')
   if (!gate.ok) return gate.response
   try {
     const weekEnd = S(new URL(req.url).searchParams.get('weekEnd'))

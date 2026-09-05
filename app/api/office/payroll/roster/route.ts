@@ -15,7 +15,7 @@
 //   GET ?weekEnd=YYYY-MM-DD
 
 import { NextResponse } from 'next/server'
-import { requireOffice } from '@/lib/require-role'
+import {requireCapability} from '@/lib/require-role'
 import { readSheet, rowsToObjects } from '@/lib/sheets'
 
 export const runtime = 'nodejs'
@@ -38,7 +38,7 @@ function normalizePayId(raw: string): string {
 }
 
 export async function GET(request: Request) {
-  const gate = await requireOffice()
+  const gate = await requireCapability('view.payroll')
   if (!gate.ok) return gate.response
 
   const weekEnd = new URL(request.url).searchParams.get('weekEnd') || ''

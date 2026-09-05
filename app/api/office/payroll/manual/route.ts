@@ -12,7 +12,7 @@
 //   POST { weekEnd, lines: [...] }    replace that week's lines wholesale
 
 import { NextResponse } from 'next/server'
-import { requireOffice } from '@/lib/require-role'
+import {requireCapability} from '@/lib/require-role'
 import { readSheet, rowsToObjects, writeSheet } from '@/lib/sheets'
 import { loadManualLines } from '@/lib/adp-run'
 
@@ -28,7 +28,7 @@ const COLUMNS = ['id', 'weekEnd', 'payId', 'salonNum', 'code', 'amount', 'label'
 const isWeekEnd = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s)
 
 export async function GET(request: Request) {
-  const gate = await requireOffice()
+  const gate = await requireCapability('view.payroll')
   if (!gate.ok) return gate.response
 
   const weekEnd = new URL(request.url).searchParams.get('weekEnd') || ''
@@ -45,7 +45,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const gate = await requireOffice()
+  const gate = await requireCapability('view.payroll')
   if (!gate.ok) return gate.response
 
   let body: any

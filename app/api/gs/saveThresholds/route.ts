@@ -11,7 +11,7 @@
 // GET returns the rows as stored, for the editor's history table.
 
 import { NextRequest, NextResponse } from 'next/server'
-import { requireAdmin } from '@/lib/require-role'
+import {requireCapability} from '@/lib/require-role'
 import { writeSheet } from '@/lib/sheets'
 import {
   TAB_THRESHOLDS, THRESHOLD_COLUMNS, METRIC_META,
@@ -29,7 +29,7 @@ const cell = (v: unknown): string => {
 }
 
 export async function GET() {
-  const gate = await requireAdmin()
+  const gate = await requireCapability('edit.settings')
   if (!gate.ok) return gate.response
   try {
     return NextResponse.json({ success: true, rows: await getThresholdRows() })
@@ -40,7 +40,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   // Bands drive scorecards, bonuses and raise reviews — owner/admin only.
-  const gate = await requireAdmin()
+  const gate = await requireCapability('edit.settings')
   if (!gate.ok) return gate.response
   try {
     const body = await req.json()
@@ -98,7 +98,7 @@ export async function POST(req: NextRequest) {
 
 // Remove one dated set entirely (the editor's "Remove" on a history row).
 export async function DELETE(req: NextRequest) {
-  const gate = await requireAdmin()
+  const gate = await requireCapability('edit.settings')
   if (!gate.ok) return gate.response
   try {
     const effectiveFrom = normEffective(new URL(req.url).searchParams.get('effectiveFrom'))

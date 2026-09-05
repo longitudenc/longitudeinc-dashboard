@@ -11,7 +11,7 @@
 // few dozen rows), which keeps column alignment guaranteed.
 
 import { NextResponse } from 'next/server'
-import { requireAdmin } from '@/lib/require-role'
+import {requireCapability} from '@/lib/require-role'
 import { readSheet, rowsToObjects, writeSheet } from '@/lib/sheets'
 import {
   TAB_ANNOUNCEMENTS, TAB_DATES, TAB_LINKS,
@@ -77,7 +77,7 @@ function shapeItem(kind: Kind, raw: any, existing: Record<string, any> | null, e
 
 
 export async function POST(req: Request) {
-  const gate = await requireAdmin()
+  const gate = await requireCapability('edit.settings')
   if (!gate.ok) return gate.response
 
   try {

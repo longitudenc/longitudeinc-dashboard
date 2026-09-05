@@ -18,7 +18,7 @@
 // column alignment guaranteed — the same approach /api/home/save takes.
 
 import { NextRequest, NextResponse } from 'next/server'
-import { requireAdmin } from '@/lib/require-role'
+import {requireCapability} from '@/lib/require-role'
 import { readSheet, writeSheet, rowsToObjects } from '@/lib/sheets'
 import { TAB_DEFS, TAB_FIELDS, DEFS_COLUMNS, FIELDS_COLUMNS, FIELD_TYPES } from '@/lib/forms'
 
@@ -38,7 +38,7 @@ function keyFrom(label: string, taken: Set<string>): string {
 }
 
 export async function GET(req: NextRequest) {
-  const gate = await requireAdmin()
+  const gate = await requireCapability('manage.forms')
   if (!gate.ok) return gate.response
   try {
     const formId = str(new URL(req.url).searchParams.get('formId'))
@@ -59,7 +59,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const gate = await requireAdmin()
+  const gate = await requireCapability('manage.forms')
   if (!gate.ok) return gate.response
 
   try {

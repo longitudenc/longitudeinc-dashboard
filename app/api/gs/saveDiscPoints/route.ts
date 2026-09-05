@@ -16,7 +16,7 @@
 
 import { NextResponse } from 'next/server'
 import { google } from 'googleapis'
-import { requireAdmin } from '@/lib/require-role'
+import {requireCapability} from '@/lib/require-role'
 
 const SHEET_ID = '1uLjwGXzDc3jtmXkUn4yFiJiYlgx5SEs3zbdFWhwuGDE'
 const TAB = 'DiscPoints'
@@ -75,7 +75,7 @@ function writeAll(sheets: any, events: Record<string, any>[]) {
 
 export async function POST(req: Request) {
   // Only owner/admin may edit disciplinary points.
-  const gate = await requireAdmin()
+  const gate = await requireCapability('edit.points')
   if (!gate.ok) return gate.response
   try {
     const body = await req.json()

@@ -12,7 +12,7 @@
 
 import { NextResponse } from 'next/server'
 import { put } from '@vercel/blob'
-import { requireOffice } from '@/lib/require-role'
+import {requireCapability} from '@/lib/require-role'
 import { runPayrollBuild } from '@/lib/adp-run'
 import { upsertSheet } from '@/lib/sheets'
 import { ADP_HISTORY_TAB, HISTORY_COLUMNS, salonSnapshot } from '@/lib/adp-history'
@@ -22,7 +22,7 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 export async function GET(request: Request) {
-  const gate = await requireOffice()
+  const gate = await requireCapability('view.payroll')
   if (!gate.ok) return gate.response
 
   const url = new URL(request.url)

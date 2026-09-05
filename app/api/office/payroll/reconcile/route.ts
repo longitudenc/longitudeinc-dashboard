@@ -16,7 +16,7 @@
 // Owner/admin/office, like everything else under /api/office.
 
 import { NextRequest, NextResponse } from 'next/server'
-import { requireOffice } from '@/lib/require-role'
+import {requireCapability} from '@/lib/require-role'
 import { runPayrollBuild } from '@/lib/adp-run'
 import { readSheet, rowsToObjects } from '@/lib/sheets'
 
@@ -39,7 +39,7 @@ function csvCell(v: unknown): string {
 const csvRow = (cells: unknown[]) => cells.map(csvCell).join(',')
 
 export async function GET(req: NextRequest) {
-  const gate = await requireOffice()
+  const gate = await requireCapability('view.payroll')
   if (!gate.ok) return gate.response
 
   try {

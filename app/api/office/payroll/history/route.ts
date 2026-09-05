@@ -15,7 +15,7 @@
 //   GET ?limit=52   most recent weeks first
 
 import { NextResponse } from 'next/server'
-import { requireOffice } from '@/lib/require-role'
+import {requireCapability} from '@/lib/require-role'
 import { readSheet, rowsToObjects } from '@/lib/sheets'
 import { ADP_HISTORY_TAB } from '@/lib/adp-history'
 
@@ -30,7 +30,7 @@ const num = (v: unknown) => {
 }
 
 export async function GET(request: Request) {
-  const gate = await requireOffice()
+  const gate = await requireCapability('view.payroll')
   if (!gate.ok) return gate.response
 
   const limit = Math.min(200, Math.max(1, parseInt(

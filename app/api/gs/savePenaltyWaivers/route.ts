@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { google } from 'googleapis'
-import { requireAdmin } from '@/lib/require-role'
+import {requireCapability} from '@/lib/require-role'
 
 const SHEET_ID = '1uLjwGXzDc3jtmXkUn4yFiJiYlgx5SEs3zbdFWhwuGDE'
 
 export async function POST(req: NextRequest) {
   // Only owner/admin may edit penalty waivers.
-  const gate = await requireAdmin()
+  const gate = await requireCapability('edit.settings')
   if (!gate.ok) return gate.response
   try {
     const { waivers } = await req.json()

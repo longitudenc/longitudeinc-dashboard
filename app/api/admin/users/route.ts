@@ -5,7 +5,7 @@
 //   GET  -> every login the app will accept, with WHERE each role comes from
 //   POST -> rewrite the Users tab (the manual list) from the panel
 //
-// Owner only. requireOwner() already describes itself as being for "the most
+// Owner only. requireCapability('manage.access') already describes itself as being for "the most
 // sensitive surface (the access/Users list)" — this is that surface.
 //
 // The Users tab is the one place a role is ASSIGNED rather than derived, so it
@@ -13,10 +13,14 @@
 // changed by changing the underlying assignment, not here.
 
 import { NextRequest, NextResponse } from 'next/server'
-import { requireOwner } from '@/lib/require-role'
+import {requireCapability} from '@/lib/require-role'
 import { readSheet, writeSheet } from '@/lib/sheets'
 import { listAllAccess } from '@/lib/access-audit'
-import { CAPABILITY_META, CAPABILITY_REQUIRES, ROLE_DEFAULTS } from '@/lib/capabilities'
+import {
+  CAPABILITY_META, CAPABILITY_REQUIRES, ROLE_DEFAULTS, ROLES, FIXED_GATES,
+  ALL_CAPABILITIES, getCapabilityOverrides, roleSubject,
+  type Capability,
+} from '@/lib/capabilities'
 import type { Role } from '@/lib/auth-roles'
 
 export const runtime = 'nodejs'
@@ -54,8 +58,29 @@ function headerIndex(header: string[], field: string): number {
   return header.findIndex(h => want.includes(norm(h)))
 }
 
+/**
+ * What each ROLE actually has right now: its code defaults, plus any role rule
+ * saved in the Capabilities tab. Deliberately NOT resolveCapabilities() -- that
+ * answers for a PERSON and would fold in their individual exceptions, which is
+ * the wrong question for a matrix whose columns are roles.
+ */
+async function effectiveRoleCaps(): Promise<Record<string, Capability[]>> {
+  const rules = await getCapabilityOverrides({ fresh: true })
+  const out: Record<string, Capability[]> = {}
+  for (const role of ROLES) {
+    const caps = new Set<Capability>(ROLE_DEFAULTS[role] || [])
+    for (const r of rules.filter(x => x.email === roleSubject(role))) {
+      if (r.allow) caps.add(r.capability)
+      else caps.delete(r.capability)
+    }
+    if (role === 'owner') caps.add('manage.access')     // mirrors resolveCapabilities
+    out[role] = ALL_CAPABILITIES.filter(c => caps.has(c))
+  }
+  return out
+}
+
 export async function GET() {
-  const gate = await requireOwner()
+  const gate = await requireCapability('manage.access')
   if (!gate.ok) return gate.response
   try {
     const audit = await listAllAccess()
@@ -67,6 +92,12 @@ export async function GET() {
       // Which capabilities depend on which, so the panel cannot offer an edit
       // grant without the view it needs.
       capabilityRequires: CAPABILITY_REQUIRES,
+      // CAPABILITIES-v3. Everything the "who can see what" matrix needs: the
+      // roles, what each one EFFECTIVELY has (code defaults plus any role rule
+      // saved against it), and the guards that are deliberately not toggles.
+      roles: ROLES,
+      roleCaps: await effectiveRoleCaps(),
+      fixedGates: FIXED_GATES,
     })
   } catch (e: any) {
     return NextResponse.json({ success: false, error: String(e?.message || e) }, { status: 500 })
@@ -74,7 +105,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const gate = await requireOwner()
+  const gate = await requireCapability('manage.access')
   if (!gate.ok) return gate.response
 
   try {
@@ -171,6 +202,12 @@ export async function POST(req: NextRequest) {
       // Which capabilities depend on which, so the panel cannot offer an edit
       // grant without the view it needs.
       capabilityRequires: CAPABILITY_REQUIRES,
+      // CAPABILITIES-v3. Everything the "who can see what" matrix needs: the
+      // roles, what each one EFFECTIVELY has (code defaults plus any role rule
+      // saved against it), and the guards that are deliberately not toggles.
+      roles: ROLES,
+      roleCaps: await effectiveRoleCaps(),
+      fixedGates: FIXED_GATES,
     })
   } catch (e: any) {
     return NextResponse.json({ success: false, error: String(e?.message || e) }, { status: 500 })

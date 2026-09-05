@@ -15,7 +15,7 @@
 // tracker — see app/api/forms/submit/route.ts.
 
 import { NextResponse } from 'next/server'
-import { requireAdmin } from '@/lib/require-role'
+import {requireCapability} from '@/lib/require-role'
 import { readSheet, rowsToObjects, writeSheet, ensureTab } from '@/lib/sheets'
 import { TAB_DEFS, TAB_FIELDS, DEFS_COLUMNS, FIELDS_COLUMNS } from '@/lib/forms'
 
@@ -73,7 +73,7 @@ const FIELDS: Array<Record<string, string>> = [
 ]
 
 export async function POST() {
-  const gate = await requireAdmin()
+  const gate = await requireCapability('manage.forms')
   if (!gate.ok) return gate.response
 
   try {

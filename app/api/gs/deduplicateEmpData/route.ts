@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { requireAdmin } from '@/lib/require-role'
+import {requireCapability} from '@/lib/require-role'
 import { readSheet, writeSheet } from '@/lib/sheets'
 
 // Remove duplicate rows from SD_EMP_DAILY (and SD_EMP_WEEKLY), keeping the LAST
@@ -25,7 +25,7 @@ async function dedupeTab(tab: string, keyCols: string[]): Promise<{ tab: string;
 }
 
 export async function GET() {
-  const gate = await requireAdmin(); if (!gate.ok) return gate.response
+  const gate = await requireCapability('run.dataops'); if (!gate.ok) return gate.response
   try {
     const daily = await dedupeTab('SD_EMP_DAILY', ['date', 'storeId', 'payId'])
     const weekly = await dedupeTab('SD_EMP_WEEKLY', ['weekEnd', 'storeId', 'payId'])
