@@ -5,10 +5,10 @@
 //   GET   -> the catalogue, plus every option the supply order form offers
 //   POST  { items: [...] } -> replace the catalogue
 //
-// Office and up, matching the rest of /api/office. Mapping a form option to an
-// ASIN decides what actually gets bought when somebody ticks a box, so it sits
-// with the people who place the orders rather than with everyone who can read
-// one.
+// Gated on view.supplies to read and edit.supplies to write, both settable
+// per person in Users & Access. Mapping a form option to an ASIN decides what
+// actually gets bought when somebody ticks a box, so seeing the mapping and
+// changing it are deliberately two different permissions.
 //
 // GET returns formOptions as well as items because the two only mean anything
 // together: the catalogue is a set of answers to the questions the form asks,
@@ -16,7 +16,7 @@
 // editor needs to be able to show.
 
 import { NextResponse } from 'next/server'
-import { requireOffice } from '@/lib/require-role'
+import { requireCapability } from '@/lib/require-role'
 import { getFormDefs } from '@/lib/forms'
 import { listSupplyItems, saveSupplyItems, type SupplyItem } from '@/lib/supply-order'
 
@@ -35,7 +35,7 @@ async function formOptions(): Promise<{ group: string; options: string[] }[]> {
 }
 
 export async function GET() {
-  const gate = await requireOffice()
+  const gate = await requireCapability('view.supplies')
   if (!gate.ok) return gate.response
   try {
     const [items, groups] = await Promise.all([listSupplyItems(true), formOptions()])
@@ -46,7 +46,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const gate = await requireOffice()
+  const gate = await requireCapability('edit.supplies')
   if (!gate.ok) return gate.response
   try {
     const body = await req.json().catch(() => ({}))

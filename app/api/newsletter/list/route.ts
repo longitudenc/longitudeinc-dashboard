@@ -8,10 +8,15 @@
 
 import { NextResponse } from 'next/server'
 import { requireSignedIn } from '@/lib/require-role'
+import { capabilitiesFor } from '@/lib/capabilities'
 import { listPublished, listDrafts } from '@/lib/newsletter-store'
 
 export const runtime = 'nodejs'
-const EDIT_ROLES = new Set(['owner', 'admin', 'office'])
+// CAPABILITIES-v2. Was a hard-coded owner/admin/office list in each of these
+// five files; now one capability, settable per person in Users & Access. The
+// defaults grant it to exactly those three roles, so nobody's access changed.
+const mayEditNewsletter = async (email: string, access: any): Promise<boolean> =>
+  (await capabilitiesFor(access, email)).has('edit.newsletter')
 
 function currentMonthET(): string {
   const et = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }))
@@ -21,7 +26,7 @@ function currentMonthET(): string {
 export async function GET() {
   const gate = await requireSignedIn()
   if (!gate.ok) return gate.response
-  const canEdit = EDIT_ROLES.has(gate.access.role)
+  const canEdit = await mayEditNewsletter(gate.effectiveEmail, gate.access)
 
   let published: string[] = []
   let drafts: string[] = []

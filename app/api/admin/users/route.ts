@@ -16,7 +16,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireOwner } from '@/lib/require-role'
 import { readSheet, writeSheet } from '@/lib/sheets'
 import { listAllAccess } from '@/lib/access-audit'
-import { CAPABILITY_META, ROLE_DEFAULTS } from '@/lib/capabilities'
+import { CAPABILITY_META, CAPABILITY_REQUIRES, ROLE_DEFAULTS } from '@/lib/capabilities'
 import type { Role } from '@/lib/auth-roles'
 
 export const runtime = 'nodejs'
@@ -64,6 +64,9 @@ export async function GET() {
       validRoles: VALID_ROLES,
       capabilityMeta: CAPABILITY_META,
       roleDefaults: ROLE_DEFAULTS,
+      // Which capabilities depend on which, so the panel cannot offer an edit
+      // grant without the view it needs.
+      capabilityRequires: CAPABILITY_REQUIRES,
     })
   } catch (e: any) {
     return NextResponse.json({ success: false, error: String(e?.message || e) }, { status: 500 })
@@ -165,6 +168,9 @@ export async function POST(req: NextRequest) {
       validRoles: VALID_ROLES,
       capabilityMeta: CAPABILITY_META,
       roleDefaults: ROLE_DEFAULTS,
+      // Which capabilities depend on which, so the panel cannot offer an edit
+      // grant without the view it needs.
+      capabilityRequires: CAPABILITY_REQUIRES,
     })
   } catch (e: any) {
     return NextResponse.json({ success: false, error: String(e?.message || e) }, { status: 500 })

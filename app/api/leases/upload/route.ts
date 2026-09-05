@@ -27,7 +27,7 @@
 
 import { NextResponse } from 'next/server'
 import { handleUpload } from '@vercel/blob/client'
-import { requireAdmin } from '@/lib/require-role'
+import { requireCapability } from '@/lib/require-role'
 import {
   upsertFile, ALLOWED_CONTENT_TYPES, MAX_FILE_BYTES,
 } from '@/lib/leases'
@@ -38,7 +38,7 @@ export const dynamic = 'force-dynamic'
 const S = (v: unknown, max = 200) => String(v ?? '').trim().slice(0, max)
 
 export async function POST(req: Request) {
-  const gate = await requireAdmin()
+  const gate = await requireCapability('edit.leases')
   if (!gate.ok) return gate.response
 
   let body: any

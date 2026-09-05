@@ -19,7 +19,7 @@
 
 import { NextResponse } from 'next/server'
 import { get } from '@vercel/blob'
-import { requireAdmin } from '@/lib/require-role'
+import { requireCapability } from '@/lib/require-role'
 import { listFiles } from '@/lib/leases'
 
 export const runtime = 'nodejs'
@@ -33,7 +33,7 @@ function dispositionFor(fileName: string, download: boolean): string {
 }
 
 export async function GET(req: Request) {
-  const gate = await requireAdmin()
+  const gate = await requireCapability('view.leases')
   if (!gate.ok) return gate.response
 
   const url = new URL(req.url)

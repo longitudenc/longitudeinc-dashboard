@@ -19,7 +19,7 @@
 // Owner/admin, like the rest of /api/leases.
 
 import { NextResponse } from 'next/server'
-import { requireAdmin } from '@/lib/require-role'
+import { requireCapability } from '@/lib/require-role'
 import { SALON_NAMES } from '@/lib/config'
 import { listFiles } from '@/lib/leases'
 import {
@@ -61,7 +61,7 @@ const bySalonNum = (a: string, b: string) =>
   (Number(a) || 0) - (Number(b) || 0) || a.localeCompare(b)
 
 export async function GET() {
-  const gate = await requireAdmin()
+  const gate = await requireCapability('view.leases')
   if (!gate.ok) return gate.response
   try {
     const today = todayISO()
@@ -158,7 +158,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const gate = await requireAdmin()
+  const gate = await requireCapability('edit.leases')
   if (!gate.ok) return gate.response
   try {
     const body = await req.json()
@@ -328,7 +328,7 @@ export async function POST(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-  const gate = await requireAdmin()
+  const gate = await requireCapability('edit.leases')
   if (!gate.ok) return gate.response
   try {
     const url = new URL(req.url)

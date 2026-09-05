@@ -10715,22 +10715,17 @@ const HUB_GROUPS = {
         href:'/office.html' },
       { t:'Form Activity', d:'Recent submissions, and what is still waiting on a decision.',
         cap:'view.payroll', go:function(){ showFormActivity(); } },
-      // Editing is gated server-side to EDIT_ROLES = owner/admin/office in every
-      // /api/newsletter/* route. `show` MIRRORS that list rather than using a
-      // capability, because no capability is checked there yet -- a toggle the
-      // server ignores would be worse than none. Move both to
-      // requireCapability('edit.newsletter') together.
+      // CAPABILITIES-v2. These three were role lists written into the routes
+      // and mirrored here by hand. Each is now a capability the route itself
+      // checks, so a card cannot promise access the API then refuses.
       { t:'Supply catalogue', d:'Which product each supply order option actually buys.',
-        show:canEditSupplies, go:function(){ showSupplyCatalog(); } },
+        cap:'view.supplies', go:function(){ showSupplyCatalog(); } },
       { t:'Newsletter', d:'Build the monthly issue, then publish it for the team to read.',
-        show:function(){ return ['owner','admin','office'].indexOf(String(SESSION.role||'')) >= 0; },
-        href:'/newsletter.html' },
-      // owner/admin only, MIRRORING requireAdmin() in every /api/leases/* route.
-      // Not cap:'view.payroll' — that includes office, who would see the card and
-      // then be refused by the API. A lease carries rent, guarantees and landlord
-      // terms; it is a narrower thing than the payroll build.
+        cap:'edit.newsletter', href:'/newsletter.html' },
+      // Reading is view.leases, writing is edit.leases. Deliberately NOT on the
+      // office default: a lease carries rent, guarantees and landlord terms.
       { t:'Leases', d:'Lease documents — upload, file and pull one back up.',
-        show:function(){ return isAdminRole(); }, href:'/leases.html' },
+        cap:'view.leases', href:'/leases.html' },
     ],
   },
 };
@@ -11063,9 +11058,14 @@ function actOpen(tr){
 
 let SUPCAT = null;   // { items, groups } from /api/office/supply-items
 
-// Mirrors requireOffice() in the route. Not a capability: none is checked there.
+// CAPABILITIES-v2. edit.supplies is what POST /api/office/supply-items
+// checks, so the inputs appear for exactly the people the save will accept.
+// Before capabilities load, fall back to the roles that hold it by default
+// rather than showing an editor to everyone.
 function canEditSupplies(){
-  return ['owner','admin','office'].indexOf(String(SESSION.role||'')) >= 0;
+  return SESSION_CAPS.size
+    ? hasCap('edit.supplies')
+    : ['owner','admin','office'].indexOf(String(SESSION.role||'')) >= 0;
 }
 
 function showSupplyCatalog(){
@@ -11225,6 +11225,9 @@ function paintSupplyCatalog(){
     html += '<div style="display:flex;gap:8px;align-items:center;margin-top:12px;">'
       + '<button class="btn btn-primary btn-sm" onclick="saveSupplyCatalog()">Save catalogue</button>'
       + '<span id="sc-msg" style="font-size:12px;color:var(--text-muted);"></span></div>';
+  } else {
+    html += '<div class="act-note" style="margin-top:12px;">Read-only &mdash; you can see what each option buys '
+      + 'but not change it. That needs <b>Edit the catalogue</b>, which an owner can grant in Users &amp; Access.</div>';
   }
   host.innerHTML = html;
 }
@@ -11584,6 +11587,10 @@ function accOpenCaps(email){
   const defaults = (ACCESS_DATA.roleDefaults || {})[entry.role] || [];
   const have = new Set(entry.caps || []);
   const isDefault = new Set(defaults);
+  const scopeText = (entry.salons && entry.salons.length)
+    ? entry.salons.join(', ')
+    : (['owner','admin','viewer'].indexOf(entry.role) >= 0 ? 'every salon'
+      : entry.role === 'stylist' ? 'only themselves' : 'no salons assigned');
 
   accCloseCaps();
   const wrap = document.createElement('div');
@@ -11591,15 +11598,25 @@ function accOpenCaps(email){
   wrap.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.45);'
     + 'display:flex;align-items:center;justify-content:center;padding:16px;';
 
-  let rows = '';
+  // Grouped, because fourteen unlabelled switches is a list to scan rather
+  // than a thing to read. The server sends the order and the headings.
+  const requires = ACCESS_DATA.capabilityRequires || {};
+  let rows = '', lastGroup = '';
   meta.forEach(function(m){
+    if(m.group && m.group !== lastGroup){
+      lastGroup = m.group;
+      rows += '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;'
+        + 'color:var(--text-muted);margin:14px 0 2px;">' + _accEsc(m.group) + '</div>';
+    }
     const on = have.has(m.key);
     const def = isDefault.has(m.key);
     const tag = (on === def)
       ? '<span style="color:var(--text-muted);font-size:10px;">default</span>'
       : '<span style="color:#b06a00;font-size:10px;font-weight:700;">' + (on ? 'granted' : 'revoked') + '</span>';
+    const dep = requires[m.key] ? ' data-needs="' + _accEsc(requires[m.key]) + '"' : '';
     rows += '<label style="display:flex;gap:8px;align-items:flex-start;padding:7px 4px;border-bottom:1px solid var(--border);cursor:pointer;">'
-      + '<input type="checkbox" class="cap-box" data-cap="' + _accEsc(m.key) + '"' + (on ? ' checked' : '') + ' style="margin-top:2px;">'
+      + '<input type="checkbox" class="cap-box" data-cap="' + _accEsc(m.key) + '"' + dep
+      + (on ? ' checked' : '') + ' onchange="accCapDeps(this)" style="margin-top:2px;">'
       + '<span style="flex:1;"><b style="font-size:12px;">' + _accEsc(m.label) + '</b> ' + tag
       + '<br><span style="font-size:11px;color:var(--text-muted);">' + _accEsc(m.description) + '</span></span>'
       + '</label>';
@@ -11608,20 +11625,56 @@ function accOpenCaps(email){
   wrap.innerHTML = '<div style="background:#fff;border-radius:10px;max-width:560px;width:100%;'
     + 'max-height:86vh;overflow:auto;padding:16px 18px;box-shadow:0 8px 30px rgba(0,0,0,.3);">'
     + '<div style="font-weight:700;font-size:14px;color:#03654e;">' + _accEsc(entry.name || entry.email) + '</div>'
-    + '<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">' + _accEsc(entry.email)
+    + '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">' + _accEsc(entry.email)
     + ' &middot; role <b>' + _accEsc(entry.role) + '</b></div>'
-    + '<div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;">'
-    + 'Ticks matching the role default are not stored. Capabilities decide which <i>features</i>; '
-    + 'which <i>salons</i> they see is still their scope.</div>'
+    + '<div style="font-size:11.5px;background:#f4f7f6;border:1px solid var(--border);border-radius:8px;'
+    + 'padding:8px 11px;margin-bottom:10px;line-height:1.5;">'
+    + '<b>Sees rows for:</b> ' + _accEsc(scopeText) + '<br>'
+    + '<span style="color:var(--text-muted);">Capabilities below decide which <i>screens</i>. '
+    + 'Granting one never widens the salons above &mdash; those are filtered separately. '
+    + 'Ticks matching the role default are not stored.</span></div>'
     + rows
     + '<div style="margin-top:12px;display:flex;gap:8px;align-items:center;">'
     + '<button class="btn btn-primary btn-sm" data-email="' + _accEsc(entry.email) + '" onclick="accSaveCaps(this)">Save</button>'
+    + '<button class="btn btn-sm" onclick="accResetCaps()">Reset to role defaults</button>'
     + '<button class="btn btn-sm" onclick="accCloseCaps()">Cancel</button>'
     + '<span id="caps-msg" style="font-size:11px;color:var(--text-muted);"></span>'
     + '</div></div>';
 
+  wrap._defaults = defaults.slice();
+  wrap._role = entry.role;
   wrap.addEventListener('click', function(ev){ if(ev.target === wrap) accCloseCaps(); });
   document.body.appendChild(wrap);
+}
+
+// Editing something you cannot open is not a state worth allowing. Ticking an
+// edit box ticks the view it needs; clearing a view clears the edits that
+// depend on it. The routes check both independently -- this only stops the
+// panel from producing a combination that reads as access and is not.
+// Back to whatever this role gets, without having to remember what that is.
+// It only sets the boxes -- nothing is written until Save, so it can be undone
+// with Cancel.
+function accResetCaps(){
+  const wrap = document.getElementById('caps-dialog');
+  if(!wrap || !wrap._defaults) return;
+  const def = wrap._defaults;
+  Array.prototype.slice.call(wrap.querySelectorAll('.cap-box')).forEach(function(b){
+    b.checked = def.indexOf(b.getAttribute('data-cap')) >= 0;
+  });
+  const msg = document.getElementById('caps-msg');
+  if(msg){ msg.textContent = 'Back to the ' + (wrap._role || 'role') + ' defaults — Save to apply.'; msg.style.color = 'var(--text-muted)'; }
+}
+
+function accCapDeps(box){
+  const boxes = Array.prototype.slice.call(document.querySelectorAll('#caps-dialog .cap-box'));
+  const by = {};
+  boxes.forEach(function(b){ by[b.getAttribute('data-cap')] = b; });
+  const needs = box.getAttribute('data-needs');
+  if(box.checked && needs && by[needs]) by[needs].checked = true;
+  if(!box.checked){
+    const cap = box.getAttribute('data-cap');
+    boxes.forEach(function(b){ if(b.getAttribute('data-needs') === cap) b.checked = false; });
+  }
 }
 
 async function accSaveCaps(btn){
@@ -16219,7 +16272,7 @@ function renderFormsList(){
       <span role="button" title="${isFormFav(f.formId)?'Unpin this form':'Pin to the top'}"
         onclick="event.stopPropagation();toggleFormFav('${hEsc(f.formId)}')"
         style="position:absolute;top:8px;left:8px;width:28px;height:28px;border-radius:50%;cursor:pointer;font-size:15px;line-height:28px;text-align:center;${isFormFav(f.formId)?'':'opacity:.3;'}">${isFormFav(f.formId)?'★':'☆'}</span>
-      ${isAdminRole()?      `<span role="button" title="Edit questions" onclick="event.stopPropagation();openFieldsDialog('${hEsc(f.formId)}')" style="position:absolute;top:8px;right:42px;width:28px;height:28px;border-radius:50%;border:1px solid var(--border);background:var(--surface,#fff);cursor:pointer;font-size:14px;line-height:26px;text-align:center;">✏️</span>`+`<span role="button" title="Manage access" onclick="event.stopPropagation();openAccessDialog('${hEsc(f.formId)}')" style="position:absolute;top:8px;right:8px;width:28px;height:28px;border-radius:50%;border:1px solid var(--border);background:var(--surface,#fff);cursor:pointer;font-size:14px;line-height:26px;text-align:center;">⚙️</span>`:''}
+      ${canManageFormSettings()? `<span role="button" title="Edit questions" onclick="event.stopPropagation();openFieldsDialog('${hEsc(f.formId)}')" style="position:absolute;top:8px;right:42px;width:28px;height:28px;border-radius:50%;border:1px solid var(--border);background:var(--surface,#fff);cursor:pointer;font-size:14px;line-height:26px;text-align:center;">✏️</span>`+`<span role="button" title="Manage access" onclick="event.stopPropagation();openAccessDialog('${hEsc(f.formId)}')" style="position:absolute;top:8px;right:8px;width:28px;height:28px;border-radius:50%;border:1px solid var(--border);background:var(--surface,#fff);cursor:pointer;font-size:14px;line-height:26px;text-align:center;">⚙️</span>`:''}
     </button>`).join('') + '</div>'
     + '<div id="forms-noresult" style="display:none;color:var(--text-muted);padding:14px 4px;">No forms match that search.</div>';
 }
@@ -16382,6 +16435,12 @@ function saveFieldsDialog(){
     if(err) err.innerHTML = '<div class="ff-error">' + hEsc(e.message || e) + '</div>';
     if(msg){ msg.textContent = ''; }
   });
+}
+
+// manage.forms is what POST /api/forms/access checks. Owner and admin hold it
+// by default -- the same two roles requireAdmin allowed before.
+function canManageFormSettings(){
+  return SESSION_CAPS.size ? hasCap('manage.forms') : isAdminRole();
 }
 
 function openAccessDialog(formId){

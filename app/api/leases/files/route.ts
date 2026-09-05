@@ -14,7 +14,7 @@
 
 import { NextResponse } from 'next/server'
 import { del } from '@vercel/blob'
-import { requireAdmin } from '@/lib/require-role'
+import { requireCapability } from '@/lib/require-role'
 import { listFiles, upsertFile, removeFile, DOC_TYPES } from '@/lib/leases'
 import { SALON_NAMES } from '@/lib/config'
 
@@ -24,7 +24,7 @@ export const dynamic = 'force-dynamic'
 const S = (v: unknown, max = 200) => String(v ?? '').trim().slice(0, max)
 
 export async function GET() {
-  const gate = await requireAdmin()
+  const gate = await requireCapability('view.leases')
   if (!gate.ok) return gate.response
   try {
     // Fresh: a file uploaded seconds ago must appear, or the upload reads as
@@ -41,7 +41,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const gate = await requireAdmin()
+  const gate = await requireCapability('edit.leases')
   if (!gate.ok) return gate.response
   try {
     const body = await req.json()
@@ -74,7 +74,7 @@ export async function POST(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-  const gate = await requireAdmin()
+  const gate = await requireCapability('edit.leases')
   if (!gate.ok) return gate.response
   try {
     const fileId = S(new URL(req.url).searchParams.get('fileId'), 80)

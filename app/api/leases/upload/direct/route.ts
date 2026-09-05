@@ -24,7 +24,7 @@
 
 import { NextResponse } from 'next/server'
 import { put } from '@vercel/blob'
-import { requireAdmin } from '@/lib/require-role'
+import { requireCapability } from '@/lib/require-role'
 import {
   upsertFile, leasePathname, ALLOWED_CONTENT_TYPES, MAX_DIRECT_BYTES,
 } from '@/lib/leases'
@@ -60,7 +60,7 @@ function contentTypeFor(file: File, declared: string): string {
 }
 
 export async function POST(req: Request) {
-  const gate = await requireAdmin()
+  const gate = await requireCapability('edit.leases')
   if (!gate.ok) return gate.response
 
   try {

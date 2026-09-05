@@ -7,11 +7,12 @@
 // route: only two cells on one FormDefs row change; every other column and
 // row round-trips untouched.
 //
-// Owner or admin: you told me there are no sensitive forms, so admins (Kayla)
-// manage access too.
+// CAPABILITIES-v2: gated on manage.forms, which owner and admin have by
+// default -- the same two roles requireAdmin let through before. It is now a
+// per-person toggle in Users & Access rather than a role list here.
 
 import { NextResponse } from 'next/server'
-import { requireAdmin } from '@/lib/require-role'
+import { requireCapability } from '@/lib/require-role'
 import { readSheet, rowsToObjects, writeSheet } from '@/lib/sheets'
 import { TAB_DEFS, DEFS_COLUMNS, STATUS_KEYS, serializeActionLabels } from '@/lib/forms'
 
@@ -75,7 +76,7 @@ function cleanList(list: any, allowEmail: boolean): string[] {
 }
 
 export async function POST(req: Request) {
-  const gate = await requireAdmin()
+  const gate = await requireCapability('manage.forms')
   if (!gate.ok) return gate.response
 
   try {
