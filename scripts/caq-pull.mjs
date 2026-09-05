@@ -225,19 +225,62 @@ async function doLogin(page) {
   // form it could have filled in at once, then reported the missing field it
   // went on to look for rather than the one in front of it.
   if (/app\.powerbi\.com\/singleSignOn/i.test(page.url())) {
+    // First try it the ordinary way.
+    let filled = false
     const gate = page.locator('input[type="text"], input[type="email"]').first()
-    if (await gate.isVisible({ timeout: 20000 }).catch(() => false)) {
+    if (await gate.isVisible({ timeout: 15000 }).catch(() => false)) {
       log('Power BI SSO gate - entering email')
-      await gate.fill(PBI_USER)
-      // This page has a real Submit button and does not respond to Enter as
-      // reliably, so click it when it is there and fall back to Enter.
+      await gate.fill(PBI_USER).catch(() => {})
+      filled = true
+    }
+
+    // Playwright called it invisible last run even though the page reported
+    // inputs: ["text"], so do not take no for an answer. Report what the
+    // element actually looks like, then set it through the native value setter
+    // and fire input/change -- a React-controlled box ignores a plain
+    // assignment, and this page is React.
+    if (!filled) {
+      const info = await page.evaluate(() => {
+        const el = document.querySelector('input[type="text"], input[type="email"]')
+        if (!el) return { found: false }
+        const r = el.getBoundingClientRect()
+        const cs = getComputedStyle(el)
+        return {
+          found: true, w: Math.round(r.width), h: Math.round(r.height),
+          display: cs.display, visibility: cs.visibility, opacity: cs.opacity,
+          disabled: el.disabled, type: el.type, id: el.id || '', cls: (el.className || '').slice(0, 60),
+        }
+      }).catch(() => null)
+      log('  gate not "visible" to Playwright; element is: ' + JSON.stringify(info))
+
+      const ok = await page.evaluate((v) => {
+        const el = document.querySelector('input[type="text"], input[type="email"]')
+        if (!el) return false
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+        setter.call(el, v)
+        el.dispatchEvent(new Event('input', { bubbles: true }))
+        el.dispatchEvent(new Event('change', { bubbles: true }))
+        return true
+      }, PBI_USER).catch(() => false)
+      log('  set the email directly: ' + ok)
+      filled = ok
+    }
+
+    if (filled) {
+      // Same treatment for Submit: click it properly if we can, otherwise
+      // click the element itself.
       const submit = page.getByRole('button', { name: /^submit$/i }).first()
       if (await submit.isVisible({ timeout: 4000 }).catch(() => false)) {
         await submit.click().catch(() => {})
       } else {
-        await gate.press('Enter').catch(() => {})
+        const clicked = await page.evaluate(() => {
+          const b = Array.from(document.querySelectorAll('button, input[type=submit]'))
+            .find(x => /submit/i.test(x.innerText || x.value || ''))
+          if (!b) return false
+          b.click(); return true
+        }).catch(() => false)
+        log('  clicked Submit directly: ' + clicked)
       }
-      // Submitting hands off to Microsoft; wait for the URL to actually leave.
       await page.waitForURL(u => !/app\.powerbi\.com\/singleSignOn/i.test(String(u)),
         { timeout: 60000 }).catch(() => {})
       await page.waitForTimeout(2000)
