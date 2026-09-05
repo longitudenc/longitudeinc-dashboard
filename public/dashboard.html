@@ -10509,6 +10509,7 @@ function applyRoute(){
       case 'admin':     switchToAdmin(); break;
       case 'reviews':   showGoogleReviews(); break;
       case 'activity':  showFormActivity(); break;
+      case 'supplies':  showSupplyCatalog(); break;
       case 'request':   if(seg[1]) openRequestDeepLink(seg[1]); break;
       case 'event':     if(seg[1]) openEventDetail(seg[1]); break;
       // Recover the name from loaded data so a deep-linked profile does not open
@@ -10661,6 +10662,8 @@ const HUB_GROUPS = {
       // capability, because no capability is checked there yet -- a toggle the
       // server ignores would be worse than none. Move both to
       // requireCapability('edit.newsletter') together.
+      { t:'Supply catalogue', d:'Which product each supply order option actually buys.',
+        show:canEditSupplies, go:function(){ showSupplyCatalog(); } },
       { t:'Newsletter', d:'Build the monthly issue, then publish it for the team to read.',
         show:function(){ return ['owner','admin','office'].indexOf(String(SESSION.role||'')) >= 0; },
         href:'/newsletter.html' },
@@ -10990,6 +10993,204 @@ function actAct(ev, btn){
 function actOpen(tr){
   const id = tr && tr.getAttribute ? tr.getAttribute('data-sub') : '';
   if(id) openRequestDeepLink(id);
+}
+
+// == Office: supply catalogue ================================================
+// What each option on the supply order form actually IS -- the ASIN the office
+// manager ends up buying when a manager ticks "Bleach". It lives here rather
+// than in the Sheets tab because the tab does not know which options the form
+// offers, and the whole failure mode of this feature is an entry whose name no
+// longer matches an option: the join is on the item name, exactly.
+//
+// So the rows ARE the form's options, not free text. There is deliberately no
+// "add item" button -- a row typed here that matches nothing on the form does
+// nothing at all. A new product starts as a new option on the form.
+
+let SUPCAT = null;   // { items, groups } from /api/office/supply-items
+
+// Mirrors requireOffice() in the route. Not a capability: none is checked there.
+function canEditSupplies(){
+  return ['owner','admin','office'].indexOf(String(SESSION.role||'')) >= 0;
+}
+
+function showSupplyCatalog(){
+  _route('#/supplies');
+  clearActive();
+  const pg = document.getElementById('page-hub');
+  if(pg) pg.classList.add('active');
+  const mainEl = document.querySelector('.content');
+  if(mainEl) mainEl.scrollTop = 0;
+  if(pg){
+    pg.innerHTML = '<div class="page-header"><h2>Supply catalogue</h2>'
+      + '<div class="sub">Which product each option on the supply order form buys</div></div>'
+      + '<div id="sc-body" style="color:var(--text-muted);font-size:13px;">Loading&hellip;</div>';
+  }
+  fetch('/api/office/supply-items')
+    .then(function(r){ return r.json(); })
+    .then(function(res){
+      if(!res || !res.success) throw new Error((res && res.error) || 'Could not load the catalogue');
+      SUPCAT = res;
+      paintSupplyCatalog();
+    })
+    .catch(function(e){
+      const h = document.getElementById('sc-body');
+      if(h) h.innerHTML = '<div class="act-empty">' + hEsc(e.message || String(e)) + '</div>';
+    });
+}
+
+// One row per form option, in the form's own order, followed by anything
+// already in the catalogue that the form no longer offers -- those are shown
+// rather than dropped, because a saved catalogue is a whole-tab replace and
+// quietly losing rows would be the worst behaviour available.
+function _scRows(){
+  const items = (SUPCAT && SUPCAT.items) || [];
+  const groups = (SUPCAT && SUPCAT.groups) || [];
+  const byName = {};
+  items.forEach(function(i){ byName[String(i.item).toLowerCase()] = i; });
+
+  const rows = [];
+  const used = {};
+  groups.forEach(function(g){
+    (g.options || []).forEach(function(opt){
+      const key = String(opt).toLowerCase();
+      used[key] = true;
+      const cat = byName[key] || null;
+      rows.push({
+        group: g.group, item: opt, onForm: true,
+        category: (cat && cat.category) || g.group,
+        vendor: (cat && cat.vendor) || '',
+        asin: (cat && (cat.asins || []).join(', ')) || '',
+        url: (cat && cat.url) || '',
+        packSize: (cat && cat.packSize) || '',
+        notes: (cat && cat.notes) || '',
+        status: (cat && cat.status) || 'active'
+      });
+    });
+  });
+  items.forEach(function(i){
+    if(used[String(i.item).toLowerCase()]) return;
+    rows.push({
+      group: 'No longer on the form', item: i.item, onForm: false,
+      category: i.category,
+      vendor: i.vendor, asin: (i.asins || []).join(', '), url: i.url,
+      packSize: i.packSize, notes: i.notes, status: i.status || 'active'
+    });
+  });
+  return rows;
+}
+
+function _scMapped(r){ return !!(String(r.asin).trim() || String(r.url).trim()); }
+
+function paintSupplyCatalog(){
+  const host = document.getElementById('sc-body');
+  if(!host) return;
+  const rows = _scRows();
+  const ed = canEditSupplies();
+  const onForm = rows.filter(function(r){ return r.onForm; });
+  const missing = onForm.filter(function(r){ return !_scMapped(r); });
+
+  const inp = function(i, f, v, ph){
+    if(!ed) return hEsc(v || '') || '<span style="color:var(--text-muted);">&mdash;</span>';
+    return '<input data-sc="' + i + '" data-f="' + f + '" value="' + hEsc(v || '') + '"'
+      + ' placeholder="' + hEsc(ph || '') + '"'
+      + ' style="width:100%;min-width:0;padding:4px 6px;border:1px solid var(--border);'
+      + 'border-radius:6px;font-size:12.5px;background:var(--surface);color:var(--text);">';
+  };
+
+  let html = '<div class="act-kpis">'
+    + '<div class="act-kpi"><div class="act-kpi-l">On the form</div>'
+      + '<div class="act-kpi-v">' + onForm.length + '</div>'
+      + '<div class="act-kpi-n">options a manager can tick</div></div>'
+    + '<div class="act-kpi"><div class="act-kpi-l">Mapped</div>'
+      + '<div class="act-kpi-v">' + (onForm.length - missing.length) + '</div>'
+      + '<div class="act-kpi-n">have a product to order</div></div>'
+    + '<div class="act-kpi"><div class="act-kpi-l">Unmapped</div>'
+      + '<div class="act-kpi-v"' + (missing.length ? ' style="color:#b3261e;"' : '') + '>' + missing.length + '</div>'
+      + '<div class="act-kpi-n">the export skips these</div></div>'
+    + '</div>';
+
+  html += '<div class="act-note">Paste the Amazon link or the ASIN &mdash; a link is trimmed down to its ASIN when you save. '
+    + 'Several ASINs separated by commas means the item is bought on whichever is cheapest or in stock. '
+    + 'The item name is the join to the form, so it cannot be edited here: to add a product, add the option to the '
+    + 'supply order form first.</div>';
+
+  const th = 'padding:5px 9px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);text-align:left;';
+  let last = '';
+  let body = '';
+  rows.forEach(function(r, i){
+    if(r.group !== last){
+      last = r.group;
+      body += '<tr><td colspan="6" style="padding:12px 9px 4px;font-size:11px;font-weight:700;'
+        + 'text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);">' + hEsc(r.group) + '</td></tr>';
+    }
+    const warn = !_scMapped(r);
+    body += '<tr' + (warn ? ' style="background:rgba(179,38,30,.05);"' : '') + '>'
+      + '<td style="padding:6px 9px;font-weight:600;width:190px;">' + hEsc(r.item)
+        + (warn ? '<div class="hint" style="color:#b3261e;">No product mapped</div>' : '')
+        + '<input type="hidden" data-sc="' + i + '" data-f="item" value="' + hEsc(r.item) + '">'
+        + '<input type="hidden" data-sc="' + i + '" data-f="status" value="' + hEsc(r.status) + '">'
+        + '<input type="hidden" data-sc="' + i + '" data-f="category" value="' + hEsc(r.category || '') + '">'
+      + '</td>'
+      + '<td style="padding:6px 9px;width:105px;">' + inp(i, 'vendor', r.vendor, 'Amazon') + '</td>'
+      + '<td style="padding:6px 9px;width:215px;">' + inp(i, 'asin', r.asin, 'B01LOC9N9G') + '</td>'
+      + '<td style="padding:6px 9px;width:105px;">' + inp(i, 'packSize', r.packSize, '6 pack') + '</td>'
+      + '<td style="padding:6px 9px;">' + inp(i, 'notes', r.notes, '') + '</td>'
+      + '<td style="padding:6px 9px;width:140px;">' + inp(i, 'url', r.url, 'link, if not Amazon') + '</td>'
+      + '</tr>';
+  });
+
+  html += '<div class="act-tw"><table class="act-t"><thead><tr>'
+    + ['Item','Vendor','ASIN(s)','Pack size','Notes','Link'].map(function(h){ return '<th style="' + th + '">' + h + '</th>'; }).join('')
+    + '</tr></thead><tbody>' + body + '</tbody></table></div>';
+
+  if(ed){
+    html += '<div style="display:flex;gap:8px;align-items:center;margin-top:12px;">'
+      + '<button class="btn btn-primary btn-sm" onclick="saveSupplyCatalog()">Save catalogue</button>'
+      + '<span id="sc-msg" style="font-size:12px;color:var(--text-muted);"></span></div>';
+  }
+  host.innerHTML = html;
+}
+
+// An Amazon URL is what somebody actually has to hand, so pull the ASIN out of
+// it rather than making them hunt for it on the product page.
+function _scAsin(v){
+  return String(v || '').split(/[,; ]+/).map(function(part){
+    const m = part.match(/[/](?:dp|gp[/]product)[/]([A-Z0-9]{10})/i);
+    return (m ? m[1] : part).replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+  }).filter(Boolean).join(', ');
+}
+
+function saveSupplyCatalog(){
+  const msg = document.getElementById('sc-msg');
+  const rows = {};
+  Array.prototype.slice.call(document.querySelectorAll('[data-sc]')).forEach(function(el){
+    const i = el.getAttribute('data-sc'), f = el.getAttribute('data-f');
+    (rows[i] = rows[i] || {})[f] = el.value;
+  });
+  const items = Object.keys(rows).map(function(k){
+    const r = rows[k];
+    return {
+      item: r.item, category: r.category || '', vendor: r.vendor || '',
+      asins: _scAsin(r.asin).split(', ').filter(Boolean),
+      url: r.url || '', packSize: r.packSize || '', notes: r.notes || '', status: r.status || 'active'
+    };
+  }).filter(function(r){ return String(r.item || '').trim(); });
+
+  if(!items.length){ if(msg) msg.textContent = 'Nothing to save.'; return; }
+  if(msg) msg.textContent = 'Saving...';
+  fetch('/api/office/supply-items', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items: items })
+  }).then(function(r){ return r.json(); }).then(function(res){
+    if(!res || !res.success) throw new Error((res && res.error) || 'Save failed');
+    SUPCAT.items = res.items || [];
+    paintSupplyCatalog();
+    const m2 = document.getElementById('sc-msg');
+    if(m2){ m2.textContent = 'Saved ' + res.saved + ' item(s).'; setTimeout(function(){ if(m2) m2.textContent = ''; }, 3000); }
+  }).catch(function(e){
+    const m2 = document.getElementById('sc-msg');
+    if(m2) m2.textContent = e.message || 'Save failed';
+  });
 }
 
 // == Google Reviews ==========================================================
@@ -16732,11 +16933,11 @@ function renderSupplyOrder(k){
   const mapped = rows.filter(r => r.cat && r.cat.asins && r.cat.asins.length).length;
   h += `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px;">
       ${ed ? `<button class="btn btn-primary btn-sm" onclick="saveSupplyOrder('${hEsc(k)}')">Save quantities</button>` : ''}
-      <button class="btn btn-secondary btn-sm" onclick="downloadSupplyCsv('${hEsc(k)}')">⬇ Amazon list file</button>
+      <button class="btn btn-secondary btn-sm" onclick="downloadSupplyXlsx('${hEsc(k)}')">⬇ Amazon list file (.xlsx)</button>
       <button class="btn btn-secondary btn-sm" onclick="copySupplyList('${hEsc(k)}')">Copy list</button>
       <span id="so-msg-${hEsc(k)}" style="font-size:12px;color:var(--text-muted);"></span>
     </div>
-    <div class="hint" style="margin-top:6px;">${mapped} of ${rows.length} have a product mapped. The file carries only those; anything unmapped stays listed above so it is not quietly dropped.</div>`;
+    <div class="hint" style="margin-top:6px;">${mapped} of ${rows.length} have a product mapped. The file carries only those; anything unmapped stays listed above so it is not quietly dropped. Upload it to a <strong>new</strong> list in Amazon Business — importing replaces a list's whole contents.</div>`;
   host.innerHTML = h;
 }
 
@@ -16783,24 +16984,30 @@ function supplyExportRows(k){
   });
 }
 
-// Amazon Business list upload. The column names match the template Amazon
-// itself exports, so the file goes back in through the same importer.
-function downloadSupplyCsv(k){
+// Amazon Business list upload. An xlsx is a zip of XML, not something worth
+// assembling in the page, so the file is built by /api/forms/supply-order/xlsx
+// -- and the quantities on screen are posted with the request, so an edit that
+// has not been saved yet still lands in the file the person just asked for.
+function downloadSupplyXlsx(k){
   const sid = soSid(k);
-  const rows = supplyExportRows(k).filter(r => r.asin && r.qty > 0);
+  const rows = supplyExportRows(k);
+  const usable = rows.filter(r => r.asin && r.qty > 0);
   const msg = document.getElementById('so-msg-' + k);
-  if(!rows.length){ if(msg) msg.textContent = 'Nothing with both a mapped product and a quantity.'; return; }
-  const head = ['Line number', 'ASIN or ISBN', 'Quantity', 'Comment', 'Priority'];
-  const lines = [head.map(csvCell).join(',')];
-  rows.forEach((r, i) => lines.push([i + 1, r.asin, r.qty, r.name, 'Medium'].map(csvCell).join(',')));
-  const s = (FORMS_SUBS || []).find(x => x.submissionId === sid) || {};
-  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob), a = document.createElement('a');
-  a.href = url;
-  a.download = 'amazon-list-' + String(s.salonNum || 'order') + '-' + String(sid).slice(-6) + '.csv';
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-  if(msg) msg.textContent = rows.length + ' item(s) exported.';
+  if(!usable.length){ if(msg) msg.textContent = 'Nothing with both a mapped product and a quantity.'; return; }
+  if(msg) msg.textContent = 'Building file…';
+  fetch('/api/forms/supply-order/xlsx', { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ submissionId: sid, lines: rows.map(r => ({ item: r.name, qty: r.qty })) }) })
+    .then(r => { if(!r.ok) throw new Error('Export failed (' + r.status + ')'); return r.blob(); })
+    .then(blob => {
+      const s = (FORMS_SUBS || []).find(x => x.submissionId === sid) || {};
+      const url = URL.createObjectURL(blob), a = document.createElement('a');
+      a.href = url;
+      a.download = 'amazon-list-' + String(s.salonNum || 'order') + '-' + String(sid).slice(-6) + '.xlsx';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      if(msg) msg.textContent = usable.length + ' item(s) exported.';
+    })
+    .catch(e => { if(msg) msg.textContent = e.message || 'Export failed'; });
 }
 
 function copySupplyList(k){

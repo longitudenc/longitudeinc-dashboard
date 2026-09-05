@@ -25,6 +25,12 @@ import { readSheet, writeSheet, rowsToObjects } from '@/lib/sheets'
 export const TAB_ITEMS = 'SupplyItems'
 export const TAB_ORDERS = 'SupplyOrders'
 export const ORDER_COLUMNS = ['submissionId', 'item', 'qty', 'updatedAt', 'updatedBy'] as const
+export const ITEM_COLUMNS = [
+  'item', 'category', 'vendor', 'asin', 'url', 'packSize', 'notes', 'status',
+  // Written by the catalogue editor so a wrong ASIN can be traced to whoever
+  // typed it. Read nowhere -- listSupplyItems ignores unknown columns.
+  'updatedAt', 'updatedBy',
+] as const
 
 const S = (v: unknown) => String(v ?? '').trim()
 
@@ -68,6 +74,87 @@ export async function listSupplyItems(fresh = false): Promise<SupplyItem[]> {
       status: S(r.status) || 'active',
     }))
     .filter(i => i.item)
+}
+
+/**
+ * Replace the whole catalogue.
+ *
+ * Whole-tab replace, like saveOrderLines: the catalogue is a few dozen rows
+ * edited as one screen, and a per-row upsert would need a stable id that the
+ * item name already is.
+ *
+ * The header is the canonical columns FOLLOWED BY whatever else the tab
+ * already had, and unknown fields are carried through per item. Somebody may
+ * have added a column by hand; a save from this screen must not be the thing
+ * that deletes it.
+ *
+ * The item name is the join key -- it must match the option text on the supply
+ * order form exactly, or the order panel will not find the product. The editor
+ * therefore offers form options rather than free text; this function only
+ * refuses the empty name.
+ */
+export async function saveSupplyItems(items: SupplyItem[], by: string): Promise<number> {
+  const raw = ((await readSheet(TAB_ITEMS, undefined, { fresh: true }).catch(() => [])) || []) as any[][]
+  const { header, rows } = buildSupplyItemRows(raw, items, by)
+  await writeSheet(TAB_ITEMS, [header, ...rows])
+  return rows.length
+}
+
+/**
+ * The row-building half of saveSupplyItems, split out so it can be tested
+ * against the real tab's shape without writing to it. A whole-tab replace is
+ * not something to first find out about in production.
+ */
+export function buildSupplyItemRows(
+  raw: any[][], items: SupplyItem[], by: string, now = new Date().toISOString(),
+): { header: string[]; rows: string[][] } {
+  const existingHeader = ((raw && raw[0]) || []).map((h: any) => S(h)).filter(Boolean)
+  const known = ITEM_COLUMNS as readonly string[]
+  const header = [...ITEM_COLUMNS, ...existingHeader.filter(h => !known.includes(h))]
+
+  // Anything already on the tab that this screen does not edit -- a column
+  // somebody added by hand, and `category`, which the editor shows but does
+  // not ask about. Blank incoming values fall back to these rather than
+  // overwriting: a save must not be able to empty a field it never offered.
+  const prior = new Map<string, Record<string, string>>()
+  if (existingHeader.length) {
+    for (const r of rowsToObjects(raw)) {
+      const key = S(r.item).toLowerCase()
+      if (key) prior.set(key, Object.fromEntries(header.map(c => [c, S(r[c])])))
+    }
+  }
+
+  const seen = new Set<string>()
+  const rows: string[][] = []
+  for (const it of items) {
+    const item = S(it.item)
+    if (!item) continue
+    const key = item.toLowerCase()
+    if (seen.has(key)) continue      // a duplicated name would silently keep the last edit
+    seen.add(key)
+    const was = prior.get(key) || {}
+    // Written every save, so a wrong ASIN can be traced to whoever typed it.
+    const forced: Record<string, string> = { item, updatedAt: now, updatedBy: S(by) }
+    const edited: Record<string, string> = {
+      category: S(it.category),
+      vendor: S(it.vendor),
+      asin: (it.asins || []).map(a => S(a)).filter(Boolean).join(', '),
+      url: S(it.url),
+      packSize: S(it.packSize),
+      notes: S(it.notes),
+      status: S(it.status),
+    }
+    rows.push(header.map(c => {
+      if (c in forced) return forced[c]
+      // Deliberately not `|| was[c]` for every field: blanking notes, a URL or
+      // an ASIN is a real edit somebody may mean to make. Only the fields the
+      // editor does not put on screen fall back.
+      if (c === 'category') return edited.category || was.category || ''
+      if (c in edited) return edited[c] || (c === 'status' ? was.status || 'active' : '')
+      return was[c] ?? ''
+    }))
+  }
+  return { header, rows }
 }
 
 /** Quantities already decided for one submission, as item -> qty. */
