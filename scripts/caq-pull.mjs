@@ -54,8 +54,25 @@ function log(...a) { console.log('[CAQ]', ...a) }
 let token = null   // captured MWCToken (module scope so waitForToken sees it)
 
 async function main() {
-  const browser = await chromium.launch({ headless: true })
-  const ctx = await browser.newContext()
+  // Microsoft will quietly refuse to progress the SSO hand-off for a browser it
+  // reads as automated: the page renders, the redirect never fires, and nothing
+  // says why -- which is exactly the symptom this script hit. A real user agent
+  // and dropping the AutomationControlled flag is the usual remedy.
+  const browser = await chromium.launch({
+    headless: true,
+    args: ['--disable-blink-features=AutomationControlled', '--no-sandbox'],
+  })
+  const ctx = await browser.newContext({
+    userAgent:
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+      '(KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
+    viewport: { width: 1440, height: 900 },
+    locale: 'en-US',
+    timezoneId: 'America/New_York',
+  })
+  await ctx.addInitScript(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined })
+  })
   const page = await ctx.newPage()
 
   // Capture the MWCToken off any /public/query request the report fires.
@@ -151,6 +168,27 @@ async function shot(page, tag) {
     const url = page.url(); const title = await page.title().catch(() => '')
     log(`step[${tag}] url=${url} title=${JSON.stringify(title)}`)
     await page.screenshot({ path: `caq-${tag}.png`, fullPage: true }).catch(() => {})
+
+    // Also say what the page SAYS. The screenshots are uploaded as an artifact,
+    // but an artifact you have to download and open is a diagnosis you do not
+    // have when you are reading a failure email. Microsoft states the real
+    // reason in text -- expired password, blocked sign-in, "we couldn't verify
+    // this device" -- and one line of it in the log usually settles the matter.
+    const seen = await page.evaluate(() => {
+      const clean = t => String(t || '').replace(/[ ]+/g, ' ').replace(/[ ]*[ ]+/g, ' ').trim()
+      const text = clean(document.body ? document.body.innerText : '').slice(0, 700)
+      const controls = Array.from(document.querySelectorAll('button, input[type=submit], a[role=button]'))
+        .map(el => clean(el.innerText || el.value || el.getAttribute('aria-label')))
+        .filter(Boolean).slice(0, 10)
+      const inputs = Array.from(document.querySelectorAll('input'))
+        .map(el => el.type + (el.name ? '[' + el.name + ']' : '')).slice(0, 10)
+      return { text, controls, inputs }
+    }).catch(() => null)
+    if (seen) {
+      if (seen.text) log(`  text: ${JSON.stringify(seen.text)}`)
+      if (seen.controls.length) log(`  buttons: ${JSON.stringify(seen.controls)}`)
+      if (seen.inputs.length) log(`  inputs: ${JSON.stringify(seen.inputs)}`)
+    }
   } catch (_) {}
 }
 
@@ -188,6 +226,22 @@ async function doLogin(page) {
     log('signed in without an email prompt (token captured)'); return
   } else {
     log('WARNING: email field never appeared'); await shot(page, 'no-email')
+    // Still sitting on Power BI's own hand-off page means the bounce to
+    // login.microsoftonline.com never happened. That is a different failure
+    // from "the login page loaded but the field moved", and worth saying so
+    // plainly rather than pressing on to look for a password box.
+    if (/app\.powerbi\.com\/singleSignOn/i.test(page.url())) {
+      log('DIAGNOSIS: still on the Power BI singleSignOn hand-off - it never redirected to Microsoft sign-in.')
+      log('  Likeliest causes, in order: the sign-in is being blocked as automated;')
+      log('  a conditional-access / MFA policy now applies to this account; or the')
+      log('  account is disabled or its password expired. The page text logged above usually says which.')
+      // A hand-off that stalls sometimes has a button waiting on a click.
+      const go = page.getByRole('button', { name: /sign in|continue|next/i }).first()
+      if (await go.isVisible({ timeout: 3000 }).catch(() => false)) {
+        log('  a sign-in button is present - clicking it'); await go.click().catch(() => {})
+        await page.waitForTimeout(4000); await shot(page, 'after-sso-click')
+      }
+    }
   }
 
   // Password — submit with Enter; if still on the page, click the visible "Sign in".
