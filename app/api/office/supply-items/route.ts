@@ -72,6 +72,14 @@ export async function POST(req: Request) {
       packSize: S(r?.packSize),
       notes: S(r?.notes),
       status: S(r?.status) || 'active',
+      // CATALOGUE-MEDIA-v1. body.items is `any`, so nothing here is
+      // type-checked against SupplyItem -- a field left out is silently
+      // blanked on save, not a compile error. Every column the editor shows
+      // must be listed.
+      image: S(r?.image),
+      price: Number(String(r?.price ?? '').replace(/[^0-9.-]/g, '')) || 0,
+      pricedAt: S(r?.pricedAt),
+      imageUrl: '',                       // resolved on read, never stored
     })).filter((i: SupplyItem) => i.item)
 
     if (!items.length) {

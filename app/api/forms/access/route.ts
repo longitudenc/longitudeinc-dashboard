@@ -13,7 +13,7 @@
 import { NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/require-role'
 import { readSheet, rowsToObjects, writeSheet } from '@/lib/sheets'
-import { TAB_DEFS, DEFS_COLUMNS } from '@/lib/forms'
+import { TAB_DEFS, DEFS_COLUMNS, STATUS_KEYS, serializeActionLabels } from '@/lib/forms'
 
 // The only group tags the engine understands. Anything else is dropped, except
 // that notify additionally accepts real email addresses.
@@ -47,6 +47,19 @@ function cleanAudience(list: any): string[] {
 }
 const isEmail = (v: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)
 
+// WORKFLOW-WORDS-v1. What this form calls each outcome -- only the five known
+// statuses, and short enough to fit on a button. A blank clears the override
+// and the form falls back to its workflow's default wording.
+function cleanActionLabels(obj: any): Record<string, string> {
+  const out: Record<string, string> = {}
+  if (!obj || typeof obj !== 'object') return out
+  for (const k of STATUS_KEYS) {
+    const v = String(obj[k] ?? '').trim().slice(0, 24)
+    if (v) out[k] = v
+  }
+  return out
+}
+
 function cleanList(list: any, allowEmail: boolean): string[] {
   if (!Array.isArray(list)) return []
   const out: string[] = []
@@ -79,6 +92,10 @@ export async function POST(req: Request) {
     // Only touched when the caller actually sends it, so a client that does not
     // know about audience yet cannot blank it by omission.
     const audience = body?.audience !== undefined ? cleanAudience(body.audience) : undefined
+    // Like audience: only written when the caller actually sends it, so an
+    // older client cannot blank a form's wording by not knowing about it.
+    const actionLabels = body?.actionLabels !== undefined
+      ? serializeActionLabels(cleanActionLabels(body.actionLabels)) : undefined
 
     // Re-read raw rows so every untouched column round-trips exactly.
     const raw = rowsToObjects(await readSheet(TAB_DEFS))
@@ -92,6 +109,7 @@ export async function POST(req: Request) {
           notify: notify.join(', '),
           workflow,
           ...(audience !== undefined ? { audience: audience.join(', ') } : {}),
+          ...(actionLabels !== undefined ? { actionLabels } : {}),
         }
       }
       return r
@@ -106,7 +124,11 @@ export async function POST(req: Request) {
     ])
 
     // Return the cleaned arrays so the dialog can update its local copy.
-    return NextResponse.json({ success: true, formId, responseView, notify, workflow, ...(audience !== undefined ? { audience } : {}) })
+    return NextResponse.json({
+      success: true, formId, responseView, notify, workflow,
+      ...(audience !== undefined ? { audience } : {}),
+      ...(actionLabels !== undefined ? { actionLabels } : {}),
+    })
   } catch (e: any) {
     return NextResponse.json({ success: false, error: e.message }, { status: 500 })
   }

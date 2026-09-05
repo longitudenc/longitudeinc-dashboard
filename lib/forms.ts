@@ -29,6 +29,8 @@ export const TAB_COMMENTS = 'FormComments'
 export const DEFS_COLUMNS = [
   'formId', 'title', 'description', 'icon', 'audience', 'status', 'sortOrder',
   'notify', 'responseView', 'workflow',
+  // WORKFLOW-WORDS-v1 -- what this form calls each outcome. See formWords().
+  'actionLabels',
 ] as const
 
 export const FIELDS_COLUMNS = [
@@ -85,8 +87,13 @@ export interface FormDef {
   notify: string[]          // RESPONSE-CONFIG-v1 — emails / 'am' who get emailed on activity
   responseView: string[]    // RESPONSE-CONFIG-v2 tags: am / office / maintenance / owner (owner-lock)
   workflow: string          // WORKFLOW-v1: 'ticket' | 'approval' | 'record' | '' (legacy = all actions)
+  actionLabels: Record<string, string>   // WORKFLOW-WORDS-v1 overrides, by status
+  labels: Record<string, string>         // resolved: what each status is CALLED
+  actions: FormAction[]                  // resolved: the buttons, in order
   fields: FormField[]
 }
+
+export interface FormAction { status: string; label: string; primary: boolean }
 
 const norm = (s: unknown) => String(s ?? '').trim()
 const lower = (s: unknown) => norm(s).toLowerCase()
@@ -122,6 +129,85 @@ export function audienceAllows(audience: unknown, role: Role | string): boolean 
 
 // Load every form definition, with its fields attached and sorted.
 // Tolerates missing tabs (returns []) so a fresh install never 500s.
+// == Wording =================================================================
+// WORKFLOW-WORDS-v1
+//
+// The workflow decides WHICH buttons exist. What they are CALLED is per form.
+//
+// "Approve / Deny" is right for a time-off request and wrong for a supply
+// order, which is not approved but ordered -- and a manager reading "Denied"
+// against a box of bin bags has to translate before they understand it. One
+// vocabulary for fifteen different forms was always going to read as
+// bureaucracy on most of them.
+//
+// The STORED status values never change: submitted / in_review / approved /
+// denied / closed. Only the display does. So renaming what a form calls its
+// outcome cannot invalidate a single row of history, and a form whose wording
+// is edited twice still reports on the submissions filed under the first.
+
+export const STATUS_KEYS = ['submitted', 'in_review', 'approved', 'denied', 'closed'] as const
+export type StatusKey = typeof STATUS_KEYS[number]
+
+// The default vocabulary per workflow -- the state a submission is IN.
+const WF_STATE: Record<string, Record<string, string>> = {
+  ticket:   { submitted: 'New',       in_review: 'In progress', approved: 'Complete', denied: 'Cancelled', closed: 'Complete' },
+  approval: { submitted: 'Pending',   in_review: 'Reviewing',   approved: 'Approved', denied: 'Denied',    closed: 'Closed' },
+  record:   { submitted: 'New',       in_review: 'Reviewing',   approved: 'Reviewed', denied: 'Filed',     closed: 'Reviewed' },
+  '':       { submitted: 'Submitted', in_review: 'In review',   approved: 'Approved', denied: 'Denied',    closed: 'Closed' },
+}
+
+// Which buttons the workflow offers, in order, with the default imperative.
+const WF_ACTIONS: Record<string, { status: StatusKey; verb: string; primary?: boolean }[]> = {
+  ticket:   [{ status: 'in_review', verb: 'Mark in progress' }, { status: 'closed',   verb: 'Complete', primary: true }, { status: 'denied', verb: 'Cancel' }],
+  approval: [{ status: 'in_review', verb: 'Mark in review' },   { status: 'approved', verb: 'Approve',  primary: true }, { status: 'denied', verb: 'Deny' }],
+  record:   [{ status: 'closed',    verb: 'Mark reviewed', primary: true }],
+  '':       [{ status: 'in_review', verb: 'Mark in review' },   { status: 'approved', verb: 'Approve',  primary: true }, { status: 'denied', verb: 'Deny' }, { status: 'closed', verb: 'Close' }],
+}
+
+/** `in_review=Ordering|approved=Ordered` -> { in_review: 'Ordering', ... } */
+export function parseActionLabels(cell: unknown): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const part of norm(cell).split('|')) {
+    const i = part.indexOf('=')
+    if (i < 1) continue
+    const k = part.slice(0, i).trim().toLowerCase()
+    const v = part.slice(i + 1).trim()
+    if ((STATUS_KEYS as readonly string[]).includes(k) && v) out[k] = v
+  }
+  return out
+}
+
+export function serializeActionLabels(labels: Record<string, string>): string {
+  return STATUS_KEYS
+    .filter(k => norm(labels[k]))
+    // '=' and '|' are the separators; a label containing one would parse back
+    // as a different pair, so they are stripped rather than escaped.
+    .map(k => k + '=' + norm(labels[k]).replace(/[=|]/g, ' ').trim())
+    .filter(pair => pair.split('=')[1])
+    .join('|')
+}
+
+/**
+ * What one form actually shows: the word for each status, and its buttons.
+ *
+ * An overridden word wins on the BUTTON as well as the chip. A form whose
+ * outcome is called "Ordered" must not have a button that says "Approve" --
+ * that is the exact mismatch this exists to remove.
+ */
+export function formWords(
+  workflow: string, overrides: Record<string, string> = {},
+): { labels: Record<string, string>; actions: FormAction[] } {
+  const key = lower(workflow)
+  const labels: Record<string, string> = { ...(WF_STATE[key] || WF_STATE['']) }
+  for (const k of STATUS_KEYS) if (norm(overrides[k])) labels[k] = norm(overrides[k])
+  const actions: FormAction[] = (WF_ACTIONS[key] || WF_ACTIONS['']).map(a => ({
+    status: a.status,
+    label: norm(overrides[a.status]) || a.verb,
+    primary: !!a.primary,
+  }))
+  return { labels, actions }
+}
+
 export async function getFormDefs(): Promise<FormDef[]> {
   const [defRows, fieldRows] = await Promise.all([
     rowsToObjects(await readSheet(TAB_DEFS)),
@@ -154,6 +240,7 @@ export async function getFormDefs(): Promise<FormDef[]> {
     .map(r => {
       const formId = norm(r.formId)
       if (!formId) return null
+      const actionLabels = parseActionLabels(r.actionLabels)
       return {
         formId,
         title: norm(r.title) || formId,
@@ -165,6 +252,8 @@ export async function getFormDefs(): Promise<FormDef[]> {
         notify: splitList(r.notify),
         responseView: splitList(r.responseView),
         workflow: lower(r.workflow),
+        actionLabels,
+        ...formWords(lower(r.workflow), actionLabels),
         fields: byForm.get(formId) || [],
       } as FormDef
     })

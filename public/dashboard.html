@@ -10953,19 +10953,16 @@ function paintFormActivity(){
   host.innerHTML = html;
 }
 
-// The same button set the review row builds, from the same formWorkflow().
-// Duplicating the labels would let the two drift into disagreeing about what
-// "done" means for a ticket.
+// The same buttons the review row builds, from the same resolved wording --
+// this page used to keep its own copy of the labels, which is how a form ends
+// up calling one thing two names.
 function actBtns(s){
   if(!s.canReview) return '<span style="font-size:11px;color:var(--text-muted);">—</span>';
-  const wf = String(formWorkflow(s.formId) || '').toLowerCase();
-  const B = function(status, label, primary){
-    return '<button class="btn ' + (primary ? 'btn-primary' : 'btn-secondary') + ' btn-sm act-b" '
-         + 'data-sub="' + hEsc(s.submissionId) + '" data-st="' + status + '" onclick="actAct(event,this)">' + label + '</button>';
-  };
-  if(wf === 'ticket')   return B('in_review', 'In progress') + B('closed', '&#10003; Done', true);
-  if(wf === 'approval') return B('approved', 'Approve', true) + B('denied', 'Deny');
-  return B('closed', '&#10003; Reviewed', true);
+  return formActions(s.formId).map(function(a){
+    return '<button class="btn ' + (a.primary ? 'btn-primary' : 'btn-secondary') + ' btn-sm act-b" '
+      + 'data-sub="' + hEsc(s.submissionId) + '" data-st="' + hEsc(a.status) + '" onclick="actAct(event,this)">'
+      + (a.primary ? '&#10003; ' : '') + hEsc(a.label) + '</button>';
+  }).join('');
 }
 
 // Acting from the list must not also open the row underneath it.
@@ -11058,6 +11055,10 @@ function _scRows(){
       rows.push({
         group: g.group, item: opt, onForm: true,
         category: (cat && cat.category) || g.group,
+        image: (cat && cat.image) || '',
+        imageUrl: (cat && cat.imageUrl) || '',
+        price: (cat && cat.price) || '',
+        pricedAt: (cat && cat.pricedAt) || '',
         vendor: (cat && cat.vendor) || '',
         asin: (cat && (cat.asins || []).join(', ')) || '',
         url: (cat && cat.url) || '',
@@ -11072,6 +11073,7 @@ function _scRows(){
     rows.push({
       group: 'No longer on the form', item: i.item, onForm: false,
       category: i.category,
+      image: i.image, imageUrl: i.imageUrl, price: i.price || '', pricedAt: i.pricedAt,
       vendor: i.vendor, asin: (i.asins || []).join(', '), url: i.url,
       packSize: i.packSize, notes: i.notes, status: i.status || 'active'
     });
@@ -11112,7 +11114,9 @@ function paintSupplyCatalog(){
   html += '<div class="act-note">Paste the Amazon link or the ASIN &mdash; a link is trimmed down to its ASIN when you save. '
     + 'Several ASINs separated by commas means the item is bought on whichever is cheapest or in stock. '
     + 'The item name is the join to the form, so it cannot be edited here: to add a product, add the option to the '
-    + 'supply order form first.</div>';
+    + 'supply order form first.<br><strong>Last paid</strong> is typed in by whoever placed the order &mdash; Amazon does not '
+    + 'publish prices to us, so it is a dated estimate, not a live figure. Pictures come from the ASIN automatically; '
+    + 'a few products have none and simply show blank.</div>';
 
   const th = 'padding:5px 9px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);text-align:left;';
   let last = '';
@@ -11120,27 +11124,33 @@ function paintSupplyCatalog(){
   rows.forEach(function(r, i){
     if(r.group !== last){
       last = r.group;
-      body += '<tr><td colspan="6" style="padding:12px 9px 4px;font-size:11px;font-weight:700;'
+      body += '<tr><td colspan="8" style="padding:12px 9px 4px;font-size:11px;font-weight:700;'
         + 'text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);">' + hEsc(r.group) + '</td></tr>';
     }
     const warn = !_scMapped(r);
     body += '<tr' + (warn ? ' style="background:rgba(179,38,30,.05);"' : '') + '>'
-      + '<td style="padding:6px 9px;font-weight:600;width:190px;">' + hEsc(r.item)
+      + '<td style="padding:6px 9px;width:44px;">' + supplyThumb(r.imageUrl) + '</td>'
+      + '<td style="padding:6px 9px;font-weight:600;width:180px;">' + hEsc(r.item)
         + (warn ? '<div class="hint" style="color:#b3261e;">No product mapped</div>' : '')
         + '<input type="hidden" data-sc="' + i + '" data-f="item" value="' + hEsc(r.item) + '">'
         + '<input type="hidden" data-sc="' + i + '" data-f="status" value="' + hEsc(r.status) + '">'
         + '<input type="hidden" data-sc="' + i + '" data-f="category" value="' + hEsc(r.category || '') + '">'
+        + '<input type="hidden" data-sc="' + i + '" data-f="image" value="' + hEsc(r.image || '') + '">'
+        + '<input type="hidden" data-sc="' + i + '" data-f="pricedAt" value="' + hEsc(r.pricedAt || '') + '">'
       + '</td>'
       + '<td style="padding:6px 9px;width:105px;">' + inp(i, 'vendor', r.vendor, 'Amazon') + '</td>'
       + '<td style="padding:6px 9px;width:215px;">' + inp(i, 'asin', r.asin, 'B01LOC9N9G') + '</td>'
-      + '<td style="padding:6px 9px;width:105px;">' + inp(i, 'packSize', r.packSize, '6 pack') + '</td>'
+      + '<td style="padding:6px 9px;width:95px;">' + inp(i, 'price', r.price, '0.00')
+        + (r.pricedAt ? '<div class="hint" style="margin-top:2px;">as of ' + hEsc(String(r.pricedAt).slice(0,10)) + '</div>' : '')
+        + '</td>'
+      + '<td style="padding:6px 9px;width:100px;">' + inp(i, 'packSize', r.packSize, '6 pack') + '</td>'
       + '<td style="padding:6px 9px;">' + inp(i, 'notes', r.notes, '') + '</td>'
       + '<td style="padding:6px 9px;width:140px;">' + inp(i, 'url', r.url, 'link, if not Amazon') + '</td>'
       + '</tr>';
   });
 
   html += '<div class="act-tw"><table class="act-t"><thead><tr>'
-    + ['Item','Vendor','ASIN(s)','Pack size','Notes','Link'].map(function(h){ return '<th style="' + th + '">' + h + '</th>'; }).join('')
+    + ['','Item','Vendor','ASIN(s)','Last paid','Pack size','Notes','Link'].map(function(h){ return '<th style="' + th + '">' + h + '</th>'; }).join('')
     + '</tr></thead><tbody>' + body + '</tbody></table></div>';
 
   if(ed){
@@ -11171,6 +11181,7 @@ function saveSupplyCatalog(){
     const r = rows[k];
     return {
       item: r.item, category: r.category || '', vendor: r.vendor || '',
+      image: r.image || '', price: r.price || '', pricedAt: r.pricedAt || '',
       asins: _scAsin(r.asin).split(', ').filter(Boolean),
       url: r.url || '', packSize: r.packSize || '', notes: r.notes || '', status: r.status || 'active'
     };
@@ -16041,6 +16052,13 @@ function loadForms(cb){
   ]).then(([defs,subs,favs])=>{
     FORMS_DEFS = defs.forms || [];
     FORMS_SUBS = subs.submissions || [];
+    // WORKFLOW-WORDS-v1. Keyed by formId, and NOT taken from FORMS_DEFS alone:
+    // that list is only the forms this person may submit, while the queue shows
+    // forms they can see responses for.
+    FORMS_META = (subs && subs.formMeta) || {};
+    (FORMS_DEFS || []).forEach(function(f){
+      if(!FORMS_META[f.formId]) FORMS_META[f.formId] = { workflow:f.workflow, labels:f.labels, actions:f.actions };
+    });
     FORM_FAVS  = Array.isArray(favs && favs.keys) ? favs.keys : [];
     // Reveal Requests when there is anything to SEE, not only anything to
     // action. Keying it on canReview hid the tab from anyone whose whole view
@@ -16076,6 +16094,7 @@ function showFormsTab(name){
 // FORM-FAVORITES-v1 — per-person pins, loaded once when the forms screen opens.
 // Held as a plain array so order is the order they were pinned; the server
 // returns them oldest-first and the screen does not re-sort them.
+let FORMS_META = {};
 let FORM_FAVS = [];
 function loadFormFavs(cb){
   fetch('/api/favorites?kind=form').then(r=>r.json()).then(r=>{
@@ -16308,6 +16327,25 @@ function openAccessDialog(formId){
   const has = (arr,v)=>arr.includes(v);
   const cb = (id,label,checked)=>`<label style="display:flex;align-items:center;gap:9px;padding:5px 0;cursor:pointer;"><input type="checkbox" id="${id}" ${checked?'checked':''}><span>${label}</span></label>`;
 
+  // WORKFLOW-WORDS-v1. One row per outcome this workflow actually has, plus the
+  // state a submission sits in before anyone touches it. The placeholder is the
+  // standard word, so clearing a box visibly falls back rather than blanking.
+  const WORD_HINT={
+    submitted:'Before anyone picks it up',
+    in_review:'While it is being handled',
+    approved:'When the answer is yes',
+    denied:'When the answer is no',
+    closed:'When it is finished',
+  };
+  const ovr=f.actionLabels||{}, resolved=f.labels||{};
+  const wordKeys=['submitted'].concat((f.actions||[]).map(a=>a.status))
+    .filter((k,i,arr)=>arr.indexOf(k)===i);
+  const wordRows=wordKeys.map(k=>`<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+      <div style="flex:1;font-size:12.5px;color:var(--text-muted);">${hEsc(WORD_HINT[k]||k)}</div>
+      <input type="text" class="ff-input" id="acw-${hEsc(k)}" data-word="${hEsc(k)}" maxlength="24"
+        value="${hEsc(ovr[k]||'')}" placeholder="${hEsc(resolved[k]||'')}" style="flex:1;min-width:0;margin:0;">
+    </div>`).join('');
+
   const ov=document.createElement('div');
   ov.id='access-overlay';
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:99999;padding:20px;';
@@ -16339,10 +16377,17 @@ function openAccessDialog(formId){
       <div style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin:16px 0 4px;">Workflow</div>
       <select id="acf-workflow" class="ff-select">
         <option value="" ${!wf?'selected':''}>Default — all actions</option>
-        <option value="ticket" ${wf==='ticket'?'selected':''}>Ticket — In Progress → Done</option>
-        <option value="approval" ${wf==='approval'?'selected':''}>Approval — Approve / Deny</option>
-        <option value="record" ${wf==='record'?'selected':''}>Record — Mark Reviewed</option>
+        <option value="ticket" ${wf==='ticket'?'selected':''}>Ticket — something to be done</option>
+        <option value="approval" ${wf==='approval'?'selected':''}>Approval — a yes or a no</option>
+        <option value="record" ${wf==='record'?'selected':''}>Record — filed, not decided</option>
       </select>
+
+      <div style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin:16px 0 4px;">Wording</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;line-height:1.5;">
+        What this form calls each outcome, on its buttons and its status chips. Leave one blank for the
+        standard word. Changing these renames nothing already filed &mdash; only how it reads.
+      </div>
+      ${wordRows}
 
       <div style="font-size:12px;color:var(--text-muted);margin-top:14px;line-height:1.5;">Owners and admins always see everything. Whoever submits always sees their own request.</div>
       <div id="access-msg" style="font-size:12.5px;color:#c0392b;margin-top:8px;"></div>
@@ -16376,13 +16421,20 @@ function saveAccess(formId){
   if(g('aca-maint').checked)   audience.push('maintenance');
   if(g('aca-stylist').checked) audience.push('stylist');
   const workflow=((g('acf-workflow')||{}).value)||'';
+  const actionLabels={};
+  Array.prototype.slice.call(document.querySelectorAll('[data-word]')).forEach(function(el){
+    const v=String(el.value||'').trim();
+    if(v) actionLabels[el.getAttribute('data-word')]=v;
+  });
   const btn=g('access-save'), msg=g('access-msg');
   if(btn){ btn.disabled=true; btn.textContent='Saving…'; }
-  fetch('/api/forms/access',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({formId,responseView:view,notify,workflow,audience})})
+  fetch('/api/forms/access',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({formId,responseView:view,notify,workflow,audience,actionLabels})})
     .then(r=>r.json()).then(res=>{
       if(!res.success){ if(msg) msg.textContent=res.error||'Save failed'; if(btn){btn.disabled=false;btn.textContent='Save';} return; }
       const f=FORMS_DEFS.find(x=>x.formId===formId); if(f){ f.responseView=res.responseView; f.notify=res.notify; f.workflow=res.workflow; if(res.audience) f.audience=res.audience; }
       closeAccessDialog();
+      // labels/actions are resolved on the server; re-read rather than guess.
+      loadForms();
     }).catch(e=>{ if(msg) msg.textContent=e.message; if(btn){btn.disabled=false;btn.textContent='Save';} });
 }
 
@@ -16679,22 +16731,36 @@ function submitActiveForm(){
     });
 }
 
-function formWorkflow(formId){ return String((FORMS_DEFS.find(f=>f.formId===formId)||{}).workflow||'').toLowerCase(); }
-function statusPill(st, wf){
-  const MAP={
-    ticket:{submitted:'New',in_review:'In Progress',approved:'Done',denied:'Cancelled',closed:'Done'},
-    approval:{submitted:'Pending',in_review:'Reviewing',approved:'Approved',denied:'Denied',closed:'Closed'},
-    record:{submitted:'New',in_review:'Reviewing',approved:'Reviewed',denied:'Filed',closed:'Reviewed'},
-  }[String(wf||'').toLowerCase()] || {submitted:'Submitted',in_review:'In Review',approved:'Approved',denied:'Denied',closed:'Closed'};
-  const label=MAP[st]||st;
-  return `<span class="status-pill st-${hEsc(st)}">${hEsc(label)}</span>`;
+function formWorkflow(formId){ return String((formMeta(formId)||{}).workflow||'').toLowerCase(); }
+
+// WORKFLOW-WORDS-v1. The server resolves a form's wording once (lib/forms.ts,
+// formWords) and sends it down; nothing here re-derives it, so a chip and the
+// button that produces it cannot end up saying different things.
+function formMeta(formId){ return (FORMS_META||{})[formId] || null; }
+const _WORD_FALLBACK={submitted:'Submitted',in_review:'In review',approved:'Approved',denied:'Denied',closed:'Closed'};
+function statusWord(formId, st){
+  const m=formMeta(formId);
+  return ((m&&m.labels)||{})[st] || _WORD_FALLBACK[st] || st;
+}
+function formActions(formId){
+  const m=formMeta(formId);
+  return (m&&m.actions&&m.actions.length) ? m.actions : [
+    {status:'in_review',label:'Mark in review',primary:false},
+    {status:'approved', label:'Approve',       primary:true },
+    {status:'denied',   label:'Deny',          primary:false},
+    {status:'closed',   label:'Close',         primary:false},
+  ];
+}
+function statusPill(st, formId){
+  return `<span class="status-pill st-${hEsc(st)}">${hEsc(statusWord(formId, st))}</span>`;
 }
 
 // Remove a submission and its comment thread. Owner/admin only -- the server
 // re-checks with requireAdmin, so this is just about not showing a dead button.
-function deleteSubmission(submissionId, title){
+function deleteSubmission(submissionId, title, formId){
+  const no = (formActions(formId).filter(function(a){ return a.status==='denied'; })[0]||{}).label || 'Deny';
   if(!confirm('Delete "'+title+'" permanently?\n\nThe submission and its comments are removed. '
-    + 'This cannot be undone. To record that a request was refused, use Deny instead.')) return;
+    + 'This cannot be undone. To record that a request was refused, use "'+no+'" instead.')) return;
   fetch('/api/forms/submissions?submissionId='+encodeURIComponent(submissionId),{method:'DELETE'})
     .then(r=>r.json()).then(res=>{
       if(!res.success){ alert(res.error||'Could not delete.'); return; }
@@ -16753,7 +16819,7 @@ function submissionRows(list, showWho, ctx){
         ${showWho?`<td>${hEsc(fmtName(s.submittedByName||''))}</td>`:''}
         <td>${hEsc(s.salonNum||'—')}</td>
         <td>${hEsc(s.submittedAt?pDate(s.submittedAt.slice(0,10)):'—')}</td>
-        <td>${statusPill(s.status, formWorkflow(s.formId))}</td>
+        <td>${statusPill(s.status, s.formId)}</td>
         <td style="text-align:right;"><button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();toggleSubmission('${hEsc(k)}')">Details</button></td>
       </tr>
       <tr id="sub-${hEsc(k)}" style="display:none;" onclick="event.stopPropagation();"><td colspan="${showWho?6:5}">${submissionDetail(s, ctx)}</td></tr>
@@ -16807,13 +16873,11 @@ function submissionDetail(s, ctx){
   }
 
   if(s.canReview){
-    const wf=formWorkflow(s.formId);
-    const B=(status,label,primary)=>`<button class="btn ${primary?'btn-primary':'btn-secondary'} btn-sm" onclick="setSubStatus('${hEsc(k)}','${sid}','${status}')">${label}</button>`;
-    let btns;
-    if(wf==='ticket')        btns = B('in_review','Mark In Progress') + B('closed','✓ Done',true) + B('denied','Cancel');
-    else if(wf==='record')   btns = B('closed','✓ Mark Reviewed',true);
-    else if(wf==='approval') btns = B('in_review','Mark In Review') + B('approved','Approve',true) + B('denied','Deny');
-    else                     btns = B('in_review','Mark In Review') + B('approved','Approve',true) + B('denied','Deny') + B('closed','Close');
+    const btns = formActions(s.formId).map(function(a){
+      return `<button class="btn ${a.primary?'btn-primary':'btn-secondary'} btn-sm" `
+        + `onclick="setSubStatus('${hEsc(k)}','${sid}','${hEsc(a.status)}')">`
+        + `${a.primary?'&#10003; ':''}${hEsc(a.label)}</button>`;
+    }).join('');
     dl += `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
       <label class="ff-label">Note (optional)</label>
       <input class="ff-input" id="rn-${hEsc(k)}" value="${hEsc(s.reviewNote||'')}" style="margin-bottom:9px;">
@@ -16826,7 +16890,7 @@ function submissionDetail(s, ctx){
   if(isAdminRole()){
     dl += `<div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--border);display:flex;justify-content:flex-end;">
       <button class="btn btn-sm" style="background:none;border:1px solid var(--border);color:#c0392b;"
-        onclick="deleteSubmission('${sid}','${hEsc(String(s.formTitle||'this submission'))}')">Delete permanently</button></div>`;
+        onclick="deleteSubmission('${sid}','${hEsc(String(s.formTitle||'this submission'))}','${hEsc(s.formId)}')">Delete permanently</button></div>`;
   }
   dl += `<div id="cmts-${hEsc(k)}" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);">${renderCommentThread(s, k)}</div>`;
   return dl;
@@ -16850,6 +16914,19 @@ const SUPPLY = {};   // submissionId -> { items, lines, canEdit }
 const soSid = k => String(k).replace(/^[a-z]+-/, '');
 
 function isSupplyOrder(s){ return s && s.formId === 'supplyorder'; }
+
+// A product thumbnail, or nothing at all. Amazon returns a 1x1 placeholder for
+// an ASIN it has no picture for -- that loads successfully, so onerror is not
+// enough and the decoded width has to be checked too.
+function supplyThumb(url, size){
+  const px = size || 34;
+  if(!url) return '<div style="width:' + px + 'px;height:' + px + 'px;border-radius:5px;background:var(--surface-hover,rgba(0,0,0,.05));"></div>';
+  return '<img src="' + hEsc(url) + '" alt="" loading="lazy" width="' + px + '" height="' + px + '"'
+    + ' onload="if(this.naturalWidth&lt;=1)this.style.visibility=&quot;hidden&quot;"'
+    + ' onerror="this.style.visibility=&quot;hidden&quot;"'
+    + ' style="width:' + px + 'px;height:' + px + 'px;object-fit:contain;border-radius:5px;background:#fff;">';
+}
+const supplyMoney = n => '$' + (Math.round(Number(n||0)*100)/100).toFixed(2);
 
 // Everything the manager ticked, flattened out of the multiselect fields.
 function supplyRequested(s){
@@ -16925,18 +17002,31 @@ function renderSupplyOrder(k){
       const label = url
         ? `<a href="${hEsc(url)}" target="_blank" rel="noopener noreferrer">${hEsc(r.name)}</a>`
         : `<strong>${hEsc(r.name)}</strong>`;
-      h += `<tr><td style="width:64px;">${qtyCell}</td><td>${label}${pack}${alt}${note}</td></tr>`;
+      const price = (r.cat && Number(r.cat.price)) || 0;
+      // The last price PAID, not a live one -- so it is shown as an estimate
+      // and dated, rather than presented as what this will cost today.
+      const cost = price
+        ? `<div class="hint" style="margin-top:2px;">${supplyMoney(price)} each${r.cat.pricedAt?' &middot; as of '+hEsc(String(r.cat.pricedAt).slice(0,10)):''}`
+          + (r.qty>1?` &middot; <strong>${supplyMoney(price*r.qty)}</strong>`:'') + '</div>'
+        : '';
+      h += `<tr><td style="width:64px;">${qtyCell}</td>`
+        + `<td style="width:44px;">${supplyThumb((r.cat&&r.cat.imageUrl)||'')}</td>`
+        + `<td>${label}${pack}${cost}${alt}${note}</td></tr>`;
     });
     h += '</tbody></table></div>';
   });
 
   const mapped = rows.filter(r => r.cat && r.cat.asins && r.cat.asins.length).length;
+  let est = 0, priced = 0;
+  rows.forEach(r => { const pr = (r.cat && Number(r.cat.price)) || 0; if(pr){ est += pr * r.qty; priced++; } });
   h += `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px;">
       ${ed ? `<button class="btn btn-primary btn-sm" onclick="saveSupplyOrder('${hEsc(k)}')">Save quantities</button>` : ''}
       <button class="btn btn-secondary btn-sm" onclick="downloadSupplyXlsx('${hEsc(k)}')">⬇ Amazon list file (.xlsx)</button>
       <button class="btn btn-secondary btn-sm" onclick="copySupplyList('${hEsc(k)}')">Copy list</button>
       <span id="so-msg-${hEsc(k)}" style="font-size:12px;color:var(--text-muted);"></span>
     </div>
+    ${est ? `<div style="margin-top:8px;font-size:13px;">Estimated <strong>${supplyMoney(est)}</strong>
+      <span style="color:var(--text-muted);font-size:12px;">from the last price paid on ${priced} of ${rows.length} items &mdash; not a live Amazon price</span></div>` : ''}
     <div class="hint" style="margin-top:6px;">${mapped} of ${rows.length} have a product mapped. The file carries only those; anything unmapped stays listed above so it is not quietly dropped. Upload it to a <strong>new</strong> list in Amazon Business — importing replaces a list's whole contents.</div>`;
   host.innerHTML = h;
 }
@@ -17146,7 +17236,7 @@ function renderResponsesTable(formId){
       <td style="white-space:nowrap;">${hEsc(s.submittedAt?pDate(s.submittedAt.slice(0,10)):'—')}</td>
       <td>${hEsc(fmtName(s.submittedByName||''))}</td>
       <td>${hEsc(s.salonNum||'—')}</td>
-      <td>${statusPill(s.status, formWorkflow(s.formId))}</td>
+      <td>${statusPill(s.status, s.formId)}</td>
       ${fields.map(f=>`<td>${hEsc(respCell(f,(s.data||{})[f.fieldKey]))}</td>`).join('')}
     </tr>`).join('');
   return `<div class="home-sec-title" style="margin-bottom:.6rem;">${rows.length} response${rows.length===1?'':'s'}</div>

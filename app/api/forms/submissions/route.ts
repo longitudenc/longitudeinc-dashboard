@@ -75,7 +75,18 @@ export async function GET(req: Request) {
         comments: commentsBySub.get(s.submissionId) || [],
       }))
 
-    return NextResponse.json({ success: true, submissions, count: submissions.length })
+    // WORKFLOW-WORDS-v1. Only the forms actually present in this payload, and
+    // only their WORDING -- not the definitions, which are audience-gated and
+    // served separately. A person can see responses for forms they may not
+    // themselves submit, so the wording cannot ride on /api/forms/defs.
+    const formMeta: Record<string, any> = {}
+    for (const row of submissions) {
+      if (formMeta[row.formId]) continue
+      const d = defs.find(x => x.formId === row.formId)
+      formMeta[row.formId] = { workflow: d?.workflow || '', labels: d?.labels || {}, actions: d?.actions || [] }
+    }
+
+    return NextResponse.json({ success: true, submissions, count: submissions.length, formMeta })
   } catch (e: any) {
     return NextResponse.json({ success: true, submissions: [], count: 0, warning: e.message })
   }
