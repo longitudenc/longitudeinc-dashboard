@@ -11083,6 +11083,23 @@ function _scRows(){
 
 function _scMapped(r){ return !!(String(r.asin).trim() || String(r.url).trim()); }
 
+// The product link, shown under the item it belongs to. An explicit url wins;
+// otherwise the first ASIN is one. Read-only viewers get the link itself
+// rather than the address, which is unreadable at this width.
+function _scLink(i, r){
+  const asin = String(r.asin || '').split(',')[0].trim();
+  const href = String(r.url || '').trim() || (asin ? 'https://www.amazon.com/dp/' + asin : '');
+  const view = href
+    ? '<a href="' + hEsc(href) + '" target="_blank" rel="noopener noreferrer" class="hint">View product &#8599;</a>'
+    : '<span class="hint" style="color:var(--text-muted);">No link</span>';
+  if(!canEditSupplies()) return view;
+  return '<input data-sc="' + i + '" data-f="url" value="' + hEsc(r.url || '') + '"'
+    + ' placeholder="' + (asin ? 'Amazon link from the ASIN' : 'paste a product link') + '"'
+    + ' style="width:100%;min-width:0;padding:3px 6px;border:1px solid var(--border);border-radius:6px;'
+    + 'font-size:11.5px;background:var(--surface);color:var(--text);">'
+    + (href ? ' <a href="' + hEsc(href) + '" target="_blank" rel="noopener noreferrer" class="hint">Open &#8599;</a>' : '');
+}
+
 function paintSupplyCatalog(){
   const host = document.getElementById('sc-body');
   if(!host) return;
@@ -11124,14 +11141,15 @@ function paintSupplyCatalog(){
   rows.forEach(function(r, i){
     if(r.group !== last){
       last = r.group;
-      body += '<tr><td colspan="8" style="padding:12px 9px 4px;font-size:11px;font-weight:700;'
+      body += '<tr><td colspan="7" style="padding:12px 9px 4px;font-size:11px;font-weight:700;'
         + 'text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);">' + hEsc(r.group) + '</td></tr>';
     }
     const warn = !_scMapped(r);
     body += '<tr' + (warn ? ' style="background:rgba(179,38,30,.05);"' : '') + '>'
       + '<td style="padding:6px 9px;width:44px;">' + supplyThumb(r.imageUrl) + '</td>'
-      + '<td style="padding:6px 9px;font-weight:600;width:180px;">' + hEsc(r.item)
+      + '<td style="padding:6px 9px;font-weight:600;width:250px;">' + hEsc(r.item)
         + (warn ? '<div class="hint" style="color:#b3261e;">No product mapped</div>' : '')
+        + '<div style="margin-top:3px;font-weight:400;">' + _scLink(i, r) + '</div>'
         + '<input type="hidden" data-sc="' + i + '" data-f="item" value="' + hEsc(r.item) + '">'
         + '<input type="hidden" data-sc="' + i + '" data-f="status" value="' + hEsc(r.status) + '">'
         + '<input type="hidden" data-sc="' + i + '" data-f="category" value="' + hEsc(r.category || '') + '">'
@@ -11145,12 +11163,11 @@ function paintSupplyCatalog(){
         + '</td>'
       + '<td style="padding:6px 9px;width:100px;">' + inp(i, 'packSize', r.packSize, '6 pack') + '</td>'
       + '<td style="padding:6px 9px;">' + inp(i, 'notes', r.notes, '') + '</td>'
-      + '<td style="padding:6px 9px;width:140px;">' + inp(i, 'url', r.url, 'link, if not Amazon') + '</td>'
       + '</tr>';
   });
 
   html += '<div class="act-tw"><table class="act-t"><thead><tr>'
-    + ['','Item','Vendor','ASIN(s)','Last paid','Pack size','Notes','Link'].map(function(h){ return '<th style="' + th + '">' + h + '</th>'; }).join('')
+    + ['','Item','Vendor','ASIN(s)','Last paid','Pack size','Notes'].map(function(h){ return '<th style="' + th + '">' + h + '</th>'; }).join('')
     + '</tr></thead><tbody>' + body + '</tbody></table></div>';
 
   if(ed){
