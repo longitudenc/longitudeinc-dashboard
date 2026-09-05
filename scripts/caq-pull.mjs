@@ -5,7 +5,7 @@
  * (no MFA), captures the short-lived query token from the report's own network
  * traffic, replays the per-salon "% Good/Improve/Bad" query for the target
  * month(s) IN THE PAGE (same origin as the working console snippet), decodes the
- * result, and POSTs it to the dashboard's /api/ingest/address-quality route.
+ * result, and POSTs it to /api/market/ingest/address-quality on the dashboard.
  *
  * Runs in GitHub Actions (see .github/workflows/caq.yml). Everything is driven
  * by env vars / repo secrets — nothing sensitive is hard-coded.
@@ -27,6 +27,10 @@ import { chromium } from 'playwright'
 const {
   PBI_USER, PBI_PASS, PBI_REPORT_URL,
   INGEST_BASE, CRON_SECRET,
+  // Optional. The ingest route accepts a dedicated CAQ key or CRON_SECRET; the
+  // narrow one is preferable because it can only append CAQ rows, so use it
+  // when the workflow supplies it and fall back otherwise.
+  CAQ_INGEST_SECRET,
   MONTHS_BACK = '1',
 } = process.env
 
@@ -153,15 +157,28 @@ async function main() {
     log(`${r.periodKey}: ${r.rows.length} salons, avg %Good ${avg}%`)
   }
 
-  const url = `${INGEST_BASE.replace(/\/$/, '')}/api/ingest/address-quality?secret=${encodeURIComponent(CRON_SECRET)}`
-  log(`POSTing ${ingestRows.length} rows → ${INGEST_BASE}/api/ingest/address-quality`)
+  // The route lives under /api/market/ -- it is part of the market ingest
+  // family, not a top-level one. Posting to /api/ingest/... got a Next.js 404
+  // page, which arrives as a 200-shaped HTML body and reads like the server
+  // rejecting the data rather than the path not existing.
+  const path = '/api/market/ingest/address-quality'
+  const url = `${INGEST_BASE.replace(/\/$/, '')}${path}?secret=${encodeURIComponent(CAQ_INGEST_SECRET || CRON_SECRET)}`
+  log(`POSTing ${ingestRows.length} rows → ${INGEST_BASE}${path}`)
   const resp = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ rows: ingestRows }),
   })
   const text = await resp.text()
-  if (!resp.ok) { console.error(`[CAQ] ingest failed HTTP ${resp.status}: ${text}`); process.exit(1) }
+  if (!resp.ok) {
+    // A Next.js error page is kilobytes of markup; the first line is the part
+    // worth reading, and the rest buries the next error in the log.
+    const brief = /^\s*</.test(text)
+      ? (text.match(/<title>([^<]*)<\/title>/i)?.[1] || 'HTML error page').slice(0, 200)
+      : text.slice(0, 500)
+    console.error(`[CAQ] ingest failed HTTP ${resp.status}: ${brief}`)
+    process.exit(1)
+  }
   log('ingest response:', text)
   log('done.')
 }
