@@ -52,6 +52,10 @@ jobs:
       PBI_REPORT_URL: ${{ secrets.PBI_REPORT_URL }}
       INGEST_BASE: ${{ vars.INGEST_BASE }}
       CRON_SECRET: ${{ secrets.CRON_SECRET }}
+      # Narrow key: the ingest route accepts this OR CRON_SECRET, and this one
+      # can only append CAQ rows. Safe to leave unset -- the script falls back
+      # to CRON_SECRET, which is exactly the previous behaviour.
+      CAQ_INGEST_SECRET: ${{ secrets.CAQ_INGEST_SECRET }}
       MONTHS_BACK: ${{ github.event.inputs.months_back || '1' }}
     steps:
       - name: Checkout
