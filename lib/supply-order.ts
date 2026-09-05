@@ -27,10 +27,9 @@ export const TAB_ORDERS = 'SupplyOrders'
 export const ORDER_COLUMNS = ['submissionId', 'item', 'qty', 'updatedAt', 'updatedBy'] as const
 export const ITEM_COLUMNS = [
   'item', 'category', 'vendor', 'asin', 'url', 'packSize', 'notes', 'status',
-  // CATALOGUE-MEDIA-v1. `image` is only needed when the ASIN thumbnail below
-  // does not resolve; `price` is what we LAST PAID, typed in by whoever placed
-  // the order, and `pricedAt` is stamped automatically when it changes.
-  'image', 'price', 'pricedAt',
+  // CATALOGUE-MEDIA-v1. Only needed when the ASIN thumbnail below does not
+  // resolve; otherwise the picture comes free from the ASIN.
+  'image',
   // Written by the catalogue editor so a wrong ASIN can be traced to whoever
   // typed it. Read nowhere -- listSupplyItems ignores unknown columns.
   'updatedAt', 'updatedBy',
@@ -49,9 +48,6 @@ export interface SupplyItem {
   notes: string
   status: string
   image: string
-  /** Last price paid, 0 when nobody has recorded one. */
-  price: number
-  pricedAt: string
   /** Resolved: `image` if set, else Amazon's thumbnail for the first ASIN. */
   imageUrl: string
 }
@@ -63,11 +59,6 @@ export interface SupplyItem {
 // resolve to a genuine 160x160.
 export const asinThumb = (asin: string) =>
   asin ? 'https://m.media-amazon.com/images/P/' + asin + '.01._SCL_SL160_.jpg' : ''
-
-const money = (v: unknown) => {
-  const n = Number(String(v ?? '').replace(/[^0-9.-]/g, ''))
-  return Number.isFinite(n) && n > 0 ? n : 0
-}
 
 export interface OrderLine {
   item: string
@@ -96,8 +87,6 @@ export async function listSupplyItems(fresh = false): Promise<SupplyItem[]> {
       notes: S(r.notes),
       status: S(r.status) || 'active',
       image: S(r.image),
-      price: money(r.price),
-      pricedAt: S(r.pricedAt),
       imageUrl: S(r.image) || asinThumb(S(r.asin).split(/[,;]/)[0].trim()),
     }))
     .filter(i => i.item)
@@ -162,10 +151,6 @@ export function buildSupplyItemRows(
     const was = prior.get(key) || {}
     // Written every save, so a wrong ASIN can be traced to whoever typed it.
     const forced: Record<string, string> = { item, updatedAt: now, updatedBy: S(by) }
-    const price = money(it.price)
-    // Stamped only when the figure actually moves, so the date answers "how old
-    // is this price" rather than "when did somebody last press Save".
-    const priceChanged = price > 0 && String(price) !== String(money(was.price))
     const edited: Record<string, string> = {
       category: S(it.category),
       vendor: S(it.vendor),
@@ -175,8 +160,6 @@ export function buildSupplyItemRows(
       notes: S(it.notes),
       status: S(it.status),
       image: S(it.image),
-      price: price > 0 ? price.toFixed(2) : '',
-      pricedAt: price > 0 ? (priceChanged ? now.slice(0, 10) : S(was.pricedAt) || now.slice(0, 10)) : '',
     }
     rows.push(header.map(c => {
       if (c in forced) return forced[c]

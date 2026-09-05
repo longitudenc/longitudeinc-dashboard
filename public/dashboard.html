@@ -397,6 +397,26 @@
   .ff-input,.ff-select,.ff-textarea{width:100%;font:inherit;font-size:13.5px;padding:9px 11px;border:1px solid var(--border);border-radius:8px;background:#fff;color:var(--text);}
   .ff-input:focus,.ff-select:focus,.ff-textarea:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(4,134,103,.12);}
   .ff-textarea{min-height:86px;resize:vertical;}
+  /* SUPPLY-TILES-v1. A picker for options that are physical objects: the
+     picture does the identifying, so nobody has to tell "Swiffer Wet Jet:
+     Pads" from "Swiffer Power Mop: Pads" by the words alone. The input is
+     still an ordinary checkbox with the same class and value -- only its
+     presentation changes, so submit, validation and the review panel are
+     untouched. */
+  .ff-tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(126px,1fr));gap:9px;margin-top:2px;}
+  .ff-tile{position:relative;display:flex;flex-direction:column;align-items:center;gap:7px;
+    padding:11px 9px 10px;border:1.5px solid var(--border);border-radius:11px;cursor:pointer;
+    font-size:12.5px;font-weight:400;text-align:center;background:var(--surface,#fff);
+    transition:border-color .12s ease,box-shadow .12s ease;}
+  .ff-tile:hover{border-color:var(--primary);}
+  .ff-tile:has(input:checked){border-color:var(--primary);box-shadow:0 0 0 2px rgba(4,134,103,.16);}
+  .ff-tile input{position:absolute;top:7px;left:7px;margin:0;width:15px;height:15px;accent-color:var(--primary);}
+  .ff-tile-img{width:54px;height:54px;object-fit:contain;border-radius:6px;background:#fff;}
+  .ff-tile-ph{width:54px;height:54px;border-radius:6px;background:rgba(0,0,0,.045);
+    display:flex;align-items:center;justify-content:center;font-size:19px;opacity:.55;}
+  .ff-tile-n{line-height:1.32;}
+  .ff-tile-p{font-size:11px;color:var(--text-muted);}
+  .ff-tiles-hint{font-size:11.5px;color:var(--text-muted);margin:1px 0 8px;}
   .ff-radio{display:flex;flex-direction:column;gap:7px;}
   .ff-radio label{display:flex;align-items:center;gap:8px;font-size:13.5px;cursor:pointer;font-weight:400;}
   .ff-section{grid-column:1/-1;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--primary);border-bottom:1px solid var(--border);padding-bottom:6px;margin:10px 0 16px;}
@@ -11057,8 +11077,6 @@ function _scRows(){
         category: (cat && cat.category) || g.group,
         image: (cat && cat.image) || '',
         imageUrl: (cat && cat.imageUrl) || '',
-        price: (cat && cat.price) || '',
-        pricedAt: (cat && cat.pricedAt) || '',
         vendor: (cat && cat.vendor) || '',
         asin: (cat && (cat.asins || []).join(', ')) || '',
         url: (cat && cat.url) || '',
@@ -11073,7 +11091,7 @@ function _scRows(){
     rows.push({
       group: 'No longer on the form', item: i.item, onForm: false,
       category: i.category,
-      image: i.image, imageUrl: i.imageUrl, price: i.price || '', pricedAt: i.pricedAt,
+      image: i.image, imageUrl: i.imageUrl,
       vendor: i.vendor, asin: (i.asins || []).join(', '), url: i.url,
       packSize: i.packSize, notes: i.notes, status: i.status || 'active'
     });
@@ -11131,9 +11149,8 @@ function paintSupplyCatalog(){
   html += '<div class="act-note">Paste the Amazon link or the ASIN &mdash; a link is trimmed down to its ASIN when you save. '
     + 'Several ASINs separated by commas means the item is bought on whichever is cheapest or in stock. '
     + 'The item name is the join to the form, so it cannot be edited here: to add a product, add the option to the '
-    + 'supply order form first.<br><strong>Last paid</strong> is typed in by whoever placed the order &mdash; Amazon does not '
-    + 'publish prices to us, so it is a dated estimate, not a live figure. Pictures come from the ASIN automatically; '
-    + 'a few products have none and simply show blank.</div>';
+    + 'supply order form first.<br>Pictures come from the ASIN automatically; a few products have none and '
+    + 'simply show blank &mdash; paste an image link for those.</div>';
 
   const th = 'padding:5px 9px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);text-align:left;';
   let last = '';
@@ -11141,7 +11158,7 @@ function paintSupplyCatalog(){
   rows.forEach(function(r, i){
     if(r.group !== last){
       last = r.group;
-      body += '<tr><td colspan="7" style="padding:12px 9px 4px;font-size:11px;font-weight:700;'
+      body += '<tr><td colspan="6" style="padding:12px 9px 4px;font-size:11px;font-weight:700;'
         + 'text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);">' + hEsc(r.group) + '</td></tr>';
     }
     const warn = !_scMapped(r);
@@ -11154,20 +11171,16 @@ function paintSupplyCatalog(){
         + '<input type="hidden" data-sc="' + i + '" data-f="status" value="' + hEsc(r.status) + '">'
         + '<input type="hidden" data-sc="' + i + '" data-f="category" value="' + hEsc(r.category || '') + '">'
         + '<input type="hidden" data-sc="' + i + '" data-f="image" value="' + hEsc(r.image || '') + '">'
-        + '<input type="hidden" data-sc="' + i + '" data-f="pricedAt" value="' + hEsc(r.pricedAt || '') + '">'
       + '</td>'
       + '<td style="padding:6px 9px;width:105px;">' + inp(i, 'vendor', r.vendor, 'Amazon') + '</td>'
       + '<td style="padding:6px 9px;width:215px;">' + inp(i, 'asin', r.asin, 'B01LOC9N9G') + '</td>'
-      + '<td style="padding:6px 9px;width:95px;">' + inp(i, 'price', r.price, '0.00')
-        + (r.pricedAt ? '<div class="hint" style="margin-top:2px;">as of ' + hEsc(String(r.pricedAt).slice(0,10)) + '</div>' : '')
-        + '</td>'
       + '<td style="padding:6px 9px;width:100px;">' + inp(i, 'packSize', r.packSize, '6 pack') + '</td>'
       + '<td style="padding:6px 9px;">' + inp(i, 'notes', r.notes, '') + '</td>'
       + '</tr>';
   });
 
   html += '<div class="act-tw"><table class="act-t"><thead><tr>'
-    + ['','Item','Vendor','ASIN(s)','Last paid','Pack size','Notes'].map(function(h){ return '<th style="' + th + '">' + h + '</th>'; }).join('')
+    + ['','Item','Vendor','ASIN(s)','Pack size','Notes'].map(function(h){ return '<th style="' + th + '">' + h + '</th>'; }).join('')
     + '</tr></thead><tbody>' + body + '</tbody></table></div>';
 
   if(ed){
@@ -11198,7 +11211,7 @@ function saveSupplyCatalog(){
     const r = rows[k];
     return {
       item: r.item, category: r.category || '', vendor: r.vendor || '',
-      image: r.image || '', price: r.price || '', pricedAt: r.pricedAt || '',
+      image: r.image || '',
       asins: _scAsin(r.asin).split(', ').filter(Boolean),
       url: r.url || '', packSize: r.packSize || '', notes: r.notes || '', status: r.status || 'active'
     };
@@ -16463,9 +16476,32 @@ function seedForms(){
   }).catch(e=>alert(e.message));
 }
 
+// SUPPLY-TILES-v1. Product pictures for a form's own options, keyed by the
+// option text. Loaded once per session and only for the forms that use them --
+// every other form still opens without a round trip.
+let FORM_PICS = null;
+function formUsesPictures(f){ return !!f && f.formId === 'supplyorder'; }
+
+function loadFormPictures(then){
+  if(FORM_PICS){ if(then) then(); return; }
+  fetch('/api/forms/supply-order')
+    .then(r=>r.json())
+    .then(res=>{
+      FORM_PICS = {};
+      ((res && res.items) || []).forEach(function(i){ FORM_PICS[String(i.item).toLowerCase()] = i; });
+    })
+    // A catalogue that will not load must not stop anyone ordering: the tiles
+    // come up without pictures rather than not at all.
+    .catch(function(){ FORM_PICS = {}; })
+    .then(function(){ if(then) then(); });
+}
+
 function openForm(formId){
   S_activeForm = FORMS_DEFS.find(f=>f.formId===formId) || null;
   showFormsTab('new');
+  if(formUsesPictures(S_activeForm)) loadFormPictures(function(){
+    if(S_activeForm && formUsesPictures(S_activeForm)) renderFormRunner();
+  });
 }
 
 // Employee options for a roster-backed picker. Same aggregation the disc-points
@@ -16500,6 +16536,41 @@ function formsSalonOptions(){
     .join('');
 }
 
+// Amazon answers an ASIN it has no picture for with a 1x1 transparent pixel,
+// which LOADS successfully -- so onerror alone would leave a hole where a tile
+// should be. Both failures land here and get the placeholder box.
+function ffTilePic(img){
+  if(img.naturalWidth > 1) return;
+  const ph = document.createElement('div');
+  ph.className = 'ff-tile-ph';
+  ph.textContent = '\ud83d\udce6';
+  img.replaceWith(ph);
+}
+
+// SUPPLY-TILES-v1. The same checkboxes, the same class, the same values -- a
+// picture and a border round each one. Nothing downstream knows the difference.
+let _tileHint = false;
+function renderTileOptions(id, options){
+  const pics = FORM_PICS || {};
+  const tiles = options.map(function(o){
+    const cat = pics[String(o).toLowerCase()] || null;
+    const img = (cat && cat.imageUrl)
+      ? '<img class="ff-tile-img" src="' + hEsc(cat.imageUrl) + '" alt="" loading="lazy"'
+        + ' onload="ffTilePic(this)" onerror="ffTilePic(this)">'
+      : '<div class="ff-tile-ph">\ud83d\udce6</div>';
+    const pack = (cat && cat.packSize) ? '<span class="ff-tile-p">' + hEsc(cat.packSize) + '</span>' : '';
+    return '<label class="ff-tile">'
+      + '<input type="checkbox" class="' + id + '-opt" value="' + hEsc(o) + '">'
+      + img + '<span class="ff-tile-n">' + hEsc(o) + '</span>' + pack
+      + '</label>';
+  }).join('');
+  // The instruction belongs to the form, not to each category of it.
+  const hint = _tileHint ? ''
+    : '<div class="ff-tiles-hint">Tap everything you are out of &mdash; the office manager decides how many.</div>';
+  _tileHint = true;
+  return hint + '<div class="ff-tiles">' + tiles + '</div>';
+}
+
 function renderFormField(f){
   const id='fld-'+f.fieldKey;
   const req=f.required?'<span class="ff-req">*</span>':'';
@@ -16520,8 +16591,10 @@ function renderFormField(f){
   } else if(f.type==='multiselect'){
     // Tick-all-that-apply. Submits an array; this is what a Google Forms
     // checkbox question maps to.
-    input='<div class="ff-radio">' + f.options.map(o=>
-      `<label><input type="checkbox" class="${id}-opt" value="${hEsc(o)}"> ${hEsc(o)}</label>`).join('') + '</div>';
+    input = formUsesPictures(S_activeForm)
+      ? renderTileOptions(id, f.options)
+      : '<div class="ff-radio">' + f.options.map(o=>
+          `<label><input type="checkbox" class="${id}-opt" value="${hEsc(o)}"> ${hEsc(o)}</label>`).join('') + '</div>';
   } else if(f.type==='employee'){
     input=`<select class="ff-select" id="${id}"><option value="">— Select employee —</option>${formsEmployeeOptions()}</select>`;
   } else if(f.type==='salon'){
@@ -16654,6 +16727,7 @@ function ffPhotoView(sid,pathname){
 function renderFormRunner(){
   const host=document.getElementById('forms-new'); const f=S_activeForm;
   if(!host||!f) return;
+  _tileHint = false;
   const reqCount = f.fields.filter(x=>x.required && x.type!=='section').length;
   host.innerHTML = `
     <button class="back-btn" onclick="renderFormsList()">&larr; All forms</button>
@@ -16943,7 +17017,6 @@ function supplyThumb(url, size){
     + ' onerror="this.style.visibility=&quot;hidden&quot;"'
     + ' style="width:' + px + 'px;height:' + px + 'px;object-fit:contain;border-radius:5px;background:#fff;">';
 }
-const supplyMoney = n => '$' + (Math.round(Number(n||0)*100)/100).toFixed(2);
 
 // Everything the manager ticked, flattened out of the multiselect fields.
 function supplyRequested(s){
@@ -17019,31 +17092,20 @@ function renderSupplyOrder(k){
       const label = url
         ? `<a href="${hEsc(url)}" target="_blank" rel="noopener noreferrer">${hEsc(r.name)}</a>`
         : `<strong>${hEsc(r.name)}</strong>`;
-      const price = (r.cat && Number(r.cat.price)) || 0;
-      // The last price PAID, not a live one -- so it is shown as an estimate
-      // and dated, rather than presented as what this will cost today.
-      const cost = price
-        ? `<div class="hint" style="margin-top:2px;">${supplyMoney(price)} each${r.cat.pricedAt?' &middot; as of '+hEsc(String(r.cat.pricedAt).slice(0,10)):''}`
-          + (r.qty>1?` &middot; <strong>${supplyMoney(price*r.qty)}</strong>`:'') + '</div>'
-        : '';
       h += `<tr><td style="width:64px;">${qtyCell}</td>`
         + `<td style="width:44px;">${supplyThumb((r.cat&&r.cat.imageUrl)||'')}</td>`
-        + `<td>${label}${pack}${cost}${alt}${note}</td></tr>`;
+        + `<td>${label}${pack}${alt}${note}</td></tr>`;
     });
     h += '</tbody></table></div>';
   });
 
   const mapped = rows.filter(r => r.cat && r.cat.asins && r.cat.asins.length).length;
-  let est = 0, priced = 0;
-  rows.forEach(r => { const pr = (r.cat && Number(r.cat.price)) || 0; if(pr){ est += pr * r.qty; priced++; } });
   h += `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px;">
       ${ed ? `<button class="btn btn-primary btn-sm" onclick="saveSupplyOrder('${hEsc(k)}')">Save quantities</button>` : ''}
       <button class="btn btn-secondary btn-sm" onclick="downloadSupplyXlsx('${hEsc(k)}')">⬇ Amazon list file (.xlsx)</button>
       <button class="btn btn-secondary btn-sm" onclick="copySupplyList('${hEsc(k)}')">Copy list</button>
       <span id="so-msg-${hEsc(k)}" style="font-size:12px;color:var(--text-muted);"></span>
     </div>
-    ${est ? `<div style="margin-top:8px;font-size:13px;">Estimated <strong>${supplyMoney(est)}</strong>
-      <span style="color:var(--text-muted);font-size:12px;">from the last price paid on ${priced} of ${rows.length} items &mdash; not a live Amazon price</span></div>` : ''}
     <div class="hint" style="margin-top:6px;">${mapped} of ${rows.length} have a product mapped. The file carries only those; anything unmapped stays listed above so it is not quietly dropped. Upload it to a <strong>new</strong> list in Amazon Business — importing replaces a list's whole contents.</div>`;
   host.innerHTML = h;
 }

@@ -15,7 +15,7 @@
 import { NextResponse } from 'next/server'
 import { requireSignedIn } from '@/lib/require-role'
 import {
-  getSubmissions, getFormDefs, canViewSubmission, canReviewSubmission,
+  getSubmissions, getFormDefs, getFormDefsForRole, canViewSubmission, canReviewSubmission,
 } from '@/lib/forms'
 import { listSupplyItems, getOrderLines, saveOrderLines } from '@/lib/supply-order'
 
@@ -37,8 +37,15 @@ export async function GET(req: Request) {
   if (!gate.ok) return gate.response
   try {
     const submissionId = S(new URL(req.url).searchParams.get('submissionId'))
+
+    // No submissionId: just the catalogue, for the form itself to draw its
+    // options with pictures. Gated on being able to OPEN the form rather than
+    // on any submission -- the person asking has not made one yet. It carries
+    // product names and ASINs, which is what the form already shows them.
     if (!submissionId) {
-      return NextResponse.json({ success: false, error: 'submissionId is required' }, { status: 400 })
+      const canOpen = (await getFormDefsForRole(gate.access.role)).some(d => d.formId === 'supplyorder')
+      if (!canOpen) return NextResponse.json({ success: false, error: 'not allowed' }, { status: 403 })
+      return NextResponse.json({ success: true, items: await listSupplyItems(), lines: {}, canEdit: false })
     }
     const { sub, rv } = await locate(submissionId)
     if (!sub) return NextResponse.json({ success: false, error: 'submission not found' }, { status: 404 })

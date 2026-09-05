@@ -77,8 +77,6 @@ export async function POST(req: Request) {
       // blanked on save, not a compile error. Every column the editor shows
       // must be listed.
       image: S(r?.image),
-      price: Number(String(r?.price ?? '').replace(/[^0-9.-]/g, '')) || 0,
-      pricedAt: S(r?.pricedAt),
       imageUrl: '',                       // resolved on read, never stored
     })).filter((i: SupplyItem) => i.item)
 
