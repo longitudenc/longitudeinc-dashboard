@@ -6181,6 +6181,18 @@ function dReviewPick(v){ if(!v) return; S_dayReviewDate=v; _dayReviewRerender();
 let S_dayReviewHost = 'day-review';
 let S_dayReviewScope = null;
 
+// MIRRORS seesEverything() in lib/scope-filter.ts, which is what actually
+// decides the rows: owner/admin/viewer get everything, anyone else gets the
+// salons in their scope. Read off SESSION.salons rather than off a capability
+// -- capabilities pick screens, scope picks rows, and this heading is about
+// rows.
+function dReviewScopeLabel(){
+  const mine = (SESSION.salons || []).map(function(x){ return String(x).trim(); }).filter(Boolean);
+  if(['owner','admin','viewer'].indexOf(String(SESSION.role||'')) >= 0) return 'all salons';
+  if(!mine.length) return 'no salons in your scope';
+  return mine.length === 1 ? 'salon ' + mine[0] : 'your ' + mine.length + ' salons';
+}
+
 function renderDayReview(){
   const host=document.getElementById('section-day-review'); if(!host) return;
   if(!canSeeDayReview()){ host.innerHTML=''; return; }
@@ -6189,7 +6201,7 @@ function renderDayReview(){
   if(!S_dayReviewDate) S_dayReviewDate=max;
   if(S_dayReviewDate>max) S_dayReviewDate=max;
   host.innerHTML=`<div class="table-card-header">
-      <div class="card-title" style="margin:0;">Day Review — all salons</div>
+      <div class="card-title" style="margin:0;">Day Review — ${hEsc(dReviewScopeLabel())}</div>
       <div style="display:flex;gap:6px;align-items:center;">
         <button class="btn btn-secondary btn-sm" onclick="dReviewStep(-1)">‹ Prev</button>
         <input type="date" id="day-review-date" value="${S_dayReviewDate}" max="${max}" onchange="dReviewPick(this.value)" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;font:inherit;">
