@@ -11495,16 +11495,6 @@ function accAddRow(){
 // Calling both of those "access" without saying which is how people end up
 // believing a screen toggle is a security boundary.
 
-// One badge, both screens. "data" and "screen" were the words the code uses
-// for these; neither told a reader what unticking the box would actually do.
-function capKindTag(kind){
-  return kind === 'screen'
-    ? '<span title="Unticking this hides the screen from their menu. It is not a lock: the rows behind it are already limited to their own salons and their own record, whoever asks."'
-      + ' style="font-size:9.5px;font-weight:700;color:#7a5b00;background:var(--grw-bg,#fdf6e0);border-radius:9px;padding:1px 6px;white-space:nowrap;">hides the screen</span>'
-    : '<span title="Unticking this makes the server refuse. They cannot reach the data at all, by any route."'
-      + ' style="font-size:9.5px;font-weight:700;color:#0a5236;background:var(--exc-bg,#e6f4e0);border-radius:9px;padding:1px 6px;white-space:nowrap;">server blocks</span>';
-}
-
 const ROLE_SHORT = {
   owner:'Owner', admin:'Admin', viewer:'Viewer', area_manager:'AM',
   manager:'Manager', office:'Office', stylist:'Stylist', maintenance:'Maint'
@@ -11512,12 +11502,37 @@ const ROLE_SHORT = {
 
 function renderCapMatrix(){
   const d = ACCESS_DATA || {};
-  const meta = (d.capabilityMeta || []).map(function(m){
+  const all = (d.capabilityMeta || []).map(function(m){
     return Object.assign({}, m, { needs: (d.capabilityRequires || {})[m.key] || '' });
   });
   const roles = d.roles || [];
+  if(!all.length || !roles.length) return '';
+
+  const perms = all.filter(function(m){ return m.kind !== 'menu'; });
+  const menus = all.filter(function(m){ return m.kind === 'menu'; });
+
+  return capGrid(perms, roles,
+      'Who can see what',
+      'Every switch here is enforced by the server. Untick one and that person cannot reach '
+      + 'the data by any route &mdash; not the screen, not the address, not the browser console.')
+    + (menus.length ? capGrid(menus, roles,
+      'Menu &mdash; which screens are offered',
+      'NOT permissions, and they cannot withhold anything. Both of these show the person the '
+      + 'salons they can ALREADY see, arranged differently &mdash; every request is trimmed to '
+      + 'their scope before it leaves the server, whichever screen asked. Use them to keep a '
+      + 'menu short, never to keep something secret.') : '')
+    + '<div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'
+    + '<button class="btn btn-primary btn-sm" onclick="saveCapMatrix()">&#128190; Save role access</button>'
+    + '<button class="btn btn-sm" onclick="loadAccessPanel()">Discard changes</button>'
+    + '<span id="cm-msg" style="font-size:11px;color:var(--text-muted);"></span></div>'
+    + capFixedGates(d)
+    + '<div style="height:14px;"></div>';
+}
+
+function capGrid(meta, roles, title, blurb){
+  const d = ACCESS_DATA || {};
   const have = d.roleCaps || {};
-  if(!meta.length || !roles.length) return '';
+  if(!meta.length) return '';
 
   const th = 'padding:6px 7px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;'
     + 'color:var(--text-muted);text-align:center;font-weight:700;';
@@ -11526,19 +11541,20 @@ function renderCapMatrix(){
     head += '<th style="' + th + 'width:66px;">' + _accEsc(ROLE_SHORT[r] || r) + '</th>';
   });
 
+  const manyGroups = meta.map(function(m){ return m.group; })
+    .filter(function(g, i, a){ return a.indexOf(g) === i; }).length > 1;
   let body = '', lastGroup = '';
   meta.forEach(function(m){
-    if(m.group !== lastGroup){
+    if(manyGroups && m.group !== lastGroup){
       lastGroup = m.group;
       body += '<tr><td colspan="' + (roles.length + 1) + '" style="padding:12px 7px 3px;font-size:10px;'
         + 'font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);'
         + 'position:sticky;left:0;background:var(--surface,#fff);">' + _accEsc(m.group) + '</td></tr>';
     }
-    const tag = capKindTag(m.kind);
     body += '<tr>'
       + '<td style="padding:6px 7px;border-top:1px solid var(--border);position:sticky;left:0;'
         + 'background:var(--surface,#fff);z-index:1;">'
-        + '<div style="font-size:12px;font-weight:600;">' + _accEsc(m.label) + ' ' + tag + '</div>'
+        + '<div style="font-size:12px;font-weight:600;">' + _accEsc(m.label) + '</div>'
         + '<div style="font-size:10.5px;color:var(--text-muted);" title="' + _accEsc(m.enforcedOn || '') + '">'
         + _accEsc(m.description) + '</div></td>';
     roles.forEach(function(r){
@@ -11555,51 +11571,28 @@ function renderCapMatrix(){
     body += '</tr>';
   });
 
+  return '<div style="font-size:12px;font-weight:700;margin:16px 0 2px;">' + title + '</div>'
+    + '<div style="font-size:11.5px;background:#f4f7f6;border:1px solid var(--border);border-radius:8px;'
+    + 'padding:9px 12px;margin-bottom:9px;line-height:1.55;">' + blurb + '</div>'
+    + '<div style="overflow-x:auto;border:1px solid var(--border);border-radius:9px;">'
+    + '<table style="width:100%;border-collapse:collapse;font-size:12px;background:var(--surface,#fff);">'
+    + '<thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>';
+}
+
+// The guards that are not switches at all, so nothing about access is invisible.
+function capFixedGates(d){
   let fixed = '';
   (d.fixedGates || []).forEach(function(g){
     fixed += '<tr><td style="' + _ACC_TD + 'font-weight:600;">' + _accEsc(g.what) + '</td>'
       + '<td style="' + _ACC_TD + '">' + _accEsc(g.who) + '</td>'
       + '<td style="' + _ACC_TD + 'color:var(--text-muted);font-size:11px;">' + _accEsc(g.where) + '</td></tr>';
   });
-
-  // A row of empty boxes for `manager` would otherwise read as "managers see
-  // nothing", which is wrong and would send somebody granting capabilities
-  // nobody needs. What everyone gets WITHOUT a capability is the baseline this
-  // grid sits on top of, so it has to be stated next to it.
-  return '<div style="font-size:12px;font-weight:700;margin:4px 0 2px;">Who can see what'
-    + '<span style="font-weight:400;color:var(--text-muted);"> &mdash; a tick is a rule for the whole role. '
-    + 'One person\'s own exception still overrides their role, and is set with the &#9881; button below.</span></div>'
-    + '<div style="font-size:11.5px;background:#f4f7f6;border:1px solid var(--border);border-radius:8px;'
-    + 'padding:9px 12px;margin-bottom:9px;line-height:1.55;">'
-    + '<b>Everyone who can sign in already gets, with no capability ticked:</b> their own home page; '
-    + 'the forms their role is the audience for, and their own submissions and comments; their own '
-    + 'disciplinary points; and salon numbers for the salons in their scope. '
-    + '<span style="color:var(--text-muted);">The grid below adds screens and data ON TOP of that. '
-    + 'An empty column is not &quot;sees nothing&quot; &mdash; it is &quot;nothing beyond their own salon '
-    + 'and their own record&quot;.</span></div>'
-    + '<div style="font-size:11.5px;border:1px solid var(--border);border-radius:8px;padding:9px 12px;'
-    + 'margin-bottom:9px;line-height:1.6;">'
-    + '<b>Two kinds of switch.</b><br>'
-    + capKindTag('data') + ' &nbsp;Untick it and the server refuses. They cannot reach the data by any '
-    + 'route &mdash; not the screen, not the address, not the browser console. Everything sensitive is one of these.<br>'
-    + capKindTag('screen') + ' &nbsp;Untick it and the screen leaves their menu. It is tidiness, not a lock: '
-    + 'the rows behind those three are already trimmed to their own salons and their own record whoever asks, '
-    + 'so there is nothing left for a switch to protect. Giving a manager &quot;Company-wide views&quot; '
-    + 'shows them the company screen with only their own salon in it.</div>'
-    + '<div style="overflow-x:auto;border:1px solid var(--border);border-radius:9px;">'
-    + '<table style="width:100%;border-collapse:collapse;font-size:12px;background:var(--surface,#fff);">'
-    + '<thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>'
-    + '<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'
-    + '<button class="btn btn-primary btn-sm" onclick="saveCapMatrix()">&#128190; Save role access</button>'
-    + '<button class="btn btn-sm" onclick="loadAccessPanel()">Discard changes</button>'
-    + '<span id="cm-msg" style="font-size:11px;color:var(--text-muted);"></span></div>'
-    + (fixed
-        ? '<div style="font-size:12px;font-weight:700;margin:16px 0 4px;">Not a toggle, by design'
-          + '<span style="font-weight:400;color:var(--text-muted);"> &mdash; these are fixed in code. '
-          + 'Listed so nothing about access is invisible.</span></div>'
-          + '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;">'
-          + _accHead(['What','Who','Where it is enforced']) + '<tbody>' + fixed + '</tbody></table></div>'
-        : '');
+  if(!fixed) return '';
+  return '<div style="font-size:12px;font-weight:700;margin:16px 0 4px;">Not a switch, by design'
+    + '<span style="font-weight:400;color:var(--text-muted);"> &mdash; fixed in code. '
+    + 'Listed so nothing about access is invisible.</span></div>'
+    + '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;">'
+    + _accHead(['What','Who','Where it is enforced']) + '<tbody>' + fixed + '</tbody></table></div>';
 }
 
 // Same pairing rule as the per-person dialog, applied down a single column: you
@@ -11672,6 +11665,15 @@ function renderAccessPanel(){
   });
 
   let html = '<div style="margin-bottom:8px;">' + counts + '</div>';
+  html += '<div style="font-size:11.5px;background:#fffdf3;border:1px solid #efe4c4;border-radius:8px;'
+        + 'padding:9px 12px;margin-bottom:4px;line-height:1.55;">'
+        + '<b>Before any of this:</b> everyone who can sign in already gets their own home page; the forms '
+        + 'their role is the audience for, and their own submissions; their own disciplinary points; and '
+        + 'the numbers for the salons in their scope. '
+        + '<span style="color:var(--text-muted);">An empty row below means &quot;nothing beyond that&quot;, '
+        + 'not &quot;nothing at all&quot;. And a permission never widens which SALONS someone sees &mdash; '
+        + 'that is their scope, which is set by their role and assignment, and is trimmed on every request '
+        + 'no matter what is ticked here.</span></div>';
   html += renderCapMatrix();
 
   html += '<div style="font-size:12px;font-weight:700;margin:10px 0 4px;">Assigned roles'
@@ -11811,7 +11813,11 @@ function accOpenCaps(email){
       ? '<span style="color:var(--text-muted);font-size:10px;">default</span>'
       : '<span style="color:#b06a00;font-size:10px;font-weight:700;">' + (on ? 'granted' : 'revoked') + '</span>';
     const dep = requires[m.key] ? ' data-needs="' + _accEsc(requires[m.key]) + '"' : '';
-    const kind = capKindTag(m.kind);
+    const kind = m.kind === 'menu'
+      ? '<span title="This does not withhold anything. It decides whether the screen is offered; the rows behind it are trimmed to their scope on every request either way."'
+        + ' style="font-size:9.5px;font-weight:700;color:#7a5b00;background:var(--grw-bg,#fdf6e0);'
+        + 'border-radius:9px;padding:1px 6px;white-space:nowrap;">menu only</span>'
+      : '';
     rows += '<label style="display:flex;gap:8px;align-items:flex-start;padding:7px 4px;border-bottom:1px solid var(--border);cursor:pointer;">'
       + '<input type="checkbox" class="cap-box" data-cap="' + _accEsc(m.key) + '"' + dep
       + (on ? ' checked' : '') + ' onchange="accCapDeps(this)" style="margin-top:2px;">'

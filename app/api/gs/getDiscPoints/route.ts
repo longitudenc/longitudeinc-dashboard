@@ -13,6 +13,7 @@
 import { NextResponse } from 'next/server'
 import { readSheet, rowsToObjects, getEmployeeProfiles } from '@/lib/sheets'
 import { requireSignedIn } from '@/lib/require-role'
+import { capabilitiesFor } from '@/lib/capabilities'
 import { seesEmployee } from '@/lib/scope-filter'
 
 export async function GET() {
@@ -42,14 +43,29 @@ export async function GET() {
     // The Points tab is hidden in the client until a rule reveals it, but the
     // data had already been fetched into the browser, so that was decoration.
     // Scope it here, where it counts.
+    //
+    // CAPABILITIES-v4: two gates, not one. `seesEmployee` is SCOPE -- which
+    // salons -- and view.points is PERMISSION -- other people at all. Without
+    // the capability this returns your own record and nothing else, so
+    // "cannot see other people's points" is true however it is asked for,
+    // rather than being a hidden tab with the data already in the browser.
+    const caps = await capabilitiesFor(gate.access, gate.effectiveEmail)
+    const maySeeOthers = caps.has('view.points')
+    const myGid = String(gate.access.globalId || '').trim()
+
     const profiles = await getEmployeeProfiles()
     const homeSalonOf = new Map<string, string>()
     for (const pr of profiles as any[]) {
       const gid = String(pr.globalId || '').trim()
       if (gid) homeSalonOf.set(gid, String(pr.homeStoreNum || '').trim())
     }
-    const visible = events.filter((e) =>
-      seesEmployee(gate.access, e.globalId, homeSalonOf.get(e.globalId) || ''))
+    const visible = events.filter((e) => {
+      // Your own record is yours, always. Nothing above can take it away, and
+      // nothing below needs to: it is the one row a person is entitled to.
+      if (myGid && e.globalId === myGid) return true
+      if (!maySeeOthers) return false
+      return seesEmployee(gate.access, e.globalId, homeSalonOf.get(e.globalId) || '')
+    })
 
     // Group by globalId for convenient client lookup
     const byEmp: Record<string, any[]> = {}

@@ -60,53 +60,69 @@ export interface CapabilityMeta {
   /** Section heading in the Users & Access panel. */
   group: string
   /**
-   * What turning this off actually does.
+   * PERMISSION or MENU -- and the panel shows them in two separate lists,
+   * because mixing them is how somebody comes to believe a menu toggle is
+   * keeping something secret.
    *
-   *   'data'   the API refuses without it. Off means the rows never leave the
-   *            server, whatever the browser asks for.
-   *   'screen' it chooses which SCREEN appears. The underlying endpoint is
-   *            scoped per person anyway (lib/scope-filter), so off means "not
-   *            in the menu", not "cannot be reached".
+   *   'permission'  the server refuses without it. Off means the data cannot
+   *                 be reached by any route: not the screen, not the address,
+   *                 not the console. Every one of these is a requireCapability
+   *                 (or an equivalent check) in the handler named below.
    *
-   * Shown in the panel, because "who can see what" is not answerable without
-   * knowing which kind of switch you are looking at.
+   *   'menu'        it decides whether a screen is offered. It CANNOT withhold
+   *                 anything, because the rows behind it are already trimmed to
+   *                 the person's scope by lib/scope-filter on every request --
+   *                 there is nothing left for it to protect. Two of these
+   *                 exist, and they are labelled as preferences, not access.
+   *
+   * If a switch cannot block, it does not belong in the permissions list. The
+   * rule for adding one: if you cannot point at the handler that refuses, it
+   * is a 'menu'.
    */
-  kind: 'data' | 'screen'
+  kind: 'permission' | 'menu'
   /** The guard this maps to, quoted in the panel so a claim can be checked. */
   enforcedOn: string
 }
 
 /** Shown in the Users & Access panel, in this order, under these headings. */
 export const CAPABILITY_META: CapabilityMeta[] = [
-  { group: 'Reports', key: 'view.company',   kind: 'screen', enforcedOn: 'company screens',            label: 'Company-wide views',  description: 'All-salon tables and totals, not just their own salons.' },
-  { group: 'Reports', key: 'view.dayreview', kind: 'screen', enforcedOn: 'Day Review screen',          label: 'Day Review',          description: 'The whole company on a single day.' },
-  { group: 'Reports', key: 'view.dayofweek', kind: 'data',   enforcedOn: 'GET /api/gs/getDailyRange',  label: 'Day of Week',         description: 'Weekday comparisons across a date window.' },
-  { group: 'Reports', key: 'view.salondata', kind: 'data',   enforcedOn: 'GET /api/market/caq, /api/market/ratings-data', label: 'Ratings & CAQ', description: 'Google ratings and address quality for our salons.' },
-  { group: 'Reports', key: 'view.market',    kind: 'data',   enforcedOn: 'GET /api/market/data',       label: 'Market Compare',      description: 'Market-wide data, including salons we do not operate.' },
+  { group: 'Reports', key: 'view.dayofweek', kind: 'permission',   enforcedOn: 'GET /api/gs/getDailyRange',  label: 'Day of Week',         description: 'Weekday comparisons across a date window.' },
+  { group: 'Reports', key: 'view.salondata', kind: 'permission',   enforcedOn: 'GET /api/market/caq, /api/market/ratings-data', label: 'Ratings & CAQ', description: 'Google ratings and address quality for our salons.' },
+  { group: 'Reports', key: 'view.market',    kind: 'permission',   enforcedOn: 'GET /api/market/data',       label: 'Market Compare',      description: 'Market-wide data, including salons we do not operate.' },
 
-  { group: 'People',  key: 'view.points',    kind: 'screen', enforcedOn: 'Disciplinary points screen', label: 'Disciplinary points', description: 'The points screen. Everyone can already see their own; this is other people\'s, within their salons.' },
-  { group: 'People',  key: 'edit.points',    kind: 'data',   enforcedOn: 'POST /api/gs/saveDiscPoints, /api/gs/reprocessDiscPoints', label: 'Award & edit points', description: 'Add, change or clear disciplinary points. Needs the line above.' },
+  { group: 'People',  key: 'view.points',    kind: 'permission', enforcedOn: 'GET /api/gs/getDiscPoints — returns only your own record without it', label: 'Other people\'s points', description: 'Disciplinary points for their salons. Without it the server returns only their own record.' },
+  { group: 'People',  key: 'edit.points',    kind: 'permission',   enforcedOn: 'POST /api/gs/saveDiscPoints, /api/gs/reprocessDiscPoints', label: 'Award & edit points', description: 'Add, change or clear disciplinary points. Needs the line above.' },
 
-  { group: 'Office',  key: 'view.payroll',   kind: 'data',   enforcedOn: 'all /api/office/payroll/*',  label: 'Payroll tools',       description: 'The ADP upload builder, its settings and the finalised files.' },
-  { group: 'Office',  key: 'view.supplies',  kind: 'data',   enforcedOn: 'GET /api/office/supply-items', label: 'Supply catalogue',  description: 'See which product each supply order option buys.' },
-  { group: 'Office',  key: 'edit.supplies',  kind: 'data',   enforcedOn: 'POST /api/office/supply-items', label: 'Edit the catalogue', description: 'Change the product a supply order option buys. Needs the line above.' },
-  { group: 'Office',  key: 'edit.newsletter',kind: 'data',   enforcedOn: 'write /api/newsletter/*',    label: 'Build the newsletter', description: 'Write, edit and publish the monthly issue. Everyone can read a published one.' },
+  { group: 'Office',  key: 'view.payroll',   kind: 'permission',   enforcedOn: 'all /api/office/payroll/*',  label: 'Payroll tools',       description: 'The ADP upload builder, its settings and the finalised files.' },
+  { group: 'Office',  key: 'view.supplies',  kind: 'permission',   enforcedOn: 'GET /api/office/supply-items', label: 'Supply catalogue',  description: 'See which product each supply order option buys.' },
+  { group: 'Office',  key: 'edit.supplies',  kind: 'permission',   enforcedOn: 'POST /api/office/supply-items', label: 'Edit the catalogue', description: 'Change the product a supply order option buys. Needs the line above.' },
+  { group: 'Office',  key: 'edit.newsletter',kind: 'permission',   enforcedOn: 'write /api/newsletter/*',    label: 'Build the newsletter', description: 'Write, edit and publish the monthly issue. Everyone can read a published one.' },
 
-  { group: 'Leases',  key: 'view.leases',    kind: 'data',   enforcedOn: 'GET /api/leases/*',          label: 'See leases',          description: 'Lease records and documents — rent, terms, landlords, guarantees.' },
-  { group: 'Leases',  key: 'edit.leases',    kind: 'data',   enforcedOn: 'write /api/leases/*',        label: 'Edit leases',         description: 'Upload, file, rename and delete lease documents. Needs the line above.' },
+  { group: 'Leases',  key: 'view.leases',    kind: 'permission',   enforcedOn: 'GET /api/leases/*',          label: 'See leases',          description: 'Lease records and documents — rent, terms, landlords, guarantees.' },
+  { group: 'Leases',  key: 'edit.leases',    kind: 'permission',   enforcedOn: 'write /api/leases/*',        label: 'Edit leases',         description: 'Upload, file, rename and delete lease documents. Needs the line above.' },
 
-  { group: 'Forms',   key: 'manage.forms',   kind: 'data',   enforcedOn: 'POST /api/forms/access, /api/forms/fields', label: 'Form settings & questions', description: 'Who can submit each form, who sees its responses, its wording and its questions.' },
-  { group: 'Forms',   key: 'delete.submissions', kind: 'data', enforcedOn: 'DELETE /api/forms/submissions', label: 'Delete submissions', description: 'Remove a submission and its comments for good. For test rows, not for outcomes.' },
+  { group: 'Forms',   key: 'manage.forms',   kind: 'permission',   enforcedOn: 'POST /api/forms/access, /api/forms/fields', label: 'Form settings & questions', description: 'Who can submit each form, who sees its responses, its wording and its questions.' },
+  { group: 'Forms',   key: 'delete.submissions', kind: 'permission', enforcedOn: 'DELETE /api/forms/submissions', label: 'Delete submissions', description: 'Remove a submission and its comments for good. For test rows, not for outcomes.' },
 
-  { group: 'Administration', key: 'edit.settings', kind: 'data', enforcedOn: 'POST /api/gs/save*, /api/home/save', label: 'Edit settings', description: 'Thresholds, AM assignments, manager table, waivers and the home page.' },
-  { group: 'Administration', key: 'run.dataops',   kind: 'data', enforcedOn: 'POST /api/gs/triggerProcessAndLoad and the other rebuild endpoints', label: 'Run data jobs', description: 'Rebuild, de-duplicate and bulk-generate. Heavy, and it rewrites shared tabs.' },
-  { group: 'Administration', key: 'manage.access', kind: 'data', enforcedOn: 'GET/POST /api/admin/users, /api/admin/capabilities', label: 'Manage access', description: 'This panel. Who can sign in and what they can see.' },
+  { group: 'Administration', key: 'edit.settings', kind: 'permission', enforcedOn: 'POST /api/gs/save*, /api/home/save', label: 'Edit settings', description: 'Thresholds, AM assignments, manager table, waivers and the home page.' },
+  { group: 'Administration', key: 'run.dataops',   kind: 'permission', enforcedOn: 'POST /api/gs/triggerProcessAndLoad and the other rebuild endpoints', label: 'Run data jobs', description: 'Rebuild, de-duplicate and bulk-generate. Heavy, and it rewrites shared tabs.' },
+  { group: 'Administration', key: 'manage.access', kind: 'permission', enforcedOn: 'GET/POST /api/admin/users, /api/admin/capabilities', label: 'Manage access', description: 'This panel. Who can sign in and what they can see.' },
+
+  // NOT permissions. Kept in the same list so nothing is defined twice, but
+  // the panel renders them in their own section -- see MENU_META.
+  { group: 'Menu',    key: 'view.company',   kind: 'menu', enforcedOn: 'which screens are offered — the rows come from scope either way', label: 'Company-wide screens', description: 'Offers the all-salon tables. It shows the SALONS THEY ALREADY SEE in a company layout — an area manager gets their own four, not eighteen.' },
+  { group: 'Menu',    key: 'view.dayreview', kind: 'menu', enforcedOn: 'which screens are offered — the rows come from scope either way', label: 'Day Review screen',    description: 'Offers the one-day view. Same rows as everywhere else: their scope, arranged by day.' },
 ]
 
 /** Group headings in the order the panel should show them. */
 export const CAPABILITY_GROUPS: string[] = CAPABILITY_META
   .map(c => c.group)
   .filter((g, i, a) => a.indexOf(g) === i)
+
+/** The permissions -- everything that actually refuses. */
+export const PERMISSION_META = () => CAPABILITY_META.filter(m => m.kind === 'permission')
+/** The two that only decide whether a screen is offered. */
+export const MENU_META = () => CAPABILITY_META.filter(m => m.kind === 'menu')
 
 // An edit capability is meaningless without the matching view: you cannot
 // change a catalogue you cannot open. The panel pairs the checkboxes, and
