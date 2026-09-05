@@ -16547,15 +16547,15 @@ function submissionRows(list, showWho, ctx){
   return `<div class="table-card"><table class="data-table"><thead><tr>
       <th>Form</th>${showWho?'<th>Submitted By</th>':''}<th>Salon</th><th>Submitted</th><th>Status</th><th></th>
     </tr></thead><tbody>` + list.map(s=>{ const k=ctx+s.submissionId; return `
-      <tr>
+      <tr class="sub-row" onclick="toggleSubmission('${hEsc(k)}')">
         <td><strong>${hEsc(s.formTitle)}</strong><div style="font-size:11.5px;color:var(--text-muted);max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${subSummary(s)}</div></td>
         ${showWho?`<td>${hEsc(fmtName(s.submittedByName||''))}</td>`:''}
         <td>${hEsc(s.salonNum||'—')}</td>
         <td>${hEsc(s.submittedAt?pDate(s.submittedAt.slice(0,10)):'—')}</td>
         <td>${statusPill(s.status, formWorkflow(s.formId))}</td>
-        <td style="text-align:right;"><button class="btn btn-secondary btn-sm" onclick="toggleSubmission('${hEsc(k)}')">Details</button></td>
+        <td style="text-align:right;"><button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();toggleSubmission('${hEsc(k)}')">Details</button></td>
       </tr>
-      <tr id="sub-${hEsc(k)}" style="display:none;"><td colspan="${showWho?6:5}">${submissionDetail(s, ctx)}</td></tr>
+      <tr id="sub-${hEsc(k)}" style="display:none;" onclick="event.stopPropagation();"><td colspan="${showWho?6:5}">${submissionDetail(s, ctx)}</td></tr>
     `; }).join('') + '</tbody></table></div>';
 }
 
@@ -17164,6 +17164,8 @@ init();
   </div>
 </div>
 <style>
+  .sub-row{cursor:pointer;}
+  .sub-row:hover{background:var(--surface-hover,rgba(0,0,0,.035));}
   .fb-cat{padding:6px 12px;border-radius:16px;border:1px solid var(--border);background:white;font-size:12px;font-weight:600;cursor:pointer;color:var(--text);transition:all .15s;}
   .fb-cat-active{background:var(--primary);color:white;border-color:var(--primary);}
   #feedback-fab:hover{transform:translateY(-2px);}
