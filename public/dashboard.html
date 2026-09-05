@@ -433,9 +433,47 @@
   .st-denied{background:var(--wrn-bg);color:var(--wrn-text);}
   .st-closed{background:#eee;color:#777;}
 
-  .sub-detail{background:#f8faf9;border:1px solid var(--border);border-radius:8px;padding:12px 14px;font-size:12.5px;line-height:1.65;}
-  .sub-detail dt{font-weight:700;color:var(--text-muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;}
-  .sub-detail dd{margin:0 0 9px;color:var(--text);white-space:pre-wrap;}
+  /* SUB-DETAIL-v2. Label and value on ONE line, in two columns, with a rule
+     between rows -- four stacked pairs of uppercase-label-then-value read as a
+     form to fill in rather than a record to read. */
+  .sub-sec{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;
+    color:var(--text-muted);margin:18px 0 7px;}
+  .sub-sec:first-child{margin-top:2px;}
+  .sub-detail{background:var(--surface,#fff);border:1px solid var(--border);border-radius:10px;
+    padding:2px 16px;font-size:13px;line-height:1.5;display:grid;grid-template-columns:170px 1fr;column-gap:20px;margin:0;}
+  .sub-detail dt{font-weight:600;color:var(--text-muted);font-size:11px;text-transform:uppercase;
+    letter-spacing:.04em;padding:11px 0;border-top:1px solid var(--border);}
+  .sub-detail dd{margin:0;color:var(--text);white-space:pre-wrap;padding:11px 0;border-top:1px solid var(--border);}
+  .sub-detail dt:first-of-type,.sub-detail dd:first-of-type{border-top:none;}
+  @media (max-width:640px){
+    .sub-detail{grid-template-columns:1fr;padding:12px 14px;}
+    .sub-detail dt{padding:9px 0 1px;border-top:none;}
+    .sub-detail dd{padding:0 0 4px;border-top:none;}
+  }
+
+  /* The note a reviewer left, distinct from the request itself. */
+  .sub-note{margin-top:10px;font-size:12.5px;background:#fffcf0;border:1px solid #efe4c4;
+    border-radius:9px;padding:10px 13px;line-height:1.55;}
+
+  /* SUB-ACTIONS-v1. Below the conversation, because deciding is the last thing
+     you do -- and every button is the same weight. A filled green primary read
+     as "this is already selected"; what is TRUE of this submission is its
+     status, so that is the only coloured thing here. */
+  .sub-actions{margin-top:18px;border:1px solid var(--border);border-radius:10px;
+    background:#f8faf9;padding:14px 16px;}
+  .sub-actions-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;}
+  .sub-actions .lbl{font-size:10.5px;font-weight:700;text-transform:uppercase;
+    letter-spacing:.06em;color:var(--text-muted);}
+  .sub-btns{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+  .sub-act{font:inherit;font-size:12.5px;font-weight:600;padding:8px 15px;border-radius:8px;
+    border:1px solid var(--border);background:#fff;color:var(--text);cursor:pointer;
+    transition:border-color .12s ease,color .12s ease;}
+  .sub-act:hover{border-color:var(--primary);color:var(--primary);}
+  .sub-act.is-current{background:#eceff0;color:var(--text-muted);cursor:default;}
+  .sub-act.is-current:hover{border-color:var(--border);color:var(--text-muted);}
+  .sub-del{font:inherit;font-size:12px;font-weight:600;padding:6px 12px;border-radius:8px;
+    border:1px solid var(--border);background:none;color:#c0392b;cursor:pointer;}
+  .sub-del:hover{border-color:#c0392b;}
 
   @media (max-width:900px){
     .home-grid{grid-template-columns:1fr;}
@@ -16920,7 +16958,7 @@ function submissionRows(list, showWho, ctx){
 function submissionDetail(s, ctx){
   const k=(ctx||'')+s.submissionId, sid=hEsc(s.submissionId);
   const def=FORMS_DEFS.find(f=>f.formId===s.formId);
-  let dl='<dl class="sub-detail">';
+  let dl='<div class="sub-sec">Details</div><dl class="sub-detail">';
   if(def){
     def.fields.forEach(f=>{
       if(f.type==='section') return;
@@ -16953,37 +16991,44 @@ function submissionDetail(s, ctx){
   dl += '</dl>';
 
   if(isSupplyOrder(s)){
-    dl += `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
-      <div style="font-size:12.5px;font-weight:700;margin-bottom:8px;">Order this</div>
-      <div id="so-${hEsc(k)}"></div></div>`;
+    dl += `<div class="sub-sec">Order this</div><div id="so-${hEsc(k)}"></div>`;
   }
 
   if(s.reviewNote){
-    dl += `<div style="margin-top:10px;font-size:12.5px;"><strong>Review note:</strong> ${hEsc(s.reviewNote)}`
+    dl += `<div class="sub-note"><strong>Note:</strong> ${hEsc(s.reviewNote)}`
       + (s.reviewedBy?` <span style="color:var(--text-muted);">— ${hEsc(s.reviewedBy)}</span>`:'') + '</div>';
   }
 
+  // Conversation before the decision. Reading what people said about a request
+  // is part of deciding it, so it should not sit below the buttons.
+  dl += `<div id="cmts-${hEsc(k)}" style="margin-top:18px;">${renderCommentThread(s, k)}</div>`;
+
   if(s.canReview){
+    // The button matching where this already IS is shown as current rather
+    // than offered again -- clicking it would be a no-op, and a highlighted
+    // button that does nothing is what made the old panel read wrong.
     const btns = formActions(s.formId).map(function(a){
-      return `<button class="btn ${a.primary?'btn-primary':'btn-secondary'} btn-sm" `
+      const cur = a.status === s.status;
+      return `<button class="sub-act${cur?' is-current':''}"${cur?' disabled':''} `
         + `onclick="setSubStatus('${hEsc(k)}','${sid}','${hEsc(a.status)}')">`
-        + `${a.primary?'&#10003; ':''}${hEsc(a.label)}</button>`;
+        + `${cur?'&#10003; ':''}${hEsc(a.label)}</button>`;
     }).join('');
-    dl += `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
-      <label class="ff-label">Note (optional)</label>
-      <input class="ff-input" id="rn-${hEsc(k)}" value="${hEsc(s.reviewNote||'')}" style="margin-bottom:9px;">
-      <div style="display:flex;gap:8px;flex-wrap:wrap;">${btns}</div></div>`;
+    dl += `<div class="sub-actions">
+      <div class="sub-actions-head"><span class="lbl">Status</span>${statusPill(s.status, s.formId)}</div>
+      <label class="lbl" for="rn-${hEsc(k)}" style="display:block;margin-bottom:5px;">Note (optional)</label>
+      <input class="ff-input" id="rn-${hEsc(k)}" value="${hEsc(s.reviewNote||'')}"
+        placeholder="Anything the submitter should know" style="margin-bottom:11px;">
+      <div class="sub-btns">${btns}</div></div>`;
   }
 
   // Deleting is owner/admin only and deliberately apart from the workflow
-  // buttons: 'Denied' and 'Done' are outcomes, this is for rows that should
-  // never have existed. Mostly test submissions.
+  // buttons: those record an outcome, this is for rows that should never have
+  // existed. Mostly test submissions.
   if(isAdminRole()){
-    dl += `<div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--border);display:flex;justify-content:flex-end;">
-      <button class="btn btn-sm" style="background:none;border:1px solid var(--border);color:#c0392b;"
+    dl += `<div style="margin-top:12px;display:flex;justify-content:flex-end;">
+      <button class="sub-del"
         onclick="deleteSubmission('${sid}','${hEsc(String(s.formTitle||'this submission'))}','${hEsc(s.formId)}')">Delete permanently</button></div>`;
   }
-  dl += `<div id="cmts-${hEsc(k)}" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);">${renderCommentThread(s, k)}</div>`;
   return dl;
 }
 
@@ -17230,7 +17275,7 @@ function renderCommentThread(s, k){
       <div style="font-size:11.5px;color:var(--text-muted);"><strong>${hEsc(c.author||'')}</strong> · ${hEsc(fmtCommentTime(c.createdAt))}</div>
       <div style="font-size:13px;white-space:pre-wrap;margin-top:2px;">${hEsc(c.body||'')}</div>
     </div>`).join('') || `<div style="font-size:12.5px;color:var(--text-muted);padding:6px 0;">No comments yet.</div>`;
-  return `<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin-bottom:4px;">Conversation</div>
+  return `<div class="sub-sec" style="margin-top:0;">Conversation</div>
     ${items}
     <textarea class="ff-textarea" id="cmt-${hEsc(k)}" placeholder="Add a comment…" style="margin-top:8px;min-height:52px;"></textarea>
     <div style="display:flex;gap:8px;margin-top:6px;">
