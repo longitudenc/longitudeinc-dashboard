@@ -118,6 +118,9 @@ async function main() {
       await browser.close(); process.exit(1)
     }
     results.push({ periodKey, periodLabel, rows: decoded.rows || [] })
+    // Name the columns once, so a shape change is visible in the log rather
+    // than only when a number comes out wrong.
+    if (decoded.cols) log(`  columns: ${JSON.stringify(decoded.cols)}`)
     log(`  ${decoded.rows.length} salons`)
   }
 
@@ -425,9 +428,28 @@ function runQueryInPage({ token, monthsBack, PBI }) {
       let cols = null
       for (const row of rowsR) if (row.S) { cols = row.S.map(c => ({ N: c.N, dn: c.DN || null, name: nameByVal[c.N] || c.N })); break }
       if (!cols) return { error: 'no schema (S) in DSR' }
-      const salonIdx = cols.findIndex(c => c.dn)
       const idxOf = re => cols.findIndex(c => re.test(c.name))
+
+      // Find the salon column BY NAME, not by "has a dictionary".
+      //
+      // DN is a dictionary name, and Power BI only dictionary-encodes a column
+      // when the repetition pays for itself. A result with no ValueDicts has no
+      // DN on any column, findIndex returns -1, and cols[-1].dn then throws
+      // "Cannot read properties of undefined (reading 'dn')" -- which reads
+      // like a corrupt response but only means this month's values did not
+      // compress. The name is present either way.
+      let salonIdx = idxOf(/salon/i)
+      if (salonIdx < 0) salonIdx = cols.findIndex(c => c.dn)
+      if (salonIdx < 0) {
+        return { error: 'no salon column found. Columns were: ' + JSON.stringify(cols.map(c => c.name)) }
+      }
       const goodIdx = idxOf(/%\s*good/i), impIdx = idxOf(/%\s*improve/i), badIdx = idxOf(/%\s*bad/i)
+      if (goodIdx < 0) {
+        // Without this the rows would come back with undefined percentages and
+        // be ingested as blanks -- a silent wrong answer beats no answer only
+        // if you never find out.
+        return { error: 'no "% Good" column found. Columns were: ' + JSON.stringify(cols.map(c => c.name)) }
+      }
       const out = []; let prev = null
       for (const row of rowsR) {
         const R = row.R || 0; const nulls = new Set(row['\u00d8'] || []); const C = row.C || []; let ci = 0; const v = []
@@ -438,11 +460,13 @@ function runQueryInPage({ token, monthsBack, PBI }) {
         }
         prev = v
         const sr = v[salonIdx]
-        const salon = cols[salonIdx].dn && typeof sr === 'number' ? dicts[cols[salonIdx].dn][sr] : sr
+        // Only dereference the dictionary when there actually is one.
+        const sdn = cols[salonIdx].dn
+        const salon = (sdn && dicts[sdn] && typeof sr === 'number') ? dicts[sdn][sr] : sr
         if (salon == null) continue
         out.push({ salon, good: v[goodIdx], improve: impIdx >= 0 ? v[impIdx] : '', bad: badIdx >= 0 ? v[badIdx] : '' })
       }
-      return { rows: out }
+      return { rows: out, cols: cols.map(c => c.name) }
     } catch (e) { return { error: 'decode failed: ' + (e && e.message ? e.message : e) } }
   }).catch(e => ({ error: 'request failed: ' + (e && e.message ? e.message : e) }))
 }
