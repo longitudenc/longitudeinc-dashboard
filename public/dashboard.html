@@ -11483,6 +11483,16 @@ function accAddRow(){
 // Calling both of those "access" without saying which is how people end up
 // believing a screen toggle is a security boundary.
 
+// One badge, both screens. "data" and "screen" were the words the code uses
+// for these; neither told a reader what unticking the box would actually do.
+function capKindTag(kind){
+  return kind === 'screen'
+    ? '<span title="Unticking this hides the screen from their menu. It is not a lock: the rows behind it are already limited to their own salons and their own record, whoever asks."'
+      + ' style="font-size:9.5px;font-weight:700;color:#7a5b00;background:var(--grw-bg,#fdf6e0);border-radius:9px;padding:1px 6px;white-space:nowrap;">hides the screen</span>'
+    : '<span title="Unticking this makes the server refuse. They cannot reach the data at all, by any route."'
+      + ' style="font-size:9.5px;font-weight:700;color:#0a5236;background:var(--exc-bg,#e6f4e0);border-radius:9px;padding:1px 6px;white-space:nowrap;">server blocks</span>';
+}
+
 const ROLE_SHORT = {
   owner:'Owner', admin:'Admin', viewer:'Viewer', area_manager:'AM',
   manager:'Manager', office:'Office', stylist:'Stylist', maintenance:'Maint'
@@ -11512,9 +11522,7 @@ function renderCapMatrix(){
         + 'font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);'
         + 'position:sticky;left:0;background:var(--surface,#fff);">' + _accEsc(m.group) + '</td></tr>';
     }
-    const tag = m.kind === 'data'
-      ? '<span title="The API refuses without it" style="font-size:9.5px;font-weight:700;color:#0a5236;background:var(--exc-bg,#e6f4e0);border-radius:9px;padding:1px 6px;">data</span>'
-      : '<span title="Chooses which screen appears; the rows behind it are scoped per person anyway" style="font-size:9.5px;font-weight:700;color:#7a5b00;background:var(--grw-bg,#fdf6e0);border-radius:9px;padding:1px 6px;">screen</span>';
+    const tag = capKindTag(m.kind);
     body += '<tr>'
       + '<td style="padding:6px 7px;border-top:1px solid var(--border);position:sticky;left:0;'
         + 'background:var(--surface,#fff);z-index:1;">'
@@ -11557,6 +11565,15 @@ function renderCapMatrix(){
     + '<span style="color:var(--text-muted);">The grid below adds screens and data ON TOP of that. '
     + 'An empty column is not &quot;sees nothing&quot; &mdash; it is &quot;nothing beyond their own salon '
     + 'and their own record&quot;.</span></div>'
+    + '<div style="font-size:11.5px;border:1px solid var(--border);border-radius:8px;padding:9px 12px;'
+    + 'margin-bottom:9px;line-height:1.6;">'
+    + '<b>Two kinds of switch.</b><br>'
+    + capKindTag('data') + ' &nbsp;Untick it and the server refuses. They cannot reach the data by any '
+    + 'route &mdash; not the screen, not the address, not the browser console. Everything sensitive is one of these.<br>'
+    + capKindTag('screen') + ' &nbsp;Untick it and the screen leaves their menu. It is tidiness, not a lock: '
+    + 'the rows behind those three are already trimmed to their own salons and their own record whoever asks, '
+    + 'so there is nothing left for a switch to protect. Giving a manager &quot;Company-wide views&quot; '
+    + 'shows them the company screen with only their own salon in it.</div>'
     + '<div style="overflow-x:auto;border:1px solid var(--border);border-radius:9px;">'
     + '<table style="width:100%;border-collapse:collapse;font-size:12px;background:var(--surface,#fff);">'
     + '<thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>'
@@ -11782,9 +11799,7 @@ function accOpenCaps(email){
       ? '<span style="color:var(--text-muted);font-size:10px;">default</span>'
       : '<span style="color:#b06a00;font-size:10px;font-weight:700;">' + (on ? 'granted' : 'revoked') + '</span>';
     const dep = requires[m.key] ? ' data-needs="' + _accEsc(requires[m.key]) + '"' : '';
-    const kind = m.kind === 'screen'
-      ? '<span title="Chooses which screen appears; the rows behind it are scoped per person anyway" style="font-size:9.5px;font-weight:700;color:#7a5b00;background:var(--grw-bg,#fdf6e0);border-radius:9px;padding:1px 6px;">screen</span>'
-      : '<span title="The API refuses without it" style="font-size:9.5px;font-weight:700;color:#0a5236;background:var(--exc-bg,#e6f4e0);border-radius:9px;padding:1px 6px;">data</span>';
+    const kind = capKindTag(m.kind);
     rows += '<label style="display:flex;gap:8px;align-items:flex-start;padding:7px 4px;border-bottom:1px solid var(--border);cursor:pointer;">'
       + '<input type="checkbox" class="cap-box" data-cap="' + _accEsc(m.key) + '"' + dep
       + (on ? ' checked' : '') + ' onchange="accCapDeps(this)" style="margin-top:2px;">'
