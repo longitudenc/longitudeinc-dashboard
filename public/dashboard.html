@@ -11163,7 +11163,7 @@ function _scLink(i, r){
     : '<span class="hint" style="color:var(--text-muted);">No link</span>';
   if(!canEditSupplies()) return view;
   return '<input data-sc="' + i + '" data-f="url" value="' + hEsc(r.url || '') + '"'
-    + ' placeholder="' + (asin ? 'Amazon link from the ASIN' : 'paste a product link') + '"'
+    + ' placeholder="' + (asin ? 'Amazon link from the ASIN' : 'paste the product link here') + '"'
     + ' style="width:100%;min-width:0;padding:3px 6px;border:1px solid var(--border);border-radius:6px;'
     + 'font-size:11.5px;background:var(--surface);color:var(--text);">'
     + (href ? ' <a href="' + hEsc(href) + '" target="_blank" rel="noopener noreferrer" class="hint">Open &#8599;</a>' : '');
@@ -11197,7 +11197,7 @@ function paintSupplyCatalog(){
       + '<div class="act-kpi-n">the export skips these</div></div>'
     + '</div>';
 
-  html += '<div class="act-note">Paste the Amazon link or the ASIN &mdash; a link is trimmed down to its ASIN when you save. '
+  html += '<div class="act-note">Paste the Amazon link into <b>either</b> box &mdash; the ASIN is pulled out of it when you save, and the link is tidied to its short form. '
     + 'Several ASINs separated by commas means the item is bought on whichever is cheapest or in stock. '
     + 'The item name is the join to the form, so it cannot be edited here: to add a product, add the option to the '
     + 'supply order form first.<br>Pictures come from the ASIN automatically; a few products have none and '

@@ -60,6 +60,24 @@ export interface SupplyItem {
 export const asinThumb = (asin: string) =>
   asin ? 'https://m.media-amazon.com/images/P/' + asin + '.01._SCL_SL160_.jpg' : ''
 
+/**
+ * Pull the ASIN out of an Amazon link.
+ *
+ * Pasting the product link is what people actually do -- it is what the browser
+ * gives you when you copy the address of the thing you are looking at. The
+ * first version only accepted a link in the ASIN box, so twelve items ended up
+ * with a URL, no ASIN, no picture and no line in the Amazon export. The ASIN is
+ * the thing everything downstream needs, so it gets extracted from wherever the
+ * link lands rather than being asked for separately.
+ *
+ * Handles /dp/, /gp/product/ and /product/, with or without a scheme, and
+ * ignores the tracking blob Amazon appends.
+ */
+export function asinFromUrl(url: string): string {
+  const m = String(url || '').match(/\/(?:dp|gp\/product|product)\/([A-Z0-9]{10})(?:[/?#]|$)/i)
+  return m ? m[1].toUpperCase() : ''
+}
+
 export interface OrderLine {
   item: string
   qty: number
@@ -151,11 +169,21 @@ export function buildSupplyItemRows(
     const was = prior.get(key) || {}
     // Written every save, so a wrong ASIN can be traced to whoever typed it.
     const forced: Record<string, string> = { item, updatedAt: now, updatedBy: S(by) }
+    // A pasted link is as good as a typed ASIN. When only the link was given,
+    // take the ASIN from it -- otherwise the row has no picture and no export
+    // line, and the person who filled it in has no way to tell.
+    const typedAsins = (it.asins || []).map(a => S(a)).filter(Boolean)
+    const fromLink = typedAsins.length ? '' : asinFromUrl(S(it.url))
+    const asins = typedAsins.length ? typedAsins : (fromLink ? [fromLink] : [])
+    // Store the canonical link rather than the search-result URL with its
+    // hundred characters of tracking, once we know what it points at.
+    const url = fromLink ? 'https://www.amazon.com/dp/' + fromLink : S(it.url)
+
     const edited: Record<string, string> = {
       category: S(it.category),
       vendor: S(it.vendor),
-      asin: (it.asins || []).map(a => S(a)).filter(Boolean).join(', '),
-      url: S(it.url),
+      asin: asins.join(', '),
+      url,
       packSize: S(it.packSize),
       notes: S(it.notes),
       status: S(it.status),
