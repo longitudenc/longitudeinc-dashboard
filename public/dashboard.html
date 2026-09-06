@@ -5992,6 +5992,31 @@ function dHeatMap(sn, dates){
 // half-hour rows are tens of thousands of records; what arrives here is a grid
 // of about 200 cells.
 
+// Averaged over months, queue LENGTH stops telling you anything: half a person
+// waiting is ordinary trading, and colouring on it painted the whole estate red.
+// How long they waited still discriminates, and it is what a customer actually
+// experiences. The bands are read off this estate's own numbers over 9 weeks:
+//
+//   line 0.5-1.0  ->  5.6 min average wait,  9.5% of customers over 15 minutes
+//   line 1-2      ->  9.1 min,              21.6%
+//   line 2-3      -> 14.1 min,              38.1%
+//   line 3+       -> 18.9 min,              48.3%
+//
+// So amber starts where a fifth of customers cross a quarter of an hour, and red
+// where it is nearer two fifths. The DAILY map keeps its own thresholds: there a
+// transient queue is a real event, and this is not that view.
+const ST_WAIT_AMBER = 8;    // minutes
+const ST_WAIT_RED   = 12;
+const ST_IDLE_BLUE  = 0.5;  // avg stylists with nobody to cut
+
+function stCellColor(waitMin, idle, line){
+  if(waitMin >= ST_WAIT_RED)   return {bg:'rgba(192,57,43,'  + Math.min(0.92, 0.34 + 0.020*(waitMin-ST_WAIT_RED))   + ')', fg:'#fff'};
+  if(waitMin >= ST_WAIT_AMBER) return {bg:'rgba(230,145,56,' + Math.min(0.85, 0.30 + 0.045*(waitMin-ST_WAIT_AMBER)) + ')', fg:'#3d2200'};
+  // Idle only reads as overstaffed when nobody is actually waiting.
+  if(idle >= ST_IDLE_BLUE && line < 0.5) return {bg:'rgba(41,128,185,' + Math.min(0.80, 0.22+0.16*idle) + ')', fg:'#fff'};
+  return {bg:'rgba(39,174,96,0.34)', fg:'#1b5e20'};
+}
+
 let S_stWeeks = 8;
 let S_stSalon = '';        // '' = every salon in scope
 let S_stData = null;
@@ -6072,16 +6097,18 @@ function paintStaffingTrend(){
       const c = G[dow + '|' + hh];
       if(!c){ cells += '<td style="background:#fafafa;min-width:40px;height:36px;"></td>'; continue; }
       const idle = Math.max(0, c.fte - c.busy);
-      const col = dStateColor(c.line, idle);
+      const wait = c.waitMin || 0;
+      const col = stCellColor(wait, idle, c.line);
       let txt = '';
-      if(c.line >= HM_LINE_RED && c.line >= idle) txt = c.line.toFixed(1);
-      else if(idle >= HM_IDLE_BLUE) txt = '+' + idle.toFixed(1);
+      if(wait >= ST_WAIT_AMBER) txt = Math.round(wait) + 'm';
+      else if(idle >= ST_IDLE_BLUE && c.line < 0.5) txt = '+' + idle.toFixed(1);
       const tip = ST_DOW[dow] + 's at ' + dHHLabel(hh) + ', averaged over ' + days + ' of them'
-        + ' — ≈' + c.line.toFixed(1) + ' waiting, ' + c.busy.toFixed(1) + ' cutting of '
+        + ' — ' + (wait ? wait.toFixed(1) + ' min average wait' : 'no measured wait')
+        + (c.w15Pct ? (', ' + c.w15Pct.toFixed(0) + '% over 15 min') : '')
+        + '; ≈' + c.line.toFixed(1) + ' waiting, ' + c.busy.toFixed(1) + ' cutting of '
         + c.fte.toFixed(1) + ' on the floor'
         + (idle >= 0.1 ? (', ' + idle.toFixed(1) + ' idle') : '')
-        + (c.served ? ('; ' + c.served.toFixed(1) + ' served') : '')
-        + (c.w15 ? ('; ' + c.w15.toFixed(1) + ' waited >15m') : '');
+        + (c.served ? ('; ' + c.served.toFixed(1) + ' served') : '');
       cells += '<td title="' + hEsc(tip) + '" style="background:' + col.bg + ';color:' + col.fg
         + ';font-size:12.5px;font-weight:700;text-align:center;min-width:40px;height:36px;">' + txt + '</td>';
     }
@@ -6098,11 +6125,13 @@ function paintStaffingTrend(){
     : d.salonCount + ' salons — each cell is the TYPICAL salon, not the total';
 
   body.innerHTML = '<div style="font-size:11.5px;color:var(--text-muted);margin:0 0 8px;line-height:1.55;">'
-    + 'Every cell is a half-hour averaged across all matching days in the period, measured from the invoice '
-    + 'clock and real punches — the same measure as the daily map. '
-    + '<span style="color:#c0392b;font-weight:700;">Red = a line formed</span> (≈ people waiting). '
-    + '<span style="color:#2980b9;font-weight:700;">Blue = stylists idle</span> with no line. '
-    + '<span style="color:#1b5e20;font-weight:700;">Green = busy, no line</span>. Hover a cell for the detail.'
+    + 'Every cell is a half-hour averaged across all matching days in the period. Coloured by <b>how long '
+    + 'customers actually waited</b>, not by how long the queue was — averaged over months a queue of half a '
+    + 'person is ordinary trading, so length stops discriminating and minutes do not. '
+    + '<span style="color:#c0392b;font-weight:700;">Red = 12 min or worse</span> (about two in five over a quarter of an hour). '
+    + '<span style="color:#b06a00;font-weight:700;">Amber = 8–12 min</span>. '
+    + '<span style="color:#1b5e20;font-weight:700;">Green = under 8</span>. '
+    + '<span style="color:#2980b9;font-weight:700;">Blue = stylists idle</span> with nobody waiting. Hover for the detail.'
     + '<br><b>' + hEsc(scope) + '</b> · ' + hEsc(d.start) + ' to ' + hEsc(d.end) + ' · ' + hEsc(counts) + '</div>'
     + '<div style="overflow-x:auto;"><table style="border-collapse:separate;border-spacing:2px;">'
     + '<thead><tr>' + header + '</tr></thead><tbody>' + rows + '</tbody></table></div>'
@@ -6113,16 +6142,18 @@ function paintStaffingTrend(){
 // somebody actually carries into building next month's rota.
 function stWorstSlots(d, G){
   const bad = d.grid.slice()
-    .filter(function(c){ return c.line >= HM_LINE_RED; })
-    .sort(function(a, b){ return b.line - a.line; })
+    .filter(function(c){ return (c.waitMin || 0) >= ST_WAIT_AMBER; })
+    .sort(function(a, b){ return (b.waitMin||0) - (a.waitMin||0); })
     .slice(0, 3);
   if(!bad.length){
     return '<div style="margin-top:10px;font-size:12px;color:#1b5e20;">'
-      + 'No half-hour in this period averages a line. Coverage is holding.</div>';
+      + 'No half-hour in this period averages an 8-minute wait. Coverage is holding.</div>';
   }
   const items = bad.map(function(c){
-    return '<li><b>' + ST_DOW[c.dow] + 's at ' + dHHLabel(c.hh) + '</b> — about '
-      + c.line.toFixed(1) + ' waiting on average, with ' + c.fte.toFixed(1) + ' on the floor.</li>';
+    return '<li><b>' + ST_DOW[c.dow] + 's at ' + dHHLabel(c.hh) + '</b> — '
+      + (c.waitMin||0).toFixed(0) + ' min average wait'
+      + (c.w15Pct ? (', ' + c.w15Pct.toFixed(0) + '% over 15 min') : '')
+      + ', with ' + c.fte.toFixed(1) + ' on the floor.</li>';
   }).join('');
   return '<div style="margin-top:12px;font-size:12.5px;">'
     + '<div style="font-weight:700;margin-bottom:4px;">Worst recurring slots</div>'
@@ -10868,6 +10899,11 @@ const HUB_GROUPS = {
         show:_navPerfUser, dest:{ company:_coGo('standouts') } },
       { t:'Flexibility & Reliability', d:'Availability and dependability across the team.',
         show:_navPerfUser, href:'/flexibility_reliability_tool.html' },
+      // The company sub-nav is on its way out, so this stands on its own in the
+      // top bar rather than only being reachable from beside it.
+      { t:'Staffing trends', d:'Where the wait builds, by day of week and half-hour, over months.',
+        cap:'view.dayofweek',
+        go:function(){ switchToCompany(); showCompanyTab('staffing'); } },
       // CAPABILITIES-v3: view.points, which is a SCREEN capability -- the rows
       // behind it are scoped by seesEmployee() in /api/gs/getDiscPoints either
       // way, and everyone can always see their own.

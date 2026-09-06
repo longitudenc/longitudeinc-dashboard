@@ -108,10 +108,13 @@ export async function GET(req: Request) {
     }
 
     // dow -> hh -> sums
-    const acc: Record<number, Record<number, { line: number; busy: number; ftMin: number; served: number; w15: number }>> = {}
+    const acc: Record<number, Record<number, {
+      line: number; busy: number; ftMin: number; served: number; w15: number
+      waitSum: number; waitN: number
+    }>> = {}
     const cell = (dow: number, hh: number) => {
       const byDow = (acc[dow] ||= {})
-      return (byDow[hh] ||= { line: 0, busy: 0, ftMin: 0, served: 0, w15: 0 })
+      return (byDow[hh] ||= { line: 0, busy: 0, ftMin: 0, served: 0, w15: 0, waitSum: 0, waitN: 0 })
     }
 
     let minHH = 99, maxHH = 0
@@ -127,6 +130,10 @@ export async function GET(req: Request) {
       c.busy += busy
       c.served += num(r.served)
       c.w15 += num(r.waitedOver15)
+      // Service-weighted, not a mean of means: a slot that served twelve people
+      // should count twelve times as much as one that served one.
+      const wait = num(r.avgWaitMin), servedN = num(r.served)
+      if (wait > 0 && servedN > 0) { c.waitSum += wait * servedN; c.waitN += servedN }
       if (line > 0 || busy > 0 || num(r.arrivals) > 0) mark(hh)
     }
 
@@ -166,6 +173,14 @@ export async function GET(req: Request) {
           fte: Math.round(fte * 100) / 100,
           served: Math.round((c.served / days) * 10) / 10,
           w15: Math.round((c.w15 / days) * 10) / 10,
+          // THE MEASURE THE TREND VIEW COLOURS BY. Averaged over months, the
+          // length of a queue stops discriminating -- half a person waiting is
+          // ordinary trading. How long they waited does not: across this
+          // estate a 0.5-1.0 line runs a 5.6 minute wait, 1-2 runs 9.1, and 2-3
+          // runs 14.1 with 38% of customers over a quarter of an hour.
+          waitMin: c.waitN ? Math.round((c.waitSum / c.waitN) * 10) / 10 : 0,
+          // Share of served customers who waited more than fifteen minutes.
+          w15Pct: c.served ? Math.round((c.w15 / c.served) * 1000) / 10 : 0,
         })
       }
     }
