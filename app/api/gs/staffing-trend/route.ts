@@ -22,7 +22,7 @@
 
 import { NextResponse } from 'next/server'
 import { requireCapability } from '@/lib/require-role'
-import { getDemandRange, getChkInOutRange } from '@/lib/sheets'
+import { getDemandRange, getChkInOutRange, getShiftsRange } from '@/lib/sheets'
 import { scopeDaily } from '@/lib/scope-filter'
 
 export const runtime = 'nodejs'
@@ -57,6 +57,20 @@ function overlap(a: number, b: number, hh: number): number {
   return ov > 0 ? ov : 0
 }
 
+/**
+ * Minutes past midnight out of an SD_SHIFTS timestamp ("2026-07-06T08:30:00.000").
+ * Read off the local clock in the string rather than parsed as a Date: these are
+ * salon-local wall times with no zone, and letting a Date interpret them would
+ * shift a morning shift by however far the server sits from Charlotte.
+ */
+function shiftMin(v: string): number | null {
+  const m = S(v).match(/T(\d{2}):(\d{2})/)
+  if (!m) return null
+  const h = Number(m[1]), mins = Number(m[2])
+  if (h > 23 || mins > 59) return null
+  return h * 60 + mins
+}
+
 /** Local day of week for a plain YYYY-MM-DD, without timezone drift. */
 function dowOf(iso: string): number {
   const [y, m, d] = iso.slice(0, 10).split('-').map(Number)
@@ -80,19 +94,22 @@ export async function GET(req: Request) {
         { status: 400 })
     }
 
-    const [dm, ck] = await Promise.all([
+    const [dm, ck, sh] = await Promise.all([
       getDemandRange(start, end).catch(() => ({ demand: [] as any[] })),
       getChkInOutRange(start, end).catch(() => ({ chkinout: [] as any[] })),
+      getShiftsRange(start, end).catch(() => ({ shifts: [] as any[] })),
     ])
 
     // Same scoping as the daily view, from the same function -- an AM gets
     // their salons here for the same reason they get them there.
-    const scoped = scopeDaily([], [], [], [], dm.demand || [], ck.chkinout || [], gate.access)
+    const scoped = scopeDaily([], [], sh.shifts || [], [], dm.demand || [], ck.chkinout || [], gate.access)
     let demand = scoped.demand
     let punches = scoped.chkinout
+    let shifts = scoped.shifts
     if (salon) {
       demand = demand.filter((r: any) => S(r.salonNum) === salon)
       punches = punches.filter((r: any) => S(r.salonNum) === salon)
+      shifts = shifts.filter((r: any) => S(r.salonNum) === salon)
     }
 
     // The DENOMINATOR is salon-days, not rows. Every (date, salon) that traded
@@ -111,10 +128,14 @@ export async function GET(req: Request) {
     const acc: Record<number, Record<number, {
       line: number; busy: number; ftMin: number; served: number; w15: number
       waitSum: number; waitN: number
+      schedMin: number; actMin: number; arrivals: number
     }>> = {}
     const cell = (dow: number, hh: number) => {
       const byDow = (acc[dow] ||= {})
-      return (byDow[hh] ||= { line: 0, busy: 0, ftMin: 0, served: 0, w15: 0, waitSum: 0, waitN: 0 })
+      return (byDow[hh] ||= {
+        line: 0, busy: 0, ftMin: 0, served: 0, w15: 0, waitSum: 0, waitN: 0,
+        schedMin: 0, actMin: 0, arrivals: 0,
+      })
     }
 
     let minHH = 99, maxHH = 0
@@ -134,6 +155,7 @@ export async function GET(req: Request) {
       // should count twelve times as much as one that served one.
       const wait = num(r.avgWaitMin), servedN = num(r.served)
       if (wait > 0 && servedN > 0) { c.waitSum += wait * servedN; c.waitN += servedN }
+      c.arrivals += num(r.arrivals)
       if (line > 0 || busy > 0 || num(r.arrivals) > 0) mark(hh)
     }
 
@@ -153,6 +175,40 @@ export async function GET(req: Request) {
       }
     }
 
+    // SCHEDULE-FIT-v1. Scheduled and actual minutes per slot, straight off
+    // SD_SHIFTS, which carries both on the same row.
+    //
+    // A split shift arrives as comma-separated starts and ends that pair up by
+    // position ("08:30,12:00" with "11:30,15:30"), so they are walked together
+    // rather than taking the first of each -- half a person's day would go
+    // missing otherwise, and it would go missing from the middle of the day,
+    // which is exactly where the interesting slots are.
+    let schedTotal = 0, actTotal = 0
+    for (const r of shifts) {
+      const d = S(r.date).slice(0, 10)
+      if (!isDate(d)) continue
+      const dow = dowOf(d)
+
+      const ss = S(r.schedStart).split(','), se = S(r.schedEnd).split(',')
+      for (let i = 0; i < ss.length; i++) {
+        const a = shiftMin(ss[i]), b = shiftMin(se[i] || '')
+        if (a == null || b == null || b <= a) continue
+        schedTotal += (b - a) / 60
+        for (let hh = Math.floor(a / 30); hh <= Math.ceil(b / 30) - 1; hh++) {
+          cell(dow, hh).schedMin += overlap(a, b, hh)
+          mark(hh)
+        }
+      }
+
+      const aa = shiftMin(S(r.actualStart)), ab = shiftMin(S(r.actualEnd))
+      if (aa == null || ab == null || ab <= aa) continue
+      actTotal += (ab - aa) / 60
+      for (let hh = Math.floor(aa / 30); hh <= Math.ceil(ab / 30) - 1; hh++) {
+        cell(dow, hh).actMin += overlap(aa, ab, hh)
+        mark(hh)
+      }
+    }
+
     const grid: any[] = []
     for (const dowStr of Object.keys(acc)) {
       const dow = Number(dowStr)
@@ -164,8 +220,10 @@ export async function GET(req: Request) {
         const line = c.line / days
         const busy = c.busy / days
         const fte = (c.ftMin / 30) / days
-        // Nothing waiting, nothing being cut, nobody on the floor: closed.
-        if (line < 0.005 && busy < 0.005 && fte < 0.005) continue
+        const schedFte = (c.schedMin / 30) / days
+        const actFte = (c.actMin / 30) / days
+        // Nothing waiting, nothing being cut, nobody on the floor or rostered.
+        if (line < 0.005 && busy < 0.005 && fte < 0.005 && schedFte < 0.005) continue
         grid.push({
           dow, hh,
           line: Math.round(line * 100) / 100,
@@ -179,6 +237,9 @@ export async function GET(req: Request) {
           // estate a 0.5-1.0 line runs a 5.6 minute wait, 1-2 runs 9.1, and 2-3
           // runs 14.1 with 38% of customers over a quarter of an hour.
           waitMin: c.waitN ? Math.round((c.waitSum / c.waitN) * 10) / 10 : 0,
+          arrivals: Math.round((c.arrivals / days) * 10) / 10,
+          schedFte: Math.round(schedFte * 100) / 100,
+          actFte: Math.round(actFte * 100) / 100,
           // Share of served customers who waited more than fifteen minutes.
           w15Pct: c.served ? Math.round((c.w15 / c.served) * 1000) / 10 : 0,
         })
@@ -202,6 +263,11 @@ export async function GET(req: Request) {
       salon: salon || '',
       salonCount: salonsSeen.size,
       salons: [...salonsSeen].sort(),
+      // Hours ROSTERED against hours WORKED across the whole period. The
+      // per-slot numbers answer "when"; this answers "how much", which is the
+      // question a payroll conversation starts from.
+      schedHours: Math.round(schedTotal),
+      actualHours: Math.round(actTotal),
       minHH: minHH > maxHH ? 0 : minHH,
       maxHH: minHH > maxHH ? 0 : maxHH,
       dayCounts,

@@ -6017,6 +6017,43 @@ function stCellColor(waitMin, idle, line){
   return {bg:'rgba(39,174,96,0.34)', fg:'#1b5e20'};
 }
 
+// SCHEDULE-FIT-v1. What the roster said, what actually happened, and what the
+// slot looked like it needed.
+//
+// The recommendation is deliberately NOT a queueing model. Inverting one --
+// need = arrivals / a target load -- was tried against this estate's own data
+// and overstated the peaks badly: it demanded 7 stylists for a Sunday 10am that
+// measured a 6.1 minute wait on 3.6. Arrivals include online check-ins who turn
+// up later, and a morning peak clears faster than a model of the average does.
+//
+// So it recommends off the OUTCOME instead. A slot where customers actually
+// waited too long was short; a slot where stylists actually stood idle while
+// nobody waited was over-covered. Both are measured, neither is inferred.
+const ST_REC_ADD1  = 8;    // avg wait (min) at or above which a slot was short
+const ST_REC_ADD2  = 12;
+const ST_REC_CALM  = 4;    // wait below which nobody was really queueing
+const ST_REC_DROP1 = 1.0;  // avg idle stylists at or above which a slot was over-covered
+const ST_REC_DROP2 = 2.0;
+
+function stRecommend(c){
+  const idle = Math.max(0, (c.actFte || 0) - (c.busy || 0));
+  const wait = c.waitMin || 0;
+  if(wait >= ST_REC_ADD2) return 2;
+  if(wait >= ST_REC_ADD1) return 1;
+  if(wait < ST_REC_CALM && idle >= ST_REC_DROP2) return -2;
+  if(wait < ST_REC_CALM && idle >= ST_REC_DROP1) return -1;
+  return 0;
+}
+
+function stRecColor(rec){
+  if(rec >= 2) return {bg:'rgba(192,57,43,0.80)', fg:'#fff'};
+  if(rec === 1) return {bg:'rgba(230,145,56,0.62)', fg:'#3d2200'};
+  if(rec <= -2) return {bg:'rgba(41,128,185,0.72)', fg:'#fff'};
+  if(rec === -1) return {bg:'rgba(41,128,185,0.42)', fg:'#0b3d5c'};
+  return {bg:'rgba(39,174,96,0.30)', fg:'#1b5e20'};
+}
+
+let S_stView = 'wait';     // 'wait' | 'fit'
 let S_stWeeks = 8;
 let S_stSalon = '';        // '' = every salon in scope
 let S_stData = null;
@@ -6040,9 +6077,15 @@ function renderStaffingTrend(){
     return '<button class="btn btn-sm ' + (S_stWeeks===n?'btn-primary':'btn-secondary') + '" '
       + 'onclick="stSetWeeks(' + n + ')">' + label + '</button>';
   };
+  const vw = function(k, label){
+    return '<button class="btn btn-sm ' + (S_stView===k?'btn-primary':'btn-secondary') + '" '
+      + 'onclick="stSetView(\'' + k + '\')">' + label + '</button>';
+  };
   host.innerHTML = '<div class="table-card-header">'
     + '<div class="card-title" style="margin:0;">Staffing trends — by day of week</div>'
     + '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">'
+      + vw('wait','What happened') + vw('fit','Schedule fit')
+      + '<span style="width:10px;"></span>'
       + wk(4,'4 weeks') + wk(8,'8 weeks') + wk(13,'13 weeks') + wk(26,'All we have')
       + '<select class="ff-select" style="width:auto;font-size:12.5px;padding:6px 9px;" onchange="stSetSalon(this.value)">' + opts + '</select>'
     + '</div></div>'
@@ -6051,6 +6094,7 @@ function renderStaffingTrend(){
 }
 
 function stSetWeeks(n){ S_stWeeks = n; renderStaffingTrend(); }
+function stSetView(k){ S_stView = k; renderStaffingTrend(); }
 function stSetSalon(v){ S_stSalon = String(v||''); renderStaffingTrend(); }
 
 function loadStaffingTrend(){
@@ -6072,6 +6116,7 @@ function loadStaffingTrend(){
 function paintStaffingTrend(){
   const body = document.getElementById('staffing-body'); if(!body || !S_stData) return;
   const d = S_stData;
+  const fit = (S_stView === 'fit');
   if(!d.grid || !d.grid.length){
     body.innerHTML = '<div class="no-data" style="padding:14px;">No measured half-hours in that period. '
       + 'The line and idle measures need both the demand scrape and clock punches for a day to count.</div>';
@@ -6098,12 +6143,19 @@ function paintStaffingTrend(){
       if(!c){ cells += '<td style="background:#fafafa;min-width:40px;height:36px;"></td>'; continue; }
       const idle = Math.max(0, c.fte - c.busy);
       const wait = c.waitMin || 0;
-      const col = stCellColor(wait, idle, c.line);
-      let txt = '';
-      if(wait >= ST_WAIT_AMBER) txt = Math.round(wait) + 'm';
-      else if(idle >= ST_IDLE_BLUE && c.line < 0.5) txt = '+' + idle.toFixed(1);
+      let col, txt = '';
+      if(fit){
+        const rec = stRecommend(c);
+        col = stRecColor(rec);
+        txt = rec > 0 ? '+' + rec : rec < 0 ? String(rec) : '';
+      } else {
+        col = stCellColor(wait, idle, c.line);
+        if(wait >= ST_WAIT_AMBER) txt = Math.round(wait) + 'm';
+        else if(idle >= ST_IDLE_BLUE && c.line < 0.5) txt = '+' + idle.toFixed(1);
+      }
       const tip = ST_DOW[dow] + 's at ' + dHHLabel(hh) + ', averaged over ' + days + ' of them'
-        + ' — ' + (wait ? wait.toFixed(1) + ' min average wait' : 'no measured wait')
+        + ' — rostered ' + (c.schedFte||0).toFixed(1) + ', worked ' + (c.actFte||0).toFixed(1)
+        + '; ' + (wait ? wait.toFixed(1) + ' min average wait' : 'no measured wait')
         + (c.w15Pct ? (', ' + c.w15Pct.toFixed(0) + '% over 15 min') : '')
         + '; ≈' + c.line.toFixed(1) + ' waiting, ' + c.busy.toFixed(1) + ' cutting of '
         + c.fte.toFixed(1) + ' on the floor'
@@ -6124,40 +6176,97 @@ function paintStaffingTrend(){
     ? salonDisplay(d.salon)
     : d.salonCount + ' salons — each cell is the TYPICAL salon, not the total';
 
-  body.innerHTML = '<div style="font-size:11.5px;color:var(--text-muted);margin:0 0 8px;line-height:1.55;">'
-    + 'Every cell is a half-hour averaged across all matching days in the period. Coloured by <b>how long '
-    + 'customers actually waited</b>, not by how long the queue was — averaged over months a queue of half a '
-    + 'person is ordinary trading, so length stops discriminating and minutes do not. '
-    + '<span style="color:#c0392b;font-weight:700;">Red = 12 min or worse</span> (about two in five over a quarter of an hour). '
-    + '<span style="color:#b06a00;font-weight:700;">Amber = 8–12 min</span>. '
-    + '<span style="color:#1b5e20;font-weight:700;">Green = under 8</span>. '
-    + '<span style="color:#2980b9;font-weight:700;">Blue = stylists idle</span> with nobody waiting. Hover for the detail.'
+  const legend = fit
+    ? 'Every cell is a half-hour averaged across all matching days. The number is the change the '
+      + 'MEASURED outcome argues for &mdash; not a forecast. '
+      + '<span style="color:#c0392b;font-weight:700;">+2</span> where customers averaged 12 minutes or more waiting, '
+      + '<span style="color:#b06a00;font-weight:700;">+1</span> at 8&ndash;12. '
+      + '<span style="color:#2980b9;font-weight:700;">&minus;1 / &minus;2</span> where stylists averaged an idle '
+      + 'head or two with nobody waiting. <span style="color:#1b5e20;font-weight:700;">Green = leave it alone</span>. '
+      + 'Hover for what was rostered against what was worked.'
+    : 'Every cell is a half-hour averaged across all matching days in the period. Coloured by <b>how long '
+      + 'customers actually waited</b>, not by how long the queue was &mdash; averaged over months a queue of half a '
+      + 'person is ordinary trading, so length stops discriminating and minutes do not. '
+      + '<span style="color:#c0392b;font-weight:700;">Red = 12 min or worse</span> (about two in five over a quarter of an hour). '
+      + '<span style="color:#b06a00;font-weight:700;">Amber = 8&ndash;12 min</span>. '
+      + '<span style="color:#1b5e20;font-weight:700;">Green = under 8</span>. '
+      + '<span style="color:#2980b9;font-weight:700;">Blue = stylists idle</span> with nobody waiting. Hover for the detail.';
+
+  body.innerHTML = stRosterHeadline(d)
+    + '<div style="font-size:11.5px;color:var(--text-muted);margin:0 0 8px;line-height:1.55;">'
+    + legend
     + '<br><b>' + hEsc(scope) + '</b> · ' + hEsc(d.start) + ' to ' + hEsc(d.end) + ' · ' + hEsc(counts) + '</div>'
     + '<div style="overflow-x:auto;"><table style="border-collapse:separate;border-spacing:2px;">'
     + '<thead><tr>' + header + '</tr></thead><tbody>' + rows + '</tbody></table></div>'
-    + stWorstSlots(d, G);
+    + stCallouts(d);
 }
 
-// The three worst slots, named. A grid shows a pattern; a sentence is what
-// somebody actually carries into building next month's rota.
-function stWorstSlots(d, G){
-  const bad = d.grid.slice()
-    .filter(function(c){ return (c.waitMin || 0) >= ST_WAIT_AMBER; })
+// Rostered against worked, in hours. The grid answers "when"; this is the
+// number a payroll conversation starts from.
+function stRosterHeadline(d){
+  const sch = d.schedHours || 0, act = d.actualHours || 0;
+  if(!sch && !act) return '';
+  const diff = act - sch;
+  const pct = sch ? (diff / sch) * 100 : 0;
+  // Under-delivery is the common case; over-delivery is the same problem
+  // pointing the other way and gets the same treatment rather than a shrug.
+  const col = Math.abs(pct) < 2 ? 'var(--text-muted)' : (diff < 0 ? '#c0392b' : '#b06a00');
+  const word = diff < 0 ? 'below' : 'above';
+  const box = function(label, value, colour){
+    return '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);">'
+      + label + '</div><div style="font-size:16px;font-weight:700;'
+      + (colour ? 'color:' + colour + ';' : '') + '">' + value + '</div></div>';
+  };
+  return '<div style="display:flex;gap:22px;flex-wrap:wrap;align-items:baseline;margin:0 0 10px;'
+    + 'padding:10px 13px;border:1px solid var(--border);border-radius:9px;background:#f8faf9;">'
+    + box('Rostered', sch.toLocaleString() + ' hrs')
+    + box('Actually worked', act.toLocaleString() + ' hrs')
+    + box('Difference', (diff>0?'+':'') + diff.toLocaleString() + ' hrs '
+        + '<span style="font-size:12px;font-weight:400;">(' + Math.abs(pct).toFixed(1) + '% ' + word + ')</span>', col)
+    + '</div>';
+}
+
+// Both directions, named. A grid shows a pattern; a sentence is what somebody
+// carries into building next month's rota -- and the surplus is worth saying as
+// plainly as the shortfall, because it costs the same and is easier to fix.
+function stCallouts(d){
+  const short = d.grid.slice()
+    .filter(function(c){ return (c.waitMin || 0) >= ST_REC_ADD1; })
     .sort(function(a, b){ return (b.waitMin||0) - (a.waitMin||0); })
-    .slice(0, 3);
-  if(!bad.length){
-    return '<div style="margin-top:10px;font-size:12px;color:#1b5e20;">'
-      + 'No half-hour in this period averages an 8-minute wait. Coverage is holding.</div>';
-  }
-  const items = bad.map(function(c){
+    .slice(0, 4);
+  const spare = d.grid.slice()
+    .map(function(c){ return Object.assign({}, c, { idle: Math.max(0, (c.actFte||0) - (c.busy||0)) }); })
+    .filter(function(c){ return (c.waitMin || 0) < ST_REC_CALM && c.idle >= ST_REC_DROP1; })
+    .sort(function(a, b){ return b.idle - a.idle; })
+    .slice(0, 4);
+
+  const list = function(title, items, colour, empty){
+    return '<div style="flex:1;min-width:280px;">'
+      + '<div style="font-weight:700;font-size:12.5px;margin-bottom:4px;color:' + colour + ';">' + title + '</div>'
+      + (items.length
+          ? '<ul style="margin:0;padding-left:20px;line-height:1.7;font-size:12.5px;">' + items.join('') + '</ul>'
+          : '<div style="font-size:12.5px;color:var(--text-muted);">' + empty + '</div>')
+      + '</div>';
+  };
+
+  const shortItems = short.map(function(c){
     return '<li><b>' + ST_DOW[c.dow] + 's at ' + dHHLabel(c.hh) + '</b> — '
-      + (c.waitMin||0).toFixed(0) + ' min average wait'
+      + (c.waitMin||0).toFixed(0) + ' min wait'
       + (c.w15Pct ? (', ' + c.w15Pct.toFixed(0) + '% over 15 min') : '')
-      + ', with ' + c.fte.toFixed(1) + ' on the floor.</li>';
-  }).join('');
-  return '<div style="margin-top:12px;font-size:12.5px;">'
-    + '<div style="font-weight:700;margin-bottom:4px;">Worst recurring slots</div>'
-    + '<ul style="margin:0;padding-left:20px;line-height:1.7;">' + items + '</ul></div>';
+      + '; rostered ' + (c.schedFte||0).toFixed(1) + ', worked ' + (c.actFte||0).toFixed(1) + '.</li>';
+  });
+  const spareItems = spare.map(function(c){
+    return '<li><b>' + ST_DOW[c.dow] + 's at ' + dHHLabel(c.hh) + '</b> — '
+      + c.idle.toFixed(1) + ' idle with a ' + (c.waitMin||0).toFixed(0) + ' min wait'
+      + '; rostered ' + (c.schedFte||0).toFixed(1) + ', worked ' + (c.actFte||0).toFixed(1) + '.</li>';
+  });
+
+  return '<div style="margin-top:14px;display:flex;gap:24px;flex-wrap:wrap;">'
+    + list('Short — customers waiting', shortItems, '#c0392b',
+        'No half-hour averages an 8-minute wait. Coverage is holding.')
+    + list('Over-covered — stylists idle', spareItems, '#2980b9',
+        'No half-hour averages an idle stylist with nobody waiting.')
+    + '</div>';
 }
 
 // ── Day Review heat strip — one day, every in-scope salon as a row ──────────
