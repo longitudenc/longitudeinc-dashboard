@@ -16690,7 +16690,15 @@ function openAccessDialog(formId){
   ov.innerHTML=`
     <div style="background:var(--surface,#fff);color:var(--text,#111);border-radius:14px;max-width:430px;width:100%;padding:22px 24px;box-shadow:0 20px 60px rgba(0,0,0,.35);max-height:90vh;overflow:auto;" onclick="event.stopPropagation()">
       <div style="font-size:17px;font-weight:600;">Manage access</div>
-      <div style="font-size:12.5px;color:var(--text-muted);margin-bottom:16px;">${hEsc(f.icon)} ${hEsc(f.title)}</div>
+      <div style="font-size:12.5px;color:var(--text-muted);margin-bottom:10px;">${hEsc(f.icon)} ${hEsc(f.title)}</div>
+
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">
+        <button type="button" class="btn btn-secondary btn-sm" onclick="copyFormLink('${hEsc(formId)}','acl-msg')">&#128279; Copy link to this form</button>
+        <span id="acl-msg" style="font-size:11px;color:var(--text-muted);"></span>
+      </div>
+      <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:14px;line-height:1.5;">
+        Anyone you send it to still signs in first, and only the roles ticked below can open it.
+      </div>
 
       <div style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin-bottom:2px;">Who can submit this form</div>
       ${cb('aca-am','Area managers',audAll||has(aud,'area_manager'))}
@@ -17032,6 +17040,41 @@ function ffPhotoView(sid,pathname){
   document.body.appendChild(ov);
 }
 
+// FORM-LINK-v1. Every form has a shareable address; only the event sign-up
+// sheet ever exposed one, because create-signup happened to need it.
+//
+// ?form= rather than #/form/ deliberately: the query survives the sign-in
+// screen. Someone who is not signed in lands on the code entry, and init()
+// re-runs IN PAGE once they are through -- location.search is untouched, so
+// they arrive at the form itself rather than the dashboard. A hash would work
+// too; this one is already proven by the sign-up links in Important Dates.
+//
+// It is not a public link. Whoever opens it still has to sign in, which is
+// what makes the response attributable to a person and a salon.
+function formShareUrl(formId){
+  return location.origin + '/dashboard.html?form=' + encodeURIComponent(formId);
+}
+
+function copyFormLink(formId, msgId){
+  const url = formShareUrl(formId);
+  const msg = document.getElementById(msgId || 'form-link-msg');
+  const show = function(t){
+    if(!msg) return;
+    msg.textContent = t;
+    setTimeout(function(){ if(msg) msg.textContent = ''; }, 4000);
+  };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(url).then(function(){ show('Link copied.'); })
+      .catch(function(){ show(url); });
+  } else {
+    const t = document.createElement('textarea');
+    t.value = url; document.body.appendChild(t); t.select();
+    try { document.execCommand('copy'); show('Link copied.'); }
+    catch(e){ show(url); }
+    finally { document.body.removeChild(t); }
+  }
+}
+
 function renderFormRunner(){
   const host=document.getElementById('forms-new'); const f=S_activeForm;
   if(!host||!f) return;
@@ -17045,6 +17088,11 @@ function renderFormRunner(){
         <div>
           <h3>${hEsc(f.title)}</h3>
           ${f.description?`<p>${hEsc(f.description)}</p>`:''}
+        </div>
+        <div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <button type="button" class="btn btn-secondary btn-sm" title="A link straight to this form"
+            onclick="copyFormLink('${hEsc(f.formId)}')">&#128279; Copy link</button>
+          <span id="form-link-msg" style="font-size:11.5px;color:var(--text-muted);"></span>
         </div>
       </div>
       <div id="form-msg"></div>
