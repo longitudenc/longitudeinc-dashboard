@@ -3375,6 +3375,7 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
       <div class="table-card" id="section-day-review" style="display:none;"></div>
       <div class="table-card" id="section-reviews" style="display:none;"></div>
       <div class="table-card" id="section-dayofweek" style="display:none;"></div>
+      <div class="table-card" id="section-staffing" style="display:none;"></div>
     </div><!-- /page-company -->
 
     <!-- Stylist Profile Drawer -->
@@ -5032,6 +5033,7 @@ function setupSidebar(){
       <button class="am-btn company-subnav-btn" data-ctab="standouts" onclick="showCompanyTab('standouts')" style="font-size:13px;padding:7px 10px;">Standouts 🏆</button>
       <button class="am-btn company-subnav-btn" data-ctab="reviews" onclick="showCompanyTab('reviews')" style="font-size:13px;padding:7px 10px;">Reviews 📋</button>
       ${canSeeDayReview()?`<button class="am-btn company-subnav-btn" data-ctab="dayreview" onclick="showCompanyTab('dayreview')" style="font-size:13px;padding:7px 10px;">Day Review 📅</button>`:''}
+        ${canSeeDayOfWeek()?`<button class="am-btn company-subnav-btn" data-ctab="staffing" onclick="showCompanyTab('staffing')" style="font-size:13px;padding:7px 10px;">Staffing trends 📊</button>`:''}
       ${canSeeDayOfWeek()?`<button class="am-btn company-subnav-btn" data-ctab="dayofweek" onclick="showCompanyTab('dayofweek')" style="font-size:13px;padding:7px 10px;">Day of Week 📆</button>`:''}
     </div>`;
     if(isAdminRole()){
@@ -5061,6 +5063,7 @@ function setupSidebar(){
         <button class="am-btn company-subnav-btn" data-ctab="standouts" onclick="showCompanyTab('standouts')" style="font-size:13px;padding:7px 10px;">Standouts 🏆</button>
       <button class="am-btn company-subnav-btn" data-ctab="reviews" onclick="showCompanyTab('reviews')" style="font-size:13px;padding:7px 10px;">Reviews 📋</button>
         ${canSeeDayReview()?`<button class="am-btn company-subnav-btn" data-ctab="dayreview" onclick="showCompanyTab('dayreview')" style="font-size:13px;padding:7px 10px;">Day Review 📅</button>`:''}
+        ${canSeeDayOfWeek()?`<button class="am-btn company-subnav-btn" data-ctab="staffing" onclick="showCompanyTab('staffing')" style="font-size:13px;padding:7px 10px;">Staffing trends 📊</button>`:''}
       ${canSeeDayOfWeek()?`<button class="am-btn company-subnav-btn" data-ctab="dayofweek" onclick="showCompanyTab('dayofweek')" style="font-size:13px;padding:7px 10px;">Day of Week 📆</button>`:''}
       </div>`;
     }
@@ -5128,15 +5131,20 @@ const COMPANY_TAB_SECTIONS = {
   standouts: ['section-standouts'],
   dayreview: ['section-day-review'],
   dayofweek: ['section-dayofweek'],
+  staffing:  ['section-staffing'],
   reviews:   ['section-reviews'],
 };
 function applyCompanyTabVisibility(){
   const full = canSeeAllSalons();
   // Sections only owner/admin/viewer may see.
   const gated = new Set(['section-scorecard','section-am-perf','section-bonus','section-company-team','section-company-requests']);
-  const roleOk = id => id==='section-day-review' ? canSeeDayReview() : id==='section-dayofweek' ? canSeeDayOfWeek() : (gated.has(id) ? full : true);
+  // Staffing trends reads the same rows as Day of Week, gated by the same
+  // capability -- /api/gs/staffing-trend checks view.dayofweek too.
+  const roleOk = id => id==='section-day-review' ? canSeeDayReview()
+    : (id==='section-dayofweek' || id==='section-staffing') ? canSeeDayOfWeek()
+    : (gated.has(id) ? full : true);
   const active = new Set(COMPANY_TAB_SECTIONS[S_companyTab] || COMPANY_TAB_SECTIONS.allsalons);
-  ['company-summary','section-scorecard','section-am-perf','section-company-team','section-company-requests','section-all-salons','co-salon-drill','section-bonus','section-standouts','section-day-review','section-dayofweek','section-reviews'].forEach(id=>{
+  ['company-summary','section-scorecard','section-am-perf','section-company-team','section-company-requests','section-all-salons','co-salon-drill','section-bonus','section-standouts','section-day-review','section-dayofweek','section-staffing','section-reviews'].forEach(id=>{
     const el = document.getElementById(id); if(!el) return;
     el.style.display = (active.has(id) && roleOk(id)) ? '' : 'none';
   });
@@ -5150,7 +5158,8 @@ function showCompanyTab(name){
   if(name==='dayreview' && !canSeeDayReview()) name='allsalons';
   // Limited roles only get All Salons + Standouts (+ Day Review for Kayla).
   if(name==='dayofweek' && !canSeeDayOfWeek()) name='allsalons';
-  else if(!canSeeAllSalons() && !['allsalons','standouts','dayreview','reviews','dayofweek'].includes(name)) name='allsalons';
+  if(name==='staffing' && !canSeeDayOfWeek()) name='allsalons';
+  else if(!canSeeAllSalons() && !['allsalons','standouts','dayreview','reviews','dayofweek','staffing'].includes(name)) name='allsalons';
   S_companyTab = name;
   _route('#/company/' + name);
   applyCompanyTabVisibility();
@@ -5158,6 +5167,7 @@ function showCompanyTab(name){
   if(name==='team') renderCompanyTeam();
   if(name==='requests') renderRequests('company');
   if(name==='dayofweek') renderDayOfWeek();
+  if(name==='staffing') renderStaffingTrend();
   if(name==='reviews') renderReviewsTab('section-reviews','company');
 }
 
@@ -5965,6 +5975,160 @@ function dHeatMap(sn, dates){
     + '<div style="overflow-x:auto;"><table style="border-collapse:separate;border-spacing:2px;"><thead><tr>'+header+'</tr></thead><tbody>'+rows+'</tbody></table></div>'
     + '</div>';
 }
+// ── Staffing trends — the heat map by day of week, over a period ───────────
+// STAFFING-TREND-v1
+//
+// The daily heat map answers "what happened on Tuesday". This answers "what
+// happens on Tuesdays", which is the question you build a schedule from: one
+// bad Saturday is an anecdote, nine of them is a rota problem.
+//
+// Rows are weekdays, columns half-hours, and every cell is averaged across all
+// the matching days in the period. The COLOURS AND THRESHOLDS ARE THE DAILY
+// MAP'S -- dStateColor, HM_LINE_RED, HM_IDLE_BLUE -- on purpose: a second
+// definition of "understaffed" that disagreed with the daily view by a
+// rounding rule would make both untrustworthy.
+//
+// The averaging happens on the server (/api/gs/staffing-trend). Months of
+// half-hour rows are tens of thousands of records; what arrives here is a grid
+// of about 200 cells.
+
+let S_stWeeks = 8;
+let S_stSalon = '';        // '' = every salon in scope
+let S_stData = null;
+const ST_DOW = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const ST_ORDER = [1,2,3,4,5,6,0];   // Monday first; Sunday reads as the week's end
+
+function stIsoAddDays(iso, days){
+  const [y,m,d] = String(iso).slice(0,10).split('-').map(Number);
+  const dt = new Date(y, (m||1)-1, (d||1) + days);
+  return dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') + '-' + String(dt.getDate()).padStart(2,'0');
+}
+
+function renderStaffingTrend(){
+  const host = document.getElementById('section-staffing'); if(!host) return;
+  const salons = allActiveSalons().filter(canDrillSalon);
+  const opts = ['<option value="">All salons — the typical one</option>']
+    .concat(salons.map(function(sn){
+      return '<option value="' + hEsc(sn) + '"' + (S_stSalon===sn?' selected':'') + '>' + hEsc(salonDisplay(sn)) + '</option>';
+    })).join('');
+  const wk = function(n, label){
+    return '<button class="btn btn-sm ' + (S_stWeeks===n?'btn-primary':'btn-secondary') + '" '
+      + 'onclick="stSetWeeks(' + n + ')">' + label + '</button>';
+  };
+  host.innerHTML = '<div class="table-card-header">'
+    + '<div class="card-title" style="margin:0;">Staffing trends — by day of week</div>'
+    + '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">'
+      + wk(4,'4 weeks') + wk(8,'8 weeks') + wk(13,'13 weeks') + wk(26,'All we have')
+      + '<select class="ff-select" style="width:auto;font-size:12.5px;padding:6px 9px;" onchange="stSetSalon(this.value)">' + opts + '</select>'
+    + '</div></div>'
+    + '<div id="staffing-body"><div class="no-data" style="padding:14px;">Loading…</div></div>';
+  loadStaffingTrend();
+}
+
+function stSetWeeks(n){ S_stWeeks = n; renderStaffingTrend(); }
+function stSetSalon(v){ S_stSalon = String(v||''); renderStaffingTrend(); }
+
+function loadStaffingTrend(){
+  const body = document.getElementById('staffing-body'); if(!body) return;
+  const end = _sdTodayIso();
+  const start = stIsoAddDays(end, -(S_stWeeks * 7));
+  const q = '/api/gs/staffing-trend?start=' + start + '&end=' + end
+    + (S_stSalon ? '&salon=' + encodeURIComponent(S_stSalon) : '');
+  fetch(q).then(function(r){ return r.json(); }).then(function(res){
+    if(!res || !res.success) throw new Error((res && res.error) || 'could not load');
+    S_stData = res;
+    paintStaffingTrend();
+  }).catch(function(e){
+    const b = document.getElementById('staffing-body');
+    if(b) b.innerHTML = '<div class="no-data" style="padding:14px;">' + hEsc(e.message || String(e)) + '</div>';
+  });
+}
+
+function paintStaffingTrend(){
+  const body = document.getElementById('staffing-body'); if(!body || !S_stData) return;
+  const d = S_stData;
+  if(!d.grid || !d.grid.length){
+    body.innerHTML = '<div class="no-data" style="padding:14px;">No measured half-hours in that period. '
+      + 'The line and idle measures need both the demand scrape and clock punches for a day to count.</div>';
+    return;
+  }
+
+  // dow|hh -> cell
+  const G = {};
+  d.grid.forEach(function(c){ G[c.dow + '|' + c.hh] = c; });
+
+  let header = '<th style="text-align:left;position:sticky;left:0;background:#fff;z-index:1;font-size:12px;padding-right:10px;">Day</th>';
+  for(let hh = d.minHH; hh <= d.maxHH; hh++){
+    header += '<th style="font-size:11px;padding:3px 2px;font-weight:600;color:var(--text-muted);min-width:40px;">'
+      + (hh % 2 === 0 ? dHHLabel(hh) : '') + '</th>';
+  }
+
+  let rows = '';
+  ST_ORDER.forEach(function(dow){
+    const days = (d.dayCounts || {})[dow] || 0;
+    if(!days) return;
+    let cells = '';
+    for(let hh = d.minHH; hh <= d.maxHH; hh++){
+      const c = G[dow + '|' + hh];
+      if(!c){ cells += '<td style="background:#fafafa;min-width:40px;height:36px;"></td>'; continue; }
+      const idle = Math.max(0, c.fte - c.busy);
+      const col = dStateColor(c.line, idle);
+      let txt = '';
+      if(c.line >= HM_LINE_RED && c.line >= idle) txt = c.line.toFixed(1);
+      else if(idle >= HM_IDLE_BLUE) txt = '+' + idle.toFixed(1);
+      const tip = ST_DOW[dow] + 's at ' + dHHLabel(hh) + ', averaged over ' + days + ' of them'
+        + ' — ≈' + c.line.toFixed(1) + ' waiting, ' + c.busy.toFixed(1) + ' cutting of '
+        + c.fte.toFixed(1) + ' on the floor'
+        + (idle >= 0.1 ? (', ' + idle.toFixed(1) + ' idle') : '')
+        + (c.served ? ('; ' + c.served.toFixed(1) + ' served') : '')
+        + (c.w15 ? ('; ' + c.w15.toFixed(1) + ' waited >15m') : '');
+      cells += '<td title="' + hEsc(tip) + '" style="background:' + col.bg + ';color:' + col.fg
+        + ';font-size:12.5px;font-weight:700;text-align:center;min-width:40px;height:36px;">' + txt + '</td>';
+    }
+    rows += '<tr><td style="text-align:left;font-weight:600;font-size:12px;position:sticky;left:0;background:#fff;white-space:nowrap;padding-right:10px;">'
+      + ST_DOW[dow] + '<span style="font-weight:400;color:var(--text-muted);"> ×' + days + '</span></td>' + cells + '</tr>';
+  });
+
+  // What the average is actually of. A Saturday averaged over two Saturdays is
+  // a different claim from one averaged over twelve, and only this line says so.
+  const counts = ST_ORDER.filter(function(w){ return (d.dayCounts||{})[w]; })
+    .map(function(w){ return ST_DOW[w].slice(0,3) + ' ×' + d.dayCounts[w]; }).join(' · ');
+  const scope = d.salon
+    ? salonDisplay(d.salon)
+    : d.salonCount + ' salons — each cell is the TYPICAL salon, not the total';
+
+  body.innerHTML = '<div style="font-size:11.5px;color:var(--text-muted);margin:0 0 8px;line-height:1.55;">'
+    + 'Every cell is a half-hour averaged across all matching days in the period, measured from the invoice '
+    + 'clock and real punches — the same measure as the daily map. '
+    + '<span style="color:#c0392b;font-weight:700;">Red = a line formed</span> (≈ people waiting). '
+    + '<span style="color:#2980b9;font-weight:700;">Blue = stylists idle</span> with no line. '
+    + '<span style="color:#1b5e20;font-weight:700;">Green = busy, no line</span>. Hover a cell for the detail.'
+    + '<br><b>' + hEsc(scope) + '</b> · ' + hEsc(d.start) + ' to ' + hEsc(d.end) + ' · ' + hEsc(counts) + '</div>'
+    + '<div style="overflow-x:auto;"><table style="border-collapse:separate;border-spacing:2px;">'
+    + '<thead><tr>' + header + '</tr></thead><tbody>' + rows + '</tbody></table></div>'
+    + stWorstSlots(d, G);
+}
+
+// The three worst slots, named. A grid shows a pattern; a sentence is what
+// somebody actually carries into building next month's rota.
+function stWorstSlots(d, G){
+  const bad = d.grid.slice()
+    .filter(function(c){ return c.line >= HM_LINE_RED; })
+    .sort(function(a, b){ return b.line - a.line; })
+    .slice(0, 3);
+  if(!bad.length){
+    return '<div style="margin-top:10px;font-size:12px;color:#1b5e20;">'
+      + 'No half-hour in this period averages a line. Coverage is holding.</div>';
+  }
+  const items = bad.map(function(c){
+    return '<li><b>' + ST_DOW[c.dow] + 's at ' + dHHLabel(c.hh) + '</b> — about '
+      + c.line.toFixed(1) + ' waiting on average, with ' + c.fte.toFixed(1) + ' on the floor.</li>';
+  }).join('');
+  return '<div style="margin-top:12px;font-size:12.5px;">'
+    + '<div style="font-weight:700;margin-bottom:4px;">Worst recurring slots</div>'
+    + '<ul style="margin:0;padding-left:20px;line-height:1.7;">' + items + '</ul></div>';
+}
+
 // ── Day Review heat strip — one day, every in-scope salon as a row ──────────
 // Same measured logic as dHeatMap (line from invoices, idle from punches), but
 // rows are salons for the single reviewed day so the whole company's coverage
