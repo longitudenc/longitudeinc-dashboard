@@ -171,10 +171,21 @@ export const ROLE_DEFAULTS: Record<Role, Capability[]> = {
   // and it is salon-scoped for them. Awarding points was admin-only and stays so.
   area_manager: ['view.dayofweek', 'view.salondata', 'view.points'],
   manager: ['view.salondata'],
-  // v2: office already had the supply catalogue and the newsletter through the
-  // hard-coded lists. Leases they did not, and still do not -- a lease carries
-  // rent, guarantees and landlord terms.
-  office: ['view.salondata', 'view.market', 'view.payroll', 'view.supplies', 'edit.supplies', 'edit.newsletter'],
+  // v4: office IS an admin who also keeps the leases and the supply list.
+  // Everything except manage.access, which is the only owner-only capability
+  // there is. Deliberately identical to admin today -- if the two roles should
+  // diverge, the place to say so is here, and the honest way is to define what
+  // "owner's eyes only" means rather than hold office back one thing at a time.
+  office: [
+    'view.dayofweek', 'view.salondata', 'view.market',
+    'view.points', 'edit.points',
+    'view.payroll', 'view.supplies', 'edit.supplies', 'edit.newsletter',
+    'view.leases', 'edit.leases',
+    'manage.forms', 'delete.submissions',
+    'edit.settings', 'run.dataops',
+    // Menu preferences, not permissions -- the same two admin gets.
+    'view.company', 'view.dayreview',
+  ],
   stylist: [],
   maintenance: [],
 }

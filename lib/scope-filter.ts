@@ -7,16 +7,33 @@
 //
 // Policy (confirmed):
 //   owner / admin / viewer -> everything, including pay.
+//   office                 -> everything too. SCOPE-v2: office is an admin who
+//                             also keeps leases and the supply list, and runs
+//                             payroll, so it already sees pay in the ADP
+//                             builder. Treating it as a stylist here was a
+//                             leftover from when the role only meant "payroll".
 //   area_manager           -> all-salon SUMMARIES stay (their company view and
 //                             company-wide Standouts are unchanged), but pay and
 //                             per-employee buckets are scoped to their salons.
-//   manager / stylist /etc -> no dashboard yet; pay stripped. (Tighten to self
-//                             when the /my employee portal ships.)
+//   manager                -> strictly their own salon.
+//   stylist / maintenance  -> themselves. SCOPE-v2: this branch used to strip
+//                             pay and pass everything else through, on the
+//                             grounds that no UI rendered it for them -- but
+//                             getAllData is requireSignedIn, so a stylist could
+//                             read every employee's bonus payout by calling it
+//                             directly. "Nothing displays it" is not a boundary.
 
 import type { Access } from './auth-roles'
 
 function seesEverything(a: Access): boolean {
-  return a.role === 'owner' || a.role === 'admin' || a.role === 'viewer'
+  return a.role === 'owner' || a.role === 'admin' || a.role === 'viewer' || a.role === 'office'
+}
+
+/** Keep only the rows belonging to this person. */
+function mineOnly<T extends { globalId?: any }>(rows: T[], a: Access): T[] {
+  const gid = String(a.globalId || '').trim()
+  if (!gid) return []
+  return (rows || []).filter(r => String(r.globalId || '').trim() === gid)
 }
 
 function amSalonSet(a: Access): Set<string> {
@@ -54,18 +71,25 @@ export function scopeAllData(data: any, access: Access): any {
     for (const m of (data.managerTable || [])) {
       if (m && m.globalId && inScope(m.salonNum)) keepGids.add(String(m.globalId).trim())
     }
+    // And themselves. calcAmBonus falls back to the AM's OWN bonus row for a
+    // salon with no assigned manager, and an AM's aggregated row can be filed
+    // under a salon outside their own scope -- the same shape of problem
+    // keepGids solves for managers.
+    if (access.globalId) keepGids.add(String(access.globalId).trim())
     const empInScope = (e: any) =>
       inScope(e.salonNum) ||
       // Employees HOMED at one of this AM's salons keep ALL their bonus rows even
       // when a given month is attributed to a salon they floated to. Reviews list
       // stylists by home salon, so without this their review comes back empty.
       inScope(homeSalonOf(String(e.globalId || '').trim())) ||
-      keepGids.has(String(e.globalId || '').trim()) ||
-      // Keep ALL manager (position "M") rows. The AM only DISPLAYS managers for
-      // their own salons, but the manager bonus needs each manager's personal
-      // product %, and a manager's single aggregated bonus row can be attributed
-      // to a salon outside this AM's scope. This guarantees it's always present.
-      String(e.position || '').trim().toUpperCase() === 'M' 
+      keepGids.has(String(e.globalId || '').trim())
+      // SCOPE-v2: a blanket "keep every position M row" clause used to sit here,
+      // so every AM received all eighteen managers' names, salons and bonus
+      // PAYOUTS. It was justified by the manager bonus needing each manager's
+      // personal product % -- but calcAmBonus loops over the AM's OWN salons,
+      // looks up that salon's manager by globalId in managerTable, and finds
+      // only that row. keepGids above is already exactly that set. The clause
+      // was solving a problem the line above it had solved.
     const out: any = { ...data }
 
     // 1) Pay: keep baseWage only for employees homed at the AM's salons.
@@ -75,7 +99,8 @@ export function scopeAllData(data: any, access: Access): any {
         out.homeDataMap[gid] = inScope((row as any)?.homeSalon) ? row : withoutWage(row)
       }
     }
-    // 2) Per-employee buckets -> the AM's salons only.
+    // 2) Per-employee buckets -> the AM's salons only. Every row that survives
+    // is now one they are entitled to whole, so there is nothing to redact.
     out.bonusPeriods = scopePeriods(data.bonusPeriods, empInScope)
     out.payrollConsolidatedPeriods = scopePeriods(data.payrollConsolidatedPeriods, empInScope)
     if (Array.isArray(data.empWeeklyConsRows))
@@ -124,16 +149,48 @@ export function scopeAllData(data: any, access: Access): any {
     return out
   }
 
-  // stylist / unknown -> strip all pay; leave the rest at the current posture
-  // (no UI consumes it). Tighten to self when /my ships.
-  if (data.homeDataMap) {
-    const out: any = { ...data, homeDataMap: {} }
-    for (const [gid, row] of Object.entries<any>(data.homeDataMap)) {
-      out.homeDataMap[gid] = withoutWage(row)
-    }
-    return out
+  // stylist / maintenance / anyone unscoped -> themselves, and the reference
+  // data the page needs to render at all.
+  //
+  // This is a DENY list, not an allow list, and that is a deliberate trade: an
+  // allow list would be safer against a future field but would break the client
+  // the moment somebody adds one it needs. Everything named here carries a
+  // person's name, salon, hours, percentages or pay; what passes through is
+  // reference data -- the salon roster, the manager table, AM assignments,
+  // thresholds -- which the salon picker and the forms depend on and which
+  // names no individual's numbers.
+  //
+  // If you add a per-employee bucket to getAllData, add it here too.
+  const gid = String(access.globalId || '').trim()
+  const out: any = { ...data }
+
+  // Weekly performance: their own rows. Salon-level weekly numbers go entirely
+  // -- eighteen salons' revenue is not a stylist's business and nothing renders
+  // it for them.
+  out.weeks = (data.weeks || []).map((w: any) => ({
+    ...w,
+    salons: [],
+    emps: mineOnly(w.emps || [], access),
+  }))
+
+  out.bonusPeriods = scopePeriods(data.bonusPeriods, (e: any) =>
+    !!gid && String(e.globalId || '').trim() === gid)
+  out.payrollConsolidatedPeriods = scopePeriods(data.payrollConsolidatedPeriods, (e: any) =>
+    !!gid && String(e.globalId || '').trim() === gid)
+  out.salonSummaryPeriods = (data.salonSummaryPeriods || []).map((p: any) => ({ ...p, salons: [] }))
+  out.empWeeklyConsRows = mineOnly(data.empWeeklyConsRows || [], access)
+
+  // Disciplinary history is keyed by globalId; keep their own, which they are
+  // entitled to and which getDiscPoints returns them anyway.
+  out.trackerData = {}
+  if (gid && data.trackerData?.[gid]) out.trackerData[gid] = data.trackerData[gid]
+
+  // Pay: their own wage, nobody else's.
+  out.homeDataMap = {}
+  for (const [k, row] of Object.entries<any>(data.homeDataMap || {})) {
+    out.homeDataMap[k] = (gid && k === gid) ? row : withoutWage(row)
   }
-  return data
+  return out
 }
 
 /** Scope getDaily rows to the role's salons. */
@@ -196,10 +253,11 @@ export function scopeDaily(
  * review without opening the door to anyone else's, and it is why the globalId
  * check comes before the role check rather than after.
  *
- * Anyone not owner/admin/viewer and not scoped to a salon sees nobody. Office
- * and maintenance are deliberately in that group: they act on forms addressed
- * to them, which carry their own visibility rules, and have no reason to read
- * the HR record of someone they will never manage.
+ * Anyone not in the sees-everything set and not scoped to a salon sees nobody.
+ * SCOPE-v2 moved OFFICE out of that group -- office is an admin who also keeps
+ * leases and supplies -- and maintenance stays in it: they act on forms
+ * addressed to them, which carry their own visibility rules, and have no reason
+ * to read the HR record of someone they will never manage.
  */
 export function seesEmployee(access: Access, globalId: string, homeSalon: string): boolean {
   if (seesEverything(access)) return true
