@@ -115,26 +115,35 @@ export async function GET(req: Request) {
     // The DENOMINATOR is salon-days, not rows. Every (date, salon) that traded
     // at all counts once for every slot, so a half-hour the salon was shut
     // averages toward zero instead of being quietly excluded and reading busy.
+    // Salon-days per salon per weekday -- the denominator, per salon.
+    const salonDays: Record<string, Record<number, Set<string>>> = {}
     const openDays: Record<number, Set<string>> = {}
     const salonsSeen = new Set<string>()
     for (const r of demand) {
       const d = S(r.date).slice(0, 10), sn = S(r.salonNum)
       if (!isDate(d) || !sn) continue
       salonsSeen.add(sn)
-      ;(openDays[dowOf(d)] ||= new Set()).add(d + '|' + sn)
+      const dow = dowOf(d)
+      ;(openDays[dow] ||= new Set()).add(d + '|' + sn)
+      ;((salonDays[sn] ||= {})[dow] ||= new Set()).add(d)
     }
 
-    // dow -> hh -> sums
-    const acc: Record<number, Record<number, {
+    // salon -> dow -> hh -> sums. Keyed by salon even when the caller asked for
+    // everything: the combined view is then a sum of real salons rather than a
+    // separate code path that could disagree with them.
+    interface Sums {
       line: number; busy: number; ftMin: number; served: number; w15: number
       waitSum: number; waitN: number
       schedMin: number; actMin: number; arrivals: number
-    }>> = {}
-    const cell = (dow: number, hh: number) => {
-      const byDow = (acc[dow] ||= {})
+      days: Set<string>
+    }
+    const acc: Record<string, Record<number, Record<number, Sums>>> = {}
+    const cell = (sn: string, dow: number, hh: number): Sums => {
+      const bySalon = (acc[sn] ||= {})
+      const byDow = (bySalon[dow] ||= {})
       return (byDow[hh] ||= {
         line: 0, busy: 0, ftMin: 0, served: 0, w15: 0, waitSum: 0, waitN: 0,
-        schedMin: 0, actMin: 0, arrivals: 0,
+        schedMin: 0, actMin: 0, arrivals: 0, days: new Set<string>(),
       })
     }
 
@@ -145,7 +154,9 @@ export async function GET(req: Request) {
       const d = S(r.date).slice(0, 10)
       const hh = Number(S(r.halfHour))
       if (!isDate(d) || !Number.isFinite(hh)) continue
-      const c = cell(dowOf(d), hh)
+      const sn = S(r.salonNum)
+      if (!sn) continue
+      const c = cell(sn, dowOf(d), hh)
       const line = num(r.avgLine), busy = num(r.avgBusy)
       c.line += line
       c.busy += busy
@@ -167,10 +178,12 @@ export async function GET(req: Request) {
       if (!truthy(p.asStylist) || truthy(p.absent)) continue
       const a = minOfDay(p.checkInTime), b = minOfDay(p.checkOutTime)
       if (a == null || b == null || b <= a) continue
+      const sn = S(p.salonNum)
+      if (!sn) continue
       const dow = dowOf(d)
       const h0 = Math.floor(a / 30), h1 = Math.ceil(b / 30) - 1
       for (let hh = h0; hh <= h1; hh++) {
-        cell(dow, hh).ftMin += overlap(a, b, hh)
+        cell(sn, dow, hh).ftMin += overlap(a, b, hh)
         mark(hh)
       }
     }
@@ -184,9 +197,12 @@ export async function GET(req: Request) {
     // missing otherwise, and it would go missing from the middle of the day,
     // which is exactly where the interesting slots are.
     let schedTotal = 0, actTotal = 0
+    const salonHours: Record<string, { sched: number; act: number }> = {}
+    const hrs = (sn: string) => (salonHours[sn] ||= { sched: 0, act: 0 })
     for (const r of shifts) {
       const d = S(r.date).slice(0, 10)
-      if (!isDate(d)) continue
+      const sn = S(r.salonNum)
+      if (!isDate(d) || !sn) continue
       const dow = dowOf(d)
 
       const ss = S(r.schedStart).split(','), se = S(r.schedEnd).split(',')
@@ -194,8 +210,9 @@ export async function GET(req: Request) {
         const a = shiftMin(ss[i]), b = shiftMin(se[i] || '')
         if (a == null || b == null || b <= a) continue
         schedTotal += (b - a) / 60
+        hrs(sn).sched += (b - a) / 60
         for (let hh = Math.floor(a / 30); hh <= Math.ceil(b / 30) - 1; hh++) {
-          cell(dow, hh).schedMin += overlap(a, b, hh)
+          cell(sn, dow, hh).schedMin += overlap(a, b, hh)
           mark(hh)
         }
       }
@@ -203,48 +220,149 @@ export async function GET(req: Request) {
       const aa = shiftMin(S(r.actualStart)), ab = shiftMin(S(r.actualEnd))
       if (aa == null || ab == null || ab <= aa) continue
       actTotal += (ab - aa) / 60
+      hrs(sn).act += (ab - aa) / 60
       for (let hh = Math.floor(aa / 30); hh <= Math.ceil(ab / 30) - 1; hh++) {
-        cell(dow, hh).actMin += overlap(aa, ab, hh)
+        cell(sn, dow, hh).actMin += overlap(aa, ab, hh)
         mark(hh)
       }
     }
 
-    const grid: any[] = []
-    for (const dowStr of Object.keys(acc)) {
-      const dow = Number(dowStr)
-      const days = openDays[dow]?.size || 0
-      if (!days) continue
-      for (const hhStr of Object.keys(acc[dow])) {
-        const hh = Number(hhStr)
-        const c = acc[dow][hh]
-        const line = c.line / days
-        const busy = c.busy / days
-        const fte = (c.ftMin / 30) / days
-        const schedFte = (c.schedMin / 30) / days
-        const actFte = (c.actMin / 30) / days
-        // Nothing waiting, nothing being cut, nobody on the floor or rostered.
-        if (line < 0.005 && busy < 0.005 && fte < 0.005 && schedFte < 0.005) continue
-        grid.push({
-          dow, hh,
-          line: Math.round(line * 100) / 100,
-          busy: Math.round(busy * 100) / 100,
-          fte: Math.round(fte * 100) / 100,
-          served: Math.round((c.served / days) * 10) / 10,
-          w15: Math.round((c.w15 / days) * 10) / 10,
-          // THE MEASURE THE TREND VIEW COLOURS BY. Averaged over months, the
-          // length of a queue stops discriminating -- half a person waiting is
-          // ordinary trading. How long they waited does not: across this
-          // estate a 0.5-1.0 line runs a 5.6 minute wait, 1-2 runs 9.1, and 2-3
-          // runs 14.1 with 38% of customers over a quarter of an hour.
-          waitMin: c.waitN ? Math.round((c.waitSum / c.waitN) * 10) / 10 : 0,
-          arrivals: Math.round((c.arrivals / days) * 10) / 10,
-          schedFte: Math.round(schedFte * 100) / 100,
-          actFte: Math.round(actFte * 100) / 100,
-          // Share of served customers who waited more than fifteen minutes.
-          w15Pct: c.served ? Math.round((c.w15 / c.served) * 1000) / 10 : 0,
-        })
-      }
+    // ── per salon, then combined ───────────────────────────────────────────
+    //
+    // The combined grid is the SUM of the salon grids rather than a separate
+    // pass, so "all salons" cannot disagree with the salons it is made of.
+    //
+    // Note what summing means for each field: a wait is service-weighted across
+    // salons (a salon that served fifty people should not count the same as one
+    // that served five), while heads and queues are TOTALS across the estate.
+    // The combined view is therefore about scale -- how many stylists the whole
+    // company is short at 10am on a Saturday -- and a single salon is what you
+    // build a rota from.
+    const RECOMMEND = {
+      add1: 8, add2: 12,      // avg wait (min) at or above which a slot was short
+      calm: 4,                // wait below which nobody was really queueing
+      drop1: 1.0, drop2: 2.0, // avg idle stylists at or above which it was over-covered
     }
+    function recommendFor(waitMin: number, idle: number): number {
+      if (waitMin >= RECOMMEND.add2) return 2
+      if (waitMin >= RECOMMEND.add1) return 1
+      if (waitMin < RECOMMEND.calm && idle >= RECOMMEND.drop2) return -2
+      if (waitMin < RECOMMEND.calm && idle >= RECOMMEND.drop1) return -1
+      return 0
+    }
+
+    interface Cell {
+      dow: number; hh: number
+      line: number; busy: number; fte: number; served: number; w15: number
+      waitMin: number; arrivals: number; schedFte: number; actFte: number; w15Pct: number
+    }
+
+    const gridsBySalon: Record<string, Cell[]> = {}
+    for (const sn of Object.keys(acc)) {
+      const out: Cell[] = []
+      for (const dowStr of Object.keys(acc[sn])) {
+        const dow = Number(dowStr)
+        const days = salonDays[sn]?.[dow]?.size || 0
+        if (!days) continue
+        for (const hhStr of Object.keys(acc[sn][dow])) {
+          const hh = Number(hhStr)
+          const c = acc[sn][dow][hh]
+          const line = c.line / days
+          const busy = c.busy / days
+          const fte = (c.ftMin / 30) / days
+          const schedFte = (c.schedMin / 30) / days
+          const actFte = (c.actMin / 30) / days
+          // Nothing waiting, nothing cut, nobody on the floor or rostered.
+          if (line < 0.005 && busy < 0.005 && fte < 0.005 && schedFte < 0.005) continue
+          out.push({
+            dow, hh,
+            line: Math.round(line * 100) / 100,
+            busy: Math.round(busy * 100) / 100,
+            fte: Math.round(fte * 100) / 100,
+            served: Math.round((c.served / days) * 10) / 10,
+            w15: Math.round((c.w15 / days) * 10) / 10,
+            // Averaged over months the LENGTH of a queue stops discriminating --
+            // half a person waiting is ordinary trading. How long they waited
+            // does not: on this estate a 0.5-1.0 line runs a 5.6 minute wait,
+            // 1-2 runs 9.1, and 2-3 runs 14.1 with 38% over a quarter of an hour.
+            waitMin: c.waitN ? Math.round((c.waitSum / c.waitN) * 10) / 10 : 0,
+            arrivals: Math.round((c.arrivals / days) * 10) / 10,
+            schedFte: Math.round(schedFte * 100) / 100,
+            actFte: Math.round(actFte * 100) / 100,
+            w15Pct: c.served ? Math.round((c.w15 / c.served) * 1000) / 10 : 0,
+          })
+        }
+      }
+      gridsBySalon[sn] = out
+    }
+
+    const wantSalon = salon || (Object.keys(gridsBySalon).length === 1 ? Object.keys(gridsBySalon)[0] : '')
+    let grid: Cell[]
+    if (wantSalon) {
+      grid = gridsBySalon[wantSalon] || []
+    } else {
+      const merged: Record<string, any> = {}
+      for (const sn of Object.keys(gridsBySalon)) {
+        for (const c of gridsBySalon[sn]) {
+          const k = c.dow + '|' + c.hh
+          const m = (merged[k] ||= { dow: c.dow, hh: c.hh, line: 0, busy: 0, fte: 0, served: 0, w15: 0, arrivals: 0, schedFte: 0, actFte: 0, waitW: 0, waitN: 0 })
+          m.line += c.line; m.busy += c.busy; m.fte += c.fte; m.served += c.served
+          m.w15 += c.w15; m.arrivals += c.arrivals
+          m.schedFte += c.schedFte; m.actFte += c.actFte
+          if (c.waitMin > 0 && c.served > 0) { m.waitW += c.waitMin * c.served; m.waitN += c.served }
+        }
+      }
+      grid = Object.values(merged).map((m: any) => ({
+        dow: m.dow, hh: m.hh,
+        line: Math.round(m.line * 100) / 100,
+        busy: Math.round(m.busy * 100) / 100,
+        fte: Math.round(m.fte * 100) / 100,
+        served: Math.round(m.served * 10) / 10,
+        w15: Math.round(m.w15 * 10) / 10,
+        waitMin: m.waitN ? Math.round((m.waitW / m.waitN) * 10) / 10 : 0,
+        arrivals: Math.round(m.arrivals * 10) / 10,
+        schedFte: Math.round(m.schedFte * 100) / 100,
+        actFte: Math.round(m.actFte * 100) / 100,
+        w15Pct: m.served ? Math.round((m.w15 / m.served) * 1000) / 10 : 0,
+      }))
+    }
+
+    // ── the per-salon table ────────────────────────────────────────────────
+    // One row per salon, so a manager can be handed their own salon's answer
+    // rather than the estate's. Ranked on hours, not slot counts: a salon short
+    // two heads for four hours is a bigger problem than one short one head for
+    // five, and counting slots would say the opposite.
+    const bySalon = Object.keys(gridsBySalon).map(sn => {
+      let shortSlots = 0, overSlots = 0, shortHours = 0, overHours = 0
+      let worstShort: any = null, worstOver: any = null
+      for (const c of gridsBySalon[sn]) {
+        const idle = Math.max(0, c.actFte - c.busy)
+        const rec = recommendFor(c.waitMin, idle)
+        // A cell is one half-hour of ONE weekday, so it stands for half an hour
+        // a week -- the hours below are per week, which is the unit a rota is
+        // written in.
+        if (rec > 0) { shortSlots++; shortHours += rec * 0.5 }
+        if (rec < 0) { overSlots++; overHours += -rec * 0.5 }
+        if (c.waitMin > 0 && (!worstShort || c.waitMin > worstShort.waitMin)) worstShort = c
+        if (idle > 0 && c.waitMin < RECOMMEND.calm && (!worstOver || idle > worstOver.idle)) worstOver = { ...c, idle }
+      }
+      const h = salonHours[sn] || { sched: 0, act: 0 }
+      return {
+        salon: sn,
+        schedHours: Math.round(h.sched),
+        actualHours: Math.round(h.act),
+        adherencePct: h.sched ? Math.round(((h.act - h.sched) / h.sched) * 1000) / 10 : 0,
+        shortSlots, overSlots,
+        shortHours: Math.round(shortHours * 10) / 10,
+        overHours: Math.round(overHours * 10) / 10,
+        worstShort: worstShort && worstShort.waitMin >= RECOMMEND.add1
+          ? { dow: worstShort.dow, hh: worstShort.hh, waitMin: worstShort.waitMin }
+          : null,
+        worstOver: worstOver && worstOver.idle >= RECOMMEND.drop1
+          ? { dow: worstOver.dow, hh: worstOver.hh, idle: Math.round(worstOver.idle * 10) / 10 }
+          : null,
+      }
+    }).sort((a, b) => (b.shortHours + b.overHours) - (a.shortHours + a.overHours))
 
     // How many of each weekday the average rests on -- a Saturday averaged over
     // two Saturdays is not the same claim as one averaged over twelve, and the
@@ -268,6 +386,8 @@ export async function GET(req: Request) {
       // question a payroll conversation starts from.
       schedHours: Math.round(schedTotal),
       actualHours: Math.round(actTotal),
+      // One row per salon: which salons to look at, and where in their week.
+      bySalon,
       minHH: minHH > maxHH ? 0 : minHH,
       maxHH: minHH > maxHH ? 0 : maxHH,
       dayCounts,

@@ -6198,7 +6198,65 @@ function paintStaffingTrend(){
     + '<br><b>' + hEsc(scope) + '</b> · ' + hEsc(d.start) + ' to ' + hEsc(d.end) + ' · ' + hEsc(counts) + '</div>'
     + '<div style="overflow-x:auto;"><table style="border-collapse:separate;border-spacing:2px;">'
     + '<thead><tr>' + header + '</tr></thead><tbody>' + rows + '</tbody></table></div>'
-    + stCallouts(d);
+    + stCallouts(d)
+    + (fit ? stSalonTable(d) : '');
+}
+
+// One row per salon: where to look, and where in that salon's week.
+//
+// Ranked on HOURS, not on how many slots are off. A salon short two heads for
+// four hours has a bigger problem than one short a head for five, and counting
+// slots would rank them the other way round.
+//
+// Short and over are shown side by side and never netted. A salon three short
+// on Saturday morning and three over on Wednesday evening is not a salon with
+// nothing wrong -- it is a salon with two things wrong that happen to cancel,
+// and a single net number would hide both.
+function stSalonTable(d){
+  const rows = (d.bySalon || []).filter(function(r){ return r.shortHours || r.overHours || r.schedHours; });
+  if(!rows.length) return '';
+  const th = 'padding:6px 9px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);text-align:left;';
+  const td = 'padding:7px 9px;border-top:1px solid var(--border);';
+  const slot = function(x){ return x ? (ST_DOW[x.dow].slice(0,3) + ' ' + dHHLabel(x.hh)) : '—'; };
+
+  let body = '';
+  rows.forEach(function(r){
+    const adh = r.adherencePct;
+    const adhCol = Math.abs(adh) < 2 ? 'var(--text-muted)' : (adh < 0 ? '#c0392b' : '#b06a00');
+    body += '<tr class="sub-row" onclick="stSetSalon(' + "'" + hEsc(r.salon) + "'" + ')">'
+      + '<td style="' + td + 'font-weight:600;">' + hEsc(salonDisplay(r.salon)) + '</td>'
+      + '<td style="' + td + 'text-align:right;">' + r.schedHours.toLocaleString() + '</td>'
+      + '<td style="' + td + 'text-align:right;">' + r.actualHours.toLocaleString() + '</td>'
+      + '<td style="' + td + 'text-align:right;color:' + adhCol + ';font-weight:600;">'
+        + (adh > 0 ? '+' : '') + adh.toFixed(1) + '%</td>'
+      + '<td style="' + td + 'text-align:right;color:#c0392b;font-weight:600;">'
+        + (r.shortHours ? r.shortHours.toFixed(1) + ' hrs' : '—') + '</td>'
+      + '<td style="' + td + 'color:var(--text-muted);">' + hEsc(slot(r.worstShort))
+        + (r.worstShort ? ' <span style="color:#c0392b;">' + r.worstShort.waitMin.toFixed(0) + 'm</span>' : '') + '</td>'
+      + '<td style="' + td + 'text-align:right;color:#2980b9;font-weight:600;">'
+        + (r.overHours ? r.overHours.toFixed(1) + ' hrs' : '—') + '</td>'
+      + '<td style="' + td + 'color:var(--text-muted);">' + hEsc(slot(r.worstOver))
+        + (r.worstOver ? ' <span style="color:#2980b9;">' + r.worstOver.idle.toFixed(1) + ' idle</span>' : '') + '</td>'
+      + '</tr>';
+  });
+
+  return '<div style="margin-top:20px;">'
+    + '<div style="font-weight:700;font-size:12.5px;margin-bottom:2px;">By salon</div>'
+    + '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:7px;line-height:1.5;">'
+    + 'Hours per week the measured outcome argues for, worst first. Short and over are '
+    + '<b>not netted</b> — a salon that is short on Saturday morning and over on Wednesday evening has two '
+    + 'problems that happen to cancel, not none. Click a row to open that salon\'s grid.</div>'
+    + '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:12.5px;">'
+    + '<thead><tr>'
+    + '<th style="' + th + '">Salon</th>'
+    + '<th style="' + th + 'text-align:right;">Rostered</th>'
+    + '<th style="' + th + 'text-align:right;">Worked</th>'
+    + '<th style="' + th + 'text-align:right;">vs plan</th>'
+    + '<th style="' + th + 'text-align:right;">Short/wk</th>'
+    + '<th style="' + th + '">Worst slot</th>'
+    + '<th style="' + th + 'text-align:right;">Over/wk</th>'
+    + '<th style="' + th + '">Most idle</th>'
+    + '</tr></thead><tbody>' + body + '</tbody></table></div></div>';
 }
 
 // Rostered against worked, in hours. The grid answers "when"; this is the
