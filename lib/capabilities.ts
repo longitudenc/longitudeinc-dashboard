@@ -102,7 +102,7 @@ export const CAPABILITY_META: CapabilityMeta[] = [
   { group: 'Leases',  key: 'edit.leases',    kind: 'permission',   enforcedOn: 'write /api/leases/*',        label: 'Edit leases',         description: 'Upload, file, rename and delete lease documents. Needs the line above.' },
 
   { group: 'Forms',   key: 'manage.forms',   kind: 'permission',   enforcedOn: 'POST /api/forms/access, /api/forms/fields', label: 'Form settings & questions', description: 'Who can submit each form, who sees its responses, its wording and its questions.' },
-  { group: 'Forms',   key: 'delete.submissions', kind: 'permission', enforcedOn: 'DELETE /api/forms/submissions', label: 'Delete submissions', description: 'Remove a submission and its comments for good. For test rows, not for outcomes.' },
+  { group: 'Forms',   key: 'delete.submissions', kind: 'permission', enforcedOn: 'DELETE /api/forms/submissions', label: 'Delete submissions', description: 'Remove a submission and its comments for good — unrecoverable, and it leaves no record that it happened. Owner only.' },
 
   { group: 'Administration', key: 'edit.settings', kind: 'permission', enforcedOn: 'POST /api/gs/save*, /api/home/save', label: 'Edit settings', description: 'Thresholds, AM assignments, manager table, waivers and the home page.' },
   { group: 'Administration', key: 'run.dataops',   kind: 'permission', enforcedOn: 'POST /api/gs/triggerProcessAndLoad and the other rebuild endpoints', label: 'Run data jobs', description: 'Rebuild, de-duplicate and bulk-generate. Heavy, and it rewrites shared tabs.' },
@@ -151,17 +151,19 @@ export const ALL_CAPABILITIES: Capability[] = CAPABILITY_META.map(c => c.key)
  */
 export const ROLE_DEFAULTS: Record<Role, Capability[]> = {
   owner: [...ALL_CAPABILITIES],
+  // v5: admin no longer carries LEASES or PAYROLL. Those are the two things
+  // that separate the office role from this one -- rent, guarantees and
+  // landlord terms on one side, what everybody is paid on the other. An admin
+  // runs the business; the office runs the paperwork.
   admin: [
     'view.company', 'view.dayreview', 'view.dayofweek',
-    'view.salondata', 'view.market', 'view.payroll', 'edit.settings',
-    // v2: exactly what admins could already do -- requireAdmin on /api/leases
-    // and /api/forms/access, and the owner/admin/office list in the newsletter
-    // and supply routes.
-    'view.supplies', 'edit.supplies', 'view.leases', 'edit.leases',
+    'view.salondata', 'view.market', 'edit.settings',
+    'view.supplies', 'edit.supplies',
     'edit.newsletter', 'manage.forms',
-    // v3: requireAdmin on the points writers, the submission delete and the
-    // data jobs; the points screen was isAdminRole() || isAMRole().
-    'view.points', 'edit.points', 'delete.submissions', 'run.dataops',
+    'view.points', 'edit.points', 'run.dataops',
+    // v5: delete.submissions is gone from here too. Removing a submission and
+    // its comment thread is unrecoverable and leaves no trace that it happened,
+    // so it stays with the owner until it is a soft delete.
   ],
   viewer: [
     'view.company', 'view.dayreview', 'view.dayofweek',
@@ -170,20 +172,21 @@ export const ROLE_DEFAULTS: Record<Role, Capability[]> = {
   // v3: an AM could always open the points screen (isAdminRole() || isAMRole())
   // and it is salon-scoped for them. Awarding points was admin-only and stays so.
   area_manager: ['view.dayofweek', 'view.salondata', 'view.points'],
-  manager: ['view.salondata'],
-  // v4: office IS an admin who also keeps the leases and the supply list.
-  // Everything except manage.access, which is the only owner-only capability
-  // there is. Deliberately identical to admin today -- if the two roles should
-  // diverge, the place to say so is here, and the honest way is to define what
-  // "owner's eyes only" means rather than hold office back one thing at a time.
+  // v5: a manager gets the home page and forms, and nothing else. view.salondata
+  // was reaching them the Ratings & CAQ screen, which is not part of that.
+  manager: [],
+  // v5: office is the paperwork role. It keeps LEASES and PAYROLL, which admin
+  // now does not, and gives up the two admin keeps -- editing settings and
+  // running data jobs -- because neither is office work. That is the whole
+  // difference between them, stated in one place.
   office: [
     'view.dayofweek', 'view.salondata', 'view.market',
     'view.points', 'edit.points',
-    'view.payroll', 'view.supplies', 'edit.supplies', 'edit.newsletter',
-    'view.leases', 'edit.leases',
-    'manage.forms', 'delete.submissions',
-    'edit.settings', 'run.dataops',
-    // Menu preferences, not permissions -- the same two admin gets.
+    'view.payroll',                                // admin no longer has this
+    'view.leases', 'edit.leases',                  // nor these
+    'view.supplies', 'edit.supplies', 'edit.newsletter',
+    'manage.forms',
+    // Menu preferences, not permissions.
     'view.company', 'view.dayreview',
   ],
   stylist: [],

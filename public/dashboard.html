@@ -11256,7 +11256,19 @@ window.addEventListener('popstate', function(){
 function _navPerfUser(){ return canSeeAllSalons() || isAMRole() || _navSalonUser(); }
 // A manager with a salon: their whole dashboard is the salon drill, which
 // already exists and is already salon-scoped. Nothing new is built for them.
-function _navSalonUser(){ return isManagerRole() && (SESSION.salons||[]).length > 0; }
+// MANAGER-SCOPE-v1. A salon manager gets the home page and forms, and nothing
+// else, until their own landing page exists.
+//
+// This used to return true for a manager with a salon, which put them into
+// every performance, pay and people card in the top bar -- scoped to their own
+// salon, so no other salon's numbers were ever at risk, but a menu full of
+// screens that were not theirs to run.
+//
+// The capability list backs this up rather than relying on it: `manager` now
+// holds nothing, so the two market routes it used to reach refuse as well. This
+// only decides what is OFFERED; lib/scope-filter decides what any of it would
+// have returned, and that has not changed.
+function _navSalonUser(){ return false; }
 function _mySalon(){ return String((SESSION.salons||[])[0]||'').trim(); }
 function _salonGo(section){ return function(){ openSalonDrill(_mySalon(), section); }; }
 
