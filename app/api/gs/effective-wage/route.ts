@@ -1,10 +1,16 @@
 // app/api/gs/effective-wage/route.ts
 //
-// EFFECTIVE-WAGE-v1  (Ctrl+F this string to confirm the file saved)
+// EFFECTIVE-WAGE-v2  (Ctrl+F this string to confirm the file saved)
 //
-//   GET ?year=2026[&globalId=2023-0001-1394]
+//   GET ?start=2026-07-01&end=2026-09-07[&globalId=...]
+//   GET ?year=2026[&globalId=2023-0001-1394]      (shorthand for that whole year)
 //
-// What an hour ON THE FLOOR is actually worth to a stylist, year to date.
+// What an hour ON THE FLOOR is actually worth to a stylist, over a date window.
+//
+// THE WINDOW IS BY WEEK, because payroll is. A week counts if its weekEnd --
+// the Friday it was paid on -- falls inside the window. Slicing a week in half
+// would put five days of hours against seven days of incentive, so a week is
+// either in or it is out, and the response names the weeks it used.
 //
 // THE DENOMINATOR IS FLOOR HOURS ONLY. Not hours worked, not hours paid.
 // Training, admin, reception, closing, vacation, holiday and sick time are all
@@ -55,21 +61,32 @@ const NON_FLOOR = [
 ] as const
 
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+const MON_LABEL = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-/** "Aug 26" -> 7 (zero-based month), or null. */
-function monthOfPeriod(key: string): number | null {
+/** "Aug 26" -> "2026-08", or null. The two-digit year is this century. */
+function monthKeyOfPeriod(key: string): string | null {
   const m = S(key).toLowerCase().match(/^([a-z]{3})\s*(\d{2})$/)
   if (!m) return null
   const i = MONTHS.indexOf(m[1])
-  return i < 0 ? null : i
+  if (i < 0) return null
+  return '20' + m[2] + '-' + String(i + 1).padStart(2, '0')
 }
 
-/** A week is attributed to the month its Friday falls in. */
-function monthOfWeek(weekEnd: string): number | null {
-  const m = S(weekEnd).match(/^\d{4}-(\d{2})-\d{2}$/)
-  if (!m) return null
-  const i = Number(m[1]) - 1
-  return i >= 0 && i < 12 ? i : null
+/** A week belongs to the month its Friday falls in: "2026-08-28" -> "2026-08". */
+const monthKeyOfWeek = (weekEnd: string) =>
+  /^\d{4}-\d{2}-\d{2}$/.test(S(weekEnd)) ? S(weekEnd).slice(0, 7) : null
+
+/** Every month key from `a` to `b` inclusive, in order. */
+function monthSpan(a: string, b: string): string[] {
+  const out: string[] = []
+  let y = Number(a.slice(0, 4)), m = Number(a.slice(5, 7))
+  const ey = Number(b.slice(0, 4)), em = Number(b.slice(5, 7))
+  // A window is a couple of years at most; the counter only guards a bad param.
+  for (let i = 0; i < 400 && (y < ey || (y === ey && m <= em)); i++) {
+    out.push(y + '-' + String(m).padStart(2, '0'))
+    if (++m > 12) { m = 1; y++ }
+  }
+  return out
 }
 
 interface Bucket {
@@ -95,14 +112,35 @@ export async function GET(req: Request) {
 
   try {
     const url = new URL(req.url)
-    const year = S(url.searchParams.get('year')) || String(new Date().getFullYear())
-    if (!/^\d{4}$/.test(year)) {
-      return NextResponse.json({ success: false, error: 'year must be YYYY' }, { status: 400 })
+    const isDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v)
+    let start = S(url.searchParams.get('start'))
+    let end = S(url.searchParams.get('end'))
+    if (!start || !end) {
+      const year = S(url.searchParams.get('year')) || String(new Date().getFullYear())
+      if (!/^\d{4}$/.test(year)) {
+        return NextResponse.json({ success: false, error: 'year must be YYYY' }, { status: 400 })
+      }
+      start = year + '-01-01'; end = year + '-12-31'
+    }
+    if (!isDate(start) || !isDate(end) || start > end) {
+      return NextResponse.json(
+        { success: false, error: 'start and end must be YYYY-MM-DD, start on or before end' },
+        { status: 400 })
     }
     const only = S(url.searchParams.get('globalId'))
 
-    const rows = rowsToObjects((await readSheet('SD_PAYROLL')) || [])
-      .filter(r => S(r.weekEnd) >= `${year}-01-01` && S(r.weekEnd) <= `${year}-12-31`)
+    const months = monthSpan(start.slice(0, 7), end.slice(0, 7))
+    const mIndex = new Map(months.map((k, i) => [k, i]))
+
+    // Read the WHOLE months the window touches, not just the window itself. The
+    // rows outside it are never counted -- they exist only to work out what
+    // share of a monthly bonus a partial month has actually earned.
+    const wide = rowsToObjects((await readSheet('SD_PAYROLL')) || [])
+      .filter(r => {
+        const mk = S(r.weekEnd).slice(0, 7)
+        return mk >= months[0] && mk <= months[months.length - 1]
+      })
+    const rows = wide.filter(r => S(r.weekEnd) >= start && S(r.weekEnd) <= end)
 
     const profiles = (await getEmployeeProfiles()) as any[]
     const homeSalon = new Map<string, string>()
@@ -114,6 +152,9 @@ export async function GET(req: Request) {
     interface Acc {
       globalId: string; name: string; salons: Set<string>; weeks: Set<string>
       total: Bucket; months: Bucket[]
+      /** Floor hours over each WHOLE month the window touches, in-window or not.
+       *  The denominator for prorating a monthly bonus into a partial month. */
+      monthFloorAll: Map<string, number>
       /** Floor hours per salon, so a floater can be attributed to where they
        *  actually worked rather than to whichever salon number sorts first. */
       salonHours: Map<string, number>
@@ -123,7 +164,8 @@ export async function GET(req: Request) {
     const blank = (gid: string, name: string): Acc => ({
       globalId: gid, name, salons: new Set(), weeks: new Set(),
       total: emptyBucket(),
-      months: Array.from({ length: 12 }, emptyBucket),
+      months: Array.from({ length: months.length }, emptyBucket),
+      monthFloorAll: new Map<string, number>(),
       salonHours: new Map<string, number>(),
       lastWage: 0, lastWeek: '',
     })
@@ -139,8 +181,9 @@ export async function GET(req: Request) {
 
       const wage = N(r.baseWage)
       const floor = N(r.floorHours)
-      const mi = monthOfWeek(S(r.weekEnd))
-      const targets = mi === null ? [a.total] : [a.total, a.months[mi]]
+      const mk = monthKeyOfWeek(S(r.weekEnd))
+      const mi = mk === null ? undefined : mIndex.get(mk)
+      const targets = mi === undefined ? [a.total] : [a.total, a.months[mi]]
 
       for (const t of targets) {
         t.floorHours += floor
@@ -164,23 +207,41 @@ export async function GET(req: Request) {
       if (wage > 0 && wk >= a.lastWeek) { a.lastWage = wage; a.lastWeek = wk }
     }
 
+    // Whole-month floor hours, so a partial month can take its share of a
+    // monthly bonus rather than all of it or none of it.
+    for (const r of wide) {
+      const a = by.get(S(r.globalId))
+      if (!a) continue
+      const mk = monthKeyOfWeek(S(r.weekEnd))
+      if (!mk) continue
+      a.monthFloorAll.set(mk, (a.monthFloorAll.get(mk) || 0) + N(r.floorHours))
+    }
+
     // The monthly stylist bonus, onto the month it was earned. Only for people
     // already in the map: a bonus row without a payroll row would divide by
     // zero floor hours, and somebody who earned a bonus in a year they logged
     // no floor time is a data question, not a wage.
+    //
+    // PRORATED BY FLOOR HOURS when the window covers only part of that month.
+    // The bonus is earned by cutting, so the share of the month's cutting that
+    // falls inside the window is the share of the bonus that belongs to it. A
+    // whole month in the window takes the whole bonus, exactly as before.
     try {
       const bonusRows = rowsToObjects((await readSheet('BonusData')) || [])
       for (const r of bonusRows) {
         const gid = S(r.globalId)
         const a = gid ? by.get(gid) : undefined
         if (!a) continue
-        const key = S(r.periodKey)
-        if (!key.endsWith(year.slice(2))) continue
+        const mk = monthKeyOfPeriod(S(r.periodKey))
+        const mi = mk === null ? undefined : mIndex.get(mk)
+        if (mk === null || mi === undefined) continue
         const amount = N(r.payout)
         if (!amount) continue
-        a.total.bonus += amount
-        const mi = monthOfPeriod(key)
-        if (mi !== null) a.months[mi].bonus += amount
+        const whole = a.monthFloorAll.get(mk) || 0
+        const share = whole > 0 ? Math.min(1, a.months[mi].floorHours / whole) : 0
+        if (share <= 0) continue
+        a.total.bonus += amount * share
+        a.months[mi].bonus += amount * share
       }
     } catch { /* no bonus tab: the breakdown simply has no bonus line */ }
 
@@ -229,16 +290,30 @@ export async function GET(req: Request) {
     const totFloor = people.reduce((s, p) => s + p.floorHours, 0)
     const totEarned = people.reduce((s, p) => s + p.gross, 0)
 
+    const label = (k: string) => MON_LABEL[Number(k.slice(5, 7)) - 1] + ' ' + k.slice(2, 4)
+    const oneYear = start.slice(0, 4) === end.slice(0, 4)
+
     return NextResponse.json({
       success: true,
-      year,
+      start, end,
+      year: start.slice(0, 4),
+      // The months the window touches, in order and parallel to every person's
+      // `months` array, so a caller never has to guess what column 0 is. The
+      // year is only in the label when the window actually spans two.
+      monthKeys: months.map(k => ({
+        key: k,
+        label: oneYear ? MON_LABEL[Number(k.slice(5, 7)) - 1] : label(k),
+        full: label(k),
+      })),
+      weeksInWindow: [...new Set(rows.map(r => S(r.weekEnd)).filter(Boolean))].sort(),
       people,
       scopeAverage: totFloor > 0 ? r2(totEarned / totFloor) : null,
       scopeFloorHours: r2(totFloor),
       excludes: ['overtime premium', '6-day pay'],
       note: 'Floor hours only. Training, admin, reception, closing, vacation, holiday and sick '
         + 'time are excluded from both the hours and the pay, because they earn base wage and '
-        + 'no tips or incentives.',
+        + 'no tips or incentives. A week counts when the Friday it was paid on falls inside the '
+        + 'window; a monthly bonus is split by floor hours when only part of its month does.',
     })
   } catch (e: any) {
     return NextResponse.json({ success: false, error: String(e?.message || e) }, { status: 500 })
