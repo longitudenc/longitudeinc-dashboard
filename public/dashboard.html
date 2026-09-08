@@ -11211,6 +11211,7 @@ function applyRoute(){
       case 'activity':  showFormActivity(); break;
       case 'slides':    showBonusSlides(); break;
       case 'effective-wage': showEffWageReport(); break;
+      case 'pay-trends': showPayTrends(); break;
       case 'supplies':  showSupplyCatalog(); break;
       case 'request':   if(seg[1]) openRequestDeepLink(seg[1]); break;
       case 'event':     if(seg[1]) openEventDetail(seg[1]); break;
@@ -11336,6 +11337,8 @@ const HUB_GROUPS = {
         cap:'view.company', go:function(){ showBonusSlides(); } },
       { t:'Effective wage', d:'What an hour on the floor is worth — by company, salon and person.',
         show:_navPerfUser, go:function(){ showEffWageReport(); } },
+      { t:'Pay trends', d:'Which pay bucket moved — base, tips, incentives and bonus, drilled to the person.',
+        show:_navPerfUser, go:function(){ showPayTrends(); } },
     ],
   },
   people: {
@@ -15677,6 +15680,11 @@ let S_ewData = null, S_ewPrior = null, S_ewSalon = '';
 // lands on a Friday. That matters more here than on Day of Week: payroll is
 // filed by week, and a one-day slip would move a whole week's pay in or out.
 let S_ewRange = 'ytd', S_ewStart = '', S_ewEnd = '', S_ewLY = true, S_ewCache = {};
+// Both pay screens share this window, and the range bar drives whichever one is
+// open. A range chosen on one is still the range on the other, which is the
+// whole point of them being the same control.
+let S_ewReload = function(){ loadEffWageReport(); };
+let S_ewRepaint = function(){ paintEffWageReport(); };
 function ewAnchor(){ const d = new Date(); d.setUTCDate(d.getUTCDate() - 1); return d.toISOString().slice(0,10); }
 function ewWindow(range){ const end = ewAnchor();
   if(range==='custom') return { start:(S_ewStart || dIsoAddDays(end,-90)), end:(S_ewEnd || end) };
@@ -15705,6 +15713,8 @@ function showEffWageReport(){
   if(pg) pg.classList.add('active');
   const mainEl = document.querySelector('.content');
   if(mainEl) mainEl.scrollTop = 0;
+  S_ewReload = function(){ loadEffWageReport(); };
+  S_ewRepaint = function(){ paintEffWageReport(); };
   if(pg){
     pg.innerHTML = '<div class="page-header"><h2>Effective wage</h2>'
       + '<div class="sub">What an hour on the floor is actually worth &mdash; base, tips, incentives and bonus over floor hours alone</div></div>'
@@ -15713,8 +15723,8 @@ function showEffWageReport(){
   loadEffWageReport();
 }
 
-function loadEffWageReport(){
-  const host = document.getElementById('ew-body'); if(!host) return;
+function ewLoad(hostId, paint){
+  const host = document.getElementById(hostId); if(!host) return;
   const w = ewWindow(S_ewRange);
   if(!w.start || !w.end || w.start > w.end){
     host.innerHTML = '<div class="no-data" style="padding:14px;">Pick a valid start and end date '
@@ -15722,7 +15732,7 @@ function loadEffWageReport(){
     return;
   }
   const ck = w.start + '|' + w.end + '|' + (S_ewLY ? 'ly' : '-');
-  if(S_ewCache[ck]){ S_ewData = S_ewCache[ck].ty; S_ewPrior = S_ewCache[ck].ly; paintEffWageReport(); return; }
+  if(S_ewCache[ck]){ S_ewData = S_ewCache[ck].ty; S_ewPrior = S_ewCache[ck].ly; paint(); return; }
 
   const get = function(a, b){
     return fetch('/api/gs/effective-wage?start=' + a + '&end=' + b)
@@ -15740,24 +15750,25 @@ function loadEffWageReport(){
     S_ewData = res;
     S_ewPrior = (both[1] && both[1].success) ? both[1] : null;
     S_ewCache[ck] = { ty: S_ewData, ly: S_ewPrior };
-    paintEffWageReport();
+    paint();
   }).catch(function(e){
-    const h = document.getElementById('ew-body');
+    const h = document.getElementById(hostId);
     if(h) h.innerHTML = '<div class="no-data" style="padding:14px;">' + hEsc(e.message || String(e)) + '</div>';
   });
 }
+function loadEffWageReport(){ ewLoad('ew-body', paintEffWageReport); }
 
 function ewSetRange(r){
   if(r === 'custom' && (!S_ewStart || !S_ewEnd)){
     const w = ewWindow(S_ewRange === 'custom' ? '13wk' : S_ewRange);
     S_ewStart = w.start; S_ewEnd = w.end;
   }
-  S_ewRange = r; loadEffWageReport();
+  S_ewRange = r; S_ewReload();
 }
-function ewSetStart(v){ S_ewStart = v; S_ewRange = 'custom'; loadEffWageReport(); }
-function ewSetEnd(v){ S_ewEnd = v; S_ewRange = 'custom'; loadEffWageReport(); }
-function ewSetLY(b){ S_ewLY = b; loadEffWageReport(); }
-function ewSetSalon(sn){ S_ewSalon = sn; paintEffWageReport(); }
+function ewSetStart(v){ S_ewStart = v; S_ewRange = 'custom'; S_ewReload(); }
+function ewSetEnd(v){ S_ewEnd = v; S_ewRange = 'custom'; S_ewReload(); }
+function ewSetLY(b){ S_ewLY = b; S_ewReload(); }
+function ewSetSalon(sn){ S_ewSalon = sn; S_ewRepaint(); }
 function ewSortSalons(col){
   S_ewSalonSort = { col: col, dir: S_ewSalonSort.col === col ? -S_ewSalonSort.dir : (col === 'salon' ? 1 : -1) };
   paintEffWageReport();
@@ -16061,8 +16072,10 @@ function ewControls(sOpts){
         : '')
     + '<label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer;">'
       + '<input type="checkbox" ' + (S_ewLY?'checked':'') + ' onchange="ewSetLY(this.checked)"> vs LY</label>'
-    + '<select class="ff-select" style="width:auto;font-size:12.5px;padding:6px 9px;" onchange="ewSetSalon(this.value)">' + sOpts + '</select>'
-    + (S_ewSalon ? '<button class="btn btn-sm btn-secondary" onclick="ewSetSalon(' + "''" + ')">&larr; Every salon</button>' : '')
+    + (sOpts
+        ? '<select class="ff-select" style="width:auto;font-size:12.5px;padding:6px 9px;" onchange="ewSetSalon(this.value)">' + sOpts + '</select>'
+          + (S_ewSalon ? '<button class="btn btn-sm btn-secondary" onclick="ewSetSalon(' + "''" + ')">&larr; Every salon</button>' : '')
+        : '')
     + '</div>';
 }
 // An empty window still needs its own controls, or the only way out of a range
@@ -16377,6 +16390,310 @@ function paintEffWageReport(){
 
   // After the HTML lands, or there is no canvas to draw on yet.
   setTimeout(function(){ try{ drawEwTrend(spec); }catch(e){} }, 30);
+}
+
+
+// ── Pay trends ────────────────────────────────────────────────────────────
+// PAY-TRENDS-v1
+//
+// The effective wage report answers "what is an hour worth". This answers the
+// other half: WHICH BUCKET MOVED. Base, tips, productivity, product, new and
+// return, stylist bonus -- each on its own card, each with the same months a
+// year earlier behind it, at whichever level you have drilled to.
+//
+// BY MONTH, not by week. A bucket question is a "has this changed" question,
+// and the stylist bonus only exists monthly -- a weekly product-incentive line
+// is noise around a number that is decided over a month.
+//
+// DOLLARS OR DOLLARS PER FLOOR HOUR, because the two answer different
+// questions. A salon's tips can rise because tipping improved or because it
+// was open more; only the per-hour figure tells them apart. At company level
+// dollars are mostly a headcount story, so per hour is the default.
+//
+// It reads the same endpoint, the same window and the same cache as the
+// effective wage report, so the two screens can never disagree and switching
+// between them costs nothing.
+const PT_BUCKETS = [
+  { k:'base',         label:'Base wages',        col:'#03654e' },
+  { k:'tips',         label:'Tips',              col:'#5fa85f' },
+  { k:'productivity', label:'Productivity',      col:'#9acb3a' },
+  { k:'bonus',        label:'Stylist bonus',     col:'#c9b037' },
+  { k:'product',      label:'Product incentive', col:'#2f7fbf' },
+  { k:'newReturn',    label:'New / return',      col:'#7a4fbf' },
+  { k:'gross',        label:'Total earned',      col:'#b3261e' },
+];
+let S_ptSalon = '', S_ptPerson = '', S_ptPerHour = true, S_ptCharts = [], S_ptSort = { col:'gross', dir:-1 };
+
+function showPayTrends(){
+  _route('#/pay-trends');
+  clearActive();
+  const pg = document.getElementById('page-hub');
+  if(pg) pg.classList.add('active');
+  const mainEl = document.querySelector('.content');
+  if(mainEl) mainEl.scrollTop = 0;
+  S_ewReload = function(){ loadPayTrends(); };
+  S_ewRepaint = function(){ paintPayTrends(); };
+  if(pg){
+    pg.innerHTML = '<div class="page-header"><h2>Pay trends</h2>'
+      + '<div class="sub">How each pay bucket has moved &mdash; company, salon or person</div></div>'
+      + '<div id="pt-body"><div class="no-data" style="padding:14px;">Loading&hellip;</div></div>';
+  }
+  loadPayTrends();
+}
+function loadPayTrends(){ ewLoad('pt-body', paintPayTrends); }
+function ptDrillSalon(sn){ S_ptSalon = sn; S_ptPerson = ''; paintPayTrends(); }
+function ptDrillPerson(gid){ S_ptPerson = gid; paintPayTrends(); }
+function ptUp(level){
+  if(level === 'company'){ S_ptSalon = ''; S_ptPerson = ''; }
+  else if(level === 'salon'){ S_ptPerson = ''; }
+  paintPayTrends();
+}
+function ptSetPerHour(b){ S_ptPerHour = b; paintPayTrends(); }
+function ptSort(col){
+  S_ptSort = { col: col, dir: S_ptSort.col === col ? -S_ptSort.dir : (col === 'name' ? 1 : -1) };
+  paintPayTrends();
+}
+
+/** A bucket out of a rolled month or total, in whichever unit is selected. */
+function ptVal(b, key){
+  if(!b) return null;
+  const v = b[key] || 0;
+  if(!S_ptPerHour) return v;
+  return b.floorHours > 0 ? v / b.floorHours : null;
+}
+const ptFmt = function(v){
+  if(v === null || v === undefined) return '—';
+  return S_ptPerHour
+    ? '$' + v.toFixed(2)
+    : '$' + Math.round(v).toLocaleString('en-US');
+};
+
+function paintPayTrends(){
+  const host = document.getElementById('pt-body'); if(!host || !S_ewData) return;
+  S_ptCharts.forEach(function(c){ try{ c.destroy(); }catch(e){} }); S_ptCharts = [];
+  const d = S_ewData;
+  const MK = d.monthKeys || [];
+  const active = new Set(allActiveSalons().map(String));
+  const people = (d.people || []).filter(function(p){ return active.has(String(p.homeSalon || '')); });
+
+  if(!people.length){
+    host.innerHTML = ewControls('') + '<div class="no-data" style="padding:14px;">No payroll rows in this window.</div>';
+    return;
+  }
+  const homeOf = {}; people.forEach(function(p){ homeOf[p.globalId] = p.homeSalon; });
+  const salons = [...new Set(people.map(function(p){ return p.homeSalon; }))]
+    .sort(function(a,b){ return (parseInt(a,10)||0) - (parseInt(b,10)||0); });
+  if(S_ptSalon && salons.indexOf(S_ptSalon) < 0){ S_ptSalon = ''; S_ptPerson = ''; }
+
+  const inSalon = function(list, sn){ return list.filter(function(p){ return homeOf[p.globalId] === sn; }); };
+  let scope = people, title = 'Company', level = 'company';
+  if(S_ptSalon){ scope = inSalon(people, S_ptSalon); title = salonDisplay(S_ptSalon); level = 'salon'; }
+  if(S_ptPerson){
+    const one = scope.filter(function(p){ return p.globalId === S_ptPerson; });
+    if(one.length){ scope = one; title = fmtName(one[0].name || ''); level = 'person'; }
+    else S_ptPerson = '';
+  }
+  const roll = ewRoll(scope, MK.length);
+
+  // The same months a year earlier, at the same level. Matched on the month
+  // key, so August is compared with August whatever the window does.
+  const priorN = ((S_ewPrior && S_ewPrior.monthKeys) || []).length;
+  const pIdx = {};
+  ((S_ewPrior && S_ewPrior.monthKeys) || []).forEach(function(m, i){ pIdx[m.key] = i; });
+  const priorPeople = function(){
+    if(!S_ewPrior || !S_ewPrior.people) return null;
+    let list = S_ewPrior.people.filter(function(p){ return active.has(String(p.homeSalon || '')); });
+    if(S_ptSalon) list = list.filter(function(p){ return p.homeSalon === S_ptSalon; });
+    if(S_ptPerson) list = list.filter(function(p){ return p.globalId === S_ptPerson; });
+    return list.length ? list : null;
+  };
+  const pl = priorPeople();
+  const priorRoll = pl ? ewRoll(pl, priorN) : null;
+  const PRIOR = (priorRoll && priorRoll.total.floorHours > 0) ? priorRoll : null;
+
+  // Which months to plot: the ones with floor time at this level.
+  const cols = [];
+  for(let i=0;i<MK.length;i++) if(roll.months[i] && roll.months[i].floorHours > 0) cols.push(i);
+  // Last year's value for the same calendar month, or null where there is none.
+  const priorMonth = function(i){
+    if(!PRIOR) return null;
+    const key = (MK[i] || {}).key || '';
+    const py = key ? (parseInt(key.slice(0,4),10) - 1) + key.slice(4) : '';
+    const j = pIdx[py];
+    return (j === undefined) ? null : PRIOR.months[j];
+  };
+
+  // ── breadcrumb ──
+  const crumb = '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12.5px;margin-bottom:10px;">'
+    + '<a href="javascript:void(0)" onclick="ptUp(' + "'company'" + ')" style="color:' + (level==='company'?'var(--text)':'var(--primary)')
+      + ';font-weight:' + (level==='company'?'700':'500') + ';text-decoration:none;">Company</a>'
+    + (S_ptSalon ? '<span style="color:var(--text-muted);">&rsaquo;</span>'
+        + '<a href="javascript:void(0)" onclick="ptUp(' + "'salon'" + ')" style="color:' + (level==='salon'?'var(--text)':'var(--primary)')
+        + ';font-weight:' + (level==='salon'?'700':'500') + ';text-decoration:none;">' + hEsc(salonDisplay(S_ptSalon)) + '</a>' : '')
+    + (S_ptPerson ? '<span style="color:var(--text-muted);">&rsaquo;</span>'
+        + '<span style="font-weight:700;">' + hEsc(title) + '</span>' : '')
+    + '<span style="margin-left:auto;display:flex;gap:4px;">'
+      + [[true,'Per floor hour'],[false,'Dollars']].map(function(o){
+          const on = S_ptPerHour === o[0];
+          return '<button onclick="ptSetPerHour(' + o[0] + ')" style="width:auto;font-size:11.5px;padding:4px 10px;'
+            + 'line-height:1.2;border:1px solid ' + (on?'var(--primary-dark)':'var(--border)') + ';border-radius:7px;background:'
+            + (on?'var(--primary-dark)':'#fff') + ';color:' + (on?'#fff':'var(--text)')
+            + ';font-weight:' + (on?'700':'500') + ';cursor:pointer;">' + o[1] + '</button>';
+        }).join('')
+    + '</span></div>';
+
+  // ── one card per bucket ──
+  const chg = function(now, was){
+    if(now === null || was === null || was === undefined || !was) return '<span style="color:var(--text-muted);">no comparison</span>';
+    const dv = now - was, pct = was ? (dv / was * 100) : 0;
+    if(Math.abs(pct) < 0.05) return '<span style="color:var(--text-muted);">flat vs LY</span>';
+    const up = dv > 0;
+    return '<span style="color:' + (up?'#0a5236':'#b3261e') + ';font-weight:600;">' + (up?'▲ ':'▼ ')
+      + Math.abs(pct).toFixed(1) + '%</span> <span style="color:var(--text-muted);">vs LY ('
+      + ptFmt(was) + ')</span>';
+  };
+  const cards = PT_BUCKETS.map(function(b){
+    const now = ptVal(roll.total, b.k);
+    const was = PRIOR ? ptVal(PRIOR.total, b.k) : null;
+    const share = (!S_ptPerHour && roll.total.gross > 0 && b.k !== 'gross')
+      ? ((roll.total[b.k]||0) / roll.total.gross * 100).toFixed(0) + '% of gross'
+      : (S_ptPerHour && roll.total.gross > 0 && b.k !== 'gross')
+        ? ((roll.total[b.k]||0) / roll.total.gross * 100).toFixed(0) + '% of gross' : '';
+    return '<div style="flex:1 1 230px;min-width:230px;background:#fff;border:1px solid var(--border);'
+        + 'border-radius:10px;padding:11px 13px 8px;border-left:3px solid ' + b.col + ';">'
+      + '<div style="display:flex;align-items:baseline;gap:8px;">'
+        + '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);">' + b.label + '</div>'
+        + (share ? '<div style="font-size:10.5px;color:var(--text-muted);margin-left:auto;">' + share + '</div>' : '')
+      + '</div>'
+      + '<div style="font-size:21px;font-weight:700;line-height:1.3;">' + ptFmt(now)
+        + (S_ptPerHour ? '<span style="font-size:11.5px;font-weight:400;color:var(--text-muted);">/hr</span>' : '') + '</div>'
+      + '<div style="font-size:11px;margin-bottom:5px;">' + chg(now, was) + '</div>'
+      + '<div style="height:74px;position:relative;"><canvas id="pt-c-' + b.k + '"></canvas></div>'
+      + '</div>';
+  }).join('');
+
+  // ── the drill list ──
+  let list = '';
+  if(level !== 'person'){
+    const rows = (level === 'company' ? salons : scope).map(function(x){
+      const isSalon = level === 'company';
+      const mine = isSalon ? inSalon(people, x) : [x];
+      const r = ewRoll(mine, MK.length).total;
+      let pw = null;
+      if(pl){
+        const pm = isSalon
+          ? pl.filter(function(q){ return q.homeSalon === x; })
+          : pl.filter(function(q){ return q.globalId === x.globalId; });
+        if(pm.length){ const t = ewRoll(pm, priorN).total; if(t.floorHours > 0) pw = t; }
+      }
+      const o = { key: isSalon ? x : x.globalId,
+        name: isSalon ? salonDisplay(x) : fmtName(x.name || ''),
+        sub: isSalon ? (mine.length + (mine.length===1?' person':' people')) : salonDisplay(x.homeSalon),
+        hrs: r.floorHours, t: r, was: pw };
+      PT_BUCKETS.forEach(function(b){ o[b.k] = ptVal(r, b.k) || 0; });
+      o.chg = (pw && ptVal(pw,'gross')) ? (ptVal(r,'gross') - ptVal(pw,'gross')) / ptVal(pw,'gross') * 100 : null;
+      return o;
+    }).filter(function(o){ return o.hrs > 0; });
+    const S = S_ptSort;
+    rows.sort(function(a,b){
+      if(S.col === 'name') return String(a.name).localeCompare(String(b.name)) * S.dir;
+      if(S.col === 'chg') return ((a.chg === null ? -1e9 : a.chg) - (b.chg === null ? -1e9 : b.chg)) * S.dir;
+      return ((a[S.col]||0) - (b[S.col]||0)) * S.dir;
+    });
+    const th = 'padding:6px 9px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);text-align:right;';
+    const td = 'padding:6px 9px;font-size:12.5px;text-align:right;border-top:1px solid var(--border);';
+    const H = function(col, label, left){
+      return '<th style="' + th + (left?'text-align:left;':'') + 'cursor:pointer;user-select:none;" '
+        + 'onclick="ptSort(' + "'" + col + "'" + ')">' + label + ' ' + ewSortIcon(S, col) + '</th>';
+    };
+    let body = '';
+    rows.forEach(function(o){
+      const go = level === 'company'
+        ? 'ptDrillSalon(' + "'" + hEsc(o.key) + "'" + ')'
+        : 'ptDrillPerson(' + "'" + hEsc(o.key) + "'" + ')';
+      body += '<tr class="sub-row" onclick="' + go + '">'
+        + '<td style="' + td + 'text-align:left;font-weight:600;">' + hEsc(o.name)
+          + '<div style="font-size:10.5px;font-weight:400;color:var(--text-muted);">' + hEsc(o.sub) + '</div></td>'
+        + '<td style="' + td + '">' + o.hrs.toFixed(0) + '</td>'
+        + PT_BUCKETS.map(function(b){
+            return '<td style="' + td + (b.k==='gross'?'font-weight:700;':'') + '">' + ptFmt(o[b.k]) + '</td>';
+          }).join('')
+        + '<td style="' + td + '">' + (o.chg === null
+            ? '<span style="color:var(--text-muted);">—</span>'
+            : '<span style="color:' + (o.chg>0?'#0a5236':'#b3261e') + ';font-weight:600;">'
+              + (o.chg>0?'▲ ':'▼ ') + Math.abs(o.chg).toFixed(1) + '%</span>') + '</td></tr>';
+    });
+    list = '<div style="font-weight:700;font-size:12.5px;margin:20px 0 4px;">'
+        + (level === 'company' ? 'By salon' : salonDisplay(S_ptSalon) + ' &mdash; ' + rows.length + ' people') + '</div>'
+      + '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:8px;">'
+        + 'Click a row to drill in. Click a heading to sort.</div>'
+      + '<div style="overflow-x:auto;border:1px solid var(--border);border-radius:10px;">'
+      + '<table style="width:100%;border-collapse:collapse;background:#fff;"><thead><tr>'
+      + H('name', level==='company'?'Salon':'Name', true) + H('hrs','Floor hrs')
+      + PT_BUCKETS.map(function(b){ return H(b.k, b.label); }).join('')
+      + H('chg','Total vs LY')
+      + '</tr></thead><tbody>' + body + '</tbody></table></div>';
+  } else {
+    list = '<div style="margin:20px 0 0;"><button class="btn btn-sm btn-secondary" onclick="openProfile('
+      + "'" + hEsc(S_ptPerson) + "','" + hEsc(String(title)).replace(/'/g,'') + "','review'" + ')">'
+      + 'Open ' + hEsc(title) + '&rsquo;s review &rarr;</button></div>';
+  }
+
+  const winLbl = ewDay(d.start) + ' &ndash; ' + ewDay(d.end);
+  host.innerHTML = ewControls('')
+    + crumb
+    + '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:8px;">'
+      + '<b>' + hEsc(title) + '</b> &middot; ' + winLbl + ' &middot; '
+      + roll.total.floorHours.toLocaleString('en-US',{maximumFractionDigits:0}) + ' floor hours'
+      + (level !== 'person' ? ' &middot; ' + scope.length + ' people' : '')
+      + (PRIOR ? '' : ' &middot; no comparable period a year earlier') + '</div>'
+    + '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:4px;">' + cards + '</div>'
+    + list
+    + '<div style="font-size:11px;color:var(--text-muted);margin-top:14px;line-height:1.6;">'
+      + '<b>Floor hours only</b>, the same basis as the effective wage report: training, admin, reception, '
+      + 'closing, vacation, holiday and sick time are out of both the hours and the pay. '
+      + (S_ptPerHour
+          ? 'Per floor hour, so a bucket only moves when the rate does &mdash; working more hours does not.'
+          : 'Total dollars, so a bucket moves with hours as well as with rate. Switch to per floor hour to '
+            + 'separate the two.')
+      + ' The comparison is the same calendar months a year earlier; a salon or person with nothing in those '
+      + 'months shows no comparison rather than a misleading one.</div>';
+
+  // ── the small charts, once the cards are in the page ──
+  setTimeout(function(){
+    if(typeof Chart === 'undefined') return;
+    const labels = cols.map(function(i){ return (MK[i] && MK[i].label) || EW_MON[i] || ''; });
+    PT_BUCKETS.forEach(function(b){
+      const el = document.getElementById('pt-c-' + b.k);
+      if(!el || cols.length < 2) return;
+      const now = cols.map(function(i){ return ptVal(roll.months[i], b.k); });
+      const was = PRIOR ? cols.map(function(i){ return ptVal(priorMonth(i), b.k); }) : null;
+      const sets = [{ label:'This period', data: now, borderColor: b.col, backgroundColor: b.col + '22',
+        borderWidth: 2.2, pointRadius: 0, tension: 0.3, fill: true, spanGaps: true }];
+      if(was && was.some(function(v){ return v !== null && v !== undefined; })){
+        sets.push({ label:'Last year', data: was, borderColor:'#9a9a9a', borderWidth:1.5,
+          borderDash:[5,3], pointRadius:0, tension:0.3, fill:false, spanGaps:true });
+      }
+      try{
+        S_ptCharts.push(new Chart(el, {
+          type:'line', data:{ labels: labels, datasets: sets },
+          options:{
+            responsive:true, maintainAspectRatio:false,
+            interaction:{ mode:'index', intersect:false },
+            plugins:{ legend:{ display:false }, tooltip:{ callbacks:{
+              title: function(c){ return c[0].label; },
+              label: function(c){
+                const v = c.parsed.y;
+                return c.dataset.label + ': ' + (v === null || v === undefined ? '—' : ptFmt(v));
+              } } } },
+            // No axes on a card this size -- the number above it is the value,
+            // and the line is only there to show the shape.
+            scales:{ x:{ display:false }, y:{ display:false, beginAtZero: !S_ptPerHour } },
+          },
+        }));
+      }catch(e){}
+    });
+  }, 30);
 }
 
 function switchProfileTab(tab){
