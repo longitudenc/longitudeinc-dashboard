@@ -13,6 +13,7 @@
 
 import { NextResponse } from 'next/server'
 import {requireCapability} from '@/lib/require-role'
+import { loadStipends, saveStipends, stipendTotal, type Stipend } from '@/lib/adp-stipends'
 import { loadAdpSettings, defaultSettings, ADP_FIELDS, ADP_EARNINGS_CODES } from '@/lib/adp-settings'
 import { readSheet, rowsToObjects, writeSheet } from '@/lib/sheets'
 
@@ -52,7 +53,14 @@ export async function GET() {
       // The company's real earnings codes, so the screen can offer them
       // rather than asking someone to remember that 14 means VACATION.
       earningsCodes: ADP_EARNINGS_CODES,
-      canEdit: gate.access.role === 'owner' || gate.access.role === 'admin',
+      // STIPENDS-v1. Weekly GM and area-manager stipends. ADP pays these
+      // itself; they are here so the reconciliation stops reporting them as a
+      // difference every week.
+      stipends: await loadStipends({ fresh: true }),
+      // Anyone who can reach this route may save it -- the POST checks the same
+      // capability, so a screen that showed the fields but refused the save
+      // would just be lying about who is in charge of payroll.
+      canEdit: true,
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -61,7 +69,11 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const gate = await requireCapability('edit.settings')
+  // view.payroll, not edit.settings. Once office and admin split, edit.settings
+  // sat with admin and view.payroll with office, so this route was readable by
+  // the people who could not save and writable by people who could not open it.
+  // Earnings codes and 6-day thresholds are payroll's to set.
+  const gate = await requireCapability('view.payroll')
   if (!gate.ok) return gate.response
 
   let body: any
@@ -72,6 +84,18 @@ export async function POST(request: Request) {
   }
 
   try {
+    // STIPENDS-v1. Saved from the same screen and the same button, but into
+    // their own tab: they are not ADP settings, they never reach the file, and
+    // folding them into the key/value store would imply otherwise.
+    if (Array.isArray(body?.stipends)) {
+      await saveStipends(body.stipends.map((r: any): Stipend => ({
+        name: String(r?.name ?? '').trim(),
+        amount: Number(String(r?.amount ?? '').replace(/[$,]/g, '')) || 0,
+        note: String(r?.note ?? '').trim(),
+        active: r?.active !== false,
+      })))
+    }
+
     // ── key/value tab: read what's there, merge, write back whole ──
     // Read FRESH — see the manual route: a cached read here would silently drop
     // a setting someone else saved in the last few seconds.
@@ -117,7 +141,13 @@ export async function POST(request: Request) {
     }
 
     console.log(`[office/payroll/settings] updated by ${gate.email}`)
-    return NextResponse.json({ success: true, settings: await loadAdpSettings() })
+    // Hand back what was actually stored, not what was sent: a nameless row is
+    // dropped and an amount is rounded, so the screen should show the tab.
+    return NextResponse.json({
+      success: true,
+      settings: await loadAdpSettings(),
+      stipends: await loadStipends({ fresh: true }),
+    })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error('[office/payroll/settings]', message)

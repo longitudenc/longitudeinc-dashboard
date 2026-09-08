@@ -1600,6 +1600,7 @@ function loadSettings(){
 
 function renderSettings(d){
   const s = d.settings, ro = CAN_EDIT_SETTINGS ? '' : ' disabled';
+  STIPENDS = d.stipends || [];
   const missing = Object.entries(s.codes).filter(([,v])=>!v).map(([k])=>k);
   // Assigned to something ADP has no code for — a typo, or a code retired since.
   const unknown = Object.entries(s.codes)
@@ -1679,6 +1680,36 @@ h += '</div><div class="hint">Blank means \u201cnot assigned\u201d. Short breaks
   }
   h += '</div></div>';
 
+  // STIPENDS-v1. The weekly GM and area-manager stipends.
+  //
+  // On this screen because it is where payroll settings live, and flagged hard
+  // as NOT going into the file: ADP auto-populates them, so a version that
+  // wrote them into the upload would pay each person twice. They are here so
+  // the weekly reconciliation stops reporting a constant ~$1,685 difference
+  // that nobody could attribute without asking.
+  const stipTotal = (STIPENDS||[]).filter(x=>x.active!==false)
+    .reduce((t,x)=>t+(parseFloat(x.amount)||0),0);
+  h += '<div class="card"><h2>Weekly stipends '
+     + '<span class="sub">$' + stipTotal.toFixed(2) + ' a week</span></h2><div class="body">'
+     + '<div class="banner info">ADP pays these automatically, so they are <b>not</b> written into the '
+     + 'upload file. They are here so the weekly total reconciles against the office spreadsheet '
+     + 'instead of sitting about $' + stipTotal.toFixed(0) + ' low every week.</div>'
+     + '<div class="scroll"><table><thead><tr><th>Name</th><th>Weekly amount</th><th>Note</th><th>Active</th></tr></thead><tbody>';
+  (STIPENDS||[]).forEach(function(x, i){
+    h += '<tr>'
+      + '<td><input id="stip-name-'+i+'" value="'+esc(x.name||'')+'" style="width:130px;"'+ro+'></td>'
+      + '<td><input id="stip-amt-'+i+'" value="'+(parseFloat(x.amount)||0).toFixed(2)+'" style="width:100px;text-align:right;"'+ro+'></td>'
+      + '<td><input id="stip-note-'+i+'" value="'+esc(x.note||'')+'" style="width:180px;"'+ro+'></td>'
+      + '<td><input type="checkbox" id="stip-on-'+i+'"'+(x.active===false?'':' checked')+ro+'></td>'
+      + '</tr>';
+  });
+  h += '</tbody></table></div>'
+     + (CAN_EDIT_SETTINGS
+        ? '<div style="margin-top:10px;"><button class="btn" onclick="addStipend()">+ Add a person</button>'
+          + '<span class="hint" style="margin-left:10px;">Untick Active to stop counting someone without losing the row.</span></div>'
+        : '')
+     + '</div></div>';
+
   // Salon table
   h += '<div class="card"><h2>Salons <span class="sub">'+Object.keys(s.salons).length+' mapped</span></h2>'
      + '<div class="body" style="padding:0;"><div class="scroll"><table><thead><tr>'
@@ -1753,6 +1784,30 @@ function ruleInput(key,label,val,ro,step){
        + '<input type="number" step="'+step+'" id="set-'+esc(key)+'" value="'+esc(val)+'"'+ro+'></label>';
 }
 
+let STIPENDS = [];
+
+// A blank row to fill in. Saved with the rest; a nameless row is dropped
+// server-side, so an accidental click costs nothing.
+function addStipend(){
+  STIPENDS.push({ name:'', amount:0, note:'', active:true });
+  renderSettings({ settings: SETTINGS, stipends: STIPENDS });
+}
+
+function collectStipends(){
+  const out = [];
+  for(let i = 0; ; i++){
+    const nm = document.getElementById('stip-name-'+i);
+    if(!nm) break;
+    out.push({
+      name: nm.value.trim(),
+      amount: parseFloat(String(document.getElementById('stip-amt-'+i).value).replace(/[$,]/g,'')) || 0,
+      note: document.getElementById('stip-note-'+i).value.trim(),
+      active: document.getElementById('stip-on-'+i).checked,
+    });
+  }
+  return out;
+}
+
 function saveSettings(){
   const codes = {}, rules = {};
   document.querySelectorAll('[id^="code-"]').forEach(el=>{ codes[el.id.slice(5)] = el.value.trim(); });
@@ -1761,9 +1816,10 @@ function saveSettings(){
   msg.textContent = 'Saving…'; msg.style.color = '';
   fetch('/api/office/payroll/settings', {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ codes, rules })
+    body: JSON.stringify({ codes, rules, stipends: collectStipends() })
   }).then(r=>r.json()).then(d=>{
-    if(d.success){ SETTINGS = d.settings; msg.textContent = 'Saved.'; msg.style.color = '#1a5c0a'; }
+    if(d.success){ SETTINGS = d.settings; if(d.stipends) STIPENDS = d.stipends;
+      msg.textContent = 'Saved.'; msg.style.color = '#1a5c0a'; }
     else { msg.textContent = 'Save failed: '+(d.error||'unknown'); msg.style.color = '#b3261e'; }
   }).catch(e=>{ msg.textContent = 'Save failed: '+e.message; msg.style.color = '#b3261e'; });
 }
