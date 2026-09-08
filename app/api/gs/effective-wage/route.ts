@@ -76,10 +76,15 @@ interface Bucket {
   floorHours: number; nonFloorHours: number
   floorBasePay: number; productivity: number; product: number; newReturn: number
   bonus: number; tips: number
+  /** Distinct weeks with floor time. The denominator for average weekly hours:
+   *  dividing a month by a flat 4.33 would report a starter who worked two
+   *  weeks of March as a half-time employee all month. */
+  weeks: Set<string>
 }
 const emptyBucket = (): Bucket => ({
   floorHours: 0, nonFloorHours: 0,
   floorBasePay: 0, productivity: 0, product: 0, newReturn: 0, bonus: 0, tips: 0,
+  weeks: new Set<string>(),
 })
 const bucketEarned = (b: Bucket) =>
   b.floorBasePay + b.productivity + b.product + b.newReturn + b.bonus + b.tips
@@ -146,6 +151,7 @@ export async function GET(req: Request) {
         t.product += N(r.productIncentive)
         t.newReturn += N(r.newReturnIncentive)
         t.tips += N(r.totalTips)
+        if (floor > 0) t.weeks.add(S(r.weekEnd))
         for (const k of NON_FLOOR) t.nonFloorHours += N((r as any)[k])
       }
       const sn = S(r.salonNum)
@@ -190,6 +196,8 @@ export async function GET(req: Request) {
         bonus: r2(b.bonus),
         tips: r2(b.tips),
         gross: r2(earned),
+        weeks: b.weeks.size,
+        avgWeeklyHours: b.weeks.size > 0 ? r2(b.floorHours / b.weeks.size) : null,
         // Zero floor hours means no answer rather than a divide-by-zero dressed
         // up as $0.00 -- a month somebody did not work should read blank.
         effectiveWage: b.floorHours > 0 ? r2(earned / b.floorHours) : null,
@@ -206,8 +214,10 @@ export async function GET(req: Request) {
         // report where one person appears in three salon totals cannot be
         // summed, so each is counted once, where most of their hours were.
         homeSalon: [...a.salonHours].sort((x, y) => y[1] - x[1])[0]?.[0] || '',
-        weeks: a.weeks.size,
         currentWage: r2(a.lastWage),
+        // shape() supplies `weeks`: weeks with FLOOR time. a.weeks counted any
+        // week with a payroll row, including one that was all holiday pay, which
+        // would drag an average weekly hours figure down for no reason.
         ...shape(a.total),
         months: a.months.map(shape),
       }))
