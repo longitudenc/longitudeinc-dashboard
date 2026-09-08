@@ -12,13 +12,23 @@
 // would put five days of hours against seven days of incentive, so a week is
 // either in or it is out, and the response names the weeks it used.
 //
-// A WEEKLY SERIES comes back alongside the monthly one, summed by the salon
-// each person is homed at, so a trend line can be drawn for the company or for
-// one salon without shipping every person's week to the browser. The monthly
-// bonus is spread across that month's weeks by floor hours -- the same rule
-// that splits it across a partial month, applied one level finer. It makes the
-// bonus component of a weekly line smoother than reality: the money arrives
-// once a month, and the chart says so.
+// A WEEKLY SERIES comes back alongside the monthly one, at two grains:
+//
+//   • every person gets `wk.h` and `wk.g` -- floor hours and floor earnings,
+//     one number per week, aligned to `weekEnds`. Company and salon lines are
+//     SUMMED FROM THESE in the browser rather than sent separately, so the
+//     three levels of the chart cannot disagree with each other or with the
+//     tables. It is two numbers a week per person; a year of the whole estate
+//     is about 13,000 of them.
+//   • `weekly` keeps the same weeks broken into base / tips / productivity /
+//     bonus / other, by home salon, for the composition view. That is five
+//     more numbers a week and only ever read at salon or company level, which
+//     is why it is not on the person.
+//
+// The monthly bonus is spread across that month's weeks by floor hours -- the
+// same rule that splits it across a partial month, applied one level finer. It
+// makes the bonus component of a weekly line smoother than reality: the money
+// arrives once a month, and the chart says so.
 //
 // THE DENOMINATOR IS FLOOR HOURS ONLY. Not hours worked, not hours paid.
 // Training, admin, reception, closing, vacation, holiday and sick time are all
@@ -323,6 +333,29 @@ export async function GET(req: Request) {
     const totFloor = people.reduce((s, p) => s + p.floorHours, 0)
     const totEarned = people.reduce((s, p) => s + p.gross, 0)
 
+    // ── the weeks themselves ──────────────────────────────────────────────
+    // Taken from the rows this caller may actually see, so every array indexed
+    // by week lines up with what is on screen.
+    const weekEnds = [...new Set(recs.map(r => r.weekEnd))].sort()
+    const wIndex = new Map(weekEnds.map((w, i) => [w, i]))
+
+    // Per person, per week: floor hours and floor earnings. The bonus goes on
+    // by the same proportion the weekly salon series uses.
+    const zeros = () => new Array(weekEnds.length).fill(0)
+    const personWk = new Map<string, { h: number[]; g: number[] }>()
+    const wkOf = (gid: string) => {
+      let w = personWk.get(gid)
+      if (!w) personWk.set(gid, w = { h: zeros(), g: zeros() })
+      return w
+    }
+    for (const rc of recs) {
+      const i = wIndex.get(rc.weekEnd)
+      if (i === undefined) continue
+      const w = wkOf(rc.gid)
+      w.h[i] += rc.floor
+      w.g[i] += rc.base + rc.productivity + rc.product + rc.newReturn + rc.tips
+    }
+
     // ── the weekly series, by home salon ──────────────────────────────────
     // Built after `people`, because a week belongs to the salon its owner is
     // homed at rather than the salon the row was filed under. Doing it the
@@ -362,7 +395,22 @@ export async function GET(req: Request) {
       const tot = list.reduce((t, rc) => t + rc.floor, 0)
       if (tot <= 0) continue
       const sn = homeOf.get(aw.gid) || ''
-      for (const rc of list) at(rc.weekEnd, sn).bonus += aw.amount * (rc.floor / tot)
+      const w = wkOf(aw.gid)
+      for (const rc of list) {
+        const cut = aw.amount * (rc.floor / tot)
+        at(rc.weekEnd, sn).bonus += cut
+        const i = wIndex.get(rc.weekEnd)
+        if (i !== undefined) w.g[i] += cut
+      }
+    }
+
+    // Onto the people themselves, rounded once at the end so a sum of weeks
+    // still lands on the person's total.
+    for (const p of people) {
+      const w = personWk.get(p.globalId)
+      ;(p as any).wk = w
+        ? { h: w.h.map(r2), g: w.g.map(r2) }
+        : { h: zeros(), g: zeros() }
     }
 
     const weeklySeries = [...weekly.keys()].sort().map(wk => {
@@ -392,8 +440,12 @@ export async function GET(req: Request) {
         label: oneYear ? MON_LABEL[Number(k.slice(5, 7)) - 1] : label(k),
         full: label(k),
       })),
-      weeksInWindow: [...new Set(rows.map(r => S(r.weekEnd)).filter(Boolean))].sort(),
-      // Week by week, summed by home salon, for the trend lines.
+      // Every pay week in the window, in order. `people[].wk.h` and `.g` are
+      // indexed by this, and so is anything the client derives from them.
+      weekEnds,
+      weeksInWindow: weekEnds,
+      // The same weeks split into their components, by home salon, for the
+      // composition view only.
       weekly: weeklySeries,
       people,
       scopeAverage: totFloor > 0 ? r2(totEarned / totFloor) : null,

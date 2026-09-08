@@ -15472,6 +15472,7 @@ function renderEffWage(globalId){
       const p = (res && res.people && res.people[0]) || null;
       if(!p || !p.effectiveWage){ host.innerHTML = ''; return; }
       host.innerHTML = ewCard(p, res);
+      setTimeout(function(){ try{ drawEwPerson(p, res); }catch(e){} }, 30);
     })
     .catch(function(){ host.innerHTML = ''; });
 }
@@ -15549,6 +15550,17 @@ function ewCard(p, res){
     + '<span><span style="display:inline-block;width:9px;height:9px;background:#9acb3a;border-radius:2px;"></span> Incentives + bonus ' + ewRate(p.floorHours ? incTotal/p.floorHours : 0) + '/hr</span>'
     + '</div>';
 
+  // Week by week, only when there are enough weeks for a line to mean anything.
+  const wkH = (p.wk && p.wk.h) || [];
+  const trendable = wkH.filter(function(v){ return v > 0; }).length >= 3;
+  const trend = trendable
+    ? '<div style="padding:0 14px 14px;">'
+      + '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:5px;">'
+        + 'Effective wage, week by week</div>'
+      + '<div style="height:180px;position:relative;"><canvas id="ew-person-canvas"></canvas></div>'
+      + '</div>'
+    : '';
+
   const avg = res.scopeAverage;
   return '<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:18px;">'
     + '<div style="background:var(--primary-dark,#03654e);color:#fff;padding:10px 14px;display:flex;'
@@ -15572,6 +15584,7 @@ function ewCard(p, res){
         + bar
       + '</div>'
     + '</div>'
+    + trend
     + '<div style="font-size:11px;color:var(--text-muted);padding:0 14px 13px;line-height:1.6;">'
       + '<b>Floor hours only.</b> '
       + (p.nonFloorHours > 0
@@ -15583,6 +15596,61 @@ function ewCard(p, res){
     + '</div>';
 }
 
+
+// One person's weekly line. The raw week is drawn faintly behind a 4-week
+// average: a single stylist's week swings hard on who happened to walk in, and
+// the point of the panel is the direction, not the noise.
+let S_ewPersonChart = null;
+function drawEwPerson(p, res){
+  if(S_ewPersonChart){ try{ S_ewPersonChart.destroy(); }catch(e){} S_ewPersonChart = null; }
+  const ctx = document.getElementById('ew-person-canvas');
+  if(!ctx || typeof Chart === 'undefined') return;
+  const we = res.weekEnds || [], wk = p.wk || { h:[], g:[] };
+  const eff = we.map(function(_, i){ return (wk.h[i] > 0) ? wk.g[i] / wk.h[i] : null; });
+  const vals = eff.filter(function(v){ return v || v === 0; });
+  if(vals.length < 3) return;
+  const avg = vals.reduce(function(a,b){ return a+b; }, 0) / vals.length;
+  const roll = eff.map(function(_, i){
+    const s = [];
+    for(let j = Math.max(0, i-3); j <= i; j++) if(eff[j] !== null) s.push(eff[j]);
+    return s.length ? s.reduce(function(a,b){ return a+b; }, 0) / s.length : null;
+  });
+  const labels = we.map(function(iso){
+    const pr = String(iso||'').split('-');
+    return pr.length >= 3 ? (parseInt(pr[1],10) + '/' + parseInt(pr[2],10)) : iso;
+  });
+  S_ewPersonChart = new Chart(ctx, {
+    type: 'line',
+    data: { labels: labels, datasets: [
+      { label:'Week', data: eff, borderColor:'#03654e33', backgroundColor:'transparent',
+        borderWidth:1.4, pointRadius:0, tension:0.25, spanGaps:true, fill:false, order:3 },
+      { label:'4-week average', data: roll, borderColor:'#03654e', backgroundColor:'#03654e18',
+        borderWidth:2.6, pointRadius:0, tension:0.3, spanGaps:true, fill:true, order:1 },
+      { label:'Their average', data: labels.map(function(){ return avg; }), borderColor:'#03654e88',
+        borderWidth:1.5, borderDash:[6,4], pointRadius:0, fill:false, order:4 },
+      ...(res.scopeAverage ? [{ label:'Everyone you can see', data: labels.map(function(){ return res.scopeAverage; }),
+        borderColor:'#8a8a8a', borderWidth:1.5, borderDash:[3,4], pointRadius:0, fill:false, order:5 }] : []),
+    ] },
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      interaction:{ mode:'index', intersect:false },
+      plugins:{
+        legend:{ display:true, position:'bottom', labels:{ boxWidth:12, font:{ size:10.5 } } },
+        tooltip:{ callbacks:{ label:function(c){
+          const v = c.parsed.y;
+          return c.dataset.label + ': ' + (v === null || v === undefined ? '—'
+            : '$' + v.toLocaleString('en-US',{ minimumFractionDigits:2, maximumFractionDigits:2 }));
+        } } },
+      },
+      // Not zero-based, for the same reason as the report: on a $29 wage it
+      // would put every point in the top inch.
+      scales:{
+        y:{ beginAtZero:false, ticks:{ font:{ size:10.5 }, callback:function(v){ return '$' + v; } } },
+        x:{ ticks:{ font:{ size:10 }, maxRotation:0, autoSkip:true, maxTicksLimit:12 } },
+      },
+    },
+  });
+}
 
 // ── Effective wage report ──────────────────────────────────────────────────
 // EFFECTIVE-WAGE-REPORT-v1
@@ -15735,6 +15803,13 @@ function ewRoll(people, nMonths){
 }
 
 // ── the trend lines ───────────────────────────────────────────────────────
+// COMPANY, SALON AND EMPLOYEE off one set of numbers. Every level is summed in
+// the browser from the same per-person weekly arrays the tables are built from,
+// so a salon line is exactly its people added up and the company line is
+// exactly the salons added up. The only gap between a line and a table is the
+// weekly rounding to the cent -- $1.26 across the whole estate over a year,
+// which is nothing at all on a figure quoted per hour.
+//
 // WEEK BY WEEK, not month by month. Payroll is filed weekly, so the week is the
 // finest honest grain, and on a 4- or 6-week window a monthly line would be two
 // points and no trend at all.
@@ -15742,27 +15817,46 @@ function ewRoll(people, nMonths){
 // The comparison is the same window shifted back 364 days, which lands exactly
 // on a Friday, so week N of this window is matched with week N of last year's
 // rather than with whatever fell nearest the date.
-let S_ewChart = 'eff', S_ewChartObj = null;
+let S_ewChart = 'eff', S_ewLevel = 'company', S_ewSmooth = false, S_ewChartObj = null;
 function ewSetChart(k){ S_ewChart = k; paintEffWageReport(); }
+function ewSetLevel(k){ S_ewLevel = k; paintEffWageReport(); }
+function ewSetSmooth(b){ S_ewSmooth = b; paintEffWageReport(); }
 
-// Sum the weekly series down to the salons on screen. The endpoint has already
-// attributed each week to the salon its owner is HOMED at, so this agrees with
-// the tables rather than with the salon the row happened to be filed under.
-function ewWeekSeries(res, salon, activeSet){
-  return ((res && res.weekly) || []).map(function(w){
-    const t = { floorHours:0, base:0, productivity:0, product:0, newReturn:0, bonus:0, tips:0 };
-    const by = w.bySalon || {};
-    Object.keys(by).forEach(function(sn){
-      if(salon ? (sn !== salon) : !activeSet.has(sn)) return;
-      const c = by[sn];
-      t.floorHours += c.floorHours||0; t.base += c.base||0; t.productivity += c.productivity||0;
-      t.product += c.product||0; t.newReturn += c.newReturn||0; t.bonus += c.bonus||0; t.tips += c.tips||0;
-    });
-    t.gross = t.base + t.productivity + t.product + t.newReturn + t.bonus + t.tips;
-    t.other = t.product + t.newReturn;
-    t.eff = t.floorHours > 0 ? t.gross / t.floorHours : null;
-    return { weekEnd: w.weekEnd, t: t };
-  }).filter(function(x){ return x.t.floorHours > 0; });
+// Eighteen salons and a dozen stylists need colours that stay apart from each
+// other on a white background. House green leads; the rest are picked for
+// separation rather than prettiness.
+const EW_PAL = ['#03654e','#c9b037','#2f7fbf','#b3261e','#7a4fbf','#e07b39','#3fa7a0','#6b8f3a',
+  '#c05fa0','#4f6bbf','#a35f2f','#2f9e5e','#8a6f2f','#7f5f9f','#5f9fbf','#9f5f5f','#4a7a4a','#bf6f8f'];
+
+/** Add a set of people into one weekly series of hours and floor earnings. */
+function ewSum(res, people){
+  const n = ((res && res.weekEnds) || []).length;
+  const h = new Array(n).fill(0), g = new Array(n).fill(0);
+  (people||[]).forEach(function(p){
+    const w = p && p.wk; if(!w) return;
+    for(let i=0;i<n;i++){ h[i] += (w.h[i]||0); g[i] += (w.g[i]||0); }
+  });
+  return { h:h, g:g };
+}
+
+// A week with no floor time is a gap, not a zero. Somebody on holiday earned
+// nothing on the floor that week; drawing that as $0 would read as a pay cut.
+function ewMetricArr(sr, metric){
+  return sr.h.map(function(hh, i){
+    if(!(hh > 0)) return null;
+    return metric === 'gross' ? sr.g[i] : sr.g[i] / hh;
+  });
+}
+
+// Trailing 4-week mean. One person's single week swings hard on who walked in;
+// at employee level the raw line is honest and unreadable at the same time.
+function ewSmoothArr(a){
+  if(!S_ewSmooth) return a;
+  return a.map(function(_, i){
+    const s = [];
+    for(let j = Math.max(0, i-3); j <= i; j++) if(a[j] !== null && a[j] !== undefined) s.push(a[j]);
+    return s.length ? s.reduce(function(x,y){ return x+y; }, 0) / s.length : null;
+  });
 }
 
 function ewWeekLabel(iso){
@@ -15770,92 +15864,155 @@ function ewWeekLabel(iso){
   return pr.length >= 3 ? (parseInt(pr[1],10) + '/' + parseInt(pr[2],10)) : iso;
 }
 
-function drawEwTrend(cur, prior){
-  if(S_ewChartObj){ try{ S_ewChartObj.destroy(); }catch(e){} S_ewChartObj = null; }
-  const ctx = document.getElementById('ew-trend-canvas');
-  if(!ctx || typeof Chart === 'undefined' || cur.length < 2) return;
+/** Last year's value for the same set of people, keyed by THIS year's week. */
+function ewPriorAt(prior, list, metric){
+  if(!prior || !prior.weekEnds || !prior.weekEnds.length) return null;
+  const sr = ewSum(prior, list), out = {};
+  prior.weekEnds.forEach(function(w, i){
+    out[w] = sr.h[i] > 0 ? (metric === 'gross' ? sr.g[i] : sr.g[i] / sr.h[i]) : null;
+  });
+  return out;
+}
 
-  const labels = cur.map(function(x){ return ewWeekLabel(x.weekEnd); });
-  // Last year by exact week: this week's Friday minus 364 days is a Friday.
-  const pmap = {}; prior.forEach(function(x){ pmap[x.weekEnd] = x.t; });
-  const lyOf = function(pick){
-    if(!prior.length) return null;
-    const out = cur.map(function(x){
-      const t = pmap[dIsoAddDays(x.weekEnd, -364)];
-      return t ? pick(t) : null;
-    });
-    return out.some(function(v){ return v !== null && v !== undefined; }) ? out : null;
-  };
+// ── what to draw ──────────────────────────────────────────────────────────
+function ewBuildSpec(d, prior, people, homeOf, active, salons, salon){
+  const we = d.weekEnds || [];
+  const labels = we.map(ewWeekLabel);
+  const metric = S_ewChart;
+  const sets = [];
+  let yTitle = metric === 'gross' ? 'Total earned' : '$ per floor hour';
+  let stacked = false, note = '';
+  // Never zero-based on a wage: every point would sit in the top inch of the
+  // chart and a dollar of movement would look like none.
+  let beginAtZero = metric !== 'eff';
 
   const line = function(label, data, colour, opts){
     return Object.assign({
       label: label, data: data, borderColor: colour, backgroundColor: colour + '22',
-      borderWidth: 2.4, pointRadius: 2.5, pointHoverRadius: 6, fill: false, tension: 0.28, spanGaps: true,
+      borderWidth: 2.2, pointRadius: 2, pointHoverRadius: 6, fill: false, tension: 0.28, spanGaps: true,
     }, opts || {});
   };
   const dashed = function(label, data, colour){
-    return line(label, data, colour, { borderWidth: 1.8, borderDash: [6,4], pointRadius: 0 });
+    return line(label, data, colour, { borderWidth: 1.8, borderDash: [6,4], pointRadius: 0, fill: false });
   };
+  const seriesOf = function(list){ return ewSmoothArr(ewMetricArr(ewSum(d, list), metric)); };
+  const inSalon = function(sn){ return people.filter(function(p){ return homeOf[p.globalId] === sn; }); };
 
-  let datasets = [], yTitle = '', money = false;
-  if(S_ewChart === 'mix'){
-    // Per hour, stacked: the bands add up to the effective wage, so the top of
-    // the stack IS the line on the other view. Dollars per hour rather than
-    // dollars, or a heavy week would look like a better-paid one.
-    const per = function(pick){
-      return cur.map(function(x){ return x.t.floorHours > 0 ? pick(x.t) / x.t.floorHours : null; });
+  // ── where it comes from: one scope, stacked, always ──
+  if(metric === 'mix'){
+    const byWeek = {};
+    (d.weekly||[]).forEach(function(w){
+      const t = { floorHours:0, base:0, tips:0, productivity:0, bonus:0, other:0 };
+      Object.keys(w.bySalon||{}).forEach(function(sn){
+        if(salon ? (sn !== salon) : !active.has(sn)) return;
+        const c = w.bySalon[sn];
+        t.floorHours += c.floorHours||0; t.base += c.base||0; t.tips += c.tips||0;
+        t.productivity += c.productivity||0; t.bonus += c.bonus||0;
+        t.other += (c.product||0) + (c.newReturn||0);
+      });
+      byWeek[w.weekEnd] = t;
+    });
+    const per = function(k){
+      return ewSmoothArr(we.map(function(w){
+        const t = byWeek[w]; return (t && t.floorHours > 0) ? t[k] / t.floorHours : null;
+      }));
     };
     const band = function(label, data, colour){
       return line(label, data, colour, { fill: true, backgroundColor: colour, borderWidth: 1, pointRadius: 0 });
     };
-    datasets = [
-      band('Base', per(function(t){ return t.base; }), '#03654e'),
-      band('Tips', per(function(t){ return t.tips; }), '#8fd08f'),
-      band('Productivity', per(function(t){ return t.productivity; }), '#9acb3a'),
-      band('Stylist bonus', per(function(t){ return t.bonus; }), '#c9b037'),
-      band('Other incentives', per(function(t){ return t.other; }), '#bcd2c8'),
-    ];
-    yTitle = '$ per floor hour'; money = true;
-  } else if(S_ewChart === 'gross'){
-    const g = cur.map(function(x){ return x.t.gross; });
-    datasets = [line('Earned this week', g, '#03654e', { fill: true })];
-    const ly = lyOf(function(t){ return t.gross; });
-    if(ly) datasets.push(dashed('Same week LY', ly, '#8a8a8a'));
-    yTitle = 'Total earned'; money = true;
-  } else {
-    const e = cur.map(function(x){ return x.t.eff; });
-    const vals = e.filter(function(v){ return v || v === 0; });
-    const avg = vals.length ? vals.reduce(function(a,b){ return a+b; },0) / vals.length : 0;
-    datasets = [line('Effective wage', e, '#03654e', { fill: true })];
-    const ly = lyOf(function(t){ return t.floorHours > 0 ? t.gross / t.floorHours : null; });
-    if(ly) datasets.push(dashed('Same week LY', ly, '#8a8a8a'));
-    datasets.push(dashed('Window average', labels.map(function(){ return avg; }), '#03654e88'));
-    yTitle = '$ per floor hour'; money = true;
+    sets.push(band('Base', per('base'), '#03654e'));
+    sets.push(band('Tips', per('tips'), '#8fd08f'));
+    sets.push(band('Productivity', per('productivity'), '#9acb3a'));
+    sets.push(band('Stylist bonus', per('bonus'), '#c9b037'));
+    sets.push(band('Other incentives', per('other'), '#bcd2c8'));
+    stacked = true; beginAtZero = true;
+    note = 'Dollars per floor hour, stacked &mdash; the top of the stack is the effective wage. '
+      + 'This view is always one scope at a time: ' + (salon ? salonDisplay(salon) : 'the whole company') + '.';
+    return { labels:labels, sets:sets, yTitle:'$ per floor hour', stacked:stacked, beginAtZero:beginAtZero, note:note };
   }
 
+  const overlay = function(list, label){
+    const at = ewPriorAt(prior, list, metric);
+    if(!at) return null;
+    const raw = we.map(function(w){ const v = at[dIsoAddDays(w, -364)]; return (v === undefined) ? null : v; });
+    return raw.some(function(v){ return v !== null; }) ? dashed(label, ewSmoothArr(raw), '#8a8a8a') : null;
+  };
+
+  if(S_ewLevel === 'employee'){
+    const pool = (salon ? inSalon(salon) : people.slice())
+      .sort(function(a,b){ return (b.floorHours||0) - (a.floorHours||0); });
+    // A chart with 147 lines is not a chart. Most floor hours first, because a
+    // line built from six hours a week is noise whatever it does.
+    const CAP = 12;
+    const shown = pool.slice(0, CAP);
+    shown.forEach(function(p, i){
+      sets.push(line(fmtName(p.name||''), seriesOf([p]), EW_PAL[i % EW_PAL.length],
+        { borderWidth: 1.9, pointRadius: 0 }));
+    });
+    sets.push(dashed(salon ? salonDisplay(salon) + ' average' : 'Company average',
+      seriesOf(salon ? pool : people), '#333333'));
+    note = (pool.length > CAP
+        ? 'The ' + CAP + ' with the most floor hours, of ' + pool.length + '. '
+          + (salon ? '' : 'Pick a salon above to see its team instead. ')
+        : '')
+      + 'Click a name in the legend to hide or show it. One person’s week swings hard on who '
+      + 'walked in, so the 4-week average is usually the readable view.';
+  } else if(S_ewLevel === 'salon'){
+    const list = salon ? [salon] : salons;
+    list.forEach(function(sn, i){
+      sets.push(line(salonDisplay(sn), seriesOf(inSalon(sn)), EW_PAL[i % EW_PAL.length],
+        { borderWidth: 1.9, pointRadius: 0 }));
+    });
+    if(salon){
+      const ly = overlay(inSalon(salon), 'Same week LY');
+      if(ly) sets.push(ly);
+    }
+    sets.push(dashed('Company', seriesOf(people), '#333333'));
+    note = (salon ? '' : list.length + ' salons. Click one in the legend to hide or show it. ')
+      + 'Every salon line is its own people added up, and the company line is every salon added up.';
+  } else {
+    const cur = seriesOf(salon ? inSalon(salon) : people);
+    sets.push(line(salon ? salonDisplay(salon) : 'Company', cur, '#03654e', { fill: true }));
+    const ly = overlay(salon ? inSalon(salon) : people, 'Same week LY');
+    if(ly) sets.push(ly);
+    const vals = cur.filter(function(v){ return v || v === 0; });
+    if(vals.length){
+      const avg = vals.reduce(function(a,b){ return a+b; }, 0) / vals.length;
+      sets.push(dashed('Window average', labels.map(function(){ return avg; }), '#03654e88'));
+    }
+    note = metric === 'gross'
+      ? 'Everything earned on the floor each week, so it moves with hours as well as with rate.'
+      : 'Floor earnings over floor hours, week by week. The axis does not start at zero: on a wage '
+        + 'it would flatten every real movement.';
+  }
+
+  return { labels:labels, sets:sets, yTitle:yTitle, stacked:stacked, beginAtZero:beginAtZero, note:note };
+}
+
+function drawEwTrend(spec){
+  if(S_ewChartObj){ try{ S_ewChartObj.destroy(); }catch(e){} S_ewChartObj = null; }
+  const ctx = document.getElementById('ew-trend-canvas');
+  if(!ctx || typeof Chart === 'undefined' || !spec || spec.labels.length < 2) return;
   S_ewChartObj = new Chart(ctx, {
     type: 'line',
-    data: { labels: labels, datasets: datasets },
+    data: { labels: spec.labels, datasets: spec.sets },
     options: {
       responsive: true, maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { display: true, position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
+        legend: { display: true, position: 'bottom',
+          labels: { boxWidth: 12, font: { size: 11 }, usePointStyle: false } },
         tooltip: { callbacks: { label: function(c){
           const v = c.parsed.y;
           if(v === null || v === undefined) return c.dataset.label + ': —';
-          return c.dataset.label + ': ' + (money
-            ? '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-            : v.toFixed(1));
+          return c.dataset.label + ': $' + v.toLocaleString('en-US',
+            { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         } } },
       },
       scales: {
         y: {
-          stacked: S_ewChart === 'mix',
-          // Never zero-based on a wage: every point would sit in the top inch
-          // of the chart and a dollar of movement would look like none.
-          beginAtZero: S_ewChart !== 'eff',
-          title: { display: true, text: yTitle },
+          stacked: spec.stacked, beginAtZero: spec.beginAtZero,
+          title: { display: true, text: spec.yTitle },
           ticks: { callback: function(v){ return '$' + v.toLocaleString('en-US'); } },
         },
         x: { ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 16 } },
@@ -16160,36 +16317,37 @@ function paintEffWageReport(){
   folk += '</tbody></table></div>';
 
   // ── the trend ──
-  const curSeries = ewWeekSeries(d, S_ewSalon, active);
-  const priSeries = S_ewPrior ? ewWeekSeries(S_ewPrior, S_ewSalon, active) : [];
-  const cBtn = [['eff','Effective wage'],['gross','Total earned'],['mix','Where it comes from']]
-    .map(function(o){
-      const on = S_ewChart === o[0];
-      return '<button onclick="ewSetChart(' + "'" + o[0] + "'" + ')" style="width:auto;flex:0 0 auto;'
-        + 'font-size:11.5px;padding:4px 10px;line-height:1.2;border:1px solid '
+  const spec = ewBuildSpec(d, S_ewPrior, people, homeOf, active, salons, S_ewSalon);
+  const pillRow = function(opts, cur, fn, small){
+    return opts.map(function(o){
+      const on = cur === o[0];
+      return '<button onclick="' + fn + '(' + "'" + o[0] + "'" + ')" style="width:auto;flex:0 0 auto;'
+        + 'font-size:' + (small ? '11.5px' : '12px') + ';padding:4px 10px;line-height:1.2;border:1px solid '
         + (on?'var(--primary-dark)':'var(--border)') + ';border-radius:7px;background:'
         + (on?'var(--primary-dark)':'#fff') + ';color:' + (on?'#fff':'var(--text)')
         + ';font-weight:' + (on?'700':'500') + ';cursor:pointer;">' + o[1] + '</button>';
     }).join('');
+  };
+  const lvlBtn = pillRow([['company','Company'],['salon','By salon'],['employee','By employee']],
+    S_ewLevel, 'ewSetLevel');
+  const cBtn = pillRow([['eff','Effective wage'],['gross','Total earned'],['mix','Where it comes from']],
+    S_ewChart, 'ewSetChart', true);
   const chart = '<div style="border:1px solid var(--border);border-radius:10px;background:#fff;'
       + 'padding:12px 14px 10px;margin-bottom:18px;">'
-    + '<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin-bottom:8px;">'
+    + '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:9px;">'
       + '<div style="font-weight:700;font-size:12.5px;">Trend &mdash; by pay week</div>'
+      + '<div style="display:flex;gap:4px;flex-wrap:wrap;">' + lvlBtn + '</div>'
+      + '<label style="font-size:11.5px;display:flex;align-items:center;gap:5px;cursor:pointer;color:var(--text-muted);">'
+        + '<input type="checkbox" ' + (S_ewSmooth?'checked':'') + ' onchange="ewSetSmooth(this.checked)"> 4-week average</label>'
       + '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-left:auto;">' + cBtn + '</div>'
     + '</div>'
-    + (curSeries.length >= 2
-        ? '<div style="height:260px;position:relative;"><canvas id="ew-trend-canvas"></canvas></div>'
+    + (spec.labels.length >= 2
+        ? '<div style="height:290px;position:relative;"><canvas id="ew-trend-canvas"></canvas></div>'
         : '<div class="no-data" style="padding:20px 0;">Two pay weeks are needed to draw a trend. '
           + 'Widen the range.</div>')
     + '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.55;">'
-      + (S_ewChart === 'mix'
-          ? 'Dollars per floor hour, stacked &mdash; the top of the stack is the effective wage. '
-          : S_ewChart === 'gross'
-            ? 'Everything earned on the floor that week, so it moves with hours as well as with rate. '
-            : 'Gross floor earnings over floor hours, week by week. The axis does not start at zero: '
-              + 'on a wage it would flatten every real movement. ')
-      + 'The stylist bonus arrives monthly and is spread across its month&rsquo;s weeks by floor hours, '
-      + 'so that band is smoother than the money actually is.'
+      + spec.note + ' The stylist bonus arrives monthly and is spread across its month&rsquo;s weeks '
+      + 'by floor hours, so that part of the line is smoother than the money actually is.'
     + '</div></div>';
 
   host.innerHTML = ewControls(sOpts)
@@ -16218,7 +16376,7 @@ function paintEffWageReport(){
       + '</div>';
 
   // After the HTML lands, or there is no canvas to draw on yet.
-  setTimeout(function(){ try{ drawEwTrend(curSeries, priSeries); }catch(e){} }, 30);
+  setTimeout(function(){ try{ drawEwTrend(spec); }catch(e){} }, 30);
 }
 
 function switchProfileTab(tab){
