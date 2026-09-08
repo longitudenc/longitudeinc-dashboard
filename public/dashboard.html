@@ -417,6 +417,20 @@
   .ff-tile-n{line-height:1.32;}
   .ff-tile-p{font-size:11px;color:var(--text-muted);}
   .ff-tiles-hint{font-size:11.5px;color:var(--text-muted);margin:1px 0 8px;}
+  /* MONTHLY-SLIDES-v1. Shaped like the deck -- title highlight, dark rail on
+     the right -- so the panel can be screenshotted into it rather than retyped. */
+  .bslide-wrap{display:flex;gap:18px;flex-wrap:wrap;}
+  .bslide{position:relative;flex:1;min-width:420px;background:#fff;border:1px solid var(--border);
+    border-radius:10px;padding:22px 26px 20px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.06);}
+  .bslide-rail{position:absolute;top:0;right:0;bottom:0;width:74px;
+    background:linear-gradient(180deg,#1f7a8c 0%,#2fae66 45%,#0f5132 100%);}
+  .bslide-title{display:inline-block;background:#ffff00;color:#000;font-size:20px;font-weight:700;
+    padding:2px 8px;margin-bottom:14px;}
+  .bslide-list{margin:0 84px 0 0;padding-left:20px;line-height:1.9;font-size:14.5px;color:#111;}
+  .bslide-note{margin:12px 84px 0 0;font-size:11.5px;color:var(--text-muted);line-height:1.5;}
+  .bslide-copy{position:absolute;bottom:14px;right:88px;}
+  @media (max-width:760px){ .bslide{min-width:0;} .bslide-list{margin-right:0;} .bslide-rail{display:none;} }
+
   .ff-radio{display:flex;flex-direction:column;gap:7px;}
   .ff-radio label{display:flex;align-items:center;gap:8px;font-size:13.5px;cursor:pointer;font-weight:400;}
   .ff-section{grid-column:1/-1;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--primary);border-bottom:1px solid var(--border);padding-bottom:6px;margin:10px 0 16px;}
@@ -9534,6 +9548,7 @@ function renderBonus(){
     {k:'stylist', lbl:'Stylist Bonus 💰'},
     {k:'manager', lbl:'Manager Bonus 💼'},
     {k:'am',      lbl:'AM Bonus 🏆'},
+    {k:'slides',  lbl:'Monthly Slides 🖼'},
   ];
   const typeBar = types.map(t=>`
     <button class="bonus-subtab ${S_bonusType===t.k?'active':''}"
@@ -9594,9 +9609,9 @@ function renderBonus(){
   container.innerHTML = `
     <div style="margin-bottom:.25rem;">
       <div class="bonus-subtabs">${typeBar}</div>
-      <div class="bonus-subtabs" style="margin-top:4px;">${viewBar}</div>
+      ${bonusTypeHasBars() ? `<div class="bonus-subtabs" style="margin-top:4px;">${viewBar}</div>
       ${periodBar}
-      ${salonFilterBar}
+      ${salonFilterBar}` : ''}
     </div>
     <div id="bonus-content" style="margin-top:1rem;"></div>`;
 
@@ -9608,6 +9623,11 @@ function setBonusType(t){
   S_bonusView = t==='stylist' ? 'month' : 'period';
   renderBonus();
 }
+
+// The slide export has no view or period bar of its own -- it carries its own
+// month picker, because the month that goes on a slide is the one that closed,
+// not whatever the table was last left on.
+function bonusTypeHasBars(){ return S_bonusType !== 'slides'; }
 
 function setBonusView(v){
   S_bonusView = v;
@@ -9640,9 +9660,173 @@ function selectMgrOrAMPeriod(pk){
   renderBonus();
 }
 
+// ── Monthly bonus slides ───────────────────────────────────────────────────
+// MONTHLY-SLIDES-v1
+//
+// The two slides that go out every month, built from the numbers already on
+// this page rather than retyped off it. Retyping is where the errors were: a
+// figure that has been rescraped since somebody wrote it down is worse than no
+// figure, because it looks authoritative.
+//
+// Nothing here computes a bonus. Stylist figures come from the same
+// isStylist / payablePayout pair the Bonus tab uses -- so termed staff and
+// anyone carrying four or more points are zeroed here exactly as they are
+// there -- and manager figures come from computeManagerBonuses(), which is the
+// aggregation the manager table itself runs.
+
+let S_slidePeriod = '';
+
+function slideMoney(x){
+  return '$' + (Math.round(x*100)/100).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+function slideMoney0(x){ return '$' + Math.round(x).toLocaleString('en-US'); }
+
+// Every bullet on both slides, as data. Rendered once and copied once, so what
+// is on screen and what lands on the clipboard cannot drift apart.
+function buildSlideData(periodKey){
+  const bp = S_bonusPeriods.find(p=>p.periodKey===periodKey || p.periodLabel===periodKey);
+  const emps = bp ? (bp.employees||[]) : [];
+  const stys = emps.filter(isStylist);
+
+  // ── stylist ──
+  const bySalon = {};
+  stys.forEach(function(e){
+    const sn = String(e.salonNum||'').trim(); if(!sn) return;
+    const b = bySalon[sn] || (bySalon[sn] = {pot:0, pay:0, earners:0});
+    const pay = payablePayout(e, periodKey);
+    b.pot += parseFloat(e.potential)||0; b.pay += pay;
+    if(pay > 0) b.earners++;
+  });
+  const ranked = Object.keys(bySalon)
+    .filter(function(sn){ return bySalon[sn].pot > 0; })
+    .map(function(sn){ return {sn:sn, pct: bySalon[sn].pay/bySalon[sn].pot*100}; })
+    .sort(function(a,b){ return b.pct - a.pct; });
+  const totPay = stys.reduce(function(s,e){ return s + payablePayout(e, periodKey); }, 0);
+  const totPot = stys.reduce(sumPotential, 0);
+  const top = stys.slice().sort(function(a,b){ return payablePayout(b, periodKey) - payablePayout(a, periodKey); })[0];
+  const salonsTotal = Object.keys(bySalon).length;
+  const salonsEarning = Object.keys(bySalon).filter(function(sn){ return bySalon[sn].earners > 0; }).length;
+  const over100 = stys.filter(function(e){ return payablePayout(e, periodKey) > 100; }).length;
+  const penalties = stys.filter(function(e){ return String(e.prodPenalty)==='true' || e.prodPenalty===true; }).length;
+
+  const stylist = ranked.length ? [
+    'Highest Salon % of Potential ' + ranked[0].sn + ' @ ' + ranked[0].pct.toFixed(1) + '%!',
+    'Highest individual payout was ' + slideMoney0(top ? payablePayout(top, periodKey) : 0),
+    'Total earned was ' + slideMoney(totPay),
+    salonsEarning + ' of ' + salonsTotal + ' Salons had someone earn a bonus',
+    over100 + ' ' + (over100===1?'person':'people') + ' over $100',
+    penalties + ' product penalties and only ' + (totPot? (totPay/totPot*100).toFixed(1) : '0.0') + '% of potential earned',
+  ] : [];
+
+  // ── manager ──
+  const built = computeManagerBonuses(allActiveSalons(), periodKey);
+  let manager = [];
+  if(built && built.salonResults.length){
+    const rs = built.salonResults;
+    const pot = rs.reduce(function(s,r){ return s + r.result.totalPotential; }, 0);
+    const pay = rs.reduce(function(s,r){ return s + r.result.finalPayout; }, 0);
+    // "excluding 0's" — the share earned by managers who earned anything, which
+    // is the number the slide has always quoted. Both are shown, because the
+    // all-in figure is the one that matches Potential and Earned below it.
+    const earners = rs.filter(function(r){ return r.result.finalPayout > 0; });
+    const ePot = earners.reduce(function(s,r){ return s + r.result.totalPotential; }, 0);
+    const ePay = earners.reduce(function(s,r){ return s + r.result.finalPayout; }, 0);
+    const best = rs.slice().sort(function(a,b){ return b.result.pctEarned - a.result.pctEarned; });
+    const bestPct = best.length ? Math.round(best[0].result.pctEarned*100) : 0;
+    const bestNames = best.filter(function(r){ return Math.round(r.result.pctEarned*100) === bestPct; })
+      .map(function(r){ return (r.mgrInfo && r.mgrInfo.name) ? String(r.mgrInfo.name).split(',')[0].trim() : ('Salon ' + r.snum); });
+    // "before hours penalty" = after the payroll and product penalties, before
+    // the floor-hours disqualification zeroes the whole thing.
+    const beforeHours = rs.map(function(r){ return Math.max(0, r.result.earned - r.result.penalties); });
+    const bhEarners = beforeHours.filter(function(v){ return v > 0; });
+    const prodMiss = rs.filter(function(r){ return r.result.productPenalty; }).length;
+    const payMiss = rs.filter(function(r){ return r.result.payrollMissed; }).length;
+    const hoursOut = rs.filter(function(r){ return r.result.hoursDisqualified; }).length;
+
+    manager = [
+      'The Manager\'s earned ' + (ePot ? Math.round(ePay/ePot*100) : 0) + '% of the total bonus (excluding 0\'s)',
+      'Highest payout is ' + bestPct + '% - Way to go ' + bestNames.slice(0,3).join(' and ') + '!',
+      'Average bonus was ' + slideMoney0(bhEarners.length ? bhEarners.reduce(function(a,b){return a+b;},0)/bhEarners.length : 0) + ' (before hours penalty)',
+      'There were ' + prodMiss + ' product ' + (prodMiss===1?'miss':'misses'),
+      'There were ' + payMiss + ' payroll ' + (payMiss===1?'miss':'misses') + '!',
+      'Potential is ' + slideMoney0(pot) + ' Earned is ' + slideMoney(pay),
+    ];
+    manager._extra = {
+      allIn: pot ? Math.round(pay/pot*100) : 0,
+      earners: earners.length, total: rs.length, hoursOut: hoursOut,
+    };
+  }
+  return { periodKey: periodKey, stylist: stylist, manager: manager };
+}
+
+function renderBonusSlides(){
+  const host = document.getElementById('bonus-slides'); if(!host) return;
+  const periods = S_bonusPeriods.map(function(p){ return p.periodKey; });
+  if(!periods.length){ host.innerHTML = '<div class="no-data" style="padding:14px;">No bonus periods loaded yet.</div>'; return; }
+  if(!S_slidePeriod || periods.indexOf(S_slidePeriod) < 0) S_slidePeriod = periods[periods.length-1];
+
+  const d = buildSlideData(S_slidePeriod);
+  const opts = periods.slice().reverse().map(function(k){
+    return '<option value="' + hEsc(k) + '"' + (k===S_slidePeriod?' selected':'') + '>' + hEsc(k) + '</option>';
+  }).join('');
+
+  // Styled to read as the deck does -- a dark rail on the right, a highlighted
+  // title -- so what is on screen can be screenshotted straight into it.
+  const slide = function(title, bullets, id, note){
+    if(!bullets.length){
+      return '<div class="bslide"><div class="bslide-title">' + hEsc(title) + '</div>'
+        + '<div style="padding:8px 0;color:var(--text-muted);font-size:13px;">Not available for ' + hEsc(S_slidePeriod)
+        + '. The month needs its salon summary built before manager numbers exist.</div></div>';
+    }
+    return '<div class="bslide">'
+      + '<div class="bslide-rail"></div>'
+      + '<div class="bslide-title">' + hEsc(title) + '</div>'
+      + '<ul class="bslide-list">' + bullets.map(function(b){ return '<li>' + hEsc(b) + '</li>'; }).join('') + '</ul>'
+      + (note ? '<div class="bslide-note">' + note + '</div>' : '')
+      + '<button class="btn btn-secondary btn-sm bslide-copy" onclick="copySlide(' + "'" + id + "'" + ')">Copy bullets</button>'
+      + '<textarea id="' + id + '" style="position:absolute;left:-9999px;top:0;">' + hEsc(bullets.join('\n')) + '</textarea>'
+      + '</div>';
+  };
+
+  const x = d.manager._extra;
+  const mgrNote = x
+    ? 'All-in across every salon it is ' + x.allIn + '%; ' + x.earners + ' of ' + x.total + ' earned anything'
+      + (x.hoursOut ? ', and ' + x.hoursOut + ' lost the lot to the floor-hours rule' : '') + '.'
+    : '';
+
+  host.innerHTML = '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">'
+      + '<select class="ff-select" style="width:auto;font-size:13px;padding:7px 10px;" onchange="setSlidePeriod(this.value)">' + opts + '</select>'
+      + '<span style="font-size:11.5px;color:var(--text-muted);">Built from the same figures as the Bonus tab &mdash; '
+      + 'termed staff and anyone on four or more points are zeroed here exactly as they are there.</span>'
+      + '<span id="slide-msg" style="font-size:12px;color:var(--text-muted);"></span></div>'
+    + '<div class="bslide-wrap">'
+    + slide(S_slidePeriod + ' Stylist Bonus', d.stylist, 'slide-styl', '')
+    + slide(S_slidePeriod + ' Manager Bonus', d.manager, 'slide-mgr', mgrNote)
+    + '</div>';
+}
+
+function setSlidePeriod(k){ S_slidePeriod = k; renderBonusSlides(); }
+
+function copySlide(id){
+  const el = document.getElementById(id); if(!el) return;
+  const msg = document.getElementById('slide-msg');
+  const done = function(t){ if(msg){ msg.textContent = t; setTimeout(function(){ if(msg) msg.textContent=''; }, 3000); } };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(el.value).then(function(){ done('Copied.'); }).catch(function(){ done('Could not copy.'); });
+  } else {
+    el.select();
+    try { document.execCommand('copy'); done('Copied.'); } catch(e){ done('Could not copy.'); }
+  }
+}
+
 function renderBonusContent(){
   const el = document.getElementById('bonus-content');
   if(!el) return;
+  if(S_bonusType==='slides'){
+    el.innerHTML = '<div id="bonus-slides"></div>';
+    renderBonusSlides();
+    return;
+  }
   if(S_bonusType==='stylist'){
     if(S_bonusView==='month')  el.innerHTML = buildBonusMonth();
     else if(S_bonusView==='ytd')   el.innerHTML = buildBonusYTD();
@@ -10087,14 +10271,17 @@ function calcMgrBonusFromSalonRow(salonRow, bonusMgrRow, waiver, periodLabel, is
           cc, sales, payroll};
 }
 
-function buildManagerBonusPeriod(amSalonNums){
-  if(!S_salonSummaryPeriods.length)
-    return '<div class="no-data">No Salon Summary data loaded.<br><span style="font-size:12px;color:var(--text-muted);">Monthly summaries are built at month-end by the nightly scrape.</span></div>';
-  if(!S_mgrBonusPeriod){ const _d=S_salonSummaryPeriods.filter(p=>_monthDone(p.periodKey)); const _l=(_d.length?_d:S_salonSummaryPeriods); S_mgrBonusPeriod = _l[_l.length-1].periodKey; }
-  const ssPeriod = S_salonSummaryPeriods.find(p=>p.periodKey===S_mgrBonusPeriod);
-  if(!ssPeriod) return '<div class="no-data">No salon summary data for this period.</div>';
-
-  // Match bonus period by label to get manager personal metrics
+// MONTHLY-SLIDES-v1. The manager-bonus aggregation, as DATA. Extracted from
+// buildManagerBonusPeriod so the slide export and the on-screen table are the
+// same numbers by construction rather than by two people keeping two copies of
+// a 121-line payout formula in agreement.
+//
+// Returns null when the period has no salon summary, which is what a month
+// that has not closed yet looks like.
+function computeManagerBonuses(amSalonNums, periodKey){
+  if(!S_salonSummaryPeriods.length) return null;
+  const ssPeriod = S_salonSummaryPeriods.find(p=>p.periodKey===periodKey);
+  if(!ssPeriod) return null;
   const bonusPeriod = S_bonusPeriods.find(p=>p.periodKey===normPeriodLabel(ssPeriod.periodLabel)||p.periodLabel===normPeriodLabel(ssPeriod.periodLabel));
 
   const salonResults = [];
@@ -10121,6 +10308,16 @@ function buildManagerBonusPeriod(amSalonNums){
     const result = calcMgrBonusFromSalonRow(salonRow, bonusMgrRow, getWaiver(snum, normPeriodLabel(ssPeriod.periodLabel)), normPeriodLabel(ssPeriod.periodLabel), isAMFallback, (S_managerTable[snum]&&S_managerTable[snum].globalId)||(bonusMgrRow&&bonusMgrRow.globalId)||"");
     salonResults.push({snum, salonRow, result, mgrInfo, bonusMgrRow, isAMFallback, am});
   });
+  return { ssPeriod, bonusPeriod, salonResults };
+}
+
+function buildManagerBonusPeriod(amSalonNums){
+  if(!S_salonSummaryPeriods.length)
+    return '<div class="no-data">No Salon Summary data loaded.<br><span style="font-size:12px;color:var(--text-muted);">Monthly summaries are built at month-end by the nightly scrape.</span></div>';
+  if(!S_mgrBonusPeriod){ const _d=S_salonSummaryPeriods.filter(p=>_monthDone(p.periodKey)); const _l=(_d.length?_d:S_salonSummaryPeriods); S_mgrBonusPeriod = _l[_l.length-1].periodKey; }
+  const built = computeManagerBonuses(amSalonNums, S_mgrBonusPeriod);
+  if(!built) return '<div class="no-data">No salon summary data for this period.</div>';
+  const { ssPeriod, bonusPeriod, salonResults } = built;
 
   if(!salonResults.length) return '<div class="no-data">No salon data found for your salons in this period.</div>';
 
