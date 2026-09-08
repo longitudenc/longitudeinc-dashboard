@@ -15400,6 +15400,7 @@ function buildProfile(globalId, name){
 
         <!-- Review tab -->
         <div id="ptab-review-content" style="display:none;flex:1;overflow-y:auto;padding:20px;">
+          <div id="eff-wage-box"></div>
           <div id="review-body">
             <div style="color:var(--text-muted);padding:20px;">Select a year to load the annual review.</div>
           </div>
@@ -15434,6 +15435,67 @@ function buildProfile(globalId, name){
   }
 }
 
+// ── Effective floor wage ───────────────────────────────────────────────────
+// EFFECTIVE-WAGE-v1
+//
+// What an hour ON THE FLOOR is worth to this person, year to date: their floor
+// time at the wage that applied each week, plus incentives, plus tips, divided
+// by floor hours alone.
+//
+// Floor hours ONLY, on both sides. Training, admin, reception, closing,
+// vacation, holiday and sick time are paid at base wage and earn no tips and no
+// incentives, so counting them drags the number toward base wage and tells a
+// stylist their cutting hour is worth less than it is. Estate-wide that is 8.2%
+// of paid time, and it is not spread evenly -- somebody with 240 hours of
+// vacation and training would be understated far more than a colleague with
+// none, which is the opposite of what a review conversation needs.
+let S_effWageYear = null;
+
+function renderEffWage(globalId){
+  const host = document.getElementById('eff-wage-box'); if(!host) return;
+  const year = S_effWageYear || new Date().getFullYear();
+  host.innerHTML = '<div style="color:var(--text-muted);font-size:12.5px;padding:0 0 12px;">Loading pay breakdown…</div>';
+  fetch('/api/gs/effective-wage?year=' + year + '&globalId=' + encodeURIComponent(globalId))
+    .then(function(r){ return r.json(); })
+    .then(function(res){
+      const p = (res && res.people && res.people[0]) || null;
+      if(!p || !p.effectiveWage){ host.innerHTML = ''; return; }
+      const bar = function(label, val, per, colour){
+        const pct = p.totalEarned > 0 ? (val / p.totalEarned * 100) : 0;
+        return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:5px;">'
+          + '<div style="width:74px;font-size:11.5px;color:var(--text-muted);">' + label + '</div>'
+          + '<div style="flex:1;background:#eee;border-radius:5px;height:16px;overflow:hidden;">'
+            + '<div style="width:' + pct.toFixed(1) + '%;background:' + colour + ';height:100%;"></div></div>'
+          + '<div style="width:132px;text-align:right;font-size:12px;">'
+            + '<b>$' + per.toFixed(2) + '</b>/hr <span style="color:var(--text-muted);">'
+            + pct.toFixed(0) + '%</span></div></div>';
+      };
+      const avg = res.scopeAverage;
+      host.innerHTML = '<div style="border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:16px;background:#f8faf9;">'
+        + '<div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:10px;">'
+          + '<div style="font-size:12.5px;font-weight:700;">Effective wage on the floor</div>'
+          + '<div style="font-size:22px;font-weight:700;color:var(--primary);">$' + p.effectiveWage.toFixed(2)
+            + '<span style="font-size:12px;font-weight:400;color:var(--text-muted);">/hr</span></div>'
+          + (avg ? '<div style="font-size:11.5px;color:var(--text-muted);">against $' + avg.toFixed(2)
+              + ' across everyone you can see</div>' : '')
+        + '</div>'
+        + bar('Base', p.floorBasePay, p.basePerHour, 'var(--primary)')
+        + bar('Tips', p.tips, p.tipsPerHour, '#7fc45f')
+        + bar('Incentives', p.incentives, p.incentivePerHour, '#9acb3a')
+        + '<div style="font-size:11px;color:var(--text-muted);margin-top:9px;line-height:1.6;">'
+          + '<b>' + p.floorHours.toFixed(0) + ' floor hours</b> across ' + p.weeks + ' weeks in ' + res.year
+          + (p.currentWage ? ', at $' + p.currentWage.toFixed(2) + '/hr base' : '') + '. '
+          + (p.nonFloorHours > 0
+              ? '<b>' + p.nonFloorHours.toFixed(0) + ' hours excluded</b> — training, admin, reception, closing, '
+                + 'vacation, holiday and sick time earn base wage and no tips, so counting them would understate '
+                + 'the hour actually spent cutting. '
+              : '')
+          + 'Excludes ' + (res.excludes || []).join(' and ') + '.</div>'
+        + '</div>';
+    })
+    .catch(function(){ host.innerHTML = ''; });
+}
+
 function switchProfileTab(tab){
   ['summary','trends','bonus','weekly','review'].forEach(t=>{
     const content = document.getElementById('ptab-'+t+'-content');
@@ -15447,6 +15509,9 @@ function switchProfileTab(tab){
   });
   const active = document.getElementById('ptab-'+tab+'-content');
   if(active) active.style.display = (tab==='trends')?'flex':'block';
+  // Loaded when the tab is opened rather than with the drawer: it is one more
+  // sheet read per person, and most profile visits never reach this tab.
+  if(tab==='review' && _reviewGlobalId) renderEffWage(_reviewGlobalId);
   if(tab==='review') loadReview();
   if(tab==='trends'){
     const mk = window._activeProfileMetric || ((window._profileMetrics||[])[0]||{}).k;
