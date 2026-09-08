@@ -11210,6 +11210,7 @@ function applyRoute(){
       case 'reviews':   showGoogleReviews(); break;
       case 'activity':  showFormActivity(); break;
       case 'slides':    showBonusSlides(); break;
+      case 'effective-wage': showEffWageReport(); break;
       case 'supplies':  showSupplyCatalog(); break;
       case 'request':   if(seg[1]) openRequestDeepLink(seg[1]); break;
       case 'event':     if(seg[1]) openEventDetail(seg[1]); break;
@@ -11333,6 +11334,8 @@ const HUB_GROUPS = {
         show:_navPerfUser, dest:{ company:_coGo('bonus'), am:_amGo('bonus'), salon:_salonGo('bonuses') }, capCompany:'view.company' },
       { t:'Monthly slides', d:'The two bonus slides for a closed month, ready to paste into the deck.',
         cap:'view.company', go:function(){ showBonusSlides(); } },
+      { t:'Effective wage', d:'What an hour on the floor is worth — by company, salon and person.',
+        show:_navPerfUser, go:function(){ showEffWageReport(); } },
     ],
   },
   people: {
@@ -15436,20 +15439,23 @@ function buildProfile(globalId, name){
 }
 
 // ── Effective floor wage ───────────────────────────────────────────────────
-// EFFECTIVE-WAGE-v1
+// EFFECTIVE-WAGE-v2
 //
-// What an hour ON THE FLOOR is worth to this person, year to date: their floor
-// time at the wage that applied each week, plus incentives, plus tips, divided
-// by floor hours alone.
+// A compensation breakdown by month, laid out like a scorecard rather than a
+// summary: one row per component, one column per month, a YTD column, and the
+// per-hour split underneath.
 //
 // Floor hours ONLY, on both sides. Training, admin, reception, closing,
 // vacation, holiday and sick time are paid at base wage and earn no tips and no
 // incentives, so counting them drags the number toward base wage and tells a
 // stylist their cutting hour is worth less than it is. Estate-wide that is 8.2%
-// of paid time, and it is not spread evenly -- somebody with 240 hours of
-// vacation and training would be understated far more than a colleague with
-// none, which is the opposite of what a review conversation needs.
+// of paid time and it is not spread evenly -- one person carries 240 non-floor
+// hours and a colleague carries two -- so it has to come out per person.
+const EW_MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 let S_effWageYear = null;
+
+const ewMoney = v => v || v === 0 ? '$' + Math.round(v).toLocaleString('en-US') : '';
+const ewRate  = v => (v || v === 0) ? '$' + v.toFixed(2) : '';
 
 function renderEffWage(globalId){
   const host = document.getElementById('eff-wage-box'); if(!host) return;
@@ -15460,40 +15466,312 @@ function renderEffWage(globalId){
     .then(function(res){
       const p = (res && res.people && res.people[0]) || null;
       if(!p || !p.effectiveWage){ host.innerHTML = ''; return; }
-      const bar = function(label, val, per, colour){
-        const pct = p.totalEarned > 0 ? (val / p.totalEarned * 100) : 0;
-        return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:5px;">'
-          + '<div style="width:74px;font-size:11.5px;color:var(--text-muted);">' + label + '</div>'
-          + '<div style="flex:1;background:#eee;border-radius:5px;height:16px;overflow:hidden;">'
-            + '<div style="width:' + pct.toFixed(1) + '%;background:' + colour + ';height:100%;"></div></div>'
-          + '<div style="width:132px;text-align:right;font-size:12px;">'
-            + '<b>$' + per.toFixed(2) + '</b>/hr <span style="color:var(--text-muted);">'
-            + pct.toFixed(0) + '%</span></div></div>';
-      };
-      const avg = res.scopeAverage;
-      host.innerHTML = '<div style="border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:16px;background:#f8faf9;">'
-        + '<div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:10px;">'
-          + '<div style="font-size:12.5px;font-weight:700;">Effective wage on the floor</div>'
-          + '<div style="font-size:22px;font-weight:700;color:var(--primary);">$' + p.effectiveWage.toFixed(2)
-            + '<span style="font-size:12px;font-weight:400;color:var(--text-muted);">/hr</span></div>'
-          + (avg ? '<div style="font-size:11.5px;color:var(--text-muted);">against $' + avg.toFixed(2)
-              + ' across everyone you can see</div>' : '')
-        + '</div>'
-        + bar('Base', p.floorBasePay, p.basePerHour, 'var(--primary)')
-        + bar('Tips', p.tips, p.tipsPerHour, '#7fc45f')
-        + bar('Incentives', p.incentives, p.incentivePerHour, '#9acb3a')
-        + '<div style="font-size:11px;color:var(--text-muted);margin-top:9px;line-height:1.6;">'
-          + '<b>' + p.floorHours.toFixed(0) + ' floor hours</b> across ' + p.weeks + ' weeks in ' + res.year
-          + (p.currentWage ? ', at $' + p.currentWage.toFixed(2) + '/hr base' : '') + '. '
-          + (p.nonFloorHours > 0
-              ? '<b>' + p.nonFloorHours.toFixed(0) + ' hours excluded</b> — training, admin, reception, closing, '
-                + 'vacation, holiday and sick time earn base wage and no tips, so counting them would understate '
-                + 'the hour actually spent cutting. '
-              : '')
-          + 'Excludes ' + (res.excludes || []).join(' and ') + '.</div>'
-        + '</div>';
+      host.innerHTML = ewCard(p, res);
     })
     .catch(function(){ host.innerHTML = ''; });
+}
+
+function ewCard(p, res){
+  // Only months with floor time. A stylist who started in May should not read
+  // as four months of zeroes.
+  const cols = [];
+  p.months.forEach(function(m, i){ if(m.floorHours > 0) cols.push(i); });
+  if(!cols.length) return '';
+
+  const th = 'padding:5px 8px;font-size:10.5px;font-weight:700;text-transform:uppercase;'
+    + 'letter-spacing:.04em;color:#fff;background:var(--primary-dark,#03654e);text-align:right;';
+  const td = 'padding:5px 8px;font-size:12px;text-align:right;border-bottom:1px solid var(--border);';
+  const lab = 'padding:5px 10px;font-size:12px;text-align:left;border-bottom:1px solid var(--border);'
+    + 'background:#f4f7f6;font-weight:600;white-space:nowrap;';
+
+  let head = '<tr><th style="' + th + 'text-align:left;">Compensation</th>';
+  cols.forEach(function(i){ head += '<th style="' + th + '">' + EW_MON[i] + '</th>'; });
+  head += '<th style="' + th + 'background:#0b3d2e;">YTD</th></tr>';
+
+  const row = function(label, pick, fmt, strong){
+    let h = '<tr><td style="' + lab + (strong ? 'font-weight:700;' : '') + '">' + label + '</td>';
+    cols.forEach(function(i){
+      h += '<td style="' + td + (strong ? 'font-weight:700;' : '') + '">' + fmt(pick(p.months[i])) + '</td>';
+    });
+    h += '<td style="' + td + 'font-weight:700;background:#f4f7f6;">' + fmt(pick(p)) + '</td></tr>';
+    return h;
+  };
+
+  // Rows that are all zero are dropped: a stylist with no product sales does
+  // not need a line of dashes explaining it.
+  const any = function(pick){ return cols.some(function(i){ return pick(p.months[i]); }) || pick(p); };
+
+  let body = '';
+  body += row('Hours Worked', function(x){ return x.floorHours; }, function(v){ return v ? v.toFixed(1) : ''; });
+  body += row('Base Wages Earned', function(x){ return x.base; }, ewMoney);
+  if(any(function(x){ return x.productivity; })) body += row('Productivity Incentive', function(x){ return x.productivity; }, ewMoney);
+  if(any(function(x){ return x.product; }))      body += row('Product Incentive', function(x){ return x.product; }, ewMoney);
+  if(any(function(x){ return x.newReturn; }))    body += row('New / Return Incentive', function(x){ return x.newReturn; }, ewMoney);
+  if(any(function(x){ return x.bonus; }))        body += row('Stylist Bonus', function(x){ return x.bonus; }, ewMoney);
+  body += row('Tips Earned', function(x){ return x.tips; }, ewMoney);
+  body += row('GROSS PAY', function(x){ return x.gross; }, ewMoney, true);
+  body += row('Effective Wage', function(x){ return x.effectiveWage; },
+    function(v){ return v ? ewRate(v) + '/hr' : ''; }, true);
+
+  // Per-hour split, as one bar. The percentages are of gross, so they answer
+  // "where does my hour come from" rather than "how big is each number".
+  const seg = function(label, val, colour, dark){
+    const pct = p.gross > 0 ? val / p.gross * 100 : 0;
+    if(pct < 0.5) return '';
+    return '<div title="' + label + ' — ' + ewMoney(val) + '" style="width:' + pct.toFixed(2) + '%;background:' + colour
+      + ';color:' + (dark ? '#123' : '#fff') + ';font-size:11px;font-weight:700;text-align:center;'
+      + 'line-height:26px;overflow:hidden;white-space:nowrap;">' + (pct >= 7 ? pct.toFixed(0) + '%' : '') + '</div>';
+  };
+  const incTotal = p.productivity + p.product + p.newReturn + p.bonus;
+  const bar = '<div style="display:flex;height:26px;border-radius:5px;overflow:hidden;border:1px solid var(--border);">'
+    + seg('Base wage', p.base, 'var(--primary-dark,#03654e)')
+    + seg('Tips', p.tips, '#8fd08f', true)
+    + seg('Incentives and bonus', incTotal, '#9acb3a', true)
+    + '</div>'
+    + '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:6px;font-size:11.5px;color:var(--text-muted);">'
+    + '<span><span style="display:inline-block;width:9px;height:9px;background:var(--primary-dark,#03654e);border-radius:2px;"></span> Base ' + ewRate(p.floorHours ? p.base/p.floorHours : 0) + '/hr</span>'
+    + '<span><span style="display:inline-block;width:9px;height:9px;background:#8fd08f;border-radius:2px;"></span> Tips ' + ewRate(p.floorHours ? p.tips/p.floorHours : 0) + '/hr</span>'
+    + '<span><span style="display:inline-block;width:9px;height:9px;background:#9acb3a;border-radius:2px;"></span> Incentives + bonus ' + ewRate(p.floorHours ? incTotal/p.floorHours : 0) + '/hr</span>'
+    + '</div>';
+
+  const avg = res.scopeAverage;
+  return '<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:18px;">'
+    + '<div style="background:var(--primary-dark,#03654e);color:#fff;padding:10px 14px;display:flex;'
+      + 'justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:10px;">'
+      + '<div style="font-weight:700;font-size:13.5px;">Compensation Breakdown — ' + res.year + '</div>'
+      + '<div style="font-size:12px;opacity:.9;">' + p.floorHours.toFixed(0) + ' floor hours · '
+        + p.weeks + ' weeks' + (p.currentWage ? ' · ' + ewRate(p.currentWage) + '/hr base' : '') + '</div>'
+    + '</div>'
+    + '<div style="padding:0;overflow-x:auto;"><table style="width:100%;border-collapse:collapse;">'
+      + '<thead>' + head + '</thead><tbody>' + body + '</tbody></table></div>'
+    + '<div style="display:flex;gap:22px;flex-wrap:wrap;padding:14px;align-items:center;">'
+      + '<div style="min-width:150px;">'
+        + '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);">Effective hourly wage</div>'
+        + '<div style="font-size:26px;font-weight:700;color:var(--primary);">' + ewRate(p.effectiveWage) + '</div>'
+        + (avg ? '<div style="font-size:11.5px;color:var(--text-muted);">against ' + ewRate(avg)
+            + ' across everyone you can see</div>' : '')
+      + '</div>'
+      + '<div style="flex:1;min-width:260px;">'
+        + '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:5px;">Per hour, where it comes from</div>'
+        + bar
+      + '</div>'
+    + '</div>'
+    + '<div style="font-size:11px;color:var(--text-muted);padding:0 14px 13px;line-height:1.6;">'
+      + '<b>Floor hours only.</b> '
+      + (p.nonFloorHours > 0
+          ? p.nonFloorHours.toFixed(0) + ' hours of training, admin, reception, closing, vacation, holiday and '
+            + 'sick time are excluded from both the hours and the pay — they earn base wage and no tips, so '
+            + 'counting them would understate the hour actually spent cutting. '
+          : '')
+      + 'Excludes ' + ((res.excludes || []).join(' and ') || 'nothing else') + '.</div>'
+    + '</div>';
+}
+
+
+// ── Effective wage report ──────────────────────────────────────────────────
+// EFFECTIVE-WAGE-REPORT-v1
+//
+// The same measure as the profile panel, from the same endpoint, aggregated up:
+// company by month, then salon by salon, then the people inside a salon.
+//
+// Weighted by FLOOR HOURS at every level, never a mean of means. A salon
+// average built by averaging its stylists would let somebody with 40 hours move
+// the number as much as somebody with 900, and the company figure would then be
+// an average of eighteen such distortions. Dollars over hours, always.
+//
+// A person is attributed to the salon they logged the most floor hours at. A
+// floater genuinely belongs to several, but a report where the same person
+// appears three times cannot be totalled, and the alternative -- splitting one
+// person across rows -- makes every individual line unreadable.
+let S_ewData = null, S_ewYear = null, S_ewSalon = '';
+
+function showEffWageReport(){
+  _route('#/effective-wage');
+  clearActive();
+  const pg = document.getElementById('page-hub');
+  if(pg) pg.classList.add('active');
+  const mainEl = document.querySelector('.content');
+  if(mainEl) mainEl.scrollTop = 0;
+  if(!S_ewYear) S_ewYear = new Date().getFullYear();
+  if(pg){
+    pg.innerHTML = '<div class="page-header"><h2>Effective wage</h2>'
+      + '<div class="sub">What an hour on the floor is actually worth &mdash; base, tips, incentives and bonus over floor hours alone</div></div>'
+      + '<div id="ew-body"><div class="no-data" style="padding:14px;">Loading&hellip;</div></div>';
+  }
+  loadEffWageReport();
+}
+
+function loadEffWageReport(){
+  const host = document.getElementById('ew-body'); if(!host) return;
+  fetch('/api/gs/effective-wage?year=' + S_ewYear)
+    .then(function(r){ return r.json(); })
+    .then(function(res){
+      if(!res || !res.success) throw new Error((res && res.error) || 'could not load');
+      S_ewData = res;
+      paintEffWageReport();
+    })
+    .catch(function(e){
+      const h = document.getElementById('ew-body');
+      if(h) h.innerHTML = '<div class="no-data" style="padding:14px;">' + hEsc(e.message || String(e)) + '</div>';
+    });
+}
+
+function ewSetYear(y){ S_ewYear = y; S_ewSalon = ''; loadEffWageReport(); }
+function ewSetSalon(sn){ S_ewSalon = sn; paintEffWageReport(); }
+
+// Sum a list of people into one bucket, per month and overall. Dollars over
+// hours -- see the note at the top about why this is not an average of averages.
+function ewRoll(people){
+  const blank = function(){ return { floorHours:0, nonFloorHours:0, base:0, productivity:0,
+    product:0, newReturn:0, bonus:0, tips:0, gross:0 }; };
+  const total = blank(), months = [];
+  for(let i=0;i<12;i++) months.push(blank());
+  const add = function(t, x){
+    t.floorHours += x.floorHours||0; t.nonFloorHours += x.nonFloorHours||0;
+    t.base += x.base||0; t.productivity += x.productivity||0; t.product += x.product||0;
+    t.newReturn += x.newReturn||0; t.bonus += x.bonus||0; t.tips += x.tips||0; t.gross += x.gross||0;
+  };
+  people.forEach(function(p){
+    add(total, p);
+    (p.months||[]).forEach(function(m,i){ add(months[i], m); });
+  });
+  const rate = function(t){ return t.floorHours > 0 ? t.gross / t.floorHours : null; };
+  total.effectiveWage = rate(total);
+  months.forEach(function(m){ m.effectiveWage = rate(m); });
+  return { total: total, months: months, headcount: people.length };
+}
+
+function paintEffWageReport(){
+  const host = document.getElementById('ew-body'); if(!host || !S_ewData) return;
+  const d = S_ewData;
+  const people = d.people || [];
+  if(!people.length){ host.innerHTML = '<div class="no-data" style="padding:14px;">No payroll rows for ' + hEsc(String(d.year)) + '.</div>'; return; }
+
+  // Each person to the salon they logged the most floor hours at, decided
+  // server-side where the per-salon hours live. See the note at the top for why
+  // a floater is counted once rather than in every salon they touched.
+  const homeOf = {};
+  people.forEach(function(p){ homeOf[p.globalId] = p.homeSalon || (p.salons && p.salons[0]) || ''; });
+  const salons = [...new Set(people.map(function(p){ return homeOf[p.globalId]; }).filter(Boolean))].sort();
+
+  const inScope = S_ewSalon ? people.filter(function(p){ return homeOf[p.globalId] === S_ewSalon; }) : people;
+  const roll = ewRoll(inScope);
+  const cols = [];
+  roll.months.forEach(function(m,i){ if(m.floorHours > 0) cols.push(i); });
+
+  const years = [];
+  for(let y = new Date().getFullYear(); y >= 2024; y--) years.push(y);
+  const yBtn = years.map(function(y){
+    return '<button class="btn btn-sm ' + (S_ewYear===y?'btn-primary':'btn-secondary') + '" onclick="ewSetYear(' + y + ')">' + y + '</button>';
+  }).join('');
+  const sOpts = ['<option value="">Every salon</option>'].concat(salons.map(function(sn){
+    return '<option value="' + hEsc(sn) + '"' + (S_ewSalon===sn?' selected':'') + '>' + hEsc(salonDisplay(sn)) + '</option>';
+  })).join('');
+
+  const th = 'padding:5px 8px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);text-align:right;';
+  const td = 'padding:5px 8px;font-size:12px;text-align:right;border-top:1px solid var(--border);';
+
+  // ── the trend, by month ──
+  let trend = '<table style="width:100%;border-collapse:collapse;">'
+    + '<thead><tr><th style="' + th + 'text-align:left;">Month</th>'
+    + '<th style="' + th + '">Floor hrs</th><th style="' + th + '">Base</th><th style="' + th + '">Tips</th>'
+    + '<th style="' + th + '">Incentives + bonus</th><th style="' + th + '">Gross</th>'
+    + '<th style="' + th + '">Effective</th></tr></thead><tbody>';
+  cols.forEach(function(i){
+    const m = roll.months[i];
+    const inc = m.productivity + m.product + m.newReturn + m.bonus;
+    trend += '<tr><td style="' + td + 'text-align:left;font-weight:600;">' + EW_MON[i] + '</td>'
+      + '<td style="' + td + '">' + m.floorHours.toFixed(0) + '</td>'
+      + '<td style="' + td + '">' + ewMoney(m.base) + '</td>'
+      + '<td style="' + td + '">' + ewMoney(m.tips) + '</td>'
+      + '<td style="' + td + '">' + ewMoney(inc) + '</td>'
+      + '<td style="' + td + '">' + ewMoney(m.gross) + '</td>'
+      + '<td style="' + td + 'font-weight:700;">' + (m.effectiveWage ? ewRate(m.effectiveWage) : '—') + '</td></tr>';
+  });
+  const T = roll.total, tInc = T.productivity + T.product + T.newReturn + T.bonus;
+  trend += '<tr style="background:#f4f7f6;"><td style="' + td + 'text-align:left;font-weight:700;">'
+    + (S_ewSalon ? salonDisplay(S_ewSalon) : 'Company') + ' YTD</td>'
+    + '<td style="' + td + 'font-weight:700;">' + T.floorHours.toFixed(0) + '</td>'
+    + '<td style="' + td + 'font-weight:700;">' + ewMoney(T.base) + '</td>'
+    + '<td style="' + td + 'font-weight:700;">' + ewMoney(T.tips) + '</td>'
+    + '<td style="' + td + 'font-weight:700;">' + ewMoney(tInc) + '</td>'
+    + '<td style="' + td + 'font-weight:700;">' + ewMoney(T.gross) + '</td>'
+    + '<td style="' + td + 'font-weight:700;color:var(--primary);">' + (T.effectiveWage ? ewRate(T.effectiveWage) : '—') + '</td></tr>';
+  trend += '</tbody></table>';
+
+  // ── salon league, only when looking at everything ──
+  let league = '';
+  if(!S_ewSalon){
+    const rows = salons.map(function(sn){
+      const r = ewRoll(people.filter(function(p){ return homeOf[p.globalId] === sn; }));
+      return { sn: sn, r: r };
+    }).filter(function(x){ return x.r.total.floorHours > 0; })
+      .sort(function(a,b){ return (b.r.total.effectiveWage||0) - (a.r.total.effectiveWage||0); });
+    league = '<div style="font-weight:700;font-size:12.5px;margin:22px 0 6px;">By salon</div>'
+      + '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:7px;">'
+      + 'Weighted by floor hours, not an average of the stylists &mdash; a 40-hour starter should not move a '
+      + 'salon as much as a 900-hour full-timer. Click a row to open it.</div>'
+      + '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;">'
+      + '<thead><tr><th style="' + th + 'text-align:left;">Salon</th><th style="' + th + '">People</th>'
+      + '<th style="' + th + '">Floor hrs</th><th style="' + th + '">Base/hr</th><th style="' + th + '">Tips/hr</th>'
+      + '<th style="' + th + '">Inc + bonus/hr</th><th style="' + th + '">Effective</th></tr></thead><tbody>';
+    rows.forEach(function(x){
+      const t = x.r.total, per = function(v){ return t.floorHours ? v / t.floorHours : 0; };
+      league += '<tr class="sub-row" onclick="ewSetSalon(' + "'" + hEsc(x.sn) + "'" + ')">'
+        + '<td style="' + td + 'text-align:left;font-weight:600;">' + hEsc(salonDisplay(x.sn)) + '</td>'
+        + '<td style="' + td + '">' + x.r.headcount + '</td>'
+        + '<td style="' + td + '">' + t.floorHours.toFixed(0) + '</td>'
+        + '<td style="' + td + '">' + ewRate(per(t.base)) + '</td>'
+        + '<td style="' + td + '">' + ewRate(per(t.tips)) + '</td>'
+        + '<td style="' + td + '">' + ewRate(per(t.productivity + t.product + t.newReturn + t.bonus)) + '</td>'
+        + '<td style="' + td + 'font-weight:700;">' + (t.effectiveWage ? ewRate(t.effectiveWage) : '—') + '</td></tr>';
+    });
+    league += '</tbody></table></div>';
+  }
+
+  // ── the people ──
+  let folk = '<div style="font-weight:700;font-size:12.5px;margin:22px 0 6px;">'
+    + (S_ewSalon ? salonDisplay(S_ewSalon) : 'Everyone') + ' &mdash; ' + inScope.length + ' people</div>'
+    + '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;">'
+    + '<thead><tr><th style="' + th + 'text-align:left;">Name</th><th style="' + th + 'text-align:left;">Salon</th>'
+    + '<th style="' + th + '">Floor hrs</th><th style="' + th + '">Base/hr</th><th style="' + th + '">Tips/hr</th>'
+    + '<th style="' + th + '">Inc + bonus/hr</th><th style="' + th + '">Effective</th></tr></thead><tbody>';
+  inScope.slice().sort(function(a,b){ return (b.effectiveWage||0) - (a.effectiveWage||0); }).forEach(function(p){
+    const per = function(v){ return p.floorHours ? v / p.floorHours : 0; };
+    folk += '<tr class="sub-row" onclick="openProfile(' + "'" + hEsc(p.globalId) + "','" + hEsc(String(p.name||'')).replace(/'/g,'') + "'" + ')">'
+      + '<td style="' + td + 'text-align:left;font-weight:600;">' + hEsc(fmtName(p.name||'')) + '</td>'
+      + '<td style="' + td + 'text-align:left;color:var(--text-muted);">' + hEsc((p.salons||[]).join(', ')) + '</td>'
+      + '<td style="' + td + '">' + p.floorHours.toFixed(0) + '</td>'
+      + '<td style="' + td + '">' + ewRate(per(p.base)) + '</td>'
+      + '<td style="' + td + '">' + ewRate(per(p.tips)) + '</td>'
+      + '<td style="' + td + '">' + ewRate(per(p.productivity + p.product + p.newReturn + p.bonus)) + '</td>'
+      + '<td style="' + td + 'font-weight:700;">' + (p.effectiveWage ? ewRate(p.effectiveWage) : '—') + '</td></tr>';
+  });
+  folk += '</tbody></table></div>';
+
+  host.innerHTML = '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">'
+      + yBtn
+      + '<select class="ff-select" style="width:auto;font-size:12.5px;padding:6px 9px;" onchange="ewSetSalon(this.value)">' + sOpts + '</select>'
+      + (S_ewSalon ? '<button class="btn btn-sm btn-secondary" onclick="ewSetSalon(&quot;&quot;)">Back to every salon</button>' : '')
+      + '</div>'
+    + '<div style="display:flex;gap:22px;flex-wrap:wrap;align-items:center;padding:12px 14px;border:1px solid var(--border);'
+      + 'border-radius:10px;background:#f8faf9;margin-bottom:14px;">'
+      + '<div><div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);">'
+        + (S_ewSalon ? salonDisplay(S_ewSalon) : 'Company') + ' effective wage</div>'
+        + '<div style="font-size:26px;font-weight:700;color:var(--primary);">' + (T.effectiveWage ? ewRate(T.effectiveWage) : '—') + '</div></div>'
+      + '<div><div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);">Floor hours</div>'
+        + '<div style="font-size:18px;font-weight:700;">' + T.floorHours.toLocaleString('en-US', {maximumFractionDigits:0}) + '</div></div>'
+      + '<div><div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);">People</div>'
+        + '<div style="font-size:18px;font-weight:700;">' + inScope.length + '</div></div>'
+      + '<div style="flex:1;min-width:230px;font-size:11.5px;color:var(--text-muted);line-height:1.5;">'
+        + 'Floor hours only. ' + T.nonFloorHours.toFixed(0) + ' hours of training, admin, reception, closing, '
+        + 'vacation, holiday and sick time are excluded from both sides. Excludes '
+        + ((d.excludes||[]).join(' and ') || 'nothing else') + '.</div>'
+    + '</div>'
+    + '<div style="font-weight:700;font-size:12.5px;margin-bottom:6px;">By month</div>'
+    + '<div style="overflow-x:auto;">' + trend + '</div>'
+    + league
+    + folk;
 }
 
 function switchProfileTab(tab){
