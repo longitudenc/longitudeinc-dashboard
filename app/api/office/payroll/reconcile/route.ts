@@ -19,6 +19,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import {requireCapability} from '@/lib/require-role'
 import { runPayrollBuild } from '@/lib/adp-run'
 import { readSheet, rowsToObjects } from '@/lib/sheets'
+import { loadStipends, stipendTotal } from '@/lib/adp-stipends'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -95,6 +96,13 @@ export async function GET(req: NextRequest) {
       return csvRow([label, ...vals.map(money), money(total), note])
     }
 
+    // STIPENDS-v1 on the reconciliation. They belong to no salon -- they are
+    // paid to the GM and the area managers, who work across all of them -- so
+    // they sit under the per-salon grid rather than in it, and they are the
+    // difference between "this file" and "the office spreadsheet".
+    const stipends = await loadStipends({ fresh: true })
+    const stipendSum = stipendTotal(stipends)
+
     const out: string[] = []
     out.push(csvRow(['Longitude payroll reconciliation']))
     out.push(csvRow(['Week', r.weekStart + ' to ' + r.weekEnd, 'Pay date', r.payDate]))
@@ -113,6 +121,31 @@ export async function GET(req: NextRequest) {
     out.push('')
     out.push(line('Gross pay (this file)', sn => N(bySalon.get(sn)?.grossPay)))
     out.push(line('Total pay (gross + tips)', sn => N(bySalon.get(sn)?.totalPay)))
+    out.push('')
+
+    // ── what the file does NOT carry ──
+    //
+    // The file is salon payroll. The office spreadsheet is the whole week's
+    // cost, so it also carries the stipends ADP populates on its own. Without
+    // this block the two totals differ by the same amount every week, and a
+    // constant difference is indistinguishable from a fault.
+    const fileTotal = (r.salonTotals || []).reduce((t, x) => t + N(x.totalPay), 0)
+    out.push(csvRow(['PAID OUTSIDE THIS FILE']))
+    out.push(csvRow(['Who', 'Weekly amount', 'Note']))
+    for (const st of stipends) {
+      out.push(csvRow([
+        st.name + (st.active ? '' : ' (inactive)'),
+        st.active ? N(st.amount).toFixed(2) : '0.00',
+        st.note || '',
+      ]))
+    }
+    out.push(csvRow(['Stipends total', stipendSum.toFixed(2),
+      'ADP auto-populates these, so they are deliberately NOT in the upload']))
+    out.push('')
+    out.push(csvRow(['Total pay (this file)', fileTotal.toFixed(2)]))
+    out.push(csvRow(['Plus stipends', stipendSum.toFixed(2)]))
+    out.push(csvRow(['Expected on the office spreadsheet', (fileTotal + stipendSum).toFixed(2),
+      'anything still missing is a hand-keyed line — retro pay, allowances — that was never entered here']))
     out.push('')
 
     // ── who each correction belongs to ──

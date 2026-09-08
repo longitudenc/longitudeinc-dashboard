@@ -13,7 +13,7 @@
 
 import { NextResponse } from 'next/server'
 import {requireCapability} from '@/lib/require-role'
-import { loadStipends, saveStipends, stipendTotal, type Stipend } from '@/lib/adp-stipends'
+import { loadStipends, saveStipends, type Stipend } from '@/lib/adp-stipends'
 import { loadAdpSettings, defaultSettings, ADP_FIELDS, ADP_EARNINGS_CODES } from '@/lib/adp-settings'
 import { readSheet, rowsToObjects, writeSheet } from '@/lib/sheets'
 
