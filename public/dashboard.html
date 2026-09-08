@@ -9548,7 +9548,6 @@ function renderBonus(){
     {k:'stylist', lbl:'Stylist Bonus 💰'},
     {k:'manager', lbl:'Manager Bonus 💼'},
     {k:'am',      lbl:'AM Bonus 🏆'},
-    {k:'slides',  lbl:'Monthly Slides 🖼'},
   ];
   const typeBar = types.map(t=>`
     <button class="bonus-subtab ${S_bonusType===t.k?'active':''}"
@@ -9609,9 +9608,9 @@ function renderBonus(){
   container.innerHTML = `
     <div style="margin-bottom:.25rem;">
       <div class="bonus-subtabs">${typeBar}</div>
-      ${bonusTypeHasBars() ? `<div class="bonus-subtabs" style="margin-top:4px;">${viewBar}</div>
+      <div class="bonus-subtabs" style="margin-top:4px;">${viewBar}</div>
       ${periodBar}
-      ${salonFilterBar}` : ''}
+      ${salonFilterBar}
     </div>
     <div id="bonus-content" style="margin-top:1rem;"></div>`;
 
@@ -9624,10 +9623,6 @@ function setBonusType(t){
   renderBonus();
 }
 
-// The slide export has no view or period bar of its own -- it carries its own
-// month picker, because the month that goes on a slide is the one that closed,
-// not whatever the table was last left on.
-function bonusTypeHasBars(){ return S_bonusType !== 'slides'; }
 
 function setBonusView(v){
   S_bonusView = v;
@@ -9709,6 +9704,41 @@ function buildSlideData(periodKey){
   const over100 = stys.filter(function(e){ return payablePayout(e, periodKey) > 100; }).length;
   const penalties = stys.filter(function(e){ return String(e.prodPenalty)==='true' || e.prodPenalty===true; }).length;
 
+  // WHAT THE PENALTIES COST. "79 product penalties" is a statistic; the dollars
+  // they removed is a lever. A penalised person forfeits a quarter of what they
+  // had earned, so the gap between what the payout would have been and what it
+  // was IS the cost of the product miss -- and it is usually larger than
+  // anything else on the slide.
+  const penalised = stys.filter(function(e){ return String(e.prodPenalty)==='true' || e.prodPenalty===true; });
+  const penaltyCost = penalised.reduce(function(t,e){
+    const pay = payablePayout(e, periodKey);
+    // payout is already net of the penalty; a quarter off means the gross was
+    // pay/0.75, so the quarter lost is a third of what they were left with.
+    return t + (pay > 0 ? pay/3 : 0);
+  }, 0);
+
+  // Where this month sits in its own history, on the one number the slide leads
+  // with. A percentage means nothing until you know whether it is normal.
+  const hist = S_bonusPeriods.map(function(p){
+    const es = (p.employees||[]).filter(isStylist);
+    const pot = es.reduce(sumPotential, 0);
+    const pay = es.reduce(function(t,e){ return t + payablePayout(e, p.periodKey); }, 0);
+    return { key: p.periodKey, pct: pot ? pay/pot*100 : null };
+  }).filter(function(h){ return h.pct !== null; });
+  const thisPct = totPot ? totPay/totPot*100 : 0;
+  const others = hist.filter(function(h){ return h.key !== periodKey; });
+  const avg = others.length ? others.reduce(function(t,h){ return t+h.pct; },0)/others.length : 0;
+  const better = others.filter(function(h){ return h.pct > thisPct; }).length;
+  const rank = better + 1;
+  const context = others.length
+    ? thisPct.toFixed(1) + '% against a ' + avg.toFixed(1) + '% average over '
+      + others.length + ' other months — ' + (rank === 1 ? 'the best of them'
+        : rank === hist.length ? 'the lowest on record' : rank + 'th of ' + hist.length)
+    : '';
+
+  // Salons where nobody earned anything, named. "17 of 18" invites the question.
+  const zeroSalons = Object.keys(bySalon).filter(function(sn){ return bySalon[sn].earners === 0; });
+
   const stylist = ranked.length ? [
     'Highest Salon % of Potential ' + ranked[0].sn + ' @ ' + ranked[0].pct.toFixed(1) + '%!',
     'Highest individual payout was ' + slideMoney0(top ? payablePayout(top, periodKey) : 0),
@@ -9717,6 +9747,12 @@ function buildSlideData(periodKey){
     over100 + ' ' + (over100===1?'person':'people') + ' over $100',
     penalties + ' product penalties and only ' + (totPot? (totPay/totPot*100).toFixed(1) : '0.0') + '% of potential earned',
   ] : [];
+  stylist._extra = {
+    context: context,
+    penaltyCost: penaltyCost,
+    penalised: penalised.length,
+    zeroSalons: zeroSalons,
+  };
 
   // ── manager ──
   const built = computeManagerBonuses(allActiveSalons(), periodKey);
@@ -9759,6 +9795,33 @@ function buildSlideData(periodKey){
   return { periodKey: periodKey, stylist: stylist, manager: manager };
 }
 
+// Its own page, because the deck is a monthly job of its own and the sub-tab
+// it briefly lived on belongs to a navigation that is being retired. Company
+// scope always: a slide about "17 of 18 salons" cannot be built from one area
+// manager's four.
+function showBonusSlides(){
+  _route('#/slides');
+  clearActive();
+  const pg = document.getElementById('page-hub');
+  if(pg) pg.classList.add('active');
+  const mainEl = document.querySelector('.content');
+  if(mainEl) mainEl.scrollTop = 0;
+  if(pg){
+    pg.innerHTML = '<div class="page-header"><h2>Monthly bonus slides</h2>'
+      + '<div class="sub">The two slides, built from the figures on this site rather than retyped off them</div></div>'
+      + '<div id="bonus-slides"><div class="no-data" style="padding:14px;">Loading&hellip;</div></div>';
+  }
+  // The bonus periods and disciplinary points both have to be in hand: points
+  // decide who is paid at all, so rendering before they land would overstate
+  // every total on the slide.
+  if(!S_bonusPeriods || !S_bonusPeriods.length){
+    const h = document.getElementById('bonus-slides');
+    if(h) h.innerHTML = '<div class="no-data" style="padding:14px;">Bonus data has not loaded yet. Open Pay &rarr; Bonuses once, then come back.</div>';
+    return;
+  }
+  loadDiscPoints(function(){ renderBonusSlides(); });
+}
+
 function renderBonusSlides(){
   const host = document.getElementById('bonus-slides'); if(!host) return;
   const periods = S_bonusPeriods.map(function(p){ return p.periodKey; });
@@ -9788,6 +9851,18 @@ function renderBonusSlides(){
       + '</div>';
   };
 
+  const sx = d.stylist._extra || {};
+  const stylNote = [
+    sx.context ? sx.context + '.' : '',
+    sx.penaltyCost > 0.5
+      ? 'Product penalties took roughly ' + slideMoney0(sx.penaltyCost) + ' off the payout — a quarter each from '
+        + sx.penalised + ' ' + (sx.penalised===1?'person':'people') + '. It is the biggest single lever on this slide.'
+      : '',
+    (sx.zeroSalons && sx.zeroSalons.length)
+      ? 'Nobody earned at ' + sx.zeroSalons.map(function(sn){ return salonDisplay(sn); }).join(', ') + '.'
+      : '',
+  ].filter(Boolean).join(' ');
+
   const x = d.manager._extra;
   const mgrNote = x
     ? 'All-in across every salon it is ' + x.allIn + '%; ' + x.earners + ' of ' + x.total + ' earned anything'
@@ -9797,10 +9872,11 @@ function renderBonusSlides(){
   host.innerHTML = '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">'
       + '<select class="ff-select" style="width:auto;font-size:13px;padding:7px 10px;" onchange="setSlidePeriod(this.value)">' + opts + '</select>'
       + '<span style="font-size:11.5px;color:var(--text-muted);">Built from the same figures as the Bonus tab &mdash; '
-      + 'termed staff and anyone on four or more points are zeroed here exactly as they are there.</span>'
+      + 'termed staff and anyone on four or more points are zeroed here exactly as they are there. '
+      + 'The grey line under each slide is context for whoever is presenting; Copy takes the bullets only.</span>'
       + '<span id="slide-msg" style="font-size:12px;color:var(--text-muted);"></span></div>'
     + '<div class="bslide-wrap">'
-    + slide(S_slidePeriod + ' Stylist Bonus', d.stylist, 'slide-styl', '')
+    + slide(S_slidePeriod + ' Stylist Bonus', d.stylist, 'slide-styl', stylNote)
     + slide(S_slidePeriod + ' Manager Bonus', d.manager, 'slide-mgr', mgrNote)
     + '</div>';
 }
@@ -9822,11 +9898,6 @@ function copySlide(id){
 function renderBonusContent(){
   const el = document.getElementById('bonus-content');
   if(!el) return;
-  if(S_bonusType==='slides'){
-    el.innerHTML = '<div id="bonus-slides"></div>';
-    renderBonusSlides();
-    return;
-  }
   if(S_bonusType==='stylist'){
     if(S_bonusView==='month')  el.innerHTML = buildBonusMonth();
     else if(S_bonusView==='ytd')   el.innerHTML = buildBonusYTD();
@@ -11138,6 +11209,7 @@ function applyRoute(){
       case 'admin':     switchToAdmin(); break;
       case 'reviews':   showGoogleReviews(); break;
       case 'activity':  showFormActivity(); break;
+      case 'slides':    showBonusSlides(); break;
       case 'supplies':  showSupplyCatalog(); break;
       case 'request':   if(seg[1]) openRequestDeepLink(seg[1]); break;
       case 'event':     if(seg[1]) openEventDetail(seg[1]); break;
@@ -11247,6 +11319,8 @@ const HUB_GROUPS = {
     cards: [
       { t:'Bonuses', d:'Stylist, manager and area manager bonus detail.',
         show:_navPerfUser, dest:{ company:_coGo('bonus'), am:_amGo('bonus'), salon:_salonGo('bonuses') }, capCompany:'view.company' },
+      { t:'Monthly slides', d:'The two bonus slides for a closed month, ready to paste into the deck.',
+        cap:'view.company', go:function(){ showBonusSlides(); } },
     ],
   },
   people: {
