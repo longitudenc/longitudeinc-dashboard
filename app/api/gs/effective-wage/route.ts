@@ -12,6 +12,14 @@
 // would put five days of hours against seven days of incentive, so a week is
 // either in or it is out, and the response names the weeks it used.
 //
+// A WEEKLY SERIES comes back alongside the monthly one, summed by the salon
+// each person is homed at, so a trend line can be drawn for the company or for
+// one salon without shipping every person's week to the browser. The monthly
+// bonus is spread across that month's weeks by floor hours -- the same rule
+// that splits it across a partial month, applied one level finer. It makes the
+// bonus component of a weekly line smoother than reality: the money arrives
+// once a month, and the chart says so.
+//
 // THE DENOMINATOR IS FLOOR HOURS ONLY. Not hours worked, not hours paid.
 // Training, admin, reception, closing, vacation, holiday and sick time are all
 // paid at base wage and earn no tips and no incentives, so leaving them in
@@ -89,6 +97,15 @@ function monthSpan(a: string, b: string): string[] {
   return out
 }
 
+/** One payroll row, kept so the weekly series can be built after each person's
+ *  home salon is known -- a floater's weeks belong to where they are homed, so
+ *  the chart and the tables cannot disagree. */
+interface Rec {
+  gid: string; weekEnd: string; monthKey: string
+  floor: number; base: number; productivity: number
+  product: number; newReturn: number; tips: number
+}
+
 interface Bucket {
   floorHours: number; nonFloorHours: number
   floorBasePay: number; productivity: number; product: number; newReturn: number
@@ -161,6 +178,7 @@ export async function GET(req: Request) {
       lastWage: number; lastWeek: string
     }
     const by = new Map<string, Acc>()
+    const recs: Rec[] = []
     const blank = (gid: string, name: string): Acc => ({
       globalId: gid, name, salons: new Set(), weeks: new Set(),
       total: emptyBucket(),
@@ -197,6 +215,16 @@ export async function GET(req: Request) {
         if (floor > 0) t.weeks.add(S(r.weekEnd))
         for (const k of NON_FLOOR) t.nonFloorHours += N((r as any)[k])
       }
+      if (mk !== null) {
+        recs.push({
+          gid, weekEnd: S(r.weekEnd), monthKey: mk, floor,
+          base: floor * wage,
+          productivity: N(r.productivityIncentive),
+          product: N(r.productIncentive),
+          newReturn: N(r.newReturnIncentive),
+          tips: N(r.totalTips),
+        })
+      }
       const sn = S(r.salonNum)
       if (sn) {
         a.salons.add(sn)
@@ -206,6 +234,10 @@ export async function GET(req: Request) {
       const wk = S(r.weekEnd)
       if (wage > 0 && wk >= a.lastWeek) { a.lastWage = wage; a.lastWeek = wk }
     }
+
+    /** Bonus actually awarded to a person for a month, after the partial-month
+     *  split. The weekly series spreads each of these over that month's weeks. */
+    const awards: { gid: string; monthKey: string; amount: number }[] = []
 
     // Whole-month floor hours, so a partial month can take its share of a
     // monthly bonus rather than all of it or none of it.
@@ -242,6 +274,7 @@ export async function GET(req: Request) {
         if (share <= 0) continue
         a.total.bonus += amount * share
         a.months[mi].bonus += amount * share
+        awards.push({ gid, monthKey: mk, amount: amount * share })
       }
     } catch { /* no bonus tab: the breakdown simply has no bonus line */ }
 
@@ -290,6 +323,60 @@ export async function GET(req: Request) {
     const totFloor = people.reduce((s, p) => s + p.floorHours, 0)
     const totEarned = people.reduce((s, p) => s + p.gross, 0)
 
+    // ── the weekly series, by home salon ──────────────────────────────────
+    // Built after `people`, because a week belongs to the salon its owner is
+    // homed at rather than the salon the row was filed under. Doing it the
+    // other way would put a floater's Tuesday in one line of the chart and the
+    // same Tuesday in a different row of the table.
+    const homeOf = new Map(people.map(p => [p.globalId, p.homeSalon]))
+    type Cell = {
+      floorHours: number; base: number; productivity: number
+      product: number; newReturn: number; bonus: number; tips: number
+    }
+    const cell = (): Cell => ({ floorHours: 0, base: 0, productivity: 0, product: 0, newReturn: 0, bonus: 0, tips: 0 })
+    const weekly = new Map<string, Map<string, Cell>>()
+    const at = (wk: string, sn: string) => {
+      let row = weekly.get(wk)
+      if (!row) weekly.set(wk, row = new Map<string, Cell>())
+      let c = row.get(sn)
+      if (!c) row.set(sn, c = cell())
+      return c
+    }
+    for (const rc of recs) {
+      const c = at(rc.weekEnd, homeOf.get(rc.gid) || '')
+      c.floorHours += rc.floor; c.base += rc.base; c.productivity += rc.productivity
+      c.product += rc.product; c.newReturn += rc.newReturn; c.tips += rc.tips
+    }
+
+    // Each award over the weeks of its month, by floor hours. A month where
+    // somebody logged no floor time cannot receive an award in the first place,
+    // so there is no zero-hours case to divide by.
+    const perPersonMonth = new Map<string, Rec[]>()
+    for (const rc of recs) {
+      const k = rc.gid + '|' + rc.monthKey
+      const list = perPersonMonth.get(k)
+      if (list) list.push(rc); else perPersonMonth.set(k, [rc])
+    }
+    for (const aw of awards) {
+      const list = perPersonMonth.get(aw.gid + '|' + aw.monthKey) || []
+      const tot = list.reduce((t, rc) => t + rc.floor, 0)
+      if (tot <= 0) continue
+      const sn = homeOf.get(aw.gid) || ''
+      for (const rc of list) at(rc.weekEnd, sn).bonus += aw.amount * (rc.floor / tot)
+    }
+
+    const weeklySeries = [...weekly.keys()].sort().map(wk => {
+      const row = weekly.get(wk)!
+      const bySalon: Record<string, any> = {}
+      for (const [sn, c] of row) {
+        bySalon[sn] = {
+          floorHours: r2(c.floorHours), base: r2(c.base), productivity: r2(c.productivity),
+          product: r2(c.product), newReturn: r2(c.newReturn), bonus: r2(c.bonus), tips: r2(c.tips),
+        }
+      }
+      return { weekEnd: wk, bySalon }
+    })
+
     const label = (k: string) => MON_LABEL[Number(k.slice(5, 7)) - 1] + ' ' + k.slice(2, 4)
     const oneYear = start.slice(0, 4) === end.slice(0, 4)
 
@@ -306,6 +393,8 @@ export async function GET(req: Request) {
         full: label(k),
       })),
       weeksInWindow: [...new Set(rows.map(r => S(r.weekEnd)).filter(Boolean))].sort(),
+      // Week by week, summed by home salon, for the trend lines.
+      weekly: weeklySeries,
       people,
       scopeAverage: totFloor > 0 ? r2(totEarned / totFloor) : null,
       scopeFloorHours: r2(totFloor),
