@@ -22,13 +22,32 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {requireCapability} from '@/lib/require-role'
 import { runPayrollBuild } from '@/lib/adp-run'
-import { readSheet, rowsToObjects, upsertSheet } from '@/lib/sheets'
+import { readSheet, rowsToObjects, upsertSheet, writeSheet } from '@/lib/sheets'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 const TAB = 'ADP_FINALIZED'
+
+// FINALIZE-SALONS-v1.
+//
+// The weekly row answers "how much". This answers "where", which is the
+// question every reconciliation actually asks: a week that differs from the
+// office spreadsheet by $0.70 is a conversation until you can say which salon
+// and which line, and then it is a lookup.
+//
+// The build already computes all of this -- runPayrollBuild returns
+// salonTotals -- and finalize was discarding it, so answering "which salon"
+// about a past week meant a rebuild. A rebuild is ~20 live SD3 calls AND can
+// return different numbers, because SD3 settles for days after a week closes.
+// A week you have agreed to should keep enough detail to defend itself.
+const SALON_TAB = 'ADP_FINALIZED_SALONS'
+const SALON_COLUMNS = [
+  'weekEnd', 'salonNum', 'employees', 'hours',
+  'grossPay', 'tips', 'totalPay',
+  'overtimePay', 'otTrueUp', 'sixDayDelta', 'breakMinutes',
+] as const
 const COLUMNS = [
   'weekEnd', 'weekStart', 'payDate',
   'employees', 'grossPay', 'tips', 'totalPay',
@@ -98,6 +117,40 @@ export async function POST(req: NextRequest) {
     }
 
     await upsertSheet(TAB, [...COLUMNS], ['weekEnd'], [row])
+
+    // Per salon, written whole for this week and leaving every other week
+    // alone. Not upsertSheet: that keys on a single column and this is many
+    // rows per week, so a re-finalize has to replace the set rather than merge
+    // into it -- otherwise a salon that dropped out of the build would linger.
+    try {
+      const salonRows = (r.salonTotals || []).map(t => ({
+        weekEnd: r.weekEnd,
+        salonNum: t.salonNum,
+        employees: String(t.employees),
+        hours: N(t.hours).toFixed(2),
+        grossPay: N(t.grossPay).toFixed(2),
+        tips: N(t.tips).toFixed(2),
+        totalPay: N(t.totalPay).toFixed(2),
+        overtimePay: N(t.overtimePay).toFixed(2),
+        otTrueUp: N(t.otTrueUp).toFixed(2),
+        sixDayDelta: N(t.sixDayDelta).toFixed(2),
+        breakMinutes: N(t.breakMinutes).toFixed(2),
+      }))
+      let kept: Record<string, any>[] = []
+      try {
+        kept = rowsToObjects((await readSheet(SALON_TAB, undefined, { fresh: true })) || [])
+          .filter(x => S(x.weekEnd) !== r.weekEnd)
+      } catch { kept = [] }
+      await writeSheet(SALON_TAB, [
+        [...SALON_COLUMNS],
+        ...[...kept, ...salonRows].map((x: any) => SALON_COLUMNS.map(c => String(x[c] ?? ''))),
+      ])
+    } catch (e) {
+      // The week IS finalized -- that write already succeeded. Losing the
+      // per-salon detail is a worse report, not a worse record, so it must not
+      // turn an agreed week into a failed request.
+      console.error('[payroll/finalize] per-salon detail failed:', e)
+    }
     return NextResponse.json({ success: true, record: row })
   } catch (e: any) {
     return NextResponse.json({ success: false, error: String(e?.message || e) }, { status: 500 })
