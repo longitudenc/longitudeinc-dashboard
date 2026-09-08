@@ -38,6 +38,47 @@ const DAILY_FEEDS: { tab: string; label: string; min: number }[] = [
   { tab: 'SD_CHKINOUT',  label: 'Clock in/out',     min: 40 },
 ]
 
+/**
+ * CLOSED-DAY-v1. Was the whole company shut that day?
+ *
+ * Labor Day 2026 turned the nightly run red: nobody worked, so employee-daily,
+ * demand, shifts and clock-in all had zero rows, and a check that asserts
+ * "yesterday has data" cannot tell that from a scrape that died quietly. That
+ * is 14 red runs on this data set -- New Year's, July 4th, Thanksgiving,
+ * Christmas, Easter, Mother's Day, two Labor Days and what look like three
+ * snow days -- each one an email that trains you to ignore the next one.
+ *
+ * The tell is in the data rather than in a holiday list nobody would maintain:
+ * SD_DAILY still gets its row per salon on a closed day, reporting zero. So
+ * "every salon reported, and every one of them reported nothing" means closed.
+ *
+ * BOTH customers and floor hours must be zero. Staff on the floor with no
+ * customers is a different thing entirely and should still fail loudly.
+ *
+ * SD_DAILY itself is never excused. If that is missing the scrape really did
+ * fail, and this returns to being the check it was.
+ */
+async function closedDay(date: string): Promise<{ closed: boolean; salons: number; customers: number; floorHours: number }> {
+  const raw = ((await readSheet('SD_DAILY', undefined, { fresh: true })) || []) as any[][]
+  const header = (raw[0] || []).map((h: any) => String(h ?? '').trim())
+  const iDate = header.indexOf('date')
+  const iCust = header.indexOf('customerCount')
+  const iHrs = header.indexOf('floorHours')
+  if (iDate < 0 || iCust < 0 || iHrs < 0) return { closed: false, salons: 0, customers: 0, floorHours: 0 }
+
+  let salons = 0, customers = 0, floorHours = 0
+  for (const r of raw.slice(1)) {
+    if (String(r?.[iDate] ?? '').slice(0, 10) !== date) continue
+    salons++
+    customers += Number(r[iCust]) || 0
+    floorHours += Number(r[iHrs]) || 0
+  }
+  // The salon-daily minimum is the same one the feed list uses: a closed day
+  // still has to prove every salon reported before its silence is excused.
+  const min = DAILY_FEEDS.find(f => f.tab === 'SD_DAILY')?.min ?? 10
+  return { closed: salons >= min && customers === 0 && floorHours === 0, salons, customers, floorHours }
+}
+
 /** Yesterday in Eastern time — the day the nightly scrape targets. */
 function yesterdayET(): string {
   const now = new Date()
@@ -85,7 +126,10 @@ export async function GET(request: Request) {
     }
   }))
 
-  const missing = feeds.filter(f => !f.ok)
+  const shut = await closedDay(date)
+  // On a closed day only SD_DAILY has to be there. The rest are empty because
+  // there was nothing to record, which is the correct state, not a fault.
+  const missing = feeds.filter(f => !f.ok && !(shut.closed && f.tab !== 'SD_DAILY'))
   const ok = missing.length === 0
   // Surfaced in the response so a broken alerting path is visible rather than
   // silent. An alert nobody receives is indistinguishable from no problem.
@@ -110,7 +154,17 @@ export async function GET(request: Request) {
     checked: feeds.length,
     alert,
     missing: missing.map(f => f.tab),
-    feeds: feeds.map(f => ({ tab: f.tab, label: f.label, rows: f.rows, ok: f.ok })),
+    // Reported whether or not it changed the outcome, so a green run on a
+    // closed day says WHY it is green rather than just being green.
+    closed: shut.closed,
+    closedDetail: shut.closed
+      ? `all ${shut.salons} salons reported ${date} with no customers and no floor hours`
+      : undefined,
+    feeds: feeds.map(f => ({
+      tab: f.tab, label: f.label, rows: f.rows,
+      ok: f.ok || (shut.closed && f.tab !== 'SD_DAILY'),
+      empty: !f.ok && shut.closed && f.tab !== 'SD_DAILY' ? 'closed day' : undefined,
+    })),
     ...(ok ? {} : { error: `No data for ${date} in: ${missing.map(f => f.tab).join(', ')}` }),
   })
 }
