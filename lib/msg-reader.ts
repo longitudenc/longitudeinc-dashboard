@@ -27,6 +27,18 @@ const FREESECT = 0xffffffff
 
 export interface MsgEntry { name: string; size: number; read: () => Buffer }
 
+/** A file that came with the message. */
+export interface MsgAttachment {
+  fileName: string
+  mimeType: string
+  /** The cid: the HTML body refers to it by, when it is an inline image. */
+  contentId: string
+  /** Where it sat in the message, for ordering when there are no cids. */
+  index: number
+  size: number
+  data: Buffer
+}
+
 /** True if these bytes are a compound file at all. */
 export function isMsg(buf: Buffer): boolean {
   return buf.length > 512 && buf.subarray(0, 8).equals(SIG)
@@ -34,6 +46,7 @@ export function isMsg(buf: Buffer): boolean {
 
 interface Dir {
   name: string; type: number; start: number; size: number
+  child: number; left: number; right: number
 }
 
 function parseCfb(buf: Buffer) {
@@ -127,6 +140,9 @@ function parseCfb(buf: Buffer) {
     dirs.push({
       name,
       type: dirBytes.readUInt8(off + 66),
+      left: dirBytes.readUInt32LE(off + 68),
+      right: dirBytes.readUInt32LE(off + 72),
+      child: dirBytes.readUInt32LE(off + 76),
       start: dirBytes.readUInt32LE(off + 116),
       size: dirBytes.readUInt32LE(off + 120),
     })
@@ -134,17 +150,41 @@ function parseCfb(buf: Buffer) {
   const root = dirs[0]
   const miniStream = root ? readChain(root.start, root.size) : Buffer.alloc(0)
 
-  const entries: MsgEntry[] = dirs
-    .filter(e => e.type === 2 && e.name)      // 2 = stream
-    .map(e => ({
-      name: e.name,
-      size: e.size,
-      read: () => e.size < miniCutoff
-        ? readChain(e.start, e.size, true, miniStream)
-        : readChain(e.start, e.size),
-    }))
+  const streamOf = (e: Dir): MsgEntry => ({
+    name: e.name,
+    size: e.size,
+    read: () => e.size < miniCutoff
+      ? readChain(e.start, e.size, true, miniStream)
+      : readChain(e.start, e.size),
+  })
 
-  return entries
+  /**
+   * The children of one storage.
+   *
+   * SIBLINGS ARE A RED-BLACK TREE, not a list — left and right on each entry,
+   * with the storage pointing only at the middle one. Reading the directory
+   * flat works right up until there are attachments, because every attachment
+   * names its streams identically (37010102 is the bytes of whichever one you
+   * are inside) and a flat pass collapses fourteen photos into one. Walking the
+   * tree per storage is what keeps them apart.
+   */
+  const childrenOf = (idx: number): Dir[] => {
+    const root = dirs[idx]
+    if (!root || root.child === FREESECT) return []
+    const out: Dir[] = []
+    const seen = new Set<number>()
+    const walk = (i: number) => {
+      if (i === FREESECT || i >= dirs.length || seen.has(i)) return
+      seen.add(i)
+      walk(dirs[i].left)
+      out.push(dirs[i])
+      walk(dirs[i].right)
+    }
+    walk(root.child)
+    return out
+  }
+
+  return { dirs, streamOf, childrenOf }
 }
 
 /** Decode a MAPI property stream by the type in its name. */
@@ -159,6 +199,7 @@ export interface MsgContent {
   subject: string
   html: string
   text: string
+  attachments: MsgAttachment[]
   /** Every stream found, for when a message does not look like the others. */
   streams: string[]
 }
@@ -171,21 +212,59 @@ export interface MsgContent {
  * markup, and the text version flattens it into a list with no categories.
  */
 export function readMsg(buf: Buffer): MsgContent {
-  const entries = parseCfb(buf)
-  const byName = new Map(entries.map(e => [e.name.toUpperCase(), e]))
-  const get = (...ids: string[]) => {
+  const { dirs, streamOf, childrenOf } = parseCfb(buf)
+
+  /** Read a property out of one storage's own children. */
+  const propFrom = (kids: Dir[]) => (...ids: string[]) => {
     for (const id of ids) {
-      const e = byName.get(`__SUBSTG1.0_${id}`.toUpperCase())
+      const want = `__substg1.0_${id}`.toUpperCase()
+      const e = kids.find(k => k.type === 2 && k.name.toUpperCase() === want)
       if (e && e.size) {
-        try { return decode(id, e.read()) } catch { /* try the next */ }
+        try { return decode(id, streamOf(e).read()) } catch { /* try the next */ }
       }
     }
     return ''
   }
+  const rawFrom = (kids: Dir[], ...ids: string[]): Buffer => {
+    for (const id of ids) {
+      const want = `__substg1.0_${id}`.toUpperCase()
+      const e = kids.find(k => k.type === 2 && k.name.toUpperCase() === want)
+      if (e && e.size) {
+        try { return streamOf(e).read() } catch { /* try the next */ }
+      }
+    }
+    return Buffer.alloc(0)
+  }
+
+  const top = childrenOf(0)
+  const get = propFrom(top)
+
+  // ── attachments ──
+  const attachments: MsgAttachment[] = []
+  const attachDirs = top.filter(e => e.type === 1 && /^__attach_version1\.0_#/i.test(e.name))
+  attachDirs.forEach((a, n) => {
+    const kids = childrenOf(dirs.indexOf(a))
+    const p = propFrom(kids)
+    const data = rawFrom(kids, '37010102')
+    if (!data.length) return
+    attachments.push({
+      // Long filename first: the short one is the 8.3 truncation, so a photo
+      // called "9689 front desk.jpg" arrives as "9689FR~1.JPG" without it.
+      fileName: (p('3707001F', '3707001E') || p('3704001F', '3704001E') || `attachment-${n + 1}`)
+        .replace(/ +$/, '').trim(),
+      mimeType: (p('370E001F', '370E001E') || '').replace(/ +$/, '').trim(),
+      contentId: (p('3712001F', '3712001E') || '').replace(/ +$/, '').trim().replace(/^<|>$/g, ''),
+      index: n,
+      size: data.length,
+      data,
+    })
+  })
+
   return {
-    subject: get('0037001F', '0037001E').trim(),
+    subject: get('0037001F', '0037001E').replace(/ +$/, '').trim(),
     html: get('10130102', '1013001E', '1013001F'),
     text: get('1000001F', '1000001E'),
-    streams: entries.map(e => e.name),
+    attachments,
+    streams: top.map(e => e.name),
   }
 }

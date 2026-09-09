@@ -16937,7 +16937,7 @@ function facSend(file){
   const fd = new FormData(); fd.append('file', file);
   fetch('/api/facility/ingest', { method:'POST', body: fd }).then(r=>r.json()).then(function(res){
     if(!res || !res.success) throw new Error((res && res.error) || 'could not read that file');
-    facShowProposal(res.parsed, res.source || file.name);
+    facShowProposal(res.parsed, res.source || file.name, res);
   }).catch(function(e){ facMsg((e && e.message) || 'could not read that file'); });
 }
 function facPaste(){
@@ -16954,9 +16954,13 @@ function facPaste(){
   }).catch(function(e){ facMsg((e && e.message) || 'could not read that'); });
 }
 
-function facShowProposal(parsed, source){
+function facShowProposal(parsed, source, extra){
+  extra = extra || {};
   facMsg('');
-  S_facProposal = { p: parsed, source: source, due: '', keep: parsed.items.map(function(){ return true; }) };
+  S_facProposal = { p: parsed, source: source, due: '',
+    keep: parsed.items.map(function(){ return true; }),
+    photos: extra.photos || [], msgPathname: extra.msgPathname || '',
+    subject: extra.subject || '', seen: extra.attachmentsSeen || 0 };
   // A review email carries no deadline — the rule is "must be addressed", not
   // "by the 14th" — so the date is ours to set and starts blank rather than
   // inventing one that would then be quoted back as if corporate had said it.
@@ -16987,12 +16991,16 @@ function facSaveProposal(){
   facMsg('Saving…');
   fetch('/api/facility', {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ kind:'items', items: items }),
+    body: JSON.stringify({ kind:'items', items: items,
+      review: { salonNum: p.salonNum, salonName: p.salonName, reviewDate: p.reviewDate,
+        subject: P.subject, sourceFile: P.source, msgPathname: P.msgPathname },
+      photos: P.photos }),
   }).then(r=>r.json()).then(function(res){
     if(!res.success) throw new Error(res.error || 'could not save');
     S_facProposal = null;
     facMsg(res.added + ' item' + (res.added===1?'':'s') + ' added'
-      + (res.skipped ? ' · ' + res.skipped + ' already on the list' : ''));
+      + (res.skipped ? ' · ' + res.skipped + ' already on the list' : '')
+      + (res.photos ? ' · ' + res.photos + ' photos kept' : ''));
     loadFacility();
   }).catch(function(e){ facMsg((e && e.message) || 'could not save'); });
 }
@@ -17007,6 +17015,33 @@ function facUpdate(itemId, patch){
     loadFacility();
   }).catch(function(e){ alert((e && e.message) || 'could not save'); });
 }
+function facAssign(photoId, itemId){
+  fetch('/api/facility', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ kind:'photo', photoId: photoId, itemId: itemId }),
+  }).then(r=>r.json()).then(function(res){
+    if(!res.success) throw new Error(res.error || 'could not move it');
+    loadFacility();
+  }).catch(function(e){ alert((e && e.message) || 'could not move it'); });
+}
+
+// A photo of a peeling front desk is unreadable at 90px, and that is the size
+// that fits beside an item. Clicking opens it whole.
+function facZoom(photoId, name){
+  const wrap = document.createElement('div');
+  wrap.setAttribute('style', 'position:fixed;inset:0;z-index:9600;background:rgba(15,25,20,.82);'
+    + 'display:flex;align-items:center;justify-content:center;padding:20px;cursor:zoom-out;');
+  wrap.innerHTML = '<figure style="margin:0;max-width:100%;max-height:100%;text-align:center;">'
+    + '<img src="/api/facility/file?photoId=' + encodeURIComponent(photoId) + '" '
+    + 'style="max-width:100%;max-height:88vh;border-radius:8px;box-shadow:0 12px 44px rgba(0,0,0,.5);">'
+    + '<figcaption style="color:#fff;font-size:12px;margin-top:8px;">' + hEsc(name||'') + '</figcaption></figure>';
+  wrap.addEventListener('click', function(){ wrap.remove(); });
+  document.addEventListener('keydown', function esc(e){
+    if(e.key === 'Escape'){ wrap.remove(); document.removeEventListener('keydown', esc); }
+  });
+  document.body.appendChild(wrap);
+}
+
 function facComment(itemId){
   const box = document.getElementById('fac-c-' + itemId);
   const txt = box ? box.value.trim() : '';
@@ -17079,11 +17114,106 @@ function facPaint_proposal(){
           + p.notes.map(function(n){ return '<div style="margin:3px 0;">' + hEsc(n) + '</div>'; }).join('')
           + '</div></details>'
         : '')
+    + (P.photos.length
+        ? '<div style="margin-top:12px;">'
+          + '<div style="font-size:12.5px;font-weight:700;margin-bottom:4px;">'
+            + P.photos.length + ' photo' + (P.photos.length===1?'':'s') + ' kept with this review</div>'
+          + '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:8px;">'
+            + 'They arrive attached to the review, not to an item &mdash; the email does not say which '
+            + 'photo is the front desk, and the filenames are camera serials. Assign them once they are '
+            + 'in, from the item itself.'
+            + (P.seen > P.photos.length
+                ? ' ' + (P.seen - P.photos.length) + ' small attachment'
+                  + ((P.seen - P.photos.length)===1?' was':'s were') + ' skipped as message furniture.'
+                : '')
+          + '</div>'
+          + '<div style="display:flex;gap:6px;flex-wrap:wrap;">'
+          + P.photos.map(function(ph){
+              return '<div style="font-size:11px;color:var(--text-muted);border:1px solid var(--border);'
+                + 'border-radius:6px;padding:3px 8px;">' + hEsc(ph.fileName)
+                + ' <span style="opacity:.7;">' + Math.round(ph.size/1024) + ' KB</span></div>';
+            }).join('')
+          + '</div></div>'
+        : '')
     + '<div style="margin-top:12px;display:flex;gap:10px;align-items:center;">'
       + '<button class="btn btn-primary btn-sm" onclick="facSaveProposal()">Add to the tracker</button>'
       + '<span style="font-size:12px;color:var(--text-muted);">Loading the same review twice will not duplicate '
         + 'it &mdash; a component already on the list keeps its status and its comments.</span>'
     + '</div></div>';
+}
+
+/** The photos on this item, and a way to pull one over from the review. */
+function facPhotoStrip(it){
+  const all = (S_facData && S_facData.photos) || [];
+  const mine = all.filter(function(p){ return p.itemId === it.itemId; });
+  // Only the photos from THIS review. A photo carries the review it came in,
+  // not a date, so the date comes back through the review record — otherwise a
+  // salon with two visits on file offers July's photos against January's items.
+  const revDate = {};
+  ((S_facData && S_facData.reviews) || []).forEach(function(r){ revDate[r.reviewId] = r.reviewDate; });
+  const pool = all.filter(function(p){
+    if(p.itemId || p.salonNum !== it.salonNum) return false;
+    const d = revDate[p.reviewId];
+    return !d || !it.reviewDate || d === it.reviewDate;
+  });
+  const thumb = function(p, assigned){
+    return '<div style="position:relative;">'
+      + '<img src="/api/facility/file?photoId=' + encodeURIComponent(p.photoId) + '" '
+        + 'onclick="facZoom(' + "'" + hEsc(p.photoId) + "','" + hEsc(p.fileName).replace(/'/g,'') + "'" + ')" '
+        + 'title="' + hEsc(p.fileName) + '" loading="lazy" '
+        + 'style="width:92px;height:92px;object-fit:cover;border-radius:8px;border:1px solid var(--border);cursor:zoom-in;background:#f4f4f2;">'
+      + '<button title="' + (assigned ? 'Put it back with the review' : 'Attach it to this item') + '" '
+        + 'onclick="facAssign(' + "'" + hEsc(p.photoId) + "','" + (assigned ? '' : hEsc(it.itemId)) + "'" + ')" '
+        + 'style="position:absolute;top:3px;right:3px;border:none;border-radius:5px;cursor:pointer;'
+        + 'background:rgba(255,255,255,.92);font-size:11px;font-weight:700;line-height:1;padding:3px 6px;'
+        + 'color:' + (assigned ? '#b3261e' : 'var(--primary-dark)') + ';">' + (assigned ? '×' : '+') + '</button>'
+      + '</div>';
+  };
+  if(!mine.length && !pool.length) return '';
+  return '<div style="margin-bottom:12px;">'
+    + (mine.length
+        ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">'
+          + mine.map(function(p){ return thumb(p, true); }).join('') + '</div>'
+        : '')
+    + (pool.length
+        ? '<details' + (mine.length ? '' : ' open') + '>'
+          + '<summary style="cursor:pointer;font-size:11.5px;color:var(--text-muted);">'
+          + pool.length + ' photo' + (pool.length===1?'':'s') + ' from this review not yet on an item'
+          + ' &mdash; click <b>+</b> to attach one here</summary>'
+          + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">'
+          + pool.map(function(p){ return thumb(p, false); }).join('') + '</div></details>'
+        : '')
+    + '</div>';
+}
+
+/** Every review email we hold, newest first. The repository. */
+function facArchive(){
+  const revs = ((S_facData && S_facData.reviews) || []).slice()
+    .filter(function(r){ return !S_facSalon || r.salonNum === S_facSalon; })
+    .sort(function(a,b){ return String(b.reviewDate).localeCompare(String(a.reviewDate)); });
+  if(!revs.length) return '';
+  const td = 'padding:6px 9px;font-size:12.5px;border-top:1px solid var(--border);';
+  return '<details style="margin-top:20px;"><summary style="cursor:pointer;font-weight:700;font-size:12.5px;">'
+    + 'Reviews on file (' + revs.length + ')</summary>'
+    + '<div style="font-size:11.5px;color:var(--text-muted);margin:6px 0 8px;">'
+    + 'Every email dropped in, kept whole with its photos. A review lands about every nine months, and by '
+    + 'the next one the original is the only thing that settles what was actually written.</div>'
+    + '<div style="overflow-x:auto;border:1px solid var(--border);border-radius:10px;">'
+    + '<table style="width:100%;border-collapse:collapse;background:#fff;">'
+    + revs.map(function(r){
+        return '<tr><td style="' + td + 'font-weight:600;">' + hEsc(salonDisplay(r.salonNum)) + '</td>'
+          + '<td style="' + td + '">' + hEsc(r.reviewDate || '—') + '</td>'
+          + '<td style="' + td + 'color:var(--text-muted);">' + r.items + ' items · '
+            + r.critical + ' critical · ' + r.photos + ' photos</td>'
+          + '<td style="' + td + 'color:var(--text-muted);">' + hEsc(r.sourceFile || '') + '</td>'
+          + '<td style="' + td + 'text-align:right;">'
+            + (r.msgPathname
+                ? '<a href="/api/facility/file?reviewId=' + encodeURIComponent(r.reviewId) + '&dl=1" '
+                  + 'style="color:var(--primary);font-weight:600;text-decoration:none;">Download the email</a>'
+                : '<span style="color:var(--text-muted);">not stored</span>')
+          + '</td></tr>';
+      }).join('')
+    + '</table></div></details>';
 }
 
 function paintFacility(){
@@ -17182,6 +17312,7 @@ function paintFacility(){
       if(open){
         body = '<div style="padding:0 14px 14px;border-top:1px solid var(--border);">'
           + '<div style="white-space:pre-wrap;font-size:13px;line-height:1.6;margin:10px 0 12px;">' + hEsc(it.detail) + '</div>'
+          + facPhotoStrip(it)
           + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">'
             + '<select class="ff-select" style="width:auto;font-size:12.5px;padding:5px 8px;" '
               + 'onchange="facUpdate(' + "'" + hEsc(it.itemId) + "'" + ', {status:this.value})">'
@@ -17242,13 +17373,15 @@ function paintFacility(){
     }).join('');
   }
 
-  host.innerHTML = drop + facPaint_proposal() + strip + filters + list
+  host.innerHTML = drop + facPaint_proposal() + strip + filters + list + facArchive()
     + '<div style="font-size:11px;color:var(--text-muted);margin-top:14px;line-height:1.6;">'
     + '<b>Critical brand elements</b> trigger a compliance action on their own; ordinary action items do at five. '
     + 'That is the rule the review emails quote, and the salon cards above apply it to what is still open. '
     + 'A review carries no deadline of its own, so <b>fix by</b> is yours to set. '
     + 'Marking an item <b>fixed</b> is the point to email the photo to GF@greatclips.com for a green flag; '
-    + '<b>verified</b> is when they lift it.</div>';
+    + '<b>verified</b> is when they lift it. '
+    + '<b>Photos</b> arrive attached to the review rather than to an item: nothing in the email says which '
+    + 'photo is the front desk, so pairing them is a judgement and a guess would mislabel evidence.</div>';
 }
 
 // ── Pay trends ────────────────────────────────────────────────────────────

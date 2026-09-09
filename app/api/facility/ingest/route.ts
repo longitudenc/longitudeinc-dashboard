@@ -16,14 +16,61 @@
 // server's job. They are small: this sample is 178 KB, well inside a request.
 
 import { NextResponse } from 'next/server'
+import { put } from '@vercel/blob'
 import { requireCapability } from '@/lib/require-role'
-import { isMsg, readMsg } from '@/lib/msg-reader'
+import { isMsg, readMsg, type MsgAttachment } from '@/lib/msg-reader'
 import { parseFacilityReview } from '@/lib/facility-parse'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 
-const MAX_BYTES = 12 * 1024 * 1024
+// A serverless request body is capped at 4.5 MB by the platform. A review email
+// with a dozen photos runs 3–4 MB, so this sits under the cap to turn an opaque
+// 413 from the edge into a sentence from us.
+const MAX_BYTES = 4 * 1024 * 1024
+
+const IMAGE = /^image\//i
+
+/**
+ * Keep the email and its photos, not just the reading of them.
+ *
+ * A review lands about every nine months. By the next one nobody remembers
+ * whether the sail was replaced or argued about, and the green-flag request
+ * needs the original to quote. The .msg goes in whole; each photo goes in
+ * separately so it can be shown against an item.
+ */
+async function stash(salonNum: string, reviewDate: string, file: Buffer, name: string,
+                     attachments: MsgAttachment[]) {
+  const base = `facility/${salonNum || 'unfiled'}/${reviewDate || 'undated'}/${Date.now().toString(36)}`
+  const safe = (s: string) => String(s || 'file').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 80)
+
+  const saved: any = { msgPathname: '', photos: [] as any[], failed: 0 }
+  try {
+    const b = await put(`${base}/${safe(name || 'review.msg')}`, file, {
+      access: 'private', contentType: 'application/vnd.ms-outlook', addRandomSuffix: false,
+    })
+    saved.msgPathname = b.pathname
+  } catch { saved.failed++ }
+
+  for (const a of attachments) {
+    // Signature logos and other message furniture are not evidence. A real
+    // repair photo off a phone is hundreds of KB; the Outlook logo in this
+    // sample is 5 KB, which is the line.
+    if (!IMAGE.test(a.mimeType || '') && !/\.(jpe?g|png|heic|webp)$/i.test(a.fileName)) continue
+    if (a.size < 20000) continue
+    try {
+      const b = await put(`${base}/${safe(a.fileName)}`, a.data, {
+        access: 'private', contentType: a.mimeType || 'image/jpeg', addRandomSuffix: false,
+      })
+      saved.photos.push({
+        fileName: a.fileName, pathname: b.pathname,
+        contentType: a.mimeType || 'image/jpeg', size: a.size,
+      })
+    } catch { saved.failed++ }
+  }
+  return saved
+}
 
 export async function POST(req: Request) {
   const gate = await requireCapability('edit.facility')
@@ -40,14 +87,27 @@ export async function POST(req: Request) {
       }
       const buf = Buffer.from(await (file as File).arrayBuffer())
       if (buf.length > MAX_BYTES) {
-        return NextResponse.json({ success: false, error: 'file is too large' }, { status: 400 })
+        return NextResponse.json({ success: false, error:
+        'That file is ' + (buf.length / 1048576).toFixed(1) + ' MB and the limit is 4 MB. '
+        + 'A review email with a lot of photos can go over — save the photos out of it and drop them '
+        + 'separately, or paste the body text instead.' }, { status: 400 })
       }
       const name = String((file as File).name || '')
 
       if (isMsg(buf)) {
         const msg = readMsg(buf)
         const parsed = parseFacilityReview({ html: msg.html, text: msg.text, subject: msg.subject })
-        return NextResponse.json({ success: true, parsed, source: name, subject: msg.subject })
+        const kept = await stash(parsed.salonNum, parsed.reviewDate, buf, name, msg.attachments)
+        // Photos come back attached to the REVIEW, never guessed onto items:
+        // in the sample they are ordinary attachments with camera-serial names
+        // and the body carries one cid, for a signature logo. Nothing in the
+        // message says which photo is the front desk.
+        return NextResponse.json({
+          success: true, parsed, source: name, subject: msg.subject,
+          msgPathname: kept.msgPathname, photos: kept.photos,
+          attachmentsSeen: msg.attachments.length,
+          storeFailed: kept.failed,
+        })
       }
       // .eml, .html, .txt: the body is already text. An .eml may be
       // quoted-printable, which turns "=93" into a soft break mid-word, so the

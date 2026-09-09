@@ -196,6 +196,112 @@ export async function addComment(o: {
   return row
 }
 
+// ── the repository: the emails themselves, and their photos ──────────────
+//
+// A facility review lands about every nine months, so the archive is small and
+// the memory of it is not: by the next one nobody remembers whether the sail
+// was replaced or argued about. Keeping the original email and its photos means
+// the evidence outlives the argument, and a green-flag request can quote the
+// review that raised it.
+//
+// PHOTOS ARE ASSIGNED BY HAND, NOT MATCHED. It is tempting to pair them with
+// items automatically, and on this sample it would be wrong: the thirteen
+// repair photos are ordinary attachments, not inline images, and the body
+// carries exactly one cid — a signature logo. Their filenames are camera
+// serials (1000017343.jpg). Nothing in the message says which photo is the
+// front desk. So they attach to the REVIEW on import, and a person moves them
+// onto items, where a guess would have quietly mislabelled evidence.
+export const TAB_REVIEWS = 'FacilityReviews'
+export const REVIEW_COLUMNS = [
+  'reviewId', 'salonNum', 'salonName', 'reviewDate', 'subject', 'sourceFile',
+  'msgPathname', 'items', 'critical', 'photos', 'addedAt', 'addedBy',
+] as const
+
+export const TAB_PHOTOS = 'FacilityPhotos'
+export const PHOTO_COLUMNS = [
+  'photoId', 'reviewId', 'salonNum', 'itemId', 'fileName', 'pathname',
+  'contentType', 'size', 'addedAt', 'addedBy',
+] as const
+
+export interface FacilityReview {
+  reviewId: string; salonNum: string; salonName: string; reviewDate: string
+  subject: string; sourceFile: string; msgPathname: string
+  items: number; critical: number; photos: number
+  addedAt: string; addedBy: string
+}
+export interface FacilityPhoto {
+  photoId: string; reviewId: string; salonNum: string; itemId: string
+  fileName: string; pathname: string; contentType: string; size: number
+  addedAt: string; addedBy: string
+}
+
+export async function listReviews(fresh = false): Promise<FacilityReview[]> {
+  const rows = await readSheet(TAB_REVIEWS, undefined, fresh ? { fresh: true } : undefined)
+  if (!rows || !rows.length) return []
+  return rowsToObjects(rows).map(o => ({
+    reviewId: S(o.reviewId, 60), salonNum: S(o.salonNum, 10), salonName: S(o.salonName, 120),
+    reviewDate: S(o.reviewDate, 10), subject: S(o.subject, 300), sourceFile: S(o.sourceFile, 300),
+    msgPathname: S(o.msgPathname, 300),
+    items: N(o.items), critical: N(o.critical), photos: N(o.photos),
+    addedAt: S(o.addedAt, 40), addedBy: S(o.addedBy, 120),
+  })).filter(r => r.reviewId && r.salonNum)
+}
+
+export async function listPhotos(fresh = false): Promise<FacilityPhoto[]> {
+  const rows = await readSheet(TAB_PHOTOS, undefined, fresh ? { fresh: true } : undefined)
+  if (!rows || !rows.length) return []
+  return rowsToObjects(rows).map(o => ({
+    photoId: S(o.photoId, 60), reviewId: S(o.reviewId, 60), salonNum: S(o.salonNum, 10),
+    itemId: S(o.itemId, 60), fileName: S(o.fileName, 200), pathname: S(o.pathname, 300),
+    contentType: S(o.contentType, 60), size: N(o.size),
+    addedAt: S(o.addedAt, 40), addedBy: S(o.addedBy, 120),
+  })).filter(p => p.photoId && p.salonNum)
+}
+
+export async function saveReview(r: Partial<FacilityReview>, by: string): Promise<FacilityReview> {
+  if (!(await tabExists(TAB_REVIEWS))) await createTab(TAB_REVIEWS)
+  const all = await listReviews(true)
+  const row: FacilityReview = {
+    reviewId: S(r.reviewId, 60) || 'rev_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+    salonNum: S(r.salonNum, 10), salonName: S(r.salonName, 120), reviewDate: S(r.reviewDate, 10),
+    subject: S(r.subject, 300), sourceFile: S(r.sourceFile, 300), msgPathname: S(r.msgPathname, 300),
+    items: N(r.items), critical: N(r.critical), photos: N(r.photos),
+    addedAt: new Date().toISOString(), addedBy: by,
+  }
+  // One review per salon per date: re-importing replaces the record rather than
+  // stacking a second copy of the same visit.
+  const keep = all.filter(x => !(x.salonNum === row.salonNum && x.reviewDate === row.reviewDate && row.reviewDate))
+  const cols = REVIEW_COLUMNS as unknown as string[]
+  await writeSheet(TAB_REVIEWS, [cols, ...[...keep, row].map(x => cols.map(c => String((x as any)[c] ?? '')))])
+  return row
+}
+
+export async function savePhotos(list: Partial<FacilityPhoto>[], by: string): Promise<FacilityPhoto[]> {
+  if (!list.length) return []
+  if (!(await tabExists(TAB_PHOTOS))) await createTab(TAB_PHOTOS)
+  const now = new Date().toISOString()
+  const rows: FacilityPhoto[] = list.map((p, i) => ({
+    photoId: S(p.photoId, 60) || 'ph_' + Date.now().toString(36) + i.toString(36) + Math.random().toString(36).slice(2, 4),
+    reviewId: S(p.reviewId, 60), salonNum: S(p.salonNum, 10), itemId: S(p.itemId, 60),
+    fileName: S(p.fileName, 200), pathname: S(p.pathname, 300),
+    contentType: S(p.contentType, 60), size: N(p.size), addedAt: now, addedBy: by,
+  })).filter(p => p.pathname && p.salonNum)
+  const cols = PHOTO_COLUMNS as unknown as string[]
+  await appendSheet(TAB_PHOTOS, rows.map(p => cols.map(c => String((p as any)[c] ?? ''))))
+  return rows
+}
+
+/** Move a photo onto an item, or back to the review with a blank itemId. */
+export async function assignPhoto(photoId: string, itemId: string): Promise<boolean> {
+  const all = await listPhotos(true)
+  const idx = all.findIndex(p => p.photoId === photoId)
+  if (idx < 0) return false
+  all[idx] = { ...all[idx], itemId: S(itemId, 60) }
+  const cols = PHOTO_COLUMNS as unknown as string[]
+  await writeSheet(TAB_PHOTOS, [cols, ...all.map(p => cols.map(c => String((p as any)[c] ?? '')))])
+  return true
+}
+
 // ── what a salon looks like right now ────────────────────────────────────
 export interface SalonFacility {
   salonNum: string
