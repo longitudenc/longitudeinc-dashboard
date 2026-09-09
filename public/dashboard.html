@@ -73,6 +73,23 @@
   .alert-info{padding:12px 16px;border-radius:8px;margin-bottom:1rem;font-size:13px;display:flex;gap:10px;background:#e8f0fb;border:1px solid #b8cef0;color:#2a50a0;}
   .divider{height:1px;background:var(--border);margin:1.5rem 0;}
   .no-data{text-align:center;padding:3rem;color:var(--text-muted);font-size:14px;}
+  /* ── Searchable dropdown ── */
+  .ss-wrap{position:relative;display:inline-block;width:100%;}
+  .ss-input{width:100%;padding:8px 28px 8px 10px;border:1px solid var(--border);border-radius:8px;
+    font:inherit;font-size:13.5px;background:#fff;color:var(--text);cursor:text;}
+  .ss-input:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(4,134,103,.12);}
+  .ss-input.ss-placeholder{color:var(--text-muted);}
+  .ss-caret{position:absolute;right:10px;top:50%;transform:translateY(-50%);pointer-events:none;
+    color:var(--text-muted);font-size:10px;}
+  .ss-menu{position:absolute;z-index:9500;left:0;right:0;top:calc(100% + 4px);max-height:290px;
+    overflow-y:auto;background:#fff;border:1px solid var(--border);border-radius:10px;
+    box-shadow:0 10px 30px rgba(0,0,0,.14);padding:4px;display:none;}
+  .ss-menu.open{display:block;}
+  .ss-opt{padding:8px 10px;border-radius:7px;font-size:13.5px;cursor:pointer;line-height:1.35;}
+  .ss-opt:hover,.ss-opt.ss-active{background:var(--accent-light);}
+  .ss-opt.ss-chosen{font-weight:700;}
+  .ss-opt mark{background:#ffe9a8;color:inherit;padding:0;border-radius:2px;}
+  .ss-none{padding:10px;font-size:12.5px;color:var(--text-muted);text-align:center;}
   .pt-card{transition:box-shadow .12s ease,transform .12s ease;}
   .pt-card:hover{box-shadow:0 4px 14px rgba(0,0,0,.10);transform:translateY(-1px);}
   .no-data-icon{font-size:40px;margin-bottom:12px;}
@@ -16625,6 +16642,209 @@ function paintEffWageReport(){
   // After the HTML lands, or there is no canvas to draw on yet.
   setTimeout(function(){ try{ drawEwTrend(spec); }catch(e){} }, 30);
 }
+
+
+
+// ── Searchable dropdowns ──────────────────────────────────────────────────
+// SEARCHABLE-SELECT-v1
+//
+// A native <select> only jumps to the first letter you press, which is fine for
+// eight statuses and useless for a hundred and seventy-five people: finding
+// "Michelle" means pressing M five times and hoping. Anywhere a list is long
+// enough for that to hurt, it becomes a box you type into.
+//
+// THE <select> STAYS. It is hidden, but it remains the element that holds the
+// value, so every existing `getElementById(id).value`, every inline onchange
+// and every form read goes on working untouched — this is a skin over the
+// control, not a replacement for it. Picking an option sets the select and
+// fires a real change event, which is what those inline handlers listen for.
+//
+// Applied by an observer rather than by hand at each call site, because the ask
+// was "anywhere there is a dropdown", and the alternative is finding all of
+// them today and missing the next one.
+const SS_MIN_OPTIONS = 12;   // shorter than this and a plain select is faster
+
+function _ssText(o){ return (o.textContent || '').replace(/\s+/g, ' ').trim(); }
+
+function ssEnhance(sel){
+  if(!sel || sel.multiple || sel.dataset.ssDone === '1') return;
+  const opts = [...sel.options];
+  if(sel.dataset.search !== 'always' && opts.length < SS_MIN_OPTIONS) return;
+  sel.dataset.ssDone = '1';
+
+  const wrap = document.createElement('div');
+  wrap.className = 'ss-wrap';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'ss-input';
+  input.autocomplete = 'off';
+  input.setAttribute('inputmode', 'search');
+  input.setAttribute('role', 'combobox');
+  input.setAttribute('aria-expanded', 'false');
+  const caret = document.createElement('span');
+  caret.className = 'ss-caret';
+  caret.textContent = '▼';
+  const menu = document.createElement('div');
+  menu.className = 'ss-menu';
+  wrap.appendChild(input); wrap.appendChild(caret); wrap.appendChild(menu);
+
+  sel.parentNode.insertBefore(wrap, sel);
+  wrap.appendChild(sel);
+  sel.style.display = 'none';
+  // Copy the sizing hint through, so a select that was laid out narrow in a
+  // toolbar does not become a full-width box.
+  if(sel.style.width) wrap.style.width = sel.style.width;
+
+  let items = [], active = -1;
+
+  const label = function(){
+    const o = sel.options[sel.selectedIndex];
+    return o ? _ssText(o) : '';
+  };
+  // A placeholder option ("— Select employee —") is a prompt, not a choice, so
+  // it shows greyed the way a placeholder attribute would.
+  const isPrompt = function(o){ return !o || o.value === ''; };
+  const showValue = function(){
+    const o = sel.options[sel.selectedIndex];
+    input.value = isPrompt(o) ? '' : label();
+    input.placeholder = isPrompt(o) ? (label() || 'Type to search…') : '';
+    input.classList.toggle('ss-placeholder', isPrompt(o));
+  };
+
+  const render = function(q){
+    // EVERY WORD HAS TO APPEAR, ANYWHERE. The list reads "MELTON, MICHELLE A
+    // (3046)", so a plain substring search fails on "michelle melton" — which
+    // is how people actually type a name they are looking for. Each word is
+    // matched separately, so first name, last name, either order, and the
+    // salon number all find the row.
+    const words = String(q || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+    items = [];
+    menu.innerHTML = '';
+    [...sel.options].forEach(function(o, i){
+      const txt = _ssText(o), low = txt.toLowerCase();
+      if(words.length && !words.every(function(w){ return low.indexOf(w) >= 0; })) return;
+      const row = document.createElement('div');
+      row.className = 'ss-opt' + (i === sel.selectedIndex ? ' ss-chosen' : '');
+      if(words.length){
+        // Mark every matched word, merging overlaps so the highlight is one
+        // run rather than nested tags.
+        let spans = [];
+        words.forEach(function(w){
+          let at = low.indexOf(w);
+          while(at >= 0){ spans.push([at, at + w.length]); at = low.indexOf(w, at + 1); }
+        });
+        spans.sort(function(a,b){ return a[0]-b[0]; });
+        const merged = [];
+        spans.forEach(function(sp){
+          const last = merged[merged.length-1];
+          if(last && sp[0] <= last[1]) last[1] = Math.max(last[1], sp[1]);
+          else merged.push([sp[0], sp[1]]);
+        });
+        let at = 0;
+        merged.forEach(function(sp){
+          if(sp[0] > at) row.appendChild(document.createTextNode(txt.slice(at, sp[0])));
+          const mk = document.createElement('mark');
+          mk.textContent = txt.slice(sp[0], sp[1]);
+          row.appendChild(mk);
+          at = sp[1];
+        });
+        if(at < txt.length) row.appendChild(document.createTextNode(txt.slice(at)));
+      } else {
+        row.textContent = txt;
+      }
+      row.addEventListener('mousedown', function(e){ e.preventDefault(); choose(i); });
+      menu.appendChild(row);
+      items.push({ idx: i, el: row });
+    });
+    if(!items.length){
+      const none = document.createElement('div');
+      none.className = 'ss-none';
+      none.textContent = 'Nothing matches “' + q + '”';
+      menu.appendChild(none);
+    }
+    active = items.length ? 0 : -1;
+    paint();
+  };
+
+  const paint = function(){
+    items.forEach(function(it, n){ it.el.classList.toggle('ss-active', n === active); });
+    if(active >= 0 && items[active]) items[active].el.scrollIntoView({ block: 'nearest' });
+  };
+
+  const open = function(){
+    render(input.value === label() ? '' : input.value);
+    menu.classList.add('open');
+    input.setAttribute('aria-expanded', 'true');
+  };
+  const close = function(){
+    menu.classList.remove('open');
+    input.setAttribute('aria-expanded', 'false');
+    showValue();
+  };
+  const choose = function(i){
+    sel.selectedIndex = i;
+    // A real event, so inline onchange="..." handlers fire exactly as they did
+    // when this was a plain select.
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    close();
+  };
+
+  input.addEventListener('focus', function(){ input.select(); open(); });
+  input.addEventListener('click', function(){ if(!menu.classList.contains('open')) open(); });
+  input.addEventListener('input', function(){ menu.classList.add('open'); render(input.value); });
+  input.addEventListener('blur', function(){ setTimeout(close, 120); });
+  input.addEventListener('keydown', function(e){
+    if(e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+      e.preventDefault();
+      if(!menu.classList.contains('open')) return open();
+      if(!items.length) return;
+      active = (active + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+      paint();
+    } else if(e.key === 'Enter'){
+      if(menu.classList.contains('open') && active >= 0 && items[active]){
+        e.preventDefault();
+        choose(items[active].idx);
+      }
+    } else if(e.key === 'Escape'){
+      if(menu.classList.contains('open')){ e.stopPropagation(); close(); input.blur(); }
+    }
+  });
+  caret.style.pointerEvents = 'auto';
+  caret.style.cursor = 'pointer';
+  caret.addEventListener('mousedown', function(e){ e.preventDefault(); input.focus(); });
+
+  // Something else set the value (a reset, a deep link): follow it.
+  sel.addEventListener('change', function(){ if(!menu.classList.contains('open')) showValue(); });
+
+  showValue();
+}
+
+/** Upgrade every long select under `root` that has not been done already. */
+function ssEnhanceAll(root){
+  const scope = root && root.querySelectorAll ? root : document;
+  try{ scope.querySelectorAll('select:not([data-ss-done])').forEach(ssEnhance); }catch(e){}
+}
+
+// New selects arrive whenever a screen renders, so watch for them rather than
+// remembering to call ssEnhanceAll at thirty call sites. Debounced, and each
+// select is marked once, so a busy render costs one pass.
+(function(){
+  let pending = null;
+  const run = function(){ pending = null; ssEnhanceAll(document); };
+  const kick = function(){ if(pending) return; pending = setTimeout(run, 60); };
+  if(typeof MutationObserver === 'function'){
+    new MutationObserver(function(muts){
+      for(const m of muts){
+        for(const n of m.addedNodes){
+          if(n.nodeType !== 1) continue;
+          if(n.tagName === 'SELECT' || (n.querySelector && n.querySelector('select'))){ kick(); return; }
+        }
+      }
+    }).observe(document.documentElement, { childList: true, subtree: true });
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', kick);
+  else kick();
+})();
 
 
 // ── Pay trends ────────────────────────────────────────────────────────────
