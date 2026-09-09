@@ -69,6 +69,48 @@ export interface FacilityItem {
 const S = (v: unknown, max = 2000) => String(v ?? '').trim().slice(0, max)
 const N = (v: unknown) => { const n = Number(String(v ?? '').replace(/[$,]/g, '')); return Number.isFinite(n) ? n : 0 }
 
+/**
+ * Rows as objects, whether or not the tab carries a header.
+ *
+ * createTab() makes an EMPTY sheet and appendSheet() adds data underneath it,
+ * so a tab created and first written in one go has no header at all — and
+ * rowsToObjects then reads the first repair as the column names and drops it,
+ * mapping every row after it to nonsense. That is exactly what happened to the
+ * first review loaded: seven items in the sheet, zero on the screen.
+ *
+ * Reading positionally when the header is missing means data already written
+ * that way comes back correctly without anyone having to repair a spreadsheet
+ * by hand; ensureHeader() below stops it happening again.
+ */
+async function readTable(tab: string, cols: readonly string[], fresh: boolean): Promise<Record<string, any>[]> {
+  let raw: any[][] = []
+  try {
+    raw = ((await readSheet(tab, undefined, fresh ? { fresh: true } : undefined)) || []) as any[][]
+  } catch { return [] }
+  if (!raw.length) return []
+  const first = (raw[0] || []).map(h => String(h ?? '').trim())
+  // A real header names the first column. Anything else is a data row.
+  if (first[0] === cols[0]) return rowsToObjects(raw)
+  return raw.map(r => {
+    const o: Record<string, any> = {}
+    cols.forEach((c, i) => { o[c] = (r as any[])[i] ?? '' })
+    return o
+  })
+}
+
+/** Put the header on, keeping whatever was written before there was one. */
+async function ensureHeader(tab: string, cols: readonly string[]): Promise<void> {
+  if (!(await tabExists(tab))) await createTab(tab)
+  let raw: any[][] = []
+  try { raw = ((await readSheet(tab, undefined, { fresh: true })) || []) as any[][] } catch { raw = [] }
+  const first = (raw[0] || []).map(h => String(h ?? '').trim())
+  if (first[0] === cols[0]) return
+  await writeSheet(tab, [
+    [...cols],
+    ...raw.map(r => cols.map((_, i) => String((r as any[])[i] ?? ''))),
+  ])
+}
+
 function toItem(o: Record<string, any>): FacilityItem {
   return {
     itemId: S(o.itemId, 60), salonNum: S(o.salonNum, 10), salonName: S(o.salonName, 120),
@@ -85,9 +127,8 @@ function toItem(o: Record<string, any>): FacilityItem {
 }
 
 export async function listFacility(fresh = false): Promise<FacilityItem[]> {
-  const rows = await readSheet(TAB_FACILITY, undefined, fresh ? { fresh: true } : undefined)
-  if (!rows || !rows.length) return []
-  return rowsToObjects(rows).map(toItem).filter(i => i.itemId && i.salonNum)
+  const rows = await readTable(TAB_FACILITY, FACILITY_COLUMNS, fresh)
+  return rows.map(toItem).filter(i => i.itemId && i.salonNum)
 }
 
 async function writeAll(items: FacilityItem[]): Promise<void> {
@@ -108,7 +149,7 @@ const newId = () => 'fac_' + Date.now().toString(36) + Math.random().toString(36
 export async function addItems(
   input: Partial<FacilityItem>[], by: string,
 ): Promise<{ added: FacilityItem[]; skipped: number }> {
-  if (!(await tabExists(TAB_FACILITY))) await createTab(TAB_FACILITY)
+  await ensureHeader(TAB_FACILITY, FACILITY_COLUMNS)
   const all = await listFacility(true)
   const seen = new Set(all.map(i => [i.salonNum, i.reviewDate, i.component.toLowerCase()].join('|')))
 
@@ -236,9 +277,8 @@ export interface FacilityPhoto {
 }
 
 export async function listReviews(fresh = false): Promise<FacilityReview[]> {
-  const rows = await readSheet(TAB_REVIEWS, undefined, fresh ? { fresh: true } : undefined)
-  if (!rows || !rows.length) return []
-  return rowsToObjects(rows).map(o => ({
+  const rows = await readTable(TAB_REVIEWS, REVIEW_COLUMNS, fresh)
+  return rows.map(o => ({
     reviewId: S(o.reviewId, 60), salonNum: S(o.salonNum, 10), salonName: S(o.salonName, 120),
     reviewDate: S(o.reviewDate, 10), subject: S(o.subject, 300), sourceFile: S(o.sourceFile, 300),
     msgPathname: S(o.msgPathname, 300),
@@ -248,9 +288,8 @@ export async function listReviews(fresh = false): Promise<FacilityReview[]> {
 }
 
 export async function listPhotos(fresh = false): Promise<FacilityPhoto[]> {
-  const rows = await readSheet(TAB_PHOTOS, undefined, fresh ? { fresh: true } : undefined)
-  if (!rows || !rows.length) return []
-  return rowsToObjects(rows).map(o => ({
+  const rows = await readTable(TAB_PHOTOS, PHOTO_COLUMNS, fresh)
+  return rows.map(o => ({
     photoId: S(o.photoId, 60), reviewId: S(o.reviewId, 60), salonNum: S(o.salonNum, 10),
     itemId: S(o.itemId, 60), fileName: S(o.fileName, 200), pathname: S(o.pathname, 300),
     contentType: S(o.contentType, 60), size: N(o.size),
@@ -259,7 +298,7 @@ export async function listPhotos(fresh = false): Promise<FacilityPhoto[]> {
 }
 
 export async function saveReview(r: Partial<FacilityReview>, by: string): Promise<FacilityReview> {
-  if (!(await tabExists(TAB_REVIEWS))) await createTab(TAB_REVIEWS)
+  await ensureHeader(TAB_REVIEWS, REVIEW_COLUMNS)
   const all = await listReviews(true)
   const row: FacilityReview = {
     reviewId: S(r.reviewId, 60) || 'rev_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
@@ -278,7 +317,7 @@ export async function saveReview(r: Partial<FacilityReview>, by: string): Promis
 
 export async function savePhotos(list: Partial<FacilityPhoto>[], by: string): Promise<FacilityPhoto[]> {
   if (!list.length) return []
-  if (!(await tabExists(TAB_PHOTOS))) await createTab(TAB_PHOTOS)
+  await ensureHeader(TAB_PHOTOS, PHOTO_COLUMNS)
   const now = new Date().toISOString()
   const rows: FacilityPhoto[] = list.map((p, i) => ({
     photoId: S(p.photoId, 60) || 'ph_' + Date.now().toString(36) + i.toString(36) + Math.random().toString(36).slice(2, 4),
