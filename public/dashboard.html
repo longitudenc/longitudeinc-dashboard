@@ -13187,7 +13187,8 @@ function renderCompanyBonus(){
   const _clbl = formatBonusPeriod(_cpk);
   const exportBtns = coView === 'period' ? `<div style="display:flex;gap:8px;">
     <button class="btn btn-secondary btn-sm export-bonus" onclick="exportBonusJPEG('${_cpk}')">📷 Export Image (${_clbl})</button>
-    <button class="btn btn-secondary btn-sm export-bonus" onclick="exportPayrollCSV('${_cpk}')">⬇ ADP Payroll CSV (${_clbl})</button>
+    <button class="btn btn-secondary btn-sm export-bonus" onclick="exportPayrollXLSX('${_cpk}')" title="Excel-safe — department codes keep their leading zeros">⬇ ADP Bonus File (${_clbl})</button>
+    <button class="btn btn-secondary btn-sm export-bonus" onclick="exportPayrollCSV('${_cpk}')" title="Plain CSV. Correct if you upload it straight to ADP; do not open it in Excel first, that strips the 000004 department codes.">⬇ CSV</button>
   </div>` : '';
 
   let bodyHtml = '';
@@ -13245,7 +13246,8 @@ function buildCompanyBonusMonth(){
   const _lbl = formatBonusPeriod(_pk);
   let exportBtns = `<div style="display:flex;gap:8px;margin-bottom:1rem;">
     <button class="btn btn-secondary btn-sm export-bonus" onclick="exportBonusJPEG('${_pk}')">📷 Export Image (${_lbl})</button>
-    <button class="btn btn-secondary btn-sm export-bonus" onclick="exportPayrollCSV('${_pk}')">⬇ ADP Payroll CSV (${_lbl})</button>
+    <button class="btn btn-secondary btn-sm export-bonus" onclick="exportPayrollXLSX('${_pk}')" title="Excel-safe — department codes keep their leading zeros">⬇ ADP Bonus File (${_lbl})</button>
+    <button class="btn btn-secondary btn-sm export-bonus" onclick="exportPayrollCSV('${_pk}')" title="Plain CSV. Correct if you upload it straight to ADP; do not open it in Excel first, that strips the 000004 department codes.">⬇ CSV</button>
   </div>`;
   const totPay = stys.reduce(sumPayout,0);
   const totPot = stys.reduce(sumPotential,0);
@@ -13360,7 +13362,8 @@ function buildCompanyBonusAll(){
   const _lbl = formatBonusPeriod(_pk);
   let html = `<div style="display:flex;gap:8px;margin:1rem 0;">
     <button class="btn btn-secondary btn-sm export-bonus" onclick="exportBonusJPEG('${_pk}')">📷 Export Image (${_lbl})</button>
-    <button class="btn btn-secondary btn-sm export-bonus" onclick="exportPayrollCSV('${_pk}')">⬇ ADP Payroll CSV (${_lbl})</button>
+    <button class="btn btn-secondary btn-sm export-bonus" onclick="exportPayrollXLSX('${_pk}')" title="Excel-safe — department codes keep their leading zeros">⬇ ADP Bonus File (${_lbl})</button>
+    <button class="btn btn-secondary btn-sm export-bonus" onclick="exportPayrollCSV('${_pk}')" title="Plain CSV. Correct if you upload it straight to ADP; do not open it in Excel first, that strips the 000004 department codes.">⬇ CSV</button>
   </div>`;
 
   html += `<div style="overflow-x:auto;"><table class="bonus-table" style="margin-top:1rem;">
@@ -14018,9 +14021,10 @@ function buildAdpCsv(periodKey){
   const push = (payId, code, amount, dept, who) => {
     if(!(Number(amount) > 0)) return;     // skip $0 / ineligible — no row
     if(!payId){ rows._missing = (rows._missing||[]); rows._missing.push({who:who||'(unknown)', code, amount: fmt(amount)}); return; }
-    // Quote File # and Temp Dept as text so leading zeros survive (e.g. AM dept
-    // 000004 / Kayla 000001, and any zero-padded pay IDs).
-    rows.push(['BSP','01','"'+payId+'"',code,fmt(amount),'"'+dept+'"']);
+    // Plain values. The File # and the Temp Dept are digits but they are NOT
+    // numbers -- an area manager's department is 000004 and Kayla's is 000001 --
+    // so how they are protected is the exporter's problem, not this line's.
+    rows.push(['BSP','01',String(payId),code,fmt(amount),String(dept)]);
   };
 
   // 1) Stylists — BonusData, code 2, skip disc-ineligible (live, rolling 12mo)
@@ -14076,9 +14080,62 @@ function buildAdpCsv(periodKey){
     }
   });
 
-  const header = 'Co Code,Batch ID,File #,Earnings 4 Code,Earnings 4 Amount,Temp Dept';
-  const body = rows.map(r=>r.join(',')).join('\n');
-  return { csv: header + '\n' + body + '\n', count: rows.length, missing: rows._missing||[] };
+  const header = ['Co Code','Batch ID','File #','Earnings 4 Code','Earnings 4 Amount','Temp Dept'];
+  // Quoting is correct CSV and is enough for anything that parses the file.
+  // It is NOT enough for Excel, which reads "000004" as four whatever the
+  // quotes say -- that is what the xlsx export below is for.
+  const q = v => /[",\n]/.test(v) ? '"' + String(v).replace(/"/g,'""') + '"' : String(v);
+  const csv = [header.join(','), ...rows.map(r=>r.map(q).join(','))].join('\n') + '\n';
+  return { csv: csv, header: header, rows: rows, count: rows.length, missing: rows._missing||[] };
+}
+
+// EVERY COLUMN EXCEPT THE AMOUNT IS A CODE, NOT A NUMBER. Co Code, Batch ID,
+// File #, the earnings code and Temp Dept are all identifiers that happen to be
+// written with digits -- Batch ID is "01", an area manager's department is
+// "000004" -- and each of them loses its leading zeros the moment anything
+// decides it is a quantity. Only Earnings 4 Amount is arithmetic.
+const ADP_TEXT_COLUMNS = [0, 1, 2, 3, 5];
+
+// THE ONE THAT SURVIVES BEING OPENED. A CSV cannot say that 000004 is text, so
+// opening the file to check it before uploading turns the area-manager
+// department into a 4 and ADP rejects the import. An xlsx types the cell, so
+// the code is still 000004 after a look, a save and an upload.
+async function exportPayrollXLSX(periodKey){
+  const btn = event && event.target;
+  const label = btn && btn.textContent;
+  if(btn){ btn.disabled = true; btn.textContent = '⏳ Generating…'; }
+  try{
+    const out = buildAdpCsv(periodKey);
+    if(out.missing.length){
+      const names = out.missing.map(m=>'• '+m.who+' — $'+m.amount).join('\n');
+      if(!confirm(out.missing.length + ' payout(s) had no File # (payId) and will be skipped:\n\n'
+        + names + '\n\nDownload anyway (without these rows)?')) return;
+    }
+    if(out.count === 0){ alert('No eligible bonus payouts for this period — nothing to export.'); return; }
+    const res = await fetch('/api/office/bonus-xlsx', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        rows: [out.header, ...out.rows],
+        textColumns: ADP_TEXT_COLUMNS,
+        sheetName: 'EPIBSP01',
+        fileName: 'EPIBSP01.xlsx',
+      }),
+    });
+    if(!res.ok){
+      let msg = 'HTTP ' + res.status;
+      try{ const j = await res.json(); if(j && j.error) msg = j.error; }catch(e){}
+      throw new Error(msg);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'EPIBSP01.xlsx'; a.click();
+    URL.revokeObjectURL(url);
+  }catch(err){
+    alert('Error generating the file: ' + (err && err.message ? err.message : err));
+  }finally{
+    if(btn){ btn.disabled = false; if(label) btn.textContent = label; }
+  }
 }
 
 function exportPayrollCSV(periodKey){

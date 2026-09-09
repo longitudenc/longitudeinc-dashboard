@@ -116,14 +116,26 @@ function zip(entries: ZipEntry[]): Buffer {
  * one so Excel does not show the green "number stored as text" warning on the
  * quantity column -- and so Amazon's importer reads a quantity rather than a
  * string that happens to contain digits.
+ *
+ * `textColumns` opts a column out of that. It exists for identifiers that are
+ * digits but are NOT numbers: an ADP department code of 000004 is four with
+ * four zeros in front, and any format that lets a spreadsheet decide will hand
+ * back a 4. Quoting a CSV field does not prevent it -- Excel parses "000004"
+ * as a number regardless -- so the only reliable answer is a cell that is
+ * typed as text before Excel ever sees it.
  */
-export function sheetToXlsx(rows: (string | number)[][], sheetName = 'Sheet1'): Buffer {
+export function sheetToXlsx(
+  rows: (string | number)[][],
+  sheetName = 'Sheet1',
+  opts?: { textColumns?: number[] },
+): Buffer {
+  const asText = new Set(opts?.textColumns ?? [])
   const xmlRows = rows.map((cells, r) => {
     const rowNum = r + 1
     const body = cells.map((v, c) => {
       const ref = cellRef(c, rowNum)
-      const isNum = typeof v === 'number'
-        || (typeof v === 'string' && v.trim() !== '' && /^-?\d+(\.\d+)?$/.test(v.trim()))
+      const isNum = !asText.has(c) && (typeof v === 'number'
+        || (typeof v === 'string' && v.trim() !== '' && /^-?\d+(\.\d+)?$/.test(v.trim())))
       return isNum
         ? `<c r="${ref}"><v>${Number(v)}</v></c>`
         : `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${xmlEscape(v)}</t></is></c>`
