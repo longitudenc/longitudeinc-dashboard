@@ -40,6 +40,8 @@ export type Capability =
   // into each route and mirrored by hand in dashboard.html. Each of these is
   // enforced server-side in the routes named beside it; none is a client-only
   // toggle, because a switch the server ignores is worse than no switch.
+  | 'view.facility'      // GET  /api/facility
+  | 'edit.facility'      // POST /api/facility, /api/facility/ingest
   | 'view.supplies'      // GET  /api/office/supply-items
   | 'edit.supplies'      // POST /api/office/supply-items
   | 'view.leases'        // GET  /api/leases/*
@@ -94,6 +96,8 @@ export const CAPABILITY_META: CapabilityMeta[] = [
   { group: 'People',  key: 'edit.points',    kind: 'permission',   enforcedOn: 'POST /api/gs/saveDiscPoints, /api/gs/reprocessDiscPoints', label: 'Award & edit points', description: 'Add, change or clear disciplinary points. Needs the line above.' },
 
   { group: 'Office',  key: 'view.payroll',   kind: 'permission',   enforcedOn: 'all /api/office/payroll/*',  label: 'Payroll tools',       description: 'The ADP upload builder, its settings and the finalised files.' },
+  { group: 'Office',  key: 'view.facility',  kind: 'permission',   enforcedOn: 'GET /api/facility', label: 'Facility tracker', description: 'Corporate facility-review findings and maintenance items, for the salons they can already see.' },
+  { group: 'Office',  key: 'edit.facility',  kind: 'permission',   enforcedOn: 'POST /api/facility, /api/facility/ingest', label: 'Log & close facility items', description: 'Load a review email, add items, change status and set due dates. Needs the line above.' },
   { group: 'Office',  key: 'view.supplies',  kind: 'permission',   enforcedOn: 'GET /api/office/supply-items', label: 'Supply catalogue',  description: 'See which product each supply order option buys.' },
   { group: 'Office',  key: 'edit.supplies',  kind: 'permission',   enforcedOn: 'POST /api/office/supply-items', label: 'Edit the catalogue', description: 'Change the product a supply order option buys. Needs the line above.' },
   { group: 'Office',  key: 'edit.newsletter',kind: 'permission',   enforcedOn: 'write /api/newsletter/*',    label: 'Build the newsletter', description: 'Write, edit and publish the monthly issue. Everyone can read a published one.' },
@@ -129,6 +133,7 @@ export const MENU_META = () => CAPABILITY_META.filter(m => m.kind === 'menu')
 // resolveCapabilities() drops an edit whose view is missing -- so a row typed
 // straight into the sheet cannot create the state either.
 export const CAPABILITY_REQUIRES: Partial<Record<Capability, Capability>> = {
+  'edit.facility': 'view.facility',
   'edit.supplies': 'view.supplies',
   'edit.leases': 'view.leases',
   'edit.points': 'view.points',
@@ -159,6 +164,7 @@ export const ROLE_DEFAULTS: Record<Role, Capability[]> = {
     'view.company', 'view.dayreview', 'view.dayofweek',
     'view.salondata', 'view.market', 'edit.settings',
     'view.supplies', 'edit.supplies',
+    'view.facility', 'edit.facility',
     'edit.newsletter', 'manage.forms',
     'view.points', 'edit.points', 'run.dataops',
     // v5: delete.submissions is gone from here too. Removing a submission and
@@ -171,7 +177,7 @@ export const ROLE_DEFAULTS: Record<Role, Capability[]> = {
   ],
   // v3: an AM could always open the points screen (isAdminRole() || isAMRole())
   // and it is salon-scoped for them. Awarding points was admin-only and stays so.
-  area_manager: ['view.dayofweek', 'view.salondata', 'view.points'],
+  area_manager: ['view.dayofweek', 'view.salondata', 'view.points', 'view.facility', 'edit.facility'],
   // v5: a manager gets the home page and forms, and nothing else. view.salondata
   // was reaching them the Ratings & CAQ screen, which is not part of that.
   manager: [],
@@ -185,12 +191,13 @@ export const ROLE_DEFAULTS: Record<Role, Capability[]> = {
     'view.payroll',                                // admin no longer has this
     'view.leases', 'edit.leases',                  // nor these
     'view.supplies', 'edit.supplies', 'edit.newsletter',
+    'view.facility', 'edit.facility',
     'manage.forms',
     // Menu preferences, not permissions.
     'view.company', 'view.dayreview',
   ],
   stylist: [],
-  maintenance: [],
+  maintenance: ['view.facility', 'edit.facility'],
 }
 
 /**

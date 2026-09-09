@@ -269,6 +269,27 @@ export function seesEmployee(access: Access, globalId: string, homeSalon: string
   return false
 }
 
+/**
+ * May this person see anything filed against this salon?
+ *
+ * The companion to scopeSalonRows, for the cases where the question is asked
+ * about ONE salon rather than a list — a write, usually, where the row does not
+ * exist yet and there is nothing to filter.
+ *
+ * `maintenance` is here and not in scopeSalonRows on purpose: the maintenance
+ * role exists to fix buildings, so it covers every building. It is a
+ * salon-scope question, not a business-data one — that role still sees no
+ * payroll, no bonuses and no reports.
+ */
+export function canSeeSalon(access: Access, salonNum: string): boolean {
+  const sn = String(salonNum || '').trim()
+  if (!sn) return false
+  if (seesEverything(access)) return true
+  if (access.role === 'maintenance') return true
+  if (access.role === 'area_manager' || access.role === 'manager') return amSalonSet(access).has(sn)
+  return false
+}
+
 export function scopeSalonRows<T extends { salonNum?: any }>(rows: T[], access: Access): T[] {
   if (seesEverything(access)) return rows
   if (access.role === 'area_manager' || access.role === 'manager') {

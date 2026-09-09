@@ -90,6 +90,10 @@
   .ss-opt.ss-chosen{font-weight:700;}
   .ss-opt mark{background:#ffe9a8;color:inherit;padding:0;border-radius:2px;}
   .ss-none{padding:10px;font-size:12.5px;color:var(--text-muted);text-align:center;}
+  .fac-drop{border:2px dashed #b9c8c1;border-radius:12px;background:#fafcfb;padding:26px 18px;
+    text-align:center;cursor:pointer;transition:background .12s,border-color .12s;}
+  .fac-drop:hover{border-color:var(--primary);background:var(--accent-light);}
+  .fac-drop.over{border-color:var(--primary);background:var(--accent-light);border-style:solid;}
   .pt-card{transition:box-shadow .12s ease,transform .12s ease;}
   .pt-card:hover{box-shadow:0 4px 14px rgba(0,0,0,.10);transform:translateY(-1px);}
   .no-data-icon{font-size:40px;margin-bottom:12px;}
@@ -11324,6 +11328,7 @@ function applyRoute(){
       case 'slides':    showBonusSlides(); break;
       case 'effective-wage': showEffWageReport(); break;
       case 'pay-trends': showPayTrends(seg[1] || '', seg[2] || ''); break;
+      case 'facility':  showFacility(); break;
       case 'supplies':  showSupplyCatalog(); break;
       case 'request':   if(seg[1]) openRequestDeepLink(seg[1]); break;
       case 'event':     if(seg[1]) openEventDetail(seg[1]); break;
@@ -11507,6 +11512,8 @@ const HUB_GROUPS = {
       // office default: a lease carries rent, guarantees and landlord terms.
       { t:'Leases', d:'Lease documents — upload, file and pull one back up.',
         cap:'view.leases', href:'/leases.html' },
+      { t:'Facility & maintenance', d:'Corporate review findings and salon repairs — what is open, what is overdue.',
+        cap:'view.facility', go:function(){ showFacility(); } },
     ],
   },
 };
@@ -16862,6 +16869,387 @@ function ssEnhanceAll(root){
   else kick();
 })();
 
+
+
+// ── Facility & maintenance tracker ────────────────────────────────────────
+// FACILITY-TRACKER-UI-v1
+//
+// One list for everything wrong with a building, from either direction: what a
+// salon reports and what a corporate facility review finds. They are the same
+// work — a peeling front desk is a repair whoever noticed it — and the question
+// that matters is "what is outstanding at 9689", not "which system told us".
+//
+// A CRITICAL BRAND ELEMENT IS NOT AN ACTION ITEM. One triggers a compliance
+// action on its own; an ordinary item only does at five. Every review email
+// quotes that rule, so the screen states where each salon stands against it
+// rather than leaving it to be counted by eye.
+let S_facData = null, S_facSalon = '', S_facStatus = 'open', S_facOpenItem = '', S_facProposal = null;
+
+const FAC_STATUS_LABEL = { open:'Open', in_progress:'In progress',
+  fixed:'Fixed — awaiting green flag', verified:'Verified', waived:'Waived' };
+const FAC_OPEN = { open:1, in_progress:1 };
+
+function showFacility(){
+  _route('#/facility');
+  clearActive();
+  const pg = document.getElementById('page-hub');
+  if(pg) pg.classList.add('active');
+  const mainEl = document.querySelector('.content');
+  if(mainEl) mainEl.scrollTop = 0;
+  if(pg){
+    pg.innerHTML = '<div class="page-header"><h2>Facility &amp; maintenance</h2>'
+      + '<div class="sub">Corporate review findings and salon repairs, in one list</div></div>'
+      + '<div id="fac-body"><div class="no-data" style="padding:14px;">Loading&hellip;</div></div>';
+  }
+  loadFacility();
+}
+
+function loadFacility(){
+  fetch('/api/facility').then(r=>r.json()).then(function(res){
+    if(!res || !res.success) throw new Error((res && res.error) || 'could not load');
+    S_facData = res;
+    paintFacility();
+  }).catch(function(e){
+    const h = document.getElementById('fac-body');
+    if(h) h.innerHTML = '<div class="no-data" style="padding:14px;">' + hEsc(e.message||String(e)) + '</div>';
+  });
+}
+
+function facSetSalon(v){ S_facSalon = v; paintFacility(); }
+function facSetStatus(v){ S_facStatus = v; paintFacility(); }
+function facToggle(id){ S_facOpenItem = (S_facOpenItem === id) ? '' : id; paintFacility(); }
+
+// ── dropping an email in ──────────────────────────────────────────────────
+function facDragOver(ev, on){ ev.preventDefault(); const d=document.getElementById('fac-drop'); if(d) d.classList.toggle('over', on); }
+function facDrop(ev){
+  ev.preventDefault();
+  const d=document.getElementById('fac-drop'); if(d) d.classList.remove('over');
+  const f = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
+  if(f) facSend(f);
+  else facMsg('That drop carried no file. Outlook sometimes drags a message as text — '
+    + 'use Paste the email below instead.');
+}
+function facPick(ev){ const f = ev.target.files && ev.target.files[0]; if(f) facSend(f); }
+function facMsg(t){ const el=document.getElementById('fac-msg'); if(el) el.innerHTML = t ? hEsc(t) : ''; }
+
+function facSend(file){
+  facMsg('Reading ' + file.name + '…');
+  const fd = new FormData(); fd.append('file', file);
+  fetch('/api/facility/ingest', { method:'POST', body: fd }).then(r=>r.json()).then(function(res){
+    if(!res || !res.success) throw new Error((res && res.error) || 'could not read that file');
+    facShowProposal(res.parsed, res.source || file.name);
+  }).catch(function(e){ facMsg((e && e.message) || 'could not read that file'); });
+}
+function facPaste(){
+  const box = document.getElementById('fac-paste');
+  const txt = box ? box.value.trim() : '';
+  if(!txt){ facMsg('Paste the email body first.'); return; }
+  facMsg('Reading…');
+  fetch('/api/facility/ingest', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ html: txt }),
+  }).then(r=>r.json()).then(function(res){
+    if(!res || !res.success) throw new Error((res && res.error) || 'could not read that');
+    facShowProposal(res.parsed, 'pasted');
+  }).catch(function(e){ facMsg((e && e.message) || 'could not read that'); });
+}
+
+function facShowProposal(parsed, source){
+  facMsg('');
+  S_facProposal = { p: parsed, source: source, due: '', keep: parsed.items.map(function(){ return true; }) };
+  // A review email carries no deadline — the rule is "must be addressed", not
+  // "by the 14th" — so the date is ours to set and starts blank rather than
+  // inventing one that would then be quoted back as if corporate had said it.
+  paintFacility();
+}
+function facSetDue(v){ if(S_facProposal){ S_facProposal.due = v; paintFacility(); } }
+function facDueOffset(days){
+  if(!S_facProposal) return;
+  const base = S_facProposal.p.reviewDate || new Date().toISOString().slice(0,10);
+  S_facProposal.due = dIsoAddDays(base, days);
+  paintFacility();
+}
+function facKeep(i, on){ if(S_facProposal) S_facProposal.keep[i] = !!on; }
+function facDiscard(){ S_facProposal = null; paintFacility(); }
+
+function facSaveProposal(){
+  if(!S_facProposal) return;
+  const P = S_facProposal, p = P.p;
+  if(!p.salonNum){ facMsg('No salon on this review — the parse needs a salon number.'); return; }
+  const items = p.items.filter(function(_, i){ return P.keep[i] !== false; }).map(function(it){
+    return { salonNum: p.salonNum, salonName: p.salonName, source: 'review',
+      sourceRef: P.source, reviewDate: p.reviewDate,
+      category: it.category, categoryLabel: it.categoryLabel,
+      component: it.component, detail: it.detail,
+      status: 'open', dueDate: P.due };
+  });
+  if(!items.length){ facMsg('Nothing ticked to save.'); return; }
+  facMsg('Saving…');
+  fetch('/api/facility', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ kind:'items', items: items }),
+  }).then(r=>r.json()).then(function(res){
+    if(!res.success) throw new Error(res.error || 'could not save');
+    S_facProposal = null;
+    facMsg(res.added + ' item' + (res.added===1?'':'s') + ' added'
+      + (res.skipped ? ' · ' + res.skipped + ' already on the list' : ''));
+    loadFacility();
+  }).catch(function(e){ facMsg((e && e.message) || 'could not save'); });
+}
+
+// ── editing an item ───────────────────────────────────────────────────────
+function facUpdate(itemId, patch){
+  fetch('/api/facility', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(Object.assign({ kind:'update', itemId: itemId }, patch)),
+  }).then(r=>r.json()).then(function(res){
+    if(!res.success) throw new Error(res.error || 'could not save');
+    loadFacility();
+  }).catch(function(e){ alert((e && e.message) || 'could not save'); });
+}
+function facComment(itemId){
+  const box = document.getElementById('fac-c-' + itemId);
+  const txt = box ? box.value.trim() : '';
+  if(!txt) return;
+  box.disabled = true;
+  fetch('/api/facility', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ kind:'comment', itemId: itemId, body: txt }),
+  }).then(r=>r.json()).then(function(res){
+    if(!res.success) throw new Error(res.error || 'could not post');
+    loadFacility();
+  }).catch(function(e){ box.disabled = false; alert((e && e.message) || 'could not post'); });
+}
+
+function facPaint_proposal(){
+  if(!S_facProposal) return '';
+  const P = S_facProposal, p = P.p;
+  const td = 'padding:6px 9px;font-size:12.5px;border-top:1px solid var(--border);';
+  let rows = '';
+  p.items.forEach(function(it, i){
+    rows += '<tr><td style="' + td + 'width:28px;text-align:center;">'
+        + '<input type="checkbox" checked onchange="facKeep(' + i + ', this.checked)"></td>'
+      + '<td style="' + td + '">' + (it.category==='critical'
+          ? '<span style="background:#fdecea;color:#b3261e;border:1px solid #f4c4be;border-radius:4px;'
+            + 'padding:1px 6px;font-size:10px;font-weight:700;text-transform:uppercase;">Critical</span>'
+          : '<span style="background:#f4f4f2;color:var(--text-muted);border:1px solid var(--border);'
+            + 'border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;text-transform:uppercase;">Action</span>')
+        + '</td>'
+      + '<td style="' + td + 'font-weight:600;">' + hEsc(it.component) + '</td>'
+      + '<td style="' + td + 'color:var(--text-muted);white-space:pre-wrap;">' + hEsc(it.detail) + '</td></tr>';
+  });
+  return '<div style="border:2px solid var(--primary);border-radius:12px;background:#fff;padding:14px 16px;margin-bottom:18px;">'
+    + '<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin-bottom:8px;">'
+      + '<div style="font-weight:700;font-size:14px;">Facility review &mdash; '
+        + hEsc(p.salonNum ? salonDisplay(p.salonNum) : 'salon not found')
+        + (p.reviewDate ? ' &middot; ' + hEsc(p.reviewDate) : '') + '</div>'
+      + '<div style="font-size:12px;color:var(--text-muted);">' + hEsc(P.source) + '</div>'
+      + '<button class="btn btn-sm btn-secondary" style="margin-left:auto;" onclick="facDiscard()">Discard</button>'
+    + '</div>'
+    + (p.compliance
+        ? '<div style="background:#fdecea;border:1px solid #f4c4be;color:#8a1a1a;border-radius:8px;'
+          + 'padding:8px 11px;font-size:12.5px;margin-bottom:10px;"><b>This review triggers a compliance action.</b> '
+          + p.criticalCount + ' critical brand element' + (p.criticalCount===1?'':'s')
+          + ' and ' + p.actionCount + ' other item' + (p.actionCount===1?'':'s')
+          + ' &mdash; a compliance action follows from any critical element, or five other items.</div>'
+        : '<div style="background:var(--accent-light);border:1px solid var(--accent);border-radius:8px;'
+          + 'padding:8px 11px;font-size:12.5px;margin-bottom:10px;">' + p.criticalCount
+          + ' critical, ' + p.actionCount + ' other &mdash; below the compliance threshold as written.</div>')
+    + (p.warnings.length
+        ? '<div style="background:#fdf3e2;border:1px solid #e0a24a;color:#8a5a12;border-radius:8px;'
+          + 'padding:8px 11px;font-size:12.5px;margin-bottom:10px;">'
+          + p.warnings.map(function(w){ return '<div>' + hEsc(w) + '</div>'; }).join('') + '</div>'
+        : '')
+    + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;font-size:12.5px;">'
+      + '<b>Fix by</b>'
+      + '<input type="date" value="' + hEsc(P.due) + '" onchange="facSetDue(this.value)" '
+        + 'style="padding:4px 7px;border:1px solid var(--border);border-radius:6px;font:inherit;">'
+      + '<button class="btn btn-sm btn-secondary" onclick="facDueOffset(30)">+30 days</button>'
+      + '<button class="btn btn-sm btn-secondary" onclick="facDueOffset(60)">+60</button>'
+      + '<button class="btn btn-sm btn-secondary" onclick="facDueOffset(90)">+90</button>'
+      + '<span style="color:var(--text-muted);">from the review date. The email does not give one &mdash; '
+        + 'it says the items must be addressed, so this deadline is ours.</span>'
+    + '</div>'
+    + '<div style="overflow-x:auto;border:1px solid var(--border);border-radius:10px;">'
+      + '<table style="width:100%;border-collapse:collapse;">' + rows + '</table></div>'
+    + (p.notes.length
+        ? '<details style="margin-top:10px;"><summary style="cursor:pointer;font-size:12.5px;font-weight:600;">'
+          + 'What else the email said</summary><div style="font-size:12px;color:var(--text-muted);'
+          + 'margin-top:6px;line-height:1.6;">'
+          + p.notes.map(function(n){ return '<div style="margin:3px 0;">' + hEsc(n) + '</div>'; }).join('')
+          + '</div></details>'
+        : '')
+    + '<div style="margin-top:12px;display:flex;gap:10px;align-items:center;">'
+      + '<button class="btn btn-primary btn-sm" onclick="facSaveProposal()">Add to the tracker</button>'
+      + '<span style="font-size:12px;color:var(--text-muted);">Loading the same review twice will not duplicate '
+        + 'it &mdash; a component already on the list keeps its status and its comments.</span>'
+    + '</div></div>';
+}
+
+function paintFacility(){
+  const host = document.getElementById('fac-body'); if(!host || !S_facData) return;
+  const d = S_facData, today = d.today;
+  const all = d.items || [], comments = d.comments || {};
+
+  const salons = [...new Set(all.map(function(i){ return i.salonNum; }))]
+    .sort(function(a,b){ return (parseInt(a,10)||0)-(parseInt(b,10)||0); });
+  let items = all.slice();
+  if(S_facSalon) items = items.filter(function(i){ return i.salonNum === S_facSalon; });
+  if(S_facStatus === 'open') items = items.filter(function(i){ return FAC_OPEN[i.status]; });
+  else if(S_facStatus === 'critical') items = items.filter(function(i){ return FAC_OPEN[i.status] && i.category==='critical'; });
+  else if(S_facStatus === 'overdue') items = items.filter(function(i){ return FAC_OPEN[i.status] && i.dueDate && i.dueDate < today; });
+  else if(S_facStatus !== 'all') items = items.filter(function(i){ return i.status === S_facStatus; });
+
+  // Critical first, then the oldest deadline, then the oldest review.
+  items.sort(function(a,b){
+    if((a.category==='critical') !== (b.category==='critical')) return a.category==='critical' ? -1 : 1;
+    const ad = a.dueDate || '9999', bd = b.dueDate || '9999';
+    if(ad !== bd) return ad.localeCompare(bd);
+    return String(a.reviewDate).localeCompare(String(b.reviewDate));
+  });
+
+  // ── the drop zone ──
+  const drop = '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:18px;">'
+    + '<div style="flex:1 1 300px;min-width:280px;">'
+      + '<div id="fac-drop" class="fac-drop" ondragover="facDragOver(event,true)" '
+        + 'ondragleave="facDragOver(event,false)" ondrop="facDrop(event)" '
+        + 'onclick="document.getElementById(' + "'fac-file'" + ').click()">'
+        + '<div style="font-size:15px;font-weight:600;color:var(--primary-dark);">Drop a facility review email here</div>'
+        + '<div style="font-size:12.5px;color:var(--text-muted);margin-top:3px;">'
+        + 'Drag it straight out of Outlook &middot; .msg or .eml</div>'
+      + '</div>'
+      + '<input type="file" id="fac-file" accept=".msg,.eml,.html,.txt" style="display:none;" onchange="facPick(event)">'
+    + '</div>'
+    + '<div style="flex:1 1 300px;min-width:280px;">'
+      + '<textarea id="fac-paste" class="ff-input" rows="3" placeholder="…or paste the email body here"'
+        + ' style="width:100%;font-size:12.5px;"></textarea>'
+      + '<button class="btn btn-sm btn-secondary" style="margin-top:6px;" onclick="facPaste()">Read what I pasted</button>'
+    + '</div>'
+    + '</div>'
+    + '<div id="fac-msg" style="font-size:12.5px;color:var(--text-muted);margin:-8px 0 12px;"></div>';
+
+  // ── where each salon stands ──
+  const sum = (d.summary || []).filter(function(x){ return x.openCritical || x.openAction || x.overdue; });
+  const strip = sum.length
+    ? '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">'
+      + sum.map(function(x){
+          const bad = x.compliance;
+          return '<button onclick="facSetSalon(' + "'" + hEsc(x.salonNum) + "'" + ')" style="text-align:left;'
+            + 'border:1px solid ' + (bad?'#f4c4be':'var(--border)') + ';background:' + (bad?'#fdecea':'#fff')
+            + ';border-radius:9px;padding:8px 11px;cursor:pointer;min-width:150px;">'
+            + '<div style="font-size:12px;font-weight:700;">' + hEsc(salonDisplay(x.salonNum)) + '</div>'
+            + '<div style="font-size:11.5px;color:' + (bad?'#8a1a1a':'var(--text-muted)') + ';margin-top:2px;">'
+              + x.openCritical + ' critical &middot; ' + x.openAction + ' other'
+              + (x.overdue ? ' &middot; <b>' + x.overdue + ' overdue</b>' : '')
+            + '</div>'
+            + (bad ? '<div style="font-size:10.5px;font-weight:700;color:#8a1a1a;margin-top:2px;">'
+                + 'COMPLIANCE ACTION</div>' : '')
+            + '</button>';
+        }).join('')
+      + '</div>'
+    : '';
+
+  // ── filters ──
+  const sOpts = ['<option value="">Every salon</option>'].concat(salons.map(function(sn){
+    return '<option value="' + hEsc(sn) + '"' + (S_facSalon===sn?' selected':'') + '>' + hEsc(salonDisplay(sn)) + '</option>';
+  })).join('');
+  const stOpts = [['open','Still open'],['critical','Open critical only'],['overdue','Overdue'],
+    ['fixed','Fixed — awaiting green flag'],['verified','Verified'],['waived','Waived'],['all','Everything']]
+    .map(function(o){ return '<option value="' + o[0] + '"' + (S_facStatus===o[0]?' selected':'') + '>' + o[1] + '</option>'; }).join('');
+  const filters = '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">'
+    + '<select class="ff-select" style="width:auto;font-size:12.5px;padding:6px 9px;" onchange="facSetSalon(this.value)">' + sOpts + '</select>'
+    + '<select class="ff-select" style="width:auto;font-size:12.5px;padding:6px 9px;" onchange="facSetStatus(this.value)">' + stOpts + '</select>'
+    + '<span style="font-size:12px;color:var(--text-muted);">' + items.length + ' item' + (items.length===1?'':'s') + '</span>'
+    + '</div>';
+
+  // ── the list ──
+  let list = '';
+  if(!items.length){
+    list = '<div class="no-data" style="padding:24px;">'
+      + (all.length ? 'Nothing matches that filter.' : 'Nothing on the tracker yet. Drop a review email above.')
+      + '</div>';
+  } else {
+    list = items.map(function(it){
+      const open = S_facOpenItem === it.itemId;
+      const overdue = FAC_OPEN[it.status] && it.dueDate && it.dueDate < today;
+      const cs = comments[it.itemId] || [];
+      const tag = it.category === 'critical'
+        ? '<span style="background:#fdecea;color:#b3261e;border:1px solid #f4c4be;border-radius:4px;padding:1px 6px;'
+          + 'font-size:10px;font-weight:700;text-transform:uppercase;white-space:nowrap;">Critical</span>'
+        : '<span style="background:#f4f4f2;color:var(--text-muted);border:1px solid var(--border);border-radius:4px;'
+          + 'padding:1px 6px;font-size:10px;font-weight:700;text-transform:uppercase;white-space:nowrap;">Action</span>';
+      let body = '';
+      if(open){
+        body = '<div style="padding:0 14px 14px;border-top:1px solid var(--border);">'
+          + '<div style="white-space:pre-wrap;font-size:13px;line-height:1.6;margin:10px 0 12px;">' + hEsc(it.detail) + '</div>'
+          + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">'
+            + '<select class="ff-select" style="width:auto;font-size:12.5px;padding:5px 8px;" '
+              + 'onchange="facUpdate(' + "'" + hEsc(it.itemId) + "'" + ', {status:this.value})">'
+              + Object.keys(FAC_STATUS_LABEL).map(function(k){
+                  return '<option value="' + k + '"' + (it.status===k?' selected':'') + '>' + FAC_STATUS_LABEL[k] + '</option>';
+                }).join('')
+            + '</select>'
+            + '<label style="font-size:12px;color:var(--text-muted);">Fix by</label>'
+            + '<input type="date" value="' + hEsc(it.dueDate) + '" '
+              + 'onchange="facUpdate(' + "'" + hEsc(it.itemId) + "'" + ', {dueDate:this.value})" '
+              + 'style="padding:4px 7px;border:1px solid var(--border);border-radius:6px;font:inherit;font-size:12.5px;">'
+            + '<input type="text" value="' + hEsc(it.assignee) + '" placeholder="Who is doing it" '
+              + 'onchange="facUpdate(' + "'" + hEsc(it.itemId) + "'" + ', {assignee:this.value})" '
+              + 'style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font:inherit;font-size:12.5px;max-width:170px;">'
+            + '<input type="text" value="' + (it.cost ? hEsc(String(it.cost)) : '') + '" placeholder="Cost" '
+              + 'onchange="facUpdate(' + "'" + hEsc(it.itemId) + "'" + ', {cost:this.value})" '
+              + 'style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font:inherit;font-size:12.5px;max-width:90px;">'
+          + '</div>'
+          + '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:8px;">'
+            + (it.source === 'review' ? 'From the facility review of ' + hEsc(it.reviewDate || '?') : 'Raised in salon')
+            + (it.sourceRef ? ' &middot; ' + hEsc(it.sourceRef) : '')
+            + (it.closedAt ? ' &middot; closed ' + hEsc(String(it.closedAt).slice(0,10)) + ' by ' + hEsc(it.closedBy) : '')
+          + '</div>'
+          + '<div style="border-top:1px dashed var(--border);padding-top:10px;">'
+            + (cs.length
+                ? cs.map(function(c){
+                    return '<div style="margin-bottom:8px;">'
+                      + '<div style="font-size:11px;color:var(--text-muted);">' + hEsc(c.author)
+                        + ' &middot; ' + hEsc(String(c.createdAt).slice(0,10)) + '</div>'
+                      + '<div style="font-size:12.5px;white-space:pre-wrap;">' + hEsc(c.body) + '</div></div>';
+                  }).join('')
+                : '<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">No comments yet.</div>')
+            + '<div style="display:flex;gap:8px;align-items:flex-start;">'
+              + '<textarea id="fac-c-' + hEsc(it.itemId) + '" class="ff-input" rows="2" '
+                + 'placeholder="Add a comment — quote, vendor, photo sent…" style="flex:1;font-size:12.5px;"></textarea>'
+              + '<button class="btn btn-sm btn-secondary" onclick="facComment(' + "'" + hEsc(it.itemId) + "'" + ')">Post</button>'
+            + '</div>'
+          + '</div></div>';
+      }
+      return '<div style="border:1px solid ' + (overdue?'#e0a24a':'var(--border)') + ';border-radius:10px;'
+          + 'background:#fff;margin-bottom:8px;overflow:hidden;">'
+        + '<div onclick="facToggle(' + "'" + hEsc(it.itemId) + "'" + ')" style="display:flex;gap:10px;'
+          + 'align-items:center;padding:11px 14px;cursor:pointer;flex-wrap:wrap;">'
+          + tag
+          + '<div style="font-weight:600;font-size:13.5px;">' + hEsc(it.component) + '</div>'
+          + '<div style="font-size:12px;color:var(--text-muted);">' + hEsc(salonDisplay(it.salonNum)) + '</div>'
+          + '<div style="margin-left:auto;display:flex;gap:10px;align-items:center;font-size:11.5px;">'
+            + (it.dueDate
+                ? '<span style="' + (overdue?'color:#8a5a12;font-weight:700;':'color:var(--text-muted);') + '">'
+                  + (overdue?'overdue ':'due ') + hEsc(it.dueDate) + '</span>'
+                : '<span style="color:var(--text-muted);">no date set</span>')
+            + '<span style="border:1px solid var(--border);border-radius:5px;padding:1px 7px;color:var(--text-muted);">'
+              + hEsc(FAC_STATUS_LABEL[it.status] || it.status) + '</span>'
+            + (cs.length ? '<span style="color:var(--text-muted);">' + cs.length + ' 💬</span>' : '')
+            + '<span style="color:var(--text-muted);">' + (open?'▲':'▼') + '</span>'
+          + '</div>'
+        + '</div>' + body + '</div>';
+    }).join('');
+  }
+
+  host.innerHTML = drop + facPaint_proposal() + strip + filters + list
+    + '<div style="font-size:11px;color:var(--text-muted);margin-top:14px;line-height:1.6;">'
+    + '<b>Critical brand elements</b> trigger a compliance action on their own; ordinary action items do at five. '
+    + 'That is the rule the review emails quote, and the salon cards above apply it to what is still open. '
+    + 'A review carries no deadline of its own, so <b>fix by</b> is yours to set. '
+    + 'Marking an item <b>fixed</b> is the point to email the photo to GF@greatclips.com for a green flag; '
+    + '<b>verified</b> is when they lift it.</div>';
+}
 
 // ── Pay trends ────────────────────────────────────────────────────────────
 // PAY-TRENDS-v1
