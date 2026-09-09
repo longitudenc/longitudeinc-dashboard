@@ -15537,6 +15537,17 @@ function ewCard(p, res){
   body += row('GROSS PAY', function(x){ return x.gross; }, ewMoney, true);
   body += row('Effective Wage', function(x){ return x.effectiveWage; },
     function(v){ return v ? ewRate(v) + '/hr' : ''; }, true);
+  // BELOW THE LINE ON PURPOSE. Vacation and holiday are real money, but they
+  // are paid at base wage and earn no tips or incentives, so they belong in
+  // neither half of a floor-hour wage. Shown, never counted.
+  if(p.ptoPay > 0){
+    body += '<tr><td style="' + lab + 'color:var(--text-muted);font-style:italic;">Vacation &amp; holiday '
+      + '<span style="font-weight:400;">(not in the wage)</span></td>'
+      + cols.map(function(i){
+          return '<td style="' + td + 'color:var(--text-muted);">' + ewMoney(p.months[i].ptoPay) + '</td>';
+        }).join('')
+      + '<td style="' + td + 'background:#f4f7f6;color:var(--text-muted);">' + ewMoney(p.ptoPay) + '</td></tr>';
+  }
 
   // Per-hour split, as one bar. The percentages are of gross, so they answer
   // "where does my hour come from" rather than "how big is each number".
@@ -15601,7 +15612,15 @@ function ewCard(p, res){
             + 'sick time are excluded from both the hours and the pay — they earn base wage and no tips, so '
             + 'counting them would understate the hour actually spent cutting. '
           : '')
-      + 'Excludes ' + ((res.excludes || []).join(' and ') || 'nothing else') + '.</div>'
+      + 'Excludes ' + ((res.excludes || []).join(' and ') || 'nothing else') + '. '
+      + (p.ptoPay > 0
+          ? '<b>Vacation and holiday are shown but not counted:</b> ' + p.ptoHours.toFixed(0) + ' hours '
+            + 'worth ' + ewMoney(p.ptoPay) + ' at base wage. It is real pay, but it earns no tips and no '
+            + 'incentives, so putting it in would pull the cutting hour down toward base wage &mdash; and '
+            + 'putting it in the pay without the hours would push it up. Neither is what an hour on the '
+            + 'floor is worth.'
+          : '')
+      + '</div>'
     + '</div>';
 }
 
@@ -15686,6 +15705,22 @@ let S_ewData = null, S_ewPrior = null, S_ewSalon = '';
 // lands on a Friday. That matters more here than on Day of Week: payroll is
 // filed by week, and a one-day slip would move a whole week's pay in or out.
 let S_ewRange = 'ytd', S_ewStart = '', S_ewEnd = '', S_ewLY = true, S_ewCache = {};
+// LEAVERS IN OR OUT. In by default, because a leaver's hours and pay are part
+// of what the year actually cost and leaving them out silently would stop these
+// screens reconciling to payroll. But 42 of the 175 people with 2026 payroll
+// have since left, they are 9% of floor hours, and their effective wage runs
+// about $2 under everyone else's -- so "how are we paying the people we have"
+// is a different question from "what did the year cost", and the switch is
+// which one you are asking.
+let S_ewTermed = true;
+function ewSetTermed(b){ S_ewTermed = b; S_ewRepaint(); }
+// The endpoint flags them; INACTIVE_MAP is the fallback for a cached response
+// from before the flag existed.
+function ewIsGone(p){
+  if(p && p.inactive !== undefined) return !!p.inactive;
+  return (typeof isInactive === 'function') ? isInactive(p && p.globalId) : false;
+}
+function ewLive(list){ return S_ewTermed ? list : list.filter(function(p){ return !ewIsGone(p); }); }
 // Both pay screens share this window, and the range bar drives whichever one is
 // open. A range chosen on one is still the range on the other, which is the
 // whole point of them being the same control.
@@ -15789,13 +15824,14 @@ function ewSortPeople(col){
 // as much as a 900-hour full-timer. personWeeks rides along so average weekly
 // hours can be weighted the same way.
 function ewRoll(people, nMonths){
-  const blank = function(){ return { floorHours:0, nonFloorHours:0, base:0, productivity:0,
-    product:0, newReturn:0, bonus:0, tips:0, gross:0, personWeeks:0 }; };
+  const blank = function(){ return { floorHours:0, nonFloorHours:0, ptoHours:0, ptoPay:0, base:0,
+    productivity:0, product:0, newReturn:0, bonus:0, tips:0, gross:0, personWeeks:0 }; };
   const total = blank(), months = [];
   const n = nMonths || 0;
   for(let i=0;i<n;i++) months.push(blank());
   const add = function(t, x){
     t.floorHours += x.floorHours||0; t.nonFloorHours += x.nonFloorHours||0;
+    t.ptoHours += x.ptoHours||0; t.ptoPay += x.ptoPay||0;
     t.base += x.base||0; t.productivity += x.productivity||0; t.product += x.product||0;
     t.newReturn += x.newReturn||0; t.bonus += x.bonus||0; t.tips += x.tips||0; t.gross += x.gross||0;
   };
@@ -15917,21 +15953,24 @@ function ewBuildSpec(d, prior, people, homeOf, active, salons, salon){
 
   // ── where it comes from: one scope, stacked, always ──
   if(metric === 'mix'){
-    const byWeek = {};
-    (d.weekly||[]).forEach(function(w){
-      const t = { floorHours:0, base:0, tips:0, productivity:0, bonus:0, other:0 };
-      Object.keys(w.bySalon||{}).forEach(function(sn){
-        if(salon ? (sn !== salon) : !active.has(sn)) return;
-        const c = w.bySalon[sn];
-        t.floorHours += c.floorHours||0; t.base += c.base||0; t.tips += c.tips||0;
-        t.productivity += c.productivity||0; t.bonus += c.bonus||0;
-        t.other += (c.product||0) + (c.newReturn||0);
-      });
-      byWeek[w.weekEnd] = t;
+    const list = salon ? inSalon(salon) : people;
+    const n = we.length;
+    const acc = { h:new Array(n).fill(0), base:new Array(n).fill(0), tips:new Array(n).fill(0),
+                  prod:new Array(n).fill(0), bonus:new Array(n).fill(0), other:new Array(n).fill(0) };
+    list.forEach(function(p){
+      const w = p.wk; if(!w) return;
+      for(let i=0;i<n;i++){
+        acc.h[i] += (w.h && w.h[i]) || 0;
+        acc.base[i] += (w.base && w.base[i]) || 0;
+        acc.tips[i] += (w.tips && w.tips[i]) || 0;
+        acc.prod[i] += (w.prod && w.prod[i]) || 0;
+        acc.bonus[i] += (w.bonus && w.bonus[i]) || 0;
+        acc.other[i] += (w.other && w.other[i]) || 0;
+      }
     });
     const per = function(k){
-      return ewSmoothArr(we.map(function(w){
-        const t = byWeek[w]; return (t && t.floorHours > 0) ? t[k] / t.floorHours : null;
+      return ewSmoothArr(acc.h.map(function(hh, i){
+        return hh > 0 ? acc[k][i] / hh : null;
       }));
     };
     const band = function(label, data, colour){
@@ -15939,7 +15978,7 @@ function ewBuildSpec(d, prior, people, homeOf, active, salons, salon){
     };
     sets.push(band('Base', per('base'), '#03654e'));
     sets.push(band('Tips', per('tips'), '#8fd08f'));
-    sets.push(band('Productivity', per('productivity'), '#9acb3a'));
+    sets.push(band('Productivity', per('prod'), '#9acb3a'));
     sets.push(band('Stylist bonus', per('bonus'), '#c9b037'));
     sets.push(band('Other incentives', per('other'), '#bcd2c8'));
     stacked = true; beginAtZero = true;
@@ -16078,6 +16117,9 @@ function ewControls(sOpts){
         : '')
     + '<label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer;">'
       + '<input type="checkbox" ' + (S_ewLY?'checked':'') + ' onchange="ewSetLY(this.checked)"> vs LY</label>'
+    + '<label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer;" '
+      + 'title="Leavers are part of what the period cost. Untick to see only the people still here.">'
+      + '<input type="checkbox" ' + (S_ewTermed?'checked':'') + ' onchange="ewSetTermed(this.checked)"> include leavers</label>'
     + (sOpts
         ? '<select class="ff-select" style="width:auto;font-size:12.5px;padding:6px 9px;" onchange="ewSetSalon(this.value)">' + sOpts + '</select>'
           + (S_ewSalon ? '<button class="btn btn-sm btn-secondary" onclick="ewSetSalon(' + "''" + ')">&larr; Every salon</button>' : '')
@@ -16097,8 +16139,11 @@ function paintEffWageReport(){
   // makes the company figure describe an estate that no longer exists.
   const active = new Set(allActiveSalons().map(String));
   const all = (d.people || []);
-  const people = all.filter(function(p){ return active.has(String(p.homeSalon || '')); });
-  const dropped = all.length - people.length;
+  const onEstate = all.filter(function(p){ return active.has(String(p.homeSalon || '')); });
+  const people = ewLive(onEstate);
+  const dropped = all.length - onEstate.length;
+  const leavers = onEstate.length - people.length;
+  const leaversIn = onEstate.filter(ewIsGone).length;
 
   // The window, and how the columns are labelled. Both come from the response
   // rather than from the range button, so what is on screen is always what was
@@ -16136,7 +16181,7 @@ function paintEffWageReport(){
   const priorRoll = function(list){ return ewRoll(list, priorN).total; };
   let PRIOR = null;
   if(S_ewPrior && S_ewPrior.people && S_ewPrior.people.length){
-    const prevAll = S_ewPrior.people.filter(function(p){ return active.has(String(p.homeSalon || '')); });
+    const prevAll = ewLive(S_ewPrior.people.filter(function(p){ return active.has(String(p.homeSalon || '')); }));
     const prev = S_ewSalon ? prevAll.filter(function(p){ return p.homeSalon === S_ewSalon; }) : prevAll;
     const pr = priorRoll(prev);
     if(pr.floorHours > 0) PRIOR = pr;
@@ -16244,8 +16289,8 @@ function paintEffWageReport(){
       // The same window a year earlier, same salon.
       let was = null;
       if(S_ewPrior && S_ewPrior.people){
-        const pt = priorRoll(S_ewPrior.people.filter(function(q){
-          return active.has(String(q.homeSalon||'')) && q.homeSalon === sn; }));
+        const pt = priorRoll(ewLive(S_ewPrior.people.filter(function(q){
+          return active.has(String(q.homeSalon||'')) && q.homeSalon === sn; })));
         if(pt.floorHours > 0) was = pt.effectiveWage;
       }
       return { sn: sn, n: r.headcount, hrs: t.floorHours, awh: t.avgWeeklyHours || 0,
@@ -16295,7 +16340,12 @@ function paintEffWageReport(){
   const P = S_ewPeopleSort;
   const folkRows = inScope.map(function(p){
     const pr = function(v){ return p.floorHours ? v / p.floorHours : 0; };
-    return { p: p, name: fmtName(p.name||''), hrs: p.floorHours,
+    // Where else they worked. The row is filed at the salon with the most
+    // hours, which for a mid-year move can be the one they LEFT -- so say so
+    // rather than let the table imply they are still there.
+    const sh = p.salonHours || {};
+    const others = Object.keys(sh).filter(function(sn){ return sn !== p.homeSalon && sh[sn] > 0; });
+    return { p: p, name: fmtName(p.name||''), hrs: p.floorHours, others: others, sh: sh,
       awh: p.weeks ? p.floorHours / p.weeks : 0,
       base: pr(p.base), tips: pr(p.tips), prod: pr(p.productivity), bon: pr(p.bonus),
       oth: pr(p.product + p.newReturn), eff: p.effectiveWage || 0 };
@@ -16320,8 +16370,18 @@ function paintEffWageReport(){
     + HP('oth','Other/hr') + HP('eff','Effective')
     + '<th style="' + th + 'text-align:left;"></th></tr></thead><tbody>';
   folkRows.forEach(function(x){
+    const tag = function(txt, title, col){
+      return ' <span title="' + hEsc(title) + '" style="font-size:9px;font-weight:700;text-transform:uppercase;'
+        + 'letter-spacing:.03em;color:' + col + ';border:1px solid currentColor;border-radius:4px;'
+        + 'padding:0 4px;vertical-align:middle;white-space:nowrap;opacity:.85;">' + txt + '</span>';
+    };
     folk += '<tr class="sub-row" onclick="openProfile(' + "'" + hEsc(x.p.globalId) + "','" + hEsc(String(x.p.name||'')).replace(/'/g,'') + "','review'" + ')">'
-      + '<td style="' + td + 'text-align:left;font-weight:600;">' + hEsc(x.name) + '</td>'
+      + '<td style="' + td + 'text-align:left;font-weight:600;">' + hEsc(x.name)
+        + (ewIsGone(x.p) ? tag('left', 'No longer active'
+            + (x.p.inactiveDate ? ' — ' + x.p.inactiveDate : ''), '#b3261e') : '')
+        + (x.others.length ? tag('+' + x.others.length, 'Also worked at '
+            + x.others.map(function(sn){ return salonDisplay(sn) + ' (' + Math.round(x.sh[sn]) + ' hrs)'; }).join(', ')
+            + '. The row is filed where the most hours were.', '#2f7fbf') : '') + '</td>'
       + '<td style="' + td + 'text-align:left;color:var(--text-muted);">' + hEsc(salonDisplay(x.p.homeSalon)) + '</td>'
       + '<td style="' + td + '">' + x.hrs.toFixed(0) + '</td>'
       + '<td style="' + td + '">' + (x.awh ? x.awh.toFixed(1) : '—') + '</td>'
@@ -16382,6 +16442,16 @@ function paintEffWageReport(){
       + 'Excludes ' + ((d.excludes||[]).join(' and ') || 'nothing else') + '. '
       + (dropped ? dropped + ' ' + (dropped===1?'person':'people') + ' at closed or sold salons are left out of the '
           + 'table and the averages. ' : '')
+      + (S_ewTermed
+          ? (leaversIn ? leaversIn + ' ' + (leaversIn===1?'person has':'people have') + ' since left and '
+              + (leaversIn===1?'is':'are') + ' still counted &mdash; untick <b>include leavers</b> to see only '
+              + 'the people still here. ' : '')
+          : leavers + ' ' + (leavers===1?'leaver is':'leavers are') + ' excluded. ')
+      + (T.ptoHours > 0
+          ? 'Vacation and holiday are outside this figure entirely: ' + T.ptoHours.toFixed(0)
+            + ' hours worth ' + ewMoney(T.ptoPay) + ' at base wage, which is '
+            + ewRate(T.floorHours ? T.ptoPay / T.floorHours : 0) + ' per floor hour of pay this does not show. '
+          : '')
       + '<b>Avg hrs/week</b> is floor hours over the weeks that person was on the floor, so a starter or a leaver '
       + 'is not averaged against a whole window. '
       + 'Showing <b>' + winLbl + '</b> &mdash; ' + (d.weeksInWindow||[]).length + ' pay '
@@ -16626,7 +16696,9 @@ function paintPayTrends(){
   const d = S_ewData;
   const MK = d.monthKeys || [];
   const active = new Set(allActiveSalons().map(String));
-  const people = (d.people || []).filter(function(p){ return active.has(String(p.homeSalon || '')); });
+  const onEstate = (d.people || []).filter(function(p){ return active.has(String(p.homeSalon || '')); });
+  const people = ewLive(onEstate);
+  const leaversIn = onEstate.filter(ewIsGone).length;
 
   if(!people.length){
     host.innerHTML = ewControls('') + '<div class="no-data" style="padding:14px;">No payroll rows in this window.</div>';
@@ -16654,7 +16726,7 @@ function paintPayTrends(){
   ((S_ewPrior && S_ewPrior.monthKeys) || []).forEach(function(m, i){ pIdx[m.key] = i; });
   const priorPeople = function(){
     if(!S_ewPrior || !S_ewPrior.people) return null;
-    let list = S_ewPrior.people.filter(function(p){ return active.has(String(p.homeSalon || '')); });
+    let list = ewLive(S_ewPrior.people.filter(function(p){ return active.has(String(p.homeSalon || '')); }));
     if(S_ptSalon) list = list.filter(function(p){ return p.homeSalon === S_ptSalon; });
     if(S_ptPerson) list = list.filter(function(p){ return p.globalId === S_ptPerson; });
     return list.length ? list : null;
@@ -16811,7 +16883,16 @@ function paintPayTrends(){
           : 'Total dollars, so a bucket moves with hours as well as with rate. Switch to per floor hour to '
             + 'separate the two.')
       + ' The comparison is the same calendar months a year earlier; a salon or person with nothing in those '
-      + 'months shows no comparison rather than a misleading one.</div>';
+      + 'months shows no comparison rather than a misleading one.'
+      + (S_ewTermed
+          ? (leaversIn ? ' ' + leaversIn + ' of these people have since left and are still counted; untick '
+              + '<b>include leavers</b> above to drop them.' : '')
+          : ' ' + (onEstate.length - people.length) + ' leavers are excluded.')
+      + (roll.total.ptoHours > 0
+          ? ' Vacation and holiday sit outside every bucket here: ' + roll.total.ptoHours.toFixed(0)
+            + ' hours worth ' + ewMoney(roll.total.ptoPay) + ' at base wage.'
+          : '')
+      + '</div>';
 
   // What the enlarged view needs. Kept here rather than recomputed on open, so
   // the big chart is guaranteed to be the same numbers as the card it came from.
