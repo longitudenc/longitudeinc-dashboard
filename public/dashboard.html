@@ -15013,6 +15013,17 @@ function profileDiscCardHtml(globalId){
   if(!_discLoaded) return '<div class="card-title">Disciplinary Points</div><div style="color:var(--text-muted);font-size:12px;">Loading…</div>';
   const cur = periodKeyFromWeekEnd(S.currentWeek) || periodKeyFromWeekEnd(new Date().toISOString());
   const active = activeDiscPoints(globalId, cur);
+  const look = discOutlook(globalId, cur);
+  const pendingLine = look.pending
+    ? '<div style="margin-top:6px;font-size:11.5px;color:#8a5a12;background:#fdf3e2;border:1px solid #e0a24a;'
+      + 'border-radius:6px;padding:5px 8px;line-height:1.5;">'
+      + '<b>' + look.pending + ' point' + (look.pending===1?'':'s') + ' pending.</b> A penalty starts the month '
+      + 'after the incident, so the total becomes <b>' + look.then + '</b> on 1 '
+      + REVIEW_MONTHS[look.startsAt % 12] + '.'
+      + (look.then >= 6 && active < 6 ? ' That makes them raise ineligible.'
+         : look.then >= 4 && active < 4 ? ' That makes them bonus ineligible.' : '')
+      + '</div>'
+    : '';
   const status = active>=6 ? '<span style="color:#9C0006;font-weight:700;">Raise &amp; bonus ineligible</span>'
                : active>=4 ? '<span style="color:#843C0C;font-weight:700;">Bonus ineligible</span>'
                :             '<span style="color:#2a7a4a;font-weight:700;">Eligible</span>';
@@ -15021,6 +15032,7 @@ function profileDiscCardHtml(globalId){
   const rows = evs.length ? evs.map(e=>{
     const mk = discMonthKey(e.date);
     const expired = mk===null || (ek-mk)>12;
+    const notYet = mk!==null && (ek-mk) <= 0;
     let rollOff = '';
     const m = String(e.date||'').match(/^(\d{4})-(\d{2})/);
     if(m){ let y=+m[1], mo=(+m[2]-1)+13; y+=Math.floor(mo/12); mo=mo%12; rollOff = REVIEW_MONTHS[mo]+' '+String(y).slice(2); }
@@ -15028,13 +15040,17 @@ function profileDiscCardHtml(globalId){
       <td style="padding:3px 8px;white-space:nowrap;">${e.date}</td>
       <td style="padding:3px 8px;text-align:center;font-weight:700;">${e.points}</td>
       <td style="padding:3px 8px;color:var(--text-muted);">${e.reason||''}</td>
-      <td style="padding:3px 8px;color:var(--text-muted);white-space:nowrap;">${expired?'expired':'rolls off '+rollOff}</td>
+      <td style="padding:3px 8px;color:${notYet?'#8a5a12':'var(--text-muted)'};white-space:nowrap;">${
+        expired ? 'expired'
+        : notYet ? 'starts '+REVIEW_MONTHS[(mk+1)%12]
+        : 'rolls off '+rollOff}</td>
     </tr>`;
   }).join('') : '<tr><td colspan="4" style="padding:6px 8px;color:var(--text-muted);">No disciplinary points on record.</td></tr>';
   return `<div class="card-title">Disciplinary Points</div>
     <div style="font-size:13px;margin-bottom:8px;">${active} active point${active!==1?'s':''} · ${status}
       <span style="color:var(--text-muted);font-size:11px;">(rolling 12-month window)</span></div>
-    <table style="width:100%;border-collapse:collapse;font-size:12px;">
+    ${pendingLine}
+    <table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:8px;">
       <thead><tr style="color:var(--text-muted);text-align:left;border-bottom:1px solid var(--border);">
         <th style="padding:3px 8px;">Date</th><th style="padding:3px 8px;text-align:center;">Pts</th>
         <th style="padding:3px 8px;">Reason</th><th style="padding:3px 8px;">Status</th>
@@ -17559,6 +17575,56 @@ function activeDiscPoints(globalId, periodKey){
   }
   return total;
 }
+// ── Points that are recorded but not counting yet ─────────────────────────
+// A penalty starts the month AFTER the incident, so a write-up approved today
+// changes nothing on screen until the 1st. That is correct and it looks broken:
+// the number you were looking at when you hit Approve is the same number
+// afterwards. So say what is coming.
+//
+// The future total is read back out of activeDiscPoints at the month it starts,
+// NOT as active + pending. Points expire on the same clock they arrive on, and
+// somebody can pick up two in September while four fall off — "4 (6 from Oct)"
+// would be wrong for them, and the honest answer is 2.
+function _discKeyToPeriod(k){ return REVIEW_MONTHS[k % 12] + ' ' + String(Math.floor(k / 12)).slice(-2); }
+
+function discOutlook(globalId, periodKey){
+  const active = activeDiscPoints(globalId, periodKey);
+  const evs = _discByEmp[globalId];
+  const out = { active: active, pending: 0, startsAt: null, then: active, label: '' };
+  if(!evs || !evs.length) return out;
+  const ek = periodSortKey(periodKey);
+  for(const e of evs){
+    const mk = discMonthKey(e.date);
+    if(mk === null) continue;
+    // Not counted yet: this month's incident, or one dated ahead.
+    if(ek - mk <= 0){
+      out.pending += Number(e.points) || 0;
+      const starts = mk + 1;
+      if(out.startsAt === null || starts < out.startsAt) out.startsAt = starts;
+    }
+  }
+  if(!out.pending || out.startsAt === null) return out;
+  const startKey = _discKeyToPeriod(out.startsAt);
+  out.then = activeDiscPoints(globalId, startKey);
+  out.label = out.then + ' from ' + REVIEW_MONTHS[out.startsAt % 12];
+  return out;
+}
+
+/** " (6 from Oct)" — a chip to sit beside a total, or '' when nothing is due. */
+function discPendingChip(globalId, periodKey, opts){
+  const o = discOutlook(globalId, periodKey);
+  if(!o.pending) return '';
+  const big = (opts && opts.big);
+  const crosses = o.then >= 4 && o.active < 4;
+  const title = o.pending + ' point' + (o.pending===1?'':'s') + ' recorded but not counting yet — a penalty '
+    + 'starts the month after the incident. Total goes to ' + o.then + ' on 1 ' + REVIEW_MONTHS[o.startsAt % 12] + '.';
+  return '<span title="' + hEsc(title) + '" style="display:inline-block;margin-left:6px;font-size:'
+    + (big ? '11.5px' : '10.5px') + ';font-weight:700;white-space:nowrap;border-radius:5px;padding:1px 6px;'
+    + 'border:1px solid ' + (crosses ? '#e0a24a' : 'var(--border)') + ';background:' + (crosses ? '#fdf3e2' : '#f4f4f2')
+    + ';color:' + (crosses ? '#8a5a12' : 'var(--text-muted)') + ';">+' + o.pending + ' pending &middot; '
+    + o.then + ' from ' + REVIEW_MONTHS[o.startsAt % 12] + '</span>';
+}
+
 function discBonusIneligible(globalId, periodKey){ return activeDiscPoints(globalId, periodKey) >= 4; }
 function discRaiseIneligible(globalId, periodKey){ return activeDiscPoints(globalId, periodKey) >= 6; }
 
@@ -20289,7 +20355,9 @@ function pointsRows(){
     let evs=(_discByEmp[gid]||[]).slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
     if(S_pointsFrom) evs=evs.filter(e=>String(e.date||'')>=S_pointsFrom);
     if(S_pointsTo)   evs=evs.filter(e=>String(e.date||'')<=S_pointsTo);
-    return { gid, name:p.name, homeSalon:p.homeSalon, inactive:p.inactive, active:activeDiscPoints(gid,curKey), events:evs };
+    const look = discOutlook(gid, curKey);
+    return { gid, name:p.name, homeSalon:p.homeSalon, inactive:p.inactive,
+      active:look.active, pending:look.pending, then:look.then, events:evs };
   }).filter(p=>{
     if(scope && !scope.has(p.homeSalon)) return false;
     if(S_pointsSearch && !p.name.toLowerCase().includes(S_pointsSearch.toLowerCase())) return false;
@@ -20299,7 +20367,9 @@ function pointsRows(){
     // person do last time", and it has to stay answerable.
     if(!S_pointsArchived && !S_pointsSearch && !S_pointsFrom && !S_pointsTo){
       if(p.inactive) return false;
-      if(p.active === 0) return false;
+      // Somebody sitting on nothing today but carrying a fresh write-up is
+      // exactly who this list is for, so pending keeps them on it.
+      if(p.active === 0 && !p.pending) return false;
     }
     return true;
   }).sort((a,b)=> b.active-a.active || a.name.localeCompare(b.name));
@@ -20360,7 +20430,7 @@ function renderPoints(){
       </label>
       <button class="btn btn-secondary btn-sm" onclick="exportPointsCSV()">⬇ Export CSV</button>
     </div>
-    <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">Active total = points in the rolling 12 months (what drives eligibility). Tap a person for their history.</div>`;
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">Active total = points in the rolling 12 months (what drives eligibility). A penalty starts the month <b>after</b> the incident, so a fresh write-up shows as <b>pending</b> until the 1st. Tap a person for their history.</div>`;
   if(!people.length){ host.innerHTML=controls+hiddenNote+'<div class="no-data"><div class="no-data-icon">📋</div>No points on record for your people.</div>'; return; }
   const body=people.map(p=>{
     const flag = p.active>=6 ? '<span style="background:#c0392b;color:#fff;border-radius:6px;padding:2px 7px;font-size:11px;font-weight:700;margin-left:8px;white-space:nowrap;">⚠ Raise blocked (6+)</span>'
@@ -20379,7 +20449,7 @@ function renderPoints(){
     return `<div class="table-card" style="margin-bottom:8px;">
       <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;cursor:pointer;" onclick="const h=this.nextElementSibling;h.style.display=h.style.display==='none'?'block':'none';">
         <div><strong>${hEsc(p.name)}</strong>${p.homeSalon?` <span style="color:var(--text-muted);font-size:12px;">· ${hEsc(p.homeSalon)}</span>`:''}${termed}${flag}</div>
-        <div style="font-weight:700;font-size:15px;white-space:nowrap;">${p.active} pts</div>
+        <div style="font-weight:700;font-size:15px;white-space:nowrap;">${p.active} pts${discPendingChip(p.gid, curKey, {big:true})}</div>
       </div>
       <div style="display:none;padding:0 12px 10px;"><table class="data-table"><thead><tr><th>Date</th><th>Violation</th><th style="text-align:right;">Pts</th><th style="text-align:right;">Falls off</th></tr></thead><tbody>${hist}</tbody></table></div>
     </div>`;
@@ -20395,14 +20465,15 @@ function setPointsField(which,v){
 }
 function exportPointsCSV(){
   const people=pointsRows();
-  const header=['Employee','Home Salon','Status','Active Points (12mo)','Bonus Blocked','Raise Blocked','Violation Date','Violation','Points','Falls Off'];
+  const header=['Employee','Home Salon','Status','Active Points (12mo)','Pending Points','Bonus Blocked','Raise Blocked','Violation Date','Violation','Points','Falls Off'];
   const lines=[header.map(csvCell).join(',')];
   people.forEach(p=>{
     const bb=p.active>=4?'Yes':'', rb=p.active>=6?'Yes':'';
+    const pend = p.pending ? p.pending : '';
     const st = p.inactive ? 'Termed' : 'Active';
-    if(!p.events.length){ lines.push([p.name,p.homeSalon,st,p.active,bb,rb,'','','',''].map(csvCell).join(',')); }
+    if(!p.events.length){ lines.push([p.name,p.homeSalon,st,p.active,pend,bb,rb,'','','',''].map(csvCell).join(',')); }
     else p.events.forEach(e=>lines.push(
-      [p.name,p.homeSalon,st,p.active,bb,rb,pDate(e.date),e.reason||'',e.points||'',pDropOff(e.date)]
+      [p.name,p.homeSalon,st,p.active,pend,bb,rb,pDate(e.date),e.reason||'',e.points||'',pDropOff(e.date)]
         .map(csvCell).join(',')));
   });
   const blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8;'});
