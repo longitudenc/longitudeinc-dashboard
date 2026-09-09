@@ -8387,6 +8387,48 @@ function drillBack(){
 // ── Trend Charts ─────────────────────────────────────────────
 let S_trendMetric = 'cc';
 let S_trendWindow = 20; // Trends weeks shown: 20 | 52 | 'ytd' | 'all' (default: recent 20)
+// Week by week, or collapsed into months. Fifty-two points across eighteen
+// salons is a thicket; twelve is a shape. The value plotted for a month is the
+// MEAN OF ITS WEEKS, not their sum, so the axis, the target lines and the
+// company average all keep the units they had — a monthly total would rescale
+// the chart and leave the targets pointing at nothing.
+let S_trendGrain = 'week';
+function setTrendGrain(g){
+  if(S_trendChart){ try{ const snap={}; S_trendChart.data.datasets.forEach((ds,i)=>{ const base=(ds.label||'').endsWith(' (PY)')?ds.label.slice(0,-5):(ds.label||''); snap[base]=S_trendChart.isDatasetVisible(i); }); S_trendVisSnapshot=snap; }catch(e){} }
+  S_trendGrain = g;
+  if(typeof S_sdTrendMetrics !== 'undefined' && document.getElementById('sd-trend-area')) sdDrawTrends();
+  else renderTrends();
+}
+
+/**
+ * Collapse a week-indexed series into one point per month.
+ * Averages the weeks present; a month with no reading stays null rather than
+ * becoming a zero, so a gap in the data reads as a gap.
+ */
+function trendToMonths(weeks, datasets){
+  const groups = [];
+  const index = [];
+  let last = '';
+  weeks.forEach(function(w, i){
+    const mk = String(w.weekEnding).slice(0, 7);
+    if(mk !== last){ groups.push({ key: mk, idx: [] }); last = mk; }
+    groups[groups.length - 1].idx.push(i);
+    index.push(groups.length - 1);
+  });
+  const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const labels = groups.map(function(g){
+    return MON[parseInt(g.key.slice(5, 7), 10) - 1] + ' ' + g.key.slice(2, 4);
+  });
+  datasets.forEach(function(ds){
+    ds.data = groups.map(function(g){
+      const vals = g.idx.map(function(i){ return ds.data[i]; })
+        .filter(function(v){ return v !== null && v !== undefined && !isNaN(v); });
+      if(!vals.length) return null;
+      return parseFloat((vals.reduce(function(a,b){ return a+b; }, 0) / vals.length).toFixed(2));
+    });
+  });
+  return { labels: labels, groups: groups };
+}
 let S_trendChart = null;
 let S_trendPriorYear = false; // Overlay prior-year (−52wk) line on trend charts
 function setTrendWindow(w){
@@ -8647,27 +8689,43 @@ function trendLineControlsHtml(){
 // Datasets are labelled with the salon NAME (SALON_NAMES[num]||num), so map
 // back to a number to test AM membership.
 function _trendSalonOfLabel(label){
-  var base = String(label||'').replace(/ (PY)$/, '');
+  var base = String(label||'').replace(/ \(PY\)$/, '');
   for (var num in SALON_NAMES) { if (SALON_NAMES[num] === base) return num; }
   return base;   // already a number, or the company-average line
 }
 
+// Changing what is on the chart has to change the numbers above it and the
+// legend below it. Three things, one call — they used to drift apart because
+// only the chart was told.
+function _trendAfterVisibilityChange(){
+  if(S_trendChart) S_trendChart.update();
+  if(window._updateTrendStats) window._updateTrendStats();
+  if(window._rebuildTrendLegend) window._rebuildTrendLegend();
+}
+
+// Which AM's salons the chart is currently showing, so the first box can be
+// named after her rather than reading "8 salons".
+let S_trendAMFilter = '';
+
 function trendSetAllLines(vis){
   if(!S_trendChart) return;
+  S_trendAMFilter = '';
   S_trendChart.data.datasets.forEach(function(ds, i){ S_trendChart.setDatasetVisibility(i, !!vis); });
-  S_trendChart.update();
+  _trendAfterVisibilityChange();
 }
 
 function trendShowAM(amId){
   if(!S_trendChart) return;
+  S_trendAMFilter = amId;
   var own = new Set(((AMS[amId]||{}).salons)||[]);
   S_trendChart.data.datasets.forEach(function(ds, i){
     var sn = _trendSalonOfLabel(ds.label);
-    // Keep any non-salon line (the company average) visible for context.
+    // Keep any non-salon line (the company average, the targets) visible: the
+    // whole point of narrowing to one AM is seeing her salons AGAINST it.
     var isSalon = /^[0-9]{3,5}$/.test(sn);
     S_trendChart.setDatasetVisibility(i, isSalon ? own.has(sn) : true);
   });
-  S_trendChart.update();
+  _trendAfterVisibilityChange();
 }
 
 function renderTrends(){
@@ -8722,7 +8780,7 @@ function selectTrendMetric(key, btn, overrideSalon, hostId, storeView){
     return;
   }
 
-  const labels = weeks.map(w=>{ const parts=String(w.weekEnding).split('-'); return parseInt(parts[1],10)+'/'+parseInt(parts[2],10); });
+  let labels = weeks.map(w=>{ const parts=String(w.weekEnding).split('-'); return parseInt(parts[1],10)+'/'+parseInt(parts[2],10); });
   const keyMap = {cc:'cc',ccG:'ccG',sgr:'sgr',prod:'prod',nr:'nr',rr:'rr',hc:'hc',mbc:'mbc',ssW:'ssW',wts:'wts',noc:'noc',pay:'pay',cph:'cph',lyDiff:'lyDiff'};
   const getVal = (a) => {
     if(!a) return null;
@@ -8871,7 +8929,14 @@ function selectTrendMetric(key, btn, overrideSalon, hostId, storeView){
   }
 
   // AM average — bold (hidden in drill mode)
-  if(!drillSalon){
+  //
+  // NOT ON THE COMPANY SCREEN. There, am.name is "Company", so this line was
+  // labelled "Company Avg" as well — two datasets with one name. The stats box
+  // looks its value up by label and found this one first, and this one is built
+  // from salonsByAM('company'), which is empty because 'company' is a synthetic
+  // scope and not an AM. That is why the Company Avg box read a dash: it was
+  // averaging a line of nulls that was shadowing the real average below.
+  if(!drillSalon && S.currentAM !== 'company'){
     const amAvgData = weeks.map(w=>getVal(calcAvgs(salonsByAM(S.currentAM,w))));
     datasets.push({
       label: am.name+' Avg',
@@ -8920,6 +8985,16 @@ function selectTrendMetric(key, btn, overrideSalon, hostId, storeView){
     });
   });
 
+  // Collapse to months AFTER every line is built, so salons, prior year,
+  // averages and targets are all folded the same way and cannot disagree.
+  let periodCount = weeks.length, periodWord = 'weeks';
+  if(S_trendGrain === 'month'){
+    const m = trendToMonths(weeks, datasets);
+    labels = m.labels;
+    periodCount = m.labels.length;
+    periodWord = 'months';
+  }
+
   const salonName = drillSalon ? (SALON_NAMES[drillSalon]||drillSalon) : null;
   const chartTitle = storeView
     ? `${metric.label}<span id="trend-focus-label"></span>`
@@ -8927,10 +9002,11 @@ function selectTrendMetric(key, btn, overrideSalon, hostId, storeView){
         ? `${metric.label} — ${am.name}<span id="trend-focus-label"></span>`
         : `${metric.label} — ${am.name}`);
   const chartSub = storeView
-    ? `Selected salon vs Company average · ${weeks.length} weeks`
+    ? `Selected salon vs Company average · ${periodCount} ${periodWord}`
     : (drillSalon
-        ? `Click the legend to add or remove salons · ${weeks.length} weeks`
-        : `Each salon · AM average (bold) · Company average (dashed) · ${weeks.length} weeks`);
+        ? `Click the legend to add or remove salons · ${periodCount} ${periodWord}`
+        : `Each salon · ${S.currentAM==='company' ? '' : 'AM average (bold) · '}Company average (dashed) · ${periodCount} ${periodWord}`
+          + (S_trendGrain === 'month' ? ' · each point is the average of that month\u2019s weeks' : ''));
   const backBtn = (storeView || !drillSalon)
     ? ''
     : `<button class="back-btn" onclick="drillBack()">← Back</button>`;
@@ -8958,7 +9034,7 @@ function selectTrendMetric(key, btn, overrideSalon, hostId, storeView){
         <div style="font-size:20px;font-weight:700;color:#888;margin-top:2px;">—</div>
       </div>
       <div id="trend-stat-co" style="flex:1;min-width:170px;background:#f7f6f3;border:1px solid var(--border);border-radius:8px;padding:10px 14px;">
-        <div style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);">Company Avg (${weeks.length}wk)</div>
+        <div style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);">Company Avg</div>
         <div style="font-size:20px;font-weight:700;color:#555;margin-top:2px;">—</div>
       </div>
     </div>`;
@@ -8976,6 +9052,12 @@ function selectTrendMetric(key, btn, overrideSalon, hostId, storeView){
           style="padding:4px 12px;border-radius:16px;border:1px solid ${S_trendPriorYear?'var(--primary)':'var(--border)'};font-size:11px;font-weight:600;cursor:pointer;background:${S_trendPriorYear?'var(--primary)':'white'};color:${S_trendPriorYear?'white':'var(--text)'};margin-right:8px;">
           ${S_trendPriorYear?'✓ ':''}Prior Year
         </button>
+        ${[['week','Weeks'],['month','Months']].map(o=>{
+          const active = S_trendGrain===o[0];
+          return `<button onclick="setTrendGrain('${o[0]}')" title="Longer windows read better by month"
+            style="padding:4px 12px;border-radius:16px;border:1px solid var(--border);font-size:11px;font-weight:600;cursor:pointer;background:${active?'var(--primary)':'white'};color:${active?'white':'var(--text)'};">${o[1]}</button>`;
+        }).join('')}
+        <span style="width:8px;"></span>
         ${[{w:20,l:'20 wk'},{w:52,l:'52 wk'},{w:'ytd',l:'YTD'},{w:'all',l:'All'}].map(o=>{
           const arg = typeof o.w === 'string' ? "'"+o.w+"'" : o.w;
           const active = S_trendWindow===o.w;
@@ -9013,14 +9095,20 @@ function selectTrendMetric(key, btn, overrideSalon, hostId, storeView){
     const salonAvg = salonPts.length ? salonPts.reduce((a,b)=>a+b,0)/salonPts.length : null;
     // Focus label = the selected salon names (or AM name if none/all)
     let focusLabel;
+    const amSet = new Set(((AMS[S_trendAMFilter]||{}).salons)||[]);
+    const visNums = visSalons.map(s=>_trendSalonOfLabel(s.label));
+    const isExactlyAM = S_trendAMFilter && amSet.size === visNums.length
+      && visNums.every(n=>amSet.has(n));
     if(visSalons.length===0) focusLabel = '—';
+    else if(isExactlyAM) focusLabel = (AMS[S_trendAMFilter].name||'').split(' ')[0]
+      + '’s ' + visSalons.length + ' salons';
     else if(visSalons.length===1) focusLabel = visSalons[0].label;
     else if(visSalons.length<=3) focusLabel = visSalons.map(s=>s.label).join(', ');
     else focusLabel = visSalons.length+' salons';
     // Update salon avg box
     const salonBox = document.getElementById('trend-stat-salon');
     if(salonBox){
-      salonBox.querySelector('div:first-child').textContent = focusLabel+' Avg ('+weeks.length+'wk)';
+      salonBox.querySelector('div:first-child').textContent = focusLabel + ' Avg';
       salonBox.querySelector('div:last-child').textContent = fmtTile(salonAvg);
     }
     // Company avg box
@@ -9039,7 +9127,7 @@ function selectTrendMetric(key, btn, overrideSalon, hostId, storeView){
         });
         const pyAvg = pyPts.length ? pyPts.reduce((a,b)=>a+b,0)/pyPts.length : null;
         pyBox.style.display = '';
-        pyBox.querySelector('div:first-child').textContent = 'Prior Year Avg ('+weeks.length+'wk)';
+        pyBox.querySelector('div:first-child').textContent = 'Prior Year Avg';
         pyBox.querySelector('div:last-child').textContent = fmtTile(pyAvg);
       } else {
         pyBox.style.display = 'none';
@@ -9069,6 +9157,7 @@ function selectTrendMetric(key, btn, overrideSalon, hostId, storeView){
   }
 
   // Build custom toggleable legend
+  window._rebuildTrendLegend = function(){ if(S_trendChart) buildCustomLegend(S_trendChart); };
   function buildCustomLegend(chart){
     const legendEl = document.getElementById('trend-custom-legend');
     if(!legendEl) return;
@@ -9142,7 +9231,7 @@ function selectTrendMetric(key, btn, overrideSalon, hostId, storeView){
         tooltip: {
           ...AWAY_TIP_STYLE,
           callbacks:{
-            title: items => 'Week Ending ' + (items[0]?.label||''),
+            title: items => (S_trendGrain==='month' ? '' : 'Week Ending ') + (items[0]?.label||''),
             label: c => {
               // Skip target/goal lines in tooltip
               // Skip only the target/threshold lines, matched exactly — a loose
