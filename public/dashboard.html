@@ -73,6 +73,8 @@
   .alert-info{padding:12px 16px;border-radius:8px;margin-bottom:1rem;font-size:13px;display:flex;gap:10px;background:#e8f0fb;border:1px solid #b8cef0;color:#2a50a0;}
   .divider{height:1px;background:var(--border);margin:1.5rem 0;}
   .no-data{text-align:center;padding:3rem;color:var(--text-muted);font-size:14px;}
+  .pt-card{transition:box-shadow .12s ease,transform .12s ease;}
+  .pt-card:hover{box-shadow:0 4px 14px rgba(0,0,0,.10);transform:translateY(-1px);}
   .no-data-icon{font-size:40px;margin-bottom:12px;}
   .legend-bar{display:flex;gap:10px;font-size:11px;align-items:center;flex-wrap:wrap;}
   .legend-item{display:flex;align-items:center;gap:4px;}
@@ -11187,6 +11189,10 @@ function _closeOverlaysExcept(kind){
     const dr = document.getElementById('profile-drawer');
     if(dr && dr.style.display !== 'none') closeProfile();
   }
+  // The enlarged pay-trends chart is a look, not a place. Navigating away shuts
+  // it and forgets it; drilling around inside Pay trends keeps the same bucket
+  // open at the new level, which is usually what you were asking.
+  if(typeof ptCloseBig === 'function') ptCloseBig(kind !== 'pay-trends');
 }
 
 function applyRoute(){
@@ -11211,7 +11217,7 @@ function applyRoute(){
       case 'activity':  showFormActivity(); break;
       case 'slides':    showBonusSlides(); break;
       case 'effective-wage': showEffWageReport(); break;
-      case 'pay-trends': showPayTrends(); break;
+      case 'pay-trends': showPayTrends(seg[1] || '', seg[2] || ''); break;
       case 'supplies':  showSupplyCatalog(); break;
       case 'request':   if(seg[1]) openRequestDeepLink(seg[1]); break;
       case 'event':     if(seg[1]) openEventDetail(seg[1]); break;
@@ -16413,19 +16419,32 @@ function paintEffWageReport(){
 // It reads the same endpoint, the same window and the same cache as the
 // effective wage report, so the two screens can never disagree and switching
 // between them costs nothing.
+// Product and new/return are one line now. Separately they were two cards
+// carrying a penny an hour between them, and new/return has been nil all year
+// -- a chart of a flat zero is a chart that teaches nothing. Together they are
+// "all other incentives", which is how they are talked about anyway.
 const PT_BUCKETS = [
-  { k:'base',         label:'Base wages',        col:'#03654e' },
-  { k:'tips',         label:'Tips',              col:'#5fa85f' },
-  { k:'productivity', label:'Productivity',      col:'#9acb3a' },
-  { k:'bonus',        label:'Stylist bonus',     col:'#c9b037' },
-  { k:'product',      label:'Product incentive', col:'#2f7fbf' },
-  { k:'newReturn',    label:'New / return',      col:'#7a4fbf' },
-  { k:'gross',        label:'Total earned',      col:'#b3261e' },
+  { k:'base',         label:'Base wages',           col:'#03654e', pick:function(b){ return b.base||0; } },
+  { k:'tips',         label:'Tips',                 col:'#5fa85f', pick:function(b){ return b.tips||0; } },
+  { k:'productivity', label:'Productivity',         col:'#9acb3a', pick:function(b){ return b.productivity||0; } },
+  { k:'bonus',        label:'Stylist bonus',        col:'#c9b037', pick:function(b){ return b.bonus||0; } },
+  { k:'other',        label:'All other incentives', col:'#2f7fbf', pick:function(b){ return (b.product||0)+(b.newReturn||0); } },
+  { k:'gross',        label:'Total earned',         col:'#b3261e', pick:function(b){ return b.gross||0; } },
 ];
+const ptBucket = function(k){ return PT_BUCKETS.filter(function(b){ return b.k === k; })[0] || null; };
 let S_ptSalon = '', S_ptPerson = '', S_ptPerHour = true, S_ptCharts = [], S_ptSort = { col:'gross', dir:-1 };
+let S_ptBig = null;   // which bucket is open full size, if any
 
-function showPayTrends(){
-  _route('#/pay-trends');
+function showPayTrends(sn, gid){
+  // A drill level is part of the address, so Back steps out one level instead
+  // of leaving the screen entirely. Called from the router too, which is why
+  // the arguments win over whatever was on screen.
+  S_ptSalon = sn || '';
+  S_ptPerson = gid || '';
+  _route(ptHash());
+  // Already here with data: repaint at the new level rather than rebuilding the
+  // page and losing the scroll position.
+  if(document.getElementById('pt-body') && S_ewData){ paintPayTrends(); return; }
   clearActive();
   const pg = document.getElementById('page-hub');
   if(pg) pg.classList.add('active');
@@ -16441,13 +16460,20 @@ function showPayTrends(){
   loadPayTrends();
 }
 function loadPayTrends(){ ewLoad('pt-body', paintPayTrends); }
-function ptDrillSalon(sn){ S_ptSalon = sn; S_ptPerson = ''; paintPayTrends(); }
-function ptDrillPerson(gid){ S_ptPerson = gid; paintPayTrends(); }
-function ptUp(level){
-  if(level === 'company'){ S_ptSalon = ''; S_ptPerson = ''; }
-  else if(level === 'salon'){ S_ptPerson = ''; }
+function ptHash(){
+  return '#/pay-trends' + (S_ptSalon ? '/' + encodeURIComponent(S_ptSalon) : '')
+    + (S_ptSalon && S_ptPerson ? '/' + encodeURIComponent(S_ptPerson) : '');
+}
+// Each of these pushes an entry, so Back retraces the drill: person -> salon ->
+// company -> whatever you were on before Pay trends.
+function ptGo(sn, gid){
+  S_ptSalon = sn || ''; S_ptPerson = (sn && gid) ? gid : '';
+  _route(ptHash());
   paintPayTrends();
 }
+function ptDrillSalon(sn){ ptGo(sn, ''); }
+function ptDrillPerson(gid){ ptGo(S_ptSalon, gid); }
+function ptUp(level){ if(level === 'company') ptGo('', ''); else ptGo(S_ptSalon, ''); }
 function ptSetPerHour(b){ S_ptPerHour = b; paintPayTrends(); }
 function ptSort(col){
   S_ptSort = { col: col, dir: S_ptSort.col === col ? -S_ptSort.dir : (col === 'name' ? 1 : -1) };
@@ -16455,9 +16481,11 @@ function ptSort(col){
 }
 
 /** A bucket out of a rolled month or total, in whichever unit is selected. */
-function ptVal(b, key){
+function ptVal(b, bucket){
   if(!b) return null;
-  const v = b[key] || 0;
+  const spec = (typeof bucket === 'string') ? ptBucket(bucket) : bucket;
+  if(!spec) return null;
+  const v = spec.pick(b);
   if(!S_ptPerHour) return v;
   return b.floorHours > 0 ? v / b.floorHours : null;
 }
@@ -16467,6 +16495,130 @@ const ptFmt = function(v){
     ? '$' + v.toFixed(2)
     : '$' + Math.round(v).toLocaleString('en-US');
 };
+
+
+// ── one bucket, full size ─────────────────────────────────────────────────
+// The cards are deliberately axis-less: at 74px an axis is three unreadable
+// numbers stealing half the height, and the figure above the line already says
+// the value. This is where the axis belongs -- with the months named, the
+// gridlines drawn, last year on the same scale, and the numbers underneath for
+// anyone who wants to read rather than look.
+let S_ptCtx = null, S_ptBigChart = null;
+
+function ptCloseBig(forget){
+  const el = document.getElementById('pt-big');
+  if(el) el.remove();
+  if(S_ptBigChart){ try{ S_ptBigChart.destroy(); }catch(e){} S_ptBigChart = null; }
+  if(forget) S_ptBig = null;
+  document.removeEventListener('keydown', ptBigKey);
+}
+function ptBigKey(e){ if(e.key === 'Escape') ptCloseBig(true); }
+
+function ptOpenBig(k){
+  const b = ptBucket(k), C = S_ptCtx;
+  if(!b || !C) return;
+  ptCloseBig(false);
+  S_ptBig = k;
+
+  const labels = C.cols.map(function(i){ return (C.MK[i] && C.MK[i].full) || (C.MK[i] && C.MK[i].label) || ''; });
+  const now = C.cols.map(function(i){ return ptVal(C.roll.months[i], b); });
+  const was = C.PRIOR ? C.cols.map(function(i){ return ptVal(C.priorMonth(i), b); }) : null;
+  const hasWas = was && was.some(function(v){ return v !== null && v !== undefined; });
+
+  const th = 'padding:6px 10px;font-size:10.5px;font-weight:700;text-transform:uppercase;'
+    + 'letter-spacing:.04em;color:var(--text-muted);text-align:right;';
+  const td = 'padding:6px 10px;font-size:12.5px;text-align:right;border-top:1px solid var(--border);';
+  let rows = '';
+  C.cols.forEach(function(i, n){
+    const a = now[n], w = hasWas ? was[n] : null;
+    const d = (a !== null && w !== null && w) ? (a - w) / w * 100 : null;
+    rows += '<tr><td style="' + td + 'text-align:left;font-weight:600;">' + labels[n] + '</td>'
+      + '<td style="' + td + '">' + (C.roll.months[C.cols[n]].floorHours || 0).toFixed(0) + '</td>'
+      + '<td style="' + td + 'font-weight:700;">' + ptFmt(a) + '</td>'
+      + (hasWas ? '<td style="' + td + '">' + ptFmt(w) + '</td>'
+        + '<td style="' + td + '">' + (d === null ? '<span style="color:var(--text-muted);">&mdash;</span>'
+            : '<span style="color:' + (d>0?'#0a5236':'#b3261e') + ';font-weight:600;">'
+              + (d>0?'▲ ':'▼ ') + Math.abs(d).toFixed(1) + '%</span>') + '</td>' : '')
+      + '</tr>';
+  });
+  const totNow = ptVal(C.roll.total, b), totWas = C.PRIOR ? ptVal(C.PRIOR.total, b) : null;
+  const totD = (totNow !== null && totWas) ? (totNow - totWas) / totWas * 100 : null;
+  rows += '<tr style="background:#f4f7f6;"><td style="' + td + 'text-align:left;font-weight:700;">'
+    + (S_ptPerHour ? 'Weighted average' : 'Total') + '</td>'
+    + '<td style="' + td + 'font-weight:700;">' + C.roll.total.floorHours.toFixed(0) + '</td>'
+    + '<td style="' + td + 'font-weight:700;color:var(--primary);">' + ptFmt(totNow) + '</td>'
+    + (hasWas ? '<td style="' + td + 'font-weight:700;">' + ptFmt(totWas) + '</td>'
+      + '<td style="' + td + 'font-weight:700;">' + (totD === null ? '&mdash;'
+          : '<span style="color:' + (totD>0?'#0a5236':'#b3261e') + ';">'
+            + (totD>0?'▲ ':'▼ ') + Math.abs(totD).toFixed(1) + '%</span>') + '</td>' : '')
+    + '</tr>';
+
+  const wrap = document.createElement('div');
+  wrap.id = 'pt-big';
+  wrap.setAttribute('style', 'position:fixed;inset:0;z-index:9000;background:rgba(15,25,20,.55);'
+    + 'display:flex;align-items:center;justify-content:center;padding:24px;');
+  wrap.innerHTML = '<div style="background:#fff;border-radius:12px;max-width:1000px;width:100%;'
+      + 'max-height:92vh;overflow:auto;box-shadow:0 18px 60px rgba(0,0,0,.32);">'
+    + '<div style="display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--border);'
+      + 'position:sticky;top:0;background:#fff;z-index:1;">'
+      + '<span style="width:11px;height:11px;border-radius:3px;background:' + b.col + ';"></span>'
+      + '<div><div style="font-weight:700;font-size:14px;">' + b.label + '</div>'
+        + '<div style="font-size:11.5px;color:var(--text-muted);">' + hEsc(C.title) + ' &middot; ' + C.winLbl
+        + ' &middot; ' + (S_ptPerHour ? 'per floor hour' : 'total dollars') + '</div></div>'
+      + '<button class="btn btn-sm btn-secondary" style="margin-left:auto;" onclick="ptCloseBig(true)">Close</button>'
+    + '</div>'
+    + '<div style="padding:16px 18px 6px;height:360px;position:relative;"><canvas id="pt-big-canvas"></canvas></div>'
+    + '<div style="padding:6px 18px 18px;">'
+      + '<div style="overflow-x:auto;border:1px solid var(--border);border-radius:10px;">'
+      + '<table style="width:100%;border-collapse:collapse;"><thead><tr>'
+        + '<th style="' + th + 'text-align:left;">Month</th><th style="' + th + '">Floor hrs</th>'
+        + '<th style="' + th + '">This period</th>'
+        + (hasWas ? '<th style="' + th + '">Last year</th><th style="' + th + '">Change</th>' : '')
+      + '</tr></thead><tbody>' + rows + '</tbody></table></div>'
+      + '<div style="font-size:11px;color:var(--text-muted);margin-top:9px;line-height:1.55;">'
+        + (S_ptPerHour
+            ? 'Dollars per floor hour, so this bucket only moves when the rate does.'
+            : 'Total dollars, so this moves with hours as well as with rate.')
+        + ' Last year is the same calendar months. Months with no floor time at this level are '
+        + 'left out entirely rather than drawn as zero.</div>'
+    + '</div></div>';
+  wrap.addEventListener('click', function(e){ if(e.target === wrap) ptCloseBig(true); });
+  document.body.appendChild(wrap);
+  document.addEventListener('keydown', ptBigKey);
+
+  if(typeof Chart === 'undefined') return;
+  const sets = [{ label:'This period', data: now, borderColor: b.col, backgroundColor: b.col + '22',
+    borderWidth: 2.6, pointRadius: 3, pointHoverRadius: 6, tension: 0.28, fill: true, spanGaps: true }];
+  if(hasWas){
+    sets.push({ label:'Last year', data: was, borderColor:'#8a8a8a', borderWidth:1.9,
+      borderDash:[6,4], pointRadius:2, tension:0.28, fill:false, spanGaps:true });
+  }
+  try{
+    S_ptBigChart = new Chart(document.getElementById('pt-big-canvas'), {
+      type:'line', data:{ labels: labels, datasets: sets },
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        interaction:{ mode:'index', intersect:false },
+        plugins:{
+          legend:{ display:true, position:'bottom', labels:{ boxWidth:12, font:{ size:11 } } },
+          tooltip:{ callbacks:{ label:function(c){
+            const v = c.parsed.y;
+            return c.dataset.label + ': ' + (v === null || v === undefined ? '—' : ptFmt(v));
+          } } },
+        },
+        scales:{
+          // Dollars per hour never sensibly starts at zero -- on a $15 base wage
+          // it would flatten the line. A dollar total does.
+          y:{ beginAtZero: !S_ptPerHour, title:{ display:true,
+                text: S_ptPerHour ? '$ per floor hour' : 'Total dollars' },
+              ticks:{ callback:function(v){ return '$' + v.toLocaleString('en-US'); } },
+              grid:{ color:'rgba(0,0,0,.06)' } },
+          x:{ title:{ display:true, text:'Month' }, grid:{ display:false } },
+        },
+      },
+    });
+  }catch(e){}
+}
 
 function paintPayTrends(){
   const host = document.getElementById('pt-body'); if(!host || !S_ewData) return;
@@ -16523,6 +16675,8 @@ function paintPayTrends(){
     return (j === undefined) ? null : PRIOR.months[j];
   };
 
+  const winLbl = ewDay(d.start) + ' &ndash; ' + ewDay(d.end);
+
   // ── breadcrumb ──
   const crumb = '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12.5px;margin-bottom:10px;">'
     + '<a href="javascript:void(0)" onclick="ptUp(' + "'company'" + ')" style="color:' + (level==='company'?'var(--text)':'var(--primary)')
@@ -16555,12 +16709,11 @@ function paintPayTrends(){
   const cards = PT_BUCKETS.map(function(b){
     const now = ptVal(roll.total, b.k);
     const was = PRIOR ? ptVal(PRIOR.total, b.k) : null;
-    const share = (!S_ptPerHour && roll.total.gross > 0 && b.k !== 'gross')
-      ? ((roll.total[b.k]||0) / roll.total.gross * 100).toFixed(0) + '% of gross'
-      : (S_ptPerHour && roll.total.gross > 0 && b.k !== 'gross')
-        ? ((roll.total[b.k]||0) / roll.total.gross * 100).toFixed(0) + '% of gross' : '';
-    return '<div style="flex:1 1 230px;min-width:230px;background:#fff;border:1px solid var(--border);'
-        + 'border-radius:10px;padding:11px 13px 8px;border-left:3px solid ' + b.col + ';">'
+    const share = (roll.total.gross > 0 && b.k !== 'gross')
+      ? (b.pick(roll.total) / roll.total.gross * 100).toFixed(0) + '% of gross' : '';
+    return '<div class="pt-card" onclick="ptOpenBig(' + "'" + b.k + "'" + ')" title="Open full size"'
+        + ' style="flex:1 1 230px;min-width:230px;background:#fff;border:1px solid var(--border);'
+        + 'border-radius:10px;padding:11px 13px 8px;border-left:3px solid ' + b.col + ';cursor:pointer;">'
       + '<div style="display:flex;align-items:baseline;gap:8px;">'
         + '<div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);">' + b.label + '</div>'
         + (share ? '<div style="font-size:10.5px;color:var(--text-muted);margin-left:auto;">' + share + '</div>' : '')
@@ -16569,6 +16722,8 @@ function paintPayTrends(){
         + (S_ptPerHour ? '<span style="font-size:11.5px;font-weight:400;color:var(--text-muted);">/hr</span>' : '') + '</div>'
       + '<div style="font-size:11px;margin-bottom:5px;">' + chg(now, was) + '</div>'
       + '<div style="height:74px;position:relative;"><canvas id="pt-c-' + b.k + '"></canvas></div>'
+      + '<div style="font-size:10px;color:var(--text-muted);text-align:right;margin-top:2px;">'
+        + 'click to enlarge</div>'
       + '</div>';
   }).join('');
 
@@ -16639,7 +16794,6 @@ function paintPayTrends(){
       + 'Open ' + hEsc(title) + '&rsquo;s review &rarr;</button></div>';
   }
 
-  const winLbl = ewDay(d.start) + ' &ndash; ' + ewDay(d.end);
   host.innerHTML = ewControls('')
     + crumb
     + '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:8px;">'
@@ -16658,6 +16812,14 @@ function paintPayTrends(){
             + 'separate the two.')
       + ' The comparison is the same calendar months a year earlier; a salon or person with nothing in those '
       + 'months shows no comparison rather than a misleading one.</div>';
+
+  // What the enlarged view needs. Kept here rather than recomputed on open, so
+  // the big chart is guaranteed to be the same numbers as the card it came from.
+  S_ptCtx = {
+    cols: cols, MK: MK, roll: roll, PRIOR: PRIOR, priorMonth: priorMonth,
+    title: title, winLbl: winLbl,
+  };
+  if(S_ptBig) setTimeout(function(){ ptOpenBig(S_ptBig); }, 40);
 
   // ── the small charts, once the cards are in the page ──
   setTimeout(function(){
