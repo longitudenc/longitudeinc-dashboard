@@ -17042,6 +17042,24 @@ function facZoom(photoId, name){
   document.body.appendChild(wrap);
 }
 
+function facRemoveReview(reviewId, label, photos){
+  const nl = String.fromCharCode(10);
+  const msg = 'Remove the ' + label + ' review from the archive?' + nl + nl
+    + 'The repairs on the tracker are NOT touched — this only removes the record of the email, '
+    + 'and the stored copy of it.'
+    + (photos ? nl + nl + 'Photos still sitting on the review are deleted too. Any you have already '
+        + 'attached to an item are kept.' : '');
+  if(!confirm(msg)) return;
+  fetch('/api/facility?reviewId=' + encodeURIComponent(reviewId), { method:'DELETE' })
+    .then(r=>r.json()).then(function(res){
+      if(!res.success) throw new Error(res.error || 'could not remove it');
+      facMsg('Review removed'
+        + (res.photos ? ' · ' + res.photos + ' unassigned photo' + (res.photos===1?'':'s') + ' deleted' : '')
+        + (res.kept ? ' · ' + res.kept + ' kept on items' : ''));
+      loadFacility();
+    }).catch(function(e){ alert((e && e.message) || 'could not remove it'); });
+}
+
 function facComment(itemId){
   const box = document.getElementById('fac-c-' + itemId);
   const txt = box ? box.value.trim() : '';
@@ -17142,6 +17160,12 @@ function facPaint_proposal(){
     + '</div></div>';
 }
 
+/** The separate repairs inside one finding. */
+function facLines(it){
+  return String(it.detail || '').split(String.fromCharCode(10))
+    .map(function(l){ return l.trim(); }).filter(Boolean);
+}
+
 /** The photos on this item, and a way to pull one over from the review. */
 function facPhotoStrip(it){
   const all = (S_facData && S_facData.photos) || [];
@@ -17203,14 +17227,21 @@ function facArchive(){
     + revs.map(function(r){
         return '<tr><td style="' + td + 'font-weight:600;">' + hEsc(salonDisplay(r.salonNum)) + '</td>'
           + '<td style="' + td + '">' + hEsc(pDate(r.reviewDate) || '—') + '</td>'
-          + '<td style="' + td + 'color:var(--text-muted);">' + r.items + ' items · '
-            + r.critical + ' critical · ' + r.photos + ' photos</td>'
+          + '<td style="' + td + 'color:' + (r.items ? 'var(--text-muted)' : '#8a5a12') + ';">'
+            + (r.items
+                ? r.items + ' items · ' + r.critical + ' critical'
+                : 'nothing on the tracker')
+            + ' · ' + r.photos + ' photo' + ((r.photos||0)===1?'':'s') + '</td>'
           + '<td style="' + td + 'color:var(--text-muted);">' + hEsc(r.sourceFile || '') + '</td>'
-          + '<td style="' + td + 'text-align:right;">'
+          + '<td style="' + td + 'text-align:right;white-space:nowrap;">'
             + (r.msgPathname
                 ? '<a href="/api/facility/file?reviewId=' + encodeURIComponent(r.reviewId) + '&dl=1" '
                   + 'style="color:var(--primary);font-weight:600;text-decoration:none;">Download the email</a>'
                 : '<span style="color:var(--text-muted);">not stored</span>')
+            + ' <button onclick="facRemoveReview(' + "'" + hEsc(r.reviewId) + "','"
+              + hEsc(salonDisplay(r.salonNum) + ' ' + (pDate(r.reviewDate) || '')).replace(/'/g,'') + "'," + (r.photos||0) + ')" '
+              + 'style="margin-left:10px;border:1px solid var(--border);background:#fff;border-radius:6px;'
+              + 'padding:2px 8px;font-size:11.5px;color:#b3261e;cursor:pointer;">Remove</button>'
           + '</td></tr>';
       }).join('')
     + '</table></div></details>';
@@ -17311,7 +17342,14 @@ function paintFacility(){
       let body = '';
       if(open){
         body = '<div style="padding:0 14px 14px;border-top:1px solid var(--border);">'
-          + '<div style="white-space:pre-wrap;font-size:13px;line-height:1.6;margin:10px 0 12px;">' + hEsc(it.detail) + '</div>'
+          + (function(){
+              const ls = facLines(it);
+              if(ls.length <= 1) return '<div style="font-size:13px;line-height:1.6;margin:10px 0 12px;">'
+                + hEsc(ls[0] || it.detail) + '</div>';
+              return '<ul style="font-size:13px;line-height:1.65;margin:10px 0 12px;padding-left:20px;">'
+                + ls.map(function(l){ return '<li style="margin:2px 0;">' + hEsc(l) + '</li>'; }).join('')
+                + '</ul>';
+            })()
           + facPhotoStrip(it)
           + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">'
             + '<select class="ff-select" style="width:auto;font-size:12.5px;padding:5px 8px;" '
@@ -17357,8 +17395,22 @@ function paintFacility(){
         + '<div onclick="facToggle(' + "'" + hEsc(it.itemId) + "'" + ')" style="display:flex;gap:10px;'
           + 'align-items:center;padding:11px 14px;cursor:pointer;flex-wrap:wrap;">'
           + tag
-          + '<div style="font-weight:600;font-size:13.5px;">' + hEsc(it.component) + '</div>'
-          + '<div style="font-size:12px;color:var(--text-muted);">' + hEsc(salonDisplay(it.salonNum)) + '</div>'
+          // A component name alone says nothing you can act on: "Walls" is not
+          // a repair, "wall has damage by jade sail near back of salon" is. The
+          // first line of the finding rides along, and a component carrying
+          // several repairs says how many rather than pretending to be one.
+          + '<div style="min-width:220px;flex:1 1 340px;">'
+            + '<div style="font-weight:600;font-size:13.5px;">' + hEsc(it.component)
+              + ' <span style="font-weight:400;font-size:12px;color:var(--text-muted);">'
+              + hEsc(salonDisplay(it.salonNum)) + '</span></div>'
+            + '<div style="font-size:12px;color:var(--text-muted);line-height:1.45;margin-top:1px;'
+              + 'display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">'
+              + hEsc(facLines(it)[0] || '')
+              + (facLines(it).length > 1
+                  ? ' <b style="color:var(--primary);">+' + (facLines(it).length - 1) + ' more</b>'
+                  : '')
+            + '</div>'
+          + '</div>'
           + '<div style="margin-left:auto;display:flex;gap:10px;align-items:center;font-size:11.5px;">'
             + (it.dueDate
                 ? '<span style="' + (overdue?'color:#8a5a12;font-weight:700;':'color:var(--text-muted);') + '">'

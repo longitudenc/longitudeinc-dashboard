@@ -19,8 +19,9 @@ import { canSeeSalon } from '@/lib/scope-filter'
 import {
   listFacility, addItems, updateItem, removeItem, summarise,
   listComments, addComment, FACILITY_STATUSES,
-  listReviews, listPhotos, saveReview, savePhotos, assignPhoto,
+  listReviews, listPhotos, saveReview, savePhotos, assignPhoto, removeReview,
 } from '@/lib/facility'
+import { del } from '@vercel/blob'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -80,11 +81,19 @@ export async function POST(req: Request) {
         if (!canSeeSalon(gate.access, S(body.review.salonNum, 10))) {
           return NextResponse.json({ success: false, error: 'outside your salons' }, { status: 403 })
         }
+        // COUNT WHAT IS ON THE TRACKER, not what this import happened to add.
+        // Loading the same email twice adds nothing — every component is
+        // already there — and recording that as "0 items" made the archive
+        // claim a review had produced nothing when it had produced seven.
+        const sn = S(body.review.salonNum, 10), rd = S(body.review.reviewDate, 10)
+        const onTracker = (await listFacility(true))
+          .filter(i => i.salonNum === sn && i.reviewDate === rd)
         review = await saveReview({
-          salonNum: S(body.review.salonNum, 10), salonName: S(body.review.salonName, 120),
-          reviewDate: S(body.review.reviewDate, 10), subject: S(body.review.subject, 300),
+          salonNum: sn, salonName: S(body.review.salonName, 120),
+          reviewDate: rd, subject: S(body.review.subject, 300),
           sourceFile: S(body.review.sourceFile, 300), msgPathname: S(body.review.msgPathname, 300),
-          items: res.added.length, critical: res.added.filter(i => i.category === 'critical').length,
+          items: onTracker.length,
+          critical: onTracker.filter(i => i.category === 'critical').length,
           photos: Array.isArray(body?.photos) ? body.photos.length : 0,
         }, gate.email)
       }
@@ -160,8 +169,26 @@ export async function DELETE(req: Request) {
   const gate = await requireCapability('edit.facility')
   if (!gate.ok) return gate.response
   try {
-    const itemId = S(new URL(req.url).searchParams.get('itemId'), 60)
-    if (!itemId) return NextResponse.json({ success: false, error: 'itemId is required' }, { status: 400 })
+    const q = new URL(req.url).searchParams
+    const reviewId = S(q.get('reviewId'), 60)
+    if (reviewId) {
+      const r = (await listReviews()).find(x => x.reviewId === reviewId)
+      if (!r) return NextResponse.json({ success: false, error: 'not found' }, { status: 404 })
+      if (!canSeeSalon(gate.access, r.salonNum)) {
+        return NextResponse.json({ success: false, error: 'outside your salons' }, { status: 403 })
+      }
+      const out = await removeReview(reviewId)
+      // The stored bytes go with the rows that referenced them; a failure here
+      // leaves an orphan object, not a broken record, so it must not fail the
+      // request.
+      for (const path of out.pathnames) {
+        try { await del(path) } catch { /* orphan, not an error */ }
+      }
+      return NextResponse.json({ success: true, ...out })
+    }
+
+    const itemId = S(q.get('itemId'), 60)
+    if (!itemId) return NextResponse.json({ success: false, error: 'itemId or reviewId is required' }, { status: 400 })
     const existing = (await listFacility()).find(i => i.itemId === itemId)
     if (existing && !canSeeSalon(gate.access, existing.salonNum)) {
       return NextResponse.json({ success: false, error: 'outside your salons' }, { status: 403 })

@@ -330,6 +330,42 @@ export async function savePhotos(list: Partial<FacilityPhoto>[], by: string): Pr
   return rows
 }
 
+/**
+ * Take a review off the archive.
+ *
+ * ITEMS ARE NEVER TOUCHED. The archive is a record of which email arrived, not
+ * the work — removing a duplicate or a mis-filed email must not delete repairs
+ * somebody is in the middle of.
+ *
+ * Photos ALREADY ON AN ITEM are kept for the same reason: they are evidence
+ * against live work now, whatever brought them in. Only the ones still sitting
+ * unassigned on the review go, along with their stored bytes, because those are
+ * what a removed review leaves behind with nothing pointing at them.
+ */
+export async function removeReview(reviewId: string): Promise<{ removed: boolean; photos: number; kept: number; pathnames: string[] }> {
+  const id = S(reviewId, 60)
+  const reviews = await listReviews(true)
+  const keepR = reviews.filter(r => r.reviewId !== id)
+  const removed = keepR.length !== reviews.length
+
+  const photos = await listPhotos(true)
+  const mine = photos.filter(p => p.reviewId === id)
+  const drop = mine.filter(p => !p.itemId)
+  const kept = mine.length - drop.length
+
+  if (removed) {
+    const rc = REVIEW_COLUMNS as unknown as string[]
+    await writeSheet(TAB_REVIEWS, [rc, ...keepR.map(r => rc.map(c => String((r as any)[c] ?? '')))])
+  }
+  if (drop.length) {
+    const dropIds = new Set(drop.map(p => p.photoId))
+    const pc = PHOTO_COLUMNS as unknown as string[]
+    await writeSheet(TAB_PHOTOS, [pc,
+      ...photos.filter(p => !dropIds.has(p.photoId)).map(p => pc.map(c => String((p as any)[c] ?? '')))])
+  }
+  return { removed, photos: drop.length, kept, pathnames: drop.map(p => p.pathname).filter(Boolean) }
+}
+
 /** Move a photo onto an item, or back to the review with a blank itemId. */
 export async function assignPhoto(photoId: string, itemId: string): Promise<boolean> {
   const all = await listPhotos(true)
