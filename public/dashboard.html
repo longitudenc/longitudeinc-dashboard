@@ -15468,6 +15468,13 @@ function buildProfile(globalId, name){
 const EW_MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 let S_effWageYear = null;
 
+// EVERYTHING THAT IS NOT BASE, TIPS, PRODUCTIVITY OR THE MONTHLY BONUS.
+// Product, new/return, six-day and the overtime premium. Defined once, because
+// three screens have to agree on it or the columns stop adding up to the total.
+function ewOther(b){
+  if(!b) return 0;
+  return (b.product||0) + (b.newReturn||0) + (b.otherIncentives||0) + (b.overtimePremium||0);
+}
 const ewMoney = v => v || v === 0 ? '$' + Math.round(v).toLocaleString('en-US') : '';
 const ewRate  = v => (v || v === 0) ? '$' + v.toFixed(2) : '';
 
@@ -15530,24 +15537,14 @@ function ewCard(p, res){
     function(v){ return v ? v.toFixed(1) : ''; });
   body += row('Base Wages Earned', function(x){ return x.base; }, ewMoney);
   if(any(function(x){ return x.productivity; })) body += row('Productivity Incentive', function(x){ return x.productivity; }, ewMoney);
-  if(any(function(x){ return x.product; }))      body += row('Product Incentive', function(x){ return x.product; }, ewMoney);
-  if(any(function(x){ return x.newReturn; }))    body += row('New / Return Incentive', function(x){ return x.newReturn; }, ewMoney);
+  if(any(ewOther))                               body += row('All Other Incentives', ewOther, ewMoney);
   if(any(function(x){ return x.bonus; }))        body += row('Stylist Bonus', function(x){ return x.bonus; }, ewMoney);
+  if(any(function(x){ return x.ptoPay; }))       body += row('Vacation &amp; Holiday Pay', function(x){ return x.ptoPay; }, ewMoney);
   body += row('Tips Earned', function(x){ return x.tips; }, ewMoney);
   body += row('GROSS PAY', function(x){ return x.gross; }, ewMoney, true);
   body += row('Effective Wage', function(x){ return x.effectiveWage; },
     function(v){ return v ? ewRate(v) + '/hr' : ''; }, true);
-  // BELOW THE LINE ON PURPOSE. Vacation and holiday are real money, but they
-  // are paid at base wage and earn no tips or incentives, so they belong in
-  // neither half of a floor-hour wage. Shown, never counted.
-  if(p.ptoPay > 0){
-    body += '<tr><td style="' + lab + 'color:var(--text-muted);font-style:italic;">Vacation &amp; holiday '
-      + '<span style="font-weight:400;">(not in the wage)</span></td>'
-      + cols.map(function(i){
-          return '<td style="' + td + 'color:var(--text-muted);">' + ewMoney(p.months[i].ptoPay) + '</td>';
-        }).join('')
-      + '<td style="' + td + 'background:#f4f7f6;color:var(--text-muted);">' + ewMoney(p.ptoPay) + '</td></tr>';
-  }
+
 
   // Per-hour split, as one bar. The percentages are of gross, so they answer
   // "where does my hour come from" rather than "how big is each number".
@@ -15558,16 +15555,16 @@ function ewCard(p, res){
       + ';color:' + (dark ? '#123' : '#fff') + ';font-size:11px;font-weight:700;text-align:center;'
       + 'line-height:26px;overflow:hidden;white-space:nowrap;">' + (pct >= 7 ? pct.toFixed(0) + '%' : '') + '</div>';
   };
-  const incTotal = p.productivity + p.product + p.newReturn + p.bonus;
+  const incTotal = p.productivity + ewOther(p) + p.bonus + p.ptoPay;
   const bar = '<div style="display:flex;height:26px;border-radius:5px;overflow:hidden;border:1px solid var(--border);">'
     + seg('Base wage', p.base, 'var(--primary-dark,#03654e)')
     + seg('Tips', p.tips, '#8fd08f', true)
-    + seg('Incentives and bonus', incTotal, '#9acb3a', true)
+    + seg('Incentives, bonus and time off', incTotal, '#9acb3a', true)
     + '</div>'
     + '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:6px;font-size:11.5px;color:var(--text-muted);">'
     + '<span><span style="display:inline-block;width:9px;height:9px;background:var(--primary-dark,#03654e);border-radius:2px;"></span> Base ' + ewRate(p.floorHours ? p.base/p.floorHours : 0) + '/hr</span>'
     + '<span><span style="display:inline-block;width:9px;height:9px;background:#8fd08f;border-radius:2px;"></span> Tips ' + ewRate(p.floorHours ? p.tips/p.floorHours : 0) + '/hr</span>'
-    + '<span><span style="display:inline-block;width:9px;height:9px;background:#9acb3a;border-radius:2px;"></span> Incentives + bonus ' + ewRate(p.floorHours ? incTotal/p.floorHours : 0) + '/hr</span>'
+    + '<span><span style="display:inline-block;width:9px;height:9px;background:#9acb3a;border-radius:2px;"></span> Incentives, bonus and time off ' + ewRate(p.floorHours ? incTotal/p.floorHours : 0) + '/hr</span>'
     + '</div>';
 
   // Week by week, only when there are enough weeks for a line to mean anything.
@@ -15612,14 +15609,13 @@ function ewCard(p, res){
             + 'sick time are excluded from both the hours and the pay — they earn base wage and no tips, so '
             + 'counting them would understate the hour actually spent cutting. '
           : '')
-      + 'Excludes ' + ((res.excludes || []).join(' and ') || 'nothing else') + '. '
       + (p.ptoPay > 0
-          ? '<b>Vacation and holiday are shown but not counted:</b> ' + p.ptoHours.toFixed(0) + ' hours '
-            + 'worth ' + ewMoney(p.ptoPay) + ' at base wage. It is real pay, but it earns no tips and no '
-            + 'incentives, so putting it in would pull the cutting hour down toward base wage &mdash; and '
-            + 'putting it in the pay without the hours would push it up. Neither is what an hour on the '
-            + 'floor is worth.'
+          ? '<b>Vacation and holiday pay is counted, its hours are not:</b> ' + p.ptoHours.toFixed(0)
+            + ' hours worth ' + ewMoney(p.ptoPay) + '. It is earned by working the floor even though it '
+            + 'is not worked on the floor. '
           : '')
+      + 'Six-day pay and the overtime premium are in <b>All Other Incentives</b>; SD_PAYROLL has no column '
+      + 'for either, so they are recovered from the two effective-wage figures it does store.'
       + '</div>'
     + '</div>';
 }
@@ -15825,7 +15821,8 @@ function ewSortPeople(col){
 // hours can be weighted the same way.
 function ewRoll(people, nMonths){
   const blank = function(){ return { floorHours:0, nonFloorHours:0, ptoHours:0, ptoPay:0, base:0,
-    productivity:0, product:0, newReturn:0, bonus:0, tips:0, gross:0, personWeeks:0 }; };
+    productivity:0, product:0, newReturn:0, otherIncentives:0, overtimePremium:0,
+    bonus:0, tips:0, gross:0, personWeeks:0 }; };
   const total = blank(), months = [];
   const n = nMonths || 0;
   for(let i=0;i<n;i++) months.push(blank());
@@ -15833,7 +15830,9 @@ function ewRoll(people, nMonths){
     t.floorHours += x.floorHours||0; t.nonFloorHours += x.nonFloorHours||0;
     t.ptoHours += x.ptoHours||0; t.ptoPay += x.ptoPay||0;
     t.base += x.base||0; t.productivity += x.productivity||0; t.product += x.product||0;
-    t.newReturn += x.newReturn||0; t.bonus += x.bonus||0; t.tips += x.tips||0; t.gross += x.gross||0;
+    t.newReturn += x.newReturn||0; t.otherIncentives += x.otherIncentives||0;
+    t.overtimePremium += x.overtimePremium||0;
+    t.bonus += x.bonus||0; t.tips += x.tips||0; t.gross += x.gross||0;
   };
   // The total is built FROM THE MONTHS, which the endpoint has already cut to
   // the window -- so hours and pay always cover the same weeks. Nothing is
@@ -15956,7 +15955,8 @@ function ewBuildSpec(d, prior, people, homeOf, active, salons, salon){
     const list = salon ? inSalon(salon) : people;
     const n = we.length;
     const acc = { h:new Array(n).fill(0), base:new Array(n).fill(0), tips:new Array(n).fill(0),
-                  prod:new Array(n).fill(0), bonus:new Array(n).fill(0), other:new Array(n).fill(0) };
+                  prod:new Array(n).fill(0), bonus:new Array(n).fill(0), other:new Array(n).fill(0),
+                  pto:new Array(n).fill(0) };
     list.forEach(function(p){
       const w = p.wk; if(!w) return;
       for(let i=0;i<n;i++){
@@ -15966,6 +15966,7 @@ function ewBuildSpec(d, prior, people, homeOf, active, salons, salon){
         acc.prod[i] += (w.prod && w.prod[i]) || 0;
         acc.bonus[i] += (w.bonus && w.bonus[i]) || 0;
         acc.other[i] += (w.other && w.other[i]) || 0;
+        acc.pto[i] += (w.pto && w.pto[i]) || 0;
       }
     });
     const per = function(k){
@@ -15981,6 +15982,7 @@ function ewBuildSpec(d, prior, people, homeOf, active, salons, salon){
     sets.push(band('Productivity', per('prod'), '#9acb3a'));
     sets.push(band('Stylist bonus', per('bonus'), '#c9b037'));
     sets.push(band('Other incentives', per('other'), '#bcd2c8'));
+    sets.push(band('Time off', per('pto'), '#7f9fbf'));
     stacked = true; beginAtZero = true;
     note = 'Dollars per floor hour, stacked &mdash; the top of the stack is the effective wage. '
       + 'This view is always one scope at a time: ' + (salon ? salonDisplay(salon) : 'the whole company') + '.';
@@ -16212,7 +16214,7 @@ function paintEffWageReport(){
   const per = function(v){ return T.floorHours ? v / T.floorHours : 0; };
   const pInc = PRIOR ? PRIOR.productivity : null;
   const pBon = PRIOR ? PRIOR.bonus : null;
-  const pOth = PRIOR ? PRIOR.product + PRIOR.newReturn : null;
+  const pOth = PRIOR ? ewOther(PRIOR) : null;
   const rateD = function(v){ return ewRate(v); };
   const cmp = function(now, was, fmt){
     const dd = delta(now, was, fmt);
@@ -16238,8 +16240,12 @@ function paintEffWageReport(){
     + tile('Stylist bonus', ewRate(per(T.bonus)) + '<span style="font-size:12px;font-weight:400;">/hr</span>',
         cmp(per(T.bonus), pPer(pBon), rateD)
           || ((T.gross ? (T.bonus/T.gross*100).toFixed(0) : 0) + '% of gross'), '#c9b037')
-    + tile('Other incentives', ewRate(per(T.product + T.newReturn)) + '<span style="font-size:12px;font-weight:400;">/hr</span>',
-        cmp(per(T.product + T.newReturn), pPer(pOth), rateD) || 'product and new/return')
+    + tile('All other incentives', ewRate(per(ewOther(T))) + '<span style="font-size:12px;font-weight:400;">/hr</span>',
+        cmp(per(ewOther(T)), pPer(pOth), rateD) || 'product, new/return, six-day and overtime')
+    + tile('Time off', ewRate(per(T.ptoPay)) + '<span style="font-size:12px;font-weight:400;">/hr</span>',
+        cmp(per(T.ptoPay), pPer(PRIOR && PRIOR.ptoPay), rateD)
+          || (T.ptoHours ? T.ptoHours.toFixed(0) + ' vacation and holiday hours' : 'no vacation or holiday'),
+        '#7f9fbf')
     + '</div>';
 
   // ── by month, with a bar so the shape is visible ──
@@ -16250,7 +16256,7 @@ function paintEffWageReport(){
     + '<thead><tr><th style="' + th + 'text-align:left;">Month</th>'
     + '<th style="' + th + '">Floor hrs</th><th style="' + th + '">Avg hrs/wk</th><th style="' + th + '">Base</th>'
     + '<th style="' + th + '">Tips</th><th style="' + th + '">Productivity</th><th style="' + th + '">Bonus</th>'
-    + '<th style="' + th + '">Other inc</th><th style="' + th + '">Gross</th>'
+    + '<th style="' + th + '">Other inc</th><th style="' + th + '">Time off</th><th style="' + th + '">Gross</th>'
     + '<th style="' + th + '">Effective</th><th style="' + th + 'text-align:left;"></th></tr></thead><tbody>';
   cols.forEach(function(i){
     const m = roll.months[i];
@@ -16261,7 +16267,8 @@ function paintEffWageReport(){
       + '<td style="' + td + '">' + ewMoney(m.tips) + '</td>'
       + '<td style="' + td + '">' + ewMoney(m.productivity) + '</td>'
       + '<td style="' + td + '">' + ewMoney(m.bonus) + '</td>'
-      + '<td style="' + td + '">' + ewMoney(m.product + m.newReturn) + '</td>'
+      + '<td style="' + td + '">' + ewMoney(ewOther(m)) + '</td>'
+      + '<td style="' + td + '">' + ewMoney(m.ptoPay) + '</td>'
       + '<td style="' + td + '">' + ewMoney(m.gross) + '</td>'
       + '<td style="' + td + 'font-weight:700;">' + (m.effectiveWage ? ewRate(m.effectiveWage) : '—') + '</td>'
       + '<td style="' + td + 'text-align:left;">' + ewBar(m.effectiveWage || 0, maxEff, 'var(--primary)') + '</td></tr>';
@@ -16274,7 +16281,8 @@ function paintEffWageReport(){
     + '<td style="' + td + 'font-weight:700;">' + ewMoney(T.tips) + '</td>'
     + '<td style="' + td + 'font-weight:700;">' + ewMoney(T.productivity) + '</td>'
     + '<td style="' + td + 'font-weight:700;">' + ewMoney(T.bonus) + '</td>'
-    + '<td style="' + td + 'font-weight:700;">' + ewMoney(T.product + T.newReturn) + '</td>'
+    + '<td style="' + td + 'font-weight:700;">' + ewMoney(ewOther(T)) + '</td>'
+    + '<td style="' + td + 'font-weight:700;">' + ewMoney(T.ptoPay) + '</td>'
     + '<td style="' + td + 'font-weight:700;">' + ewMoney(T.gross) + '</td>'
     + '<td style="' + td + 'font-weight:700;color:var(--primary);">' + (T.effectiveWage ? ewRate(T.effectiveWage) : '—') + '</td>'
     + '<td style="' + td + '"></td></tr></tbody></table>';
@@ -16295,7 +16303,7 @@ function paintEffWageReport(){
       }
       return { sn: sn, n: r.headcount, hrs: t.floorHours, awh: t.avgWeeklyHours || 0,
         base: pr(t.base), tips: pr(t.tips), prod: pr(t.productivity), bon: pr(t.bonus),
-        oth: pr(t.product + t.newReturn), eff: t.effectiveWage || 0,
+        oth: pr(ewOther(t)), pto: pr(t.ptoPay), eff: t.effectiveWage || 0,
         was: was, chg: (was && t.effectiveWage) ? t.effectiveWage - was : null };
     }).filter(function(x){ return x.hrs > 0; });
     const S = S_ewSalonSort;
@@ -16315,7 +16323,7 @@ function paintEffWageReport(){
       + '<table style="width:100%;border-collapse:collapse;background:#fff;"><thead><tr>'
       + H('salon','Salon',true) + H('n','People') + H('hrs','Floor hrs') + H('awh','Avg hrs/wk')
       + H('base','Base/hr') + H('tips','Tips/hr') + H('prod','Prod/hr') + H('bon','Bonus/hr')
-      + H('oth','Other/hr') + H('eff','Effective') + H('chg','vs LY')
+      + H('oth','Other/hr') + H('pto','Time off/hr') + H('eff','Effective') + H('chg','vs LY')
       + '<th style="' + th + 'text-align:left;"></th></tr></thead><tbody>';
     rows.forEach(function(x){
       league += '<tr class="sub-row" onclick="ewSetSalon(' + "'" + hEsc(x.sn) + "'" + ')">'
@@ -16328,6 +16336,7 @@ function paintEffWageReport(){
         + '<td style="' + td + '">' + ewRate(x.prod) + '</td>'
         + '<td style="' + td + '">' + ewRate(x.bon) + '</td>'
         + '<td style="' + td + '">' + ewRate(x.oth) + '</td>'
+        + '<td style="' + td + '">' + ewRate(x.pto) + '</td>'
         + '<td style="' + td + 'font-weight:700;">' + ewRate(x.eff) + '</td>'
         + '<td style="' + td + '">' + (x.chg === null ? '<span style="color:var(--text-muted);">&mdash;</span>'
             : delta(x.eff, x.was, ewRate)) + '</td>'
@@ -16348,7 +16357,7 @@ function paintEffWageReport(){
     return { p: p, name: fmtName(p.name||''), hrs: p.floorHours, others: others, sh: sh,
       awh: p.weeks ? p.floorHours / p.weeks : 0,
       base: pr(p.base), tips: pr(p.tips), prod: pr(p.productivity), bon: pr(p.bonus),
-      oth: pr(p.product + p.newReturn), eff: p.effectiveWage || 0 };
+      oth: pr(ewOther(p)), pto: pr(p.ptoPay), eff: p.effectiveWage || 0 };
   });
   folkRows.sort(function(a,b){
     if(P.col === 'name') return a.name.localeCompare(b.name) * P.dir;
@@ -16367,7 +16376,7 @@ function paintEffWageReport(){
     + '<table style="width:100%;border-collapse:collapse;background:#fff;"><thead><tr>'
     + HP('name','Name',true) + HP('salon','Salon',true) + HP('hrs','Floor hrs') + HP('awh','Avg hrs/wk')
     + HP('base','Base/hr') + HP('tips','Tips/hr') + HP('prod','Prod/hr') + HP('bon','Bonus/hr')
-    + HP('oth','Other/hr') + HP('eff','Effective')
+    + HP('oth','Other/hr') + HP('pto','Time off/hr') + HP('eff','Effective')
     + '<th style="' + th + 'text-align:left;"></th></tr></thead><tbody>';
   folkRows.forEach(function(x){
     const tag = function(txt, title, col){
@@ -16390,6 +16399,7 @@ function paintEffWageReport(){
       + '<td style="' + td + '">' + ewRate(x.prod) + '</td>'
       + '<td style="' + td + '">' + ewRate(x.bon) + '</td>'
       + '<td style="' + td + '">' + ewRate(x.oth) + '</td>'
+      + '<td style="' + td + '">' + ewRate(x.pto) + '</td>'
       + '<td style="' + td + 'font-weight:700;">' + ewRate(x.eff) + '</td>'
       + '<td style="' + td + 'text-align:left;">' + ewBar(x.eff, bestP, 'var(--primary)') + '</td></tr>';
   });
@@ -16448,10 +16458,12 @@ function paintEffWageReport(){
               + 'the people still here. ' : '')
           : leavers + ' ' + (leavers===1?'leaver is':'leavers are') + ' excluded. ')
       + (T.ptoHours > 0
-          ? 'Vacation and holiday are outside this figure entirely: ' + T.ptoHours.toFixed(0)
-            + ' hours worth ' + ewMoney(T.ptoPay) + ' at base wage, which is '
-            + ewRate(T.floorHours ? T.ptoPay / T.floorHours : 0) + ' per floor hour of pay this does not show. '
+          ? 'Vacation and holiday PAY is counted (' + ewMoney(T.ptoPay) + '); their '
+            + T.ptoHours.toFixed(0) + ' hours are not, so a window containing somebody&rsquo;s vacation '
+            + 'week reads high. '
           : '')
+      + 'Six-day pay and the overtime premium sit in <b>Other</b>: SD_PAYROLL has no column for either, '
+      + 'so they are recovered from the two effective-wage figures it does store. '
       + '<b>Avg hrs/week</b> is floor hours over the weeks that person was on the floor, so a starter or a leaver '
       + 'is not averaged against a whole window. '
       + 'Showing <b>' + winLbl + '</b> &mdash; ' + (d.weeksInWindow||[]).length + ' pay '
@@ -16498,7 +16510,11 @@ const PT_BUCKETS = [
   { k:'tips',         label:'Tips',                 col:'#5fa85f', pick:function(b){ return b.tips||0; } },
   { k:'productivity', label:'Productivity',         col:'#9acb3a', pick:function(b){ return b.productivity||0; } },
   { k:'bonus',        label:'Stylist bonus',        col:'#c9b037', pick:function(b){ return b.bonus||0; } },
-  { k:'other',        label:'All other incentives', col:'#2f7fbf', pick:function(b){ return (b.product||0)+(b.newReturn||0); } },
+  // Product, new/return, six-day and the overtime premium. The last two have no
+  // column in SD_PAYROLL and are recovered from the two effective-wage figures
+  // it does store -- see the endpoint.
+  { k:'other',        label:'All other incentives', col:'#2f7fbf', pick:function(b){ return ewOther(b); } },
+  { k:'pto',          label:'Time off',             col:'#7f9fbf', pick:function(b){ return b.ptoPay||0; } },
   { k:'gross',        label:'Total earned',         col:'#b3261e', pick:function(b){ return b.gross||0; } },
 ];
 const ptBucket = function(k){ return PT_BUCKETS.filter(function(b){ return b.k === k; })[0] || null; };
@@ -16888,9 +16904,13 @@ function paintPayTrends(){
           ? (leaversIn ? ' ' + leaversIn + ' of these people have since left and are still counted; untick '
               + '<b>include leavers</b> above to drop them.' : '')
           : ' ' + (onEstate.length - people.length) + ' leavers are excluded.')
+      + ' <b>All other incentives</b> is product, new/return, six-day pay and the overtime premium;'
+      + ' the last two have no column in the payroll feed and are recovered from the two effective-wage'
+      + ' figures it does store.'
       + (roll.total.ptoHours > 0
-          ? ' Vacation and holiday sit outside every bucket here: ' + roll.total.ptoHours.toFixed(0)
-            + ' hours worth ' + ewMoney(roll.total.ptoPay) + ' at base wage.'
+          ? ' <b>Time off</b> is vacation and holiday PAY (' + ewMoney(roll.total.ptoPay) + '); their '
+            + roll.total.ptoHours.toFixed(0) + ' hours stay out of the denominator, so a short window'
+            + ' containing somebody&rsquo;s vacation week reads high.'
           : '')
       + '</div>';
 

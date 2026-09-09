@@ -52,12 +52,36 @@
 // backwards for a review conversation. It is attributed to the month it was
 // earned rather than smeared across the year.
 //
-// WHAT IS DELIBERATELY NOT IN IT, because SD_PAYROLL does not carry the
-// columns and a partial number would be worse than a stated one:
-//   • the overtime premium
-//   • 6-day pay (SD3 files it inside All Other Incentives)
-// Both are small and both are hours-based rather than floor-earned. The
-// response says so rather than leaving a reader to assume completeness.
+// THE OVERTIME PREMIUM AND SIX-DAY PAY ARE IN IT, recovered rather than read.
+// SD_PAYROLL has no column for either: SD3 files six-day inside "All Other
+// Incentives", which is not scraped. But it does store TWO effective-wage
+// columns per row, and they turn out to be complete:
+//
+//   effectiveWageNoOt x hoursWorked = subTotalPay + every incentive
+//   effectiveWageOt   x hoursWorked = the same, plus the overtime premium
+//
+// So the incentives we do not have a column for are the RESIDUAL of the first,
+// and the overtime premium is the DIFFERENCE between the two. Checked against
+// 2026: the residual is zero on 3,228 rows, positive on 1,975, and where it is
+// positive it clusters on round per-floor-hour rates -- $2.00 on 420 rows,
+// $1.00 on 158, $3.00 on 34 -- which is exactly the shape of the six-day rule
+// ("$rate per floor hour for the week"). That is $40,438 of incentive and
+// $3,050 of overtime premium this year that used to be invisible.
+//
+// IT IS DERIVED, NOT READ, and the response says so. The rate columns are
+// stored to the cent, so multiplying by ~30 hours leaves about 15 cents of
+// rounding on a row; anything under 50 cents is treated as noise and dropped.
+// 22 rows of 5,225 come out negative, worst -$94, and are left as they fall --
+// a correction is as real as a payment.
+//
+// VACATION AND HOLIDAY PAY IS IN IT TOO, as its own bucket, in the numerator
+// over floor hours. It is earned by working the floor even though it is not
+// worked on the floor. Putting the hours in as well would answer a different
+// question -- what an hour of anything is worth -- and pull the number toward
+// base wage; leaving it out entirely made the floor hour look cheaper than it
+// is. The one thing to know is that a short window containing somebody's
+// vacation week will read high, because the pay lands in a window the hours
+// it accrued over do not.
 //
 // SCOPE. Pay is the most sensitive thing here, so this uses seesEmployee --
 // the same rule behind disciplinary points and reviews. You always see
@@ -118,13 +142,18 @@ interface Rec {
   gid: string; weekEnd: string; monthKey: string
   floor: number; base: number; productivity: number
   product: number; newReturn: number; tips: number
+  other: number; overtime: number; pto: number
 }
 
 interface Bucket {
   floorHours: number; nonFloorHours: number
-  /** Vacation + holiday, and what they paid at base wage. Reported, not counted. */
+  /** Vacation + holiday hours, and what they paid at base wage. */
   ptoHours: number; ptoPay: number
   floorBasePay: number; productivity: number; product: number; newReturn: number
+  /** Six-day and anything else SD3 files under All Other Incentives. Derived. */
+  otherIncentives: number
+  /** The half-time premium, at SD3's own blended rate. Derived. */
+  overtimePremium: number
   bonus: number; tips: number
   /** Distinct weeks with floor time. The denominator for average weekly hours:
    *  dividing a month by a flat 4.33 would report a starter who worked two
@@ -133,11 +162,35 @@ interface Bucket {
 }
 const emptyBucket = (): Bucket => ({
   floorHours: 0, nonFloorHours: 0, ptoHours: 0, ptoPay: 0,
-  floorBasePay: 0, productivity: 0, product: 0, newReturn: 0, bonus: 0, tips: 0,
+  floorBasePay: 0, productivity: 0, product: 0, newReturn: 0,
+  otherIncentives: 0, overtimePremium: 0, bonus: 0, tips: 0,
   weeks: new Set<string>(),
 })
 const bucketEarned = (b: Bucket) =>
-  b.floorBasePay + b.productivity + b.product + b.newReturn + b.bonus + b.tips
+  b.floorBasePay + b.productivity + b.product + b.newReturn
+  + b.otherIncentives + b.overtimePremium + b.bonus + b.tips + b.ptoPay
+
+/**
+ * What SD3 paid that we have no column for.
+ *   residual = effectiveWageNoOt x hoursWorked - (subTotalPay + the three incentives)
+ *   premium  = (effectiveWageOt - effectiveWageNoOt) x hoursWorked
+ * Both rate columns are stored to the cent, so a thirty-hour row carries about
+ * fifteen cents of rounding either way -- below the floor these are noise.
+ */
+function derivedPay(r: Record<string, any>) {
+  const worked = N(r.totalHoursWorked)
+  if (worked <= 0) return { other: 0, overtime: 0 }
+  const noOt = N(r.effectiveWageNoOt), withOt = N(r.effectiveWageOt)
+  if (noOt <= 0) return { other: 0, overtime: 0 }
+  const known = N(r.subTotalPay) + N(r.productivityIncentive)
+    + N(r.productIncentive) + N(r.newReturnIncentive)
+  const other = noOt * worked - known
+  const overtime = (withOt - noOt) * worked
+  return {
+    other: Math.abs(other) < 0.5 ? 0 : other,
+    overtime: Math.abs(overtime) < 0.5 ? 0 : overtime,
+  }
+}
 
 export async function GET(req: Request) {
   const gate = await requireSignedIn()
@@ -226,7 +279,10 @@ export async function GET(req: Request) {
       const mi = mk === null ? undefined : mIndex.get(mk)
       const targets = mi === undefined ? [a.total] : [a.total, a.months[mi]]
 
+      const extra = derivedPay(r)
       for (const t of targets) {
+        t.otherIncentives += extra.other
+        t.overtimePremium += extra.overtime
         t.floorHours += floor
         // Floor time at the wage that applied THAT week, so a raise mid-year is
         // carried correctly instead of being back-applied to January.
@@ -249,6 +305,9 @@ export async function GET(req: Request) {
           product: N(r.productIncentive),
           newReturn: N(r.newReturnIncentive),
           tips: N(r.totalTips),
+          other: extra.other,
+          overtime: extra.overtime,
+          pto: (N(r.vacationHours) + N(r.holidayHours)) * wage,
         })
       }
       const sn = S(r.salonNum)
@@ -315,6 +374,8 @@ export async function GET(req: Request) {
         productivity: r2(b.productivity),
         product: r2(b.product),
         newReturn: r2(b.newReturn),
+        otherIncentives: r2(b.otherIncentives),
+        overtimePremium: r2(b.overtimePremium),
         bonus: r2(b.bonus),
         tips: r2(b.tips),
         gross: r2(earned),
@@ -363,11 +424,11 @@ export async function GET(req: Request) {
     // rather than two, because the composition view has to be filterable the
     // same way every other view is.
     const zeros = () => new Array(weekEnds.length).fill(0)
-    interface Wk { h: number[]; base: number[]; tips: number[]; prod: number[]; bonus: number[]; other: number[] }
+    interface Wk { h: number[]; base: number[]; tips: number[]; prod: number[]; bonus: number[]; other: number[]; pto: number[] }
     const personWk = new Map<string, Wk>()
     const wkOf = (gid: string): Wk => {
       let w = personWk.get(gid)
-      if (!w) personWk.set(gid, w = { h: zeros(), base: zeros(), tips: zeros(), prod: zeros(), bonus: zeros(), other: zeros() })
+      if (!w) personWk.set(gid, w = { h: zeros(), base: zeros(), tips: zeros(), prod: zeros(), bonus: zeros(), other: zeros(), pto: zeros() })
       return w
     }
     for (const rc of recs) {
@@ -378,7 +439,11 @@ export async function GET(req: Request) {
       w.base[i] += rc.base
       w.tips[i] += rc.tips
       w.prod[i] += rc.productivity
-      w.other[i] += rc.product + rc.newReturn
+      // Product, new/return, six-day and the overtime premium are one line on
+      // screen: they are what is left after base, tips, productivity and the
+      // monthly bonus, and separating four near-nil components taught nothing.
+      w.other[i] += rc.product + rc.newReturn + rc.other + rc.overtime
+      w.pto[i] += rc.pto
     }
 
     // Each award over the weeks of its month, by floor hours. A month where
@@ -406,12 +471,12 @@ export async function GET(req: Request) {
     // a caller that only wants the line does not have to add five arrays up.
     for (const p of people) {
       const w = personWk.get(p.globalId)
-      if (!w) { (p as any).wk = { h: zeros(), g: zeros(), base: zeros(), tips: zeros(), prod: zeros(), bonus: zeros(), other: zeros() }; continue }
+      if (!w) { (p as any).wk = { h: zeros(), g: zeros(), base: zeros(), tips: zeros(), prod: zeros(), bonus: zeros(), other: zeros(), pto: zeros() }; continue }
       ;(p as any).wk = {
         h: w.h.map(r2),
-        g: w.h.map((_, i) => r2(w.base[i] + w.tips[i] + w.prod[i] + w.bonus[i] + w.other[i])),
+        g: w.h.map((_, i) => r2(w.base[i] + w.tips[i] + w.prod[i] + w.bonus[i] + w.other[i] + w.pto[i])),
         base: w.base.map(r2), tips: w.tips.map(r2), prod: w.prod.map(r2),
-        bonus: w.bonus.map(r2), other: w.other.map(r2),
+        bonus: w.bonus.map(r2), other: w.other.map(r2), pto: w.pto.map(r2),
       }
     }
 
@@ -437,11 +502,19 @@ export async function GET(req: Request) {
       people,
       scopeAverage: totFloor > 0 ? r2(totEarned / totFloor) : null,
       scopeFloorHours: r2(totFloor),
-      excludes: ['overtime premium', '6-day pay'],
-      note: 'Floor hours only. Training, admin, reception, closing, vacation, holiday and sick '
-        + 'time are excluded from both the hours and the pay, because they earn base wage and '
-        + 'no tips or incentives. A week counts when the Friday it was paid on falls inside the '
-        + 'window; a monthly bonus is split by floor hours when only part of its month does.',
+      excludes: [],
+      derived: {
+        note: 'Six-day pay and the overtime premium have no column in SD_PAYROLL. They are '
+          + 'recovered from the two effective-wage columns, which carry them: the incentives are the '
+          + 'residual of effectiveWageNoOt x hours worked, and the premium is the gap between the two '
+          + 'rate columns. Both are stored to the cent, so anything under fifty cents on a row is '
+          + 'treated as rounding.',
+      },
+      note: 'The denominator is floor hours only: training, admin, reception, closing, vacation, '
+        + 'holiday and sick hours are not in it. Vacation and holiday PAY is, as its own bucket, '
+        + 'because it is earned by working the floor even though it is not worked on the floor. '
+        + 'A week counts when the Friday it was paid on falls inside the window; a monthly bonus is '
+        + 'split by floor hours when only part of its month does.',
     })
   } catch (e: any) {
     return NextResponse.json({ success: false, error: String(e?.message || e) }, { status: 500 })

@@ -225,6 +225,11 @@
       <div id="salon-out"></div>
     </div>
 
+    <!-- ── One precedent: what another lease actually says ────── -->
+    <div class="panel" id="panel-precedent">
+      <div id="precedent-out"></div>
+    </div>
+
     <!-- ── Documents ─────────────────────────────────────────── -->
     <div class="panel" id="panel-docs">
 
@@ -1084,10 +1089,50 @@ function removeFile(fileId){
 }
 
 // ── Panels ────────────────────────────────────────────────────
-function showPanel(name){
-  document.querySelectorAll('.panel').forEach(el => el.classList.toggle('active', el.id === 'panel-'+name));
-  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.panel === name));
+// ── Routing ───────────────────────────────────────────────────
+// Every panel is an address. Before this, drilling into a salon or a precedent
+// changed the screen without touching history, so Back left the Lease Manager
+// entirely and landed you on the page you arrived from. Now Back steps out one
+// level, and every view can be linked to.
+let _lmApplying = false, _lmReady = false;
+function lmRoute(hash, replace){
+  if(_lmApplying || !hash) return;
+  if((location.hash || '') === hash) return;
+  try{
+    if(replace || !_lmReady) history.replaceState({h:hash}, '', hash);
+    else history.pushState({h:hash}, '', hash);
+    _lmReady = true;
+  }catch(e){}
 }
+function showPanel(name, opts){
+  document.querySelectorAll('.panel').forEach(el => el.classList.toggle('active', el.id === 'panel-'+name));
+  // The salon and precedent panels are drill-downs, not tabs — nothing in the
+  // tab strip should look selected while one is open.
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.panel === name));
+  if(!(opts && opts.fromRoute)) lmRoute('#/' + name);
+}
+function lmApply(){
+  const raw = String(location.hash || '').replace(/^#\/?/, '');
+  const seg = raw.split('/').filter(Boolean).map(decodeURIComponent);
+  _lmApplying = true;
+  try{
+    const kind = seg[0] || 'dash';
+    if(kind === 'salon' && seg[1]){
+      S_SALON = seg[1];
+      if(seg[2]) S_SALON_TAB = seg[2];
+      showPanel('salon', {fromRoute:true}); renderSalon();
+    } else if(kind === 'precedent' && seg[1]){
+      PREC = { salonNum: seg[1], topic: seg[2] || '', issue: seg[3] || '' };
+      showPanel('precedent', {fromRoute:true}); renderPrecedent();
+    } else if(['dash','leases','gaps','reneg','docs'].indexOf(kind) >= 0){
+      showPanel(kind, {fromRoute:true});
+    } else {
+      showPanel('dash', {fromRoute:true});
+    }
+  }catch(e){ console.error('route failed', location.hash, e); }
+  finally{ _lmApplying = false; }
+}
+window.addEventListener('popstate', lmApply);
 
 // ── Lease records ─────────────────────────────────────────────
 let REC = { leases:[], options:[], timeline:[], actions:[], portfolio:null, statuses:[], today:'' };
@@ -1203,6 +1248,9 @@ function loadRecords(){
     renderLeaseList();
     renderGaps();
     renderReneg();
+    // A deep link lands before the records arrive, so the panel it asked for
+    // would render empty. Re-apply now that there is something to render.
+    lmApply();
   }).catch(e=>{ $('dash-out').innerHTML = '<div class="banner err">'+esc(e.message)+'</div>'; });
 }
 
@@ -1696,8 +1744,14 @@ function renderReneg(){
   // salons is a reference document, not a working list. Picking one salon
   // turns it into the page you take into the call.
   const shown = R_SALON ? plan.filter(p => p.salonNum === R_SALON) : plan;
-  const withAsks = plan.map(p => [p.salonNum, salonLabel(p.salonNum)
-    + '  (' + p.openTotal + ' open' + (p.openHigh ? ', ' + p.openHigh + ' high' : '') + ')']);
+  // The LIST below stays in date order — soonest conversation first, which is
+  // the order the work happens in. The FILTER is sorted by salon number,
+  // because picking one is a lookup: you already know which salon you mean, and
+  // hunting for it in date order makes you read every line.
+  const withAsks = plan.slice()
+    .sort((a,b) => (parseInt(a.salonNum,10)||0) - (parseInt(b.salonNum,10)||0))
+    .map(p => [p.salonNum, salonLabel(p.salonNum)
+      + '  (' + p.openTotal + ' open' + (p.openHigh ? ', ' + p.openHigh + ' high' : '') + ')']);
   h += '<div class="card"><h2>By salon <span class="sub">'
      + (R_SALON ? esc(salonLabel(R_SALON)) : 'soonest conversation first')
      + '</span></h2>'
@@ -1754,7 +1808,9 @@ function renderReneg(){
         + '<td><span class="sv '+esc(g.severity)+'">'+esc(SEV_LABEL[g.severity]||g.severity)+'</span></td>'
         + '<td class="nowrap">'+g.salons.map(s=>'<button class="lnk" onclick="openSalon(\''+esc(s)+'\')">'+esc(s)+'</button>').join(' ')+'</td>'
         + '<td class="nowrap">'+(g.precedents.length
-            ? g.precedents.map(s=>'<button class="lnk" onclick="openSalon(\''+esc(s)+'\')">'+esc(s)+'</button>').join(' ')
+            ? g.precedents.map(s=>'<button class="lnk" title="What ' + esc(salonLabel(s))
+                + ' says about this" onclick="openPrecedent(\''+esc(s)+'\',\''+esc(g.topic||'')
+                + '\',\''+esc(String(g.issue||'').replace(/'/g,''))+'\')">'+esc(s)+'</button>').join(' ')
             : '<span class="muted">— none of ours is better</span>')+'</td>'
         + '<td class="muted">'+txt(g.ask)+'</td></tr>';
     });
@@ -1779,7 +1835,9 @@ function askRow(a){
     + (a.note ? '<div class="cur">'+txt(a.note)+'</div>' : '')
     + (prec.length
         ? '<div class="prec"><span class="lab">Precedent</span> '
-          + prec.map(s=>'<button class="lnk" onclick="openSalon(\''+esc(s)+'\')">'+esc(salonLabel(s))+'</button>').join(' · ')
+          + prec.map(s=>'<button class="lnk" title="What ' + esc(salonLabel(s)) + ' says about this" '
+              + 'onclick="openPrecedent(\''+esc(s)+'\',\''+esc(a.topic||'')+'\',\''
+              + esc(String(a.issue||'').replace(/'/g,''))+'\')">'+esc(salonLabel(s))+'</button>').join(' · ')
           + '</div>'
         : '')
     + '<div class="acts">'
@@ -1870,15 +1928,126 @@ function deleteAsk(askId){
 
 // ── One salon, drilled into ───────────────────────────────────────
 let S_SALON = '';
-function openSalon(num){
+function openSalon(num, tab){
   S_SALON = String(num);
-  showPanel('salon');
+  if(tab) S_SALON_TAB = tab;
+  lmRoute('#/salon/' + encodeURIComponent(S_SALON) + (tab ? '/' + encodeURIComponent(tab) : ''));
+  showPanel('salon', {fromRoute:true});
   renderSalon();
   window.scrollTo(0, 0);
 }
 
 let S_SALON_TAB = 'overview';
-function salonTab(t){ S_SALON_TAB = t; C_EDIT = null; renderSalon(); }
+function salonTab(t){
+  S_SALON_TAB = t; C_EDIT = null;
+  lmRoute('#/salon/' + encodeURIComponent(S_SALON) + '/' + encodeURIComponent(t));
+  renderSalon();
+}
+
+// ── What another lease actually says ──────────────────────────
+// A precedent used to be a link to the whole salon record, which answered
+// "where" and not "what". In a renewal call the useful thing is the sentence:
+// the plain-English summary, then the lease's own words, then which document
+// and section it came from so it can be quoted with a reference.
+let PREC = null;
+
+function openPrecedent(salonNum, topic, issue){
+  PREC = { salonNum: String(salonNum), topic: String(topic || ''), issue: String(issue || '') };
+  lmRoute('#/precedent/' + encodeURIComponent(PREC.salonNum)
+    + '/' + encodeURIComponent(PREC.topic) + '/' + encodeURIComponent(PREC.issue));
+  showPanel('precedent', {fromRoute:true});
+  renderPrecedent();
+  window.scrollTo(0, 0);
+}
+
+/**
+ * The clauses on that lease worth reading for this issue.
+ * An exact topic match is what was asked for. Failing that, the issue's own
+ * words are scored against the clause text — better a near miss with the
+ * language on screen than a correct "nothing found".
+ */
+function precedentClauses(salonNum, topic, issue){
+  const mine = (REC.clauses||[]).filter(c => String(c.salonNum) === String(salonNum));
+  if(!mine.length) return { hits: [], how: 'none' };
+  const t = String(topic||'').trim().toLowerCase();
+  if(t){
+    const exact = mine.filter(c => String(c.topic||'').trim().toLowerCase() === t);
+    if(exact.length) return { hits: exact, how: 'topic' };
+  }
+  const stop = new Set(['the','and','for','with','that','this','from','into','their','there','have',
+    'has','was','are','not','but','our','its','any','all','can','out','per','than','then','they']);
+  const terms = (String(issue||'') + ' ' + String(topic||'')).toLowerCase()
+    .replace(/[^a-z0-9 ]/g,' ').split(/\s+/)
+    .filter(w => w.length > 3 && !stop.has(w));
+  if(!terms.length) return { hits: [], how: 'none' };
+  const scored = mine.map(c => {
+    const topicL = String(c.topic||'').toLowerCase();
+    const body = (String(c.summary||'') + ' ' + String(c.text||'') + ' ' + String(c.note||'')).toLowerCase();
+    let sc = 0;
+    terms.forEach(w => { if(topicL.includes(w)) sc += 10; else if(body.includes(w)) sc += 1; });
+    return { c: c, sc: sc };
+  }).filter(x => x.sc > 0).sort((a,b) => b.sc - a.sc).slice(0, 4);
+  return { hits: scored.map(x => x.c), how: scored.length ? 'search' : 'none' };
+}
+
+function renderPrecedent(){
+  const out = $('precedent-out');
+  if(!PREC){ out.innerHTML = ''; return; }
+  const num = PREC.salonNum;
+  const l = (REC.leases||[]).find(x => x.salonNum === num);
+  const found = precedentClauses(num, PREC.topic, PREC.issue);
+
+  let h = '<div class="shead"><div style="display:flex;align-items:flex-start;gap:12px;">'
+    + '<div><h1>' + esc(salonLabel(num)) + '</h1>'
+    + '<div class="sub">' + esc(PREC.topic || PREC.issue || 'Precedent')
+      + (l && l.landlord ? ' &middot; ' + esc(String(l.landlord).split('—')[0].trim()) : '') + '</div></div>'
+    + '<span style="flex:1;"></span>'
+    + '<button class="btn ghost small" onclick="history.back()">&larr; Back</button>'
+    + '<button class="btn ghost small" onclick="openSalon(\'' + esc(num) + '\', \'clauses\')">Open the whole lease</button>'
+    + '</div></div>';
+
+  if(PREC.issue){
+    h += '<div class="card"><div class="body">'
+      + '<div class="hint" style="margin-bottom:4px;">The issue you are arguing</div>'
+      + '<b>' + esc(PREC.issue) + '</b></div></div>';
+  }
+
+  if(!found.hits.length){
+    h += '<div class="card"><div class="body">'
+      + '<div class="banner"><b>Nothing recorded on this topic for ' + esc(salonLabel(num)) + '.</b> '
+      + 'It is named as a precedent, so the better wording is in that lease &mdash; it just has not been '
+      + 'written down as a clause yet. Open the lease and add it under <b>Clauses &amp; Amendments</b>, '
+      + 'and it becomes quotable from here.</div>'
+      + '<button class="btn" onclick="openSalon(\'' + esc(num) + '\', \'clauses\')">'
+      + 'Add the clause</button></div></div>';
+  } else {
+    if(found.how === 'search'){
+      h += '<div class="card"><div class="body"><span class="hint">No clause is filed under that exact '
+        + 'topic, so these are the closest by wording. Worth checking before quoting.</span></div></div>';
+    }
+    found.hits.forEach(c => {
+      h += '<div class="card"><h2>' + esc(c.topic || 'Clause')
+        + '<span class="sub">' + esc([c.sourceDoc, c.section].filter(Boolean).join(' &middot; ')
+            || 'no source recorded') + '</span></h2><div class="body">';
+      if(c.summary){
+        h += '<div class="hint" style="margin-bottom:3px;">What it means</div>'
+          + '<div style="font-size:13.5px;margin-bottom:12px;">' + txt(c.summary) + '</div>';
+      }
+      if(c.text){
+        h += '<div class="hint" style="margin-bottom:3px;">What the lease says &mdash; read this one out</div>'
+          + '<blockquote style="margin:0;padding:10px 14px;border-left:3px solid var(--primary);'
+          + 'background:#fafcfb;border-radius:0 8px 8px 0;font-size:13px;line-height:1.65;'
+          + 'white-space:pre-wrap;">' + txt(c.text) + '</blockquote>';
+      } else {
+        h += '<span class="hint">The lease\'s own words are not recorded for this clause &mdash; only the '
+          + 'summary. Add the wording and it can be quoted verbatim.</span>';
+      }
+      if(c.note) h += '<div class="hint" style="margin-top:10px;">' + txt(c.note) + '</div>';
+      h += '</div></div>';
+    });
+  }
+  out.innerHTML = h;
+}
 
 function renderSalon(){
   const num = S_SALON;
