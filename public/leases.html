@@ -8,6 +8,12 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<!-- Reading PDFs happens in the BROWSER, not on the server. The bytes are
+     already going straight to Blob and a 30 MB scan will not fit through a
+     serverless request body; only a few KB of extracted text needs to travel.
+     Nothing breaks if this fails to load — the abstraction step is skipped and
+     the upload still files the document. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
   :root{
     --primary:#048667; --primary-dark:#03654e; --accent:#9acb3a; --accent-light:#eaf5d8;
@@ -254,6 +260,16 @@
       </div>
     </div>
 
+    <div class="card" id="abstract-card" style="display:none;">
+      <h2>What the document says <span class="sub">read from the file &mdash; nothing is saved until you say so</span></h2>
+      <div class="body" id="abstract-out"></div>
+    </div>
+
+    <div class="card">
+      <h2>CAM reconciliations <span class="sub" id="recon-sub">what each year actually cost</span></h2>
+      <div class="body" id="recon-out"><div class="loading">Loading&hellip;</div></div>
+    </div>
+
     <div class="card">
       <h2>Documents <span class="sub" id="doc-sub"></span></h2>
       <div class="body" style="padding:10px 14px;">
@@ -404,6 +420,7 @@ fetch('/api/auth/me').then(r=>r.json()).then(me=>{
   $('tabs').style.display = 'flex';
   loadRecords();
   loadFiles();
+  loadRecons();
 }).catch(e=>{ $('gate').innerHTML = '<div class="banner err">'+esc(e.message)+'</div>'; });
 
 
@@ -466,6 +483,295 @@ function salonFromText(t){
   if(!m) return '';
   const list = REC.salons || SALONS || [];
   return list.some(x => String(x.num) === m[2]) ? m[2] : '';
+}
+
+
+// ── Reading a dropped document ────────────────────────────────────────────
+// LEASE-ABSTRACT-CLIENT-v1
+//
+// A PDF has no idea it contains a table. Pulled out as one run of characters an
+// American Asset recovery row reads "1,303,823.12-155,814.711,148,008.413651,
+// 200.00..." and there is no way to tell 365 + 1,200.00 from 651,200.00. So
+// every text item's POSITION is read and the rows are rebuilt as tab-separated
+// cells before anything is sent anywhere.
+//
+// AND THE TABLE IS SIDEWAYS. On these statements the covering letter is
+// portrait and the recovery calculation is landscape, rotated 90 degrees on the
+// same page. Grouping everything by page-y turns that table's columns into
+// "rows" and produces "0.300.300.430.340.300.30" where six separate percentages
+// should be. Each item carries its own baseline direction, so grouping along
+// ITS axis keeps the two halves of the document apart.
+
+function pdfAxes(t){
+  const ang = ((Math.round(Math.atan2(t[1], t[0]) * 180 / Math.PI / 90) * 90) % 360 + 360) % 360;
+  if(ang === 90)  return { a:ang, line: t[4],  adv: t[5]  };
+  if(ang === 180) return { a:ang, line: -t[5], adv: -t[4] };
+  if(ang === 270) return { a:ang, line: -t[4], adv: -t[5] };
+  return { a:0, line: -t[5], adv: t[4] };
+}
+function pdfLines(items){
+  const rows = new Map();
+  for(const it of items){
+    if(!it.str || !it.str.trim()) continue;
+    const ax = pdfAxes(it.transform);
+    const key = ax.a + '|' + (Math.round(ax.line / 2) * 2);
+    if(!rows.has(key)) rows.set(key, { a:ax.a, line:ax.line, cells:[] });
+    rows.get(key).cells.push({ adv: ax.adv, w: it.width || 0, s: it.str });
+  }
+  return [...rows.values()]
+    .sort((p,q) => (p.a - q.a) || (p.line - q.line))
+    .map(r => {
+      const cs = r.cells.sort((x,y) => x.adv - y.adv);
+      let out = '', prev = null;
+      for(const c of cs){
+        // A gap wider than a space is a column boundary. Narrower and it is
+        // just the PDF splitting a word across two items.
+        if(prev && (c.adv - (prev.adv + prev.w)) > 1.2) out += '\t';
+        out += c.s;
+        prev = c;
+      }
+      return out.replace(/[  ]{2,}/g, ' ').replace(/\t +/g, '\t').trim();
+    })
+    .filter(Boolean);
+}
+
+async function readPdf(file){
+  if(!window.pdfjsLib) throw new Error('the PDF reader did not load');
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  const buf = new Uint8Array(await file.arrayBuffer());
+  const doc = await pdfjsLib.getDocument({ data: buf }).promise;
+  const lines = [];
+  // Twenty pages is far past any reconciliation letter, and it stops a
+  // thousand-page scan locking the tab up.
+  const pages = Math.min(doc.numPages, 20);
+  for(let n = 1; n <= pages; n++){
+    const tc = await (await doc.getPage(n)).getTextContent();
+    pdfLines(tc.items).forEach(l => lines.push(l));
+  }
+  return lines;
+}
+
+let ABS = null;            // the proposal on screen, if any
+let ABS_EDIT = null;       // the salon + year the user has settled on
+
+async function abstractItem(item){
+  if(!/pdf/i.test(item.contentType || '')) return;
+  try{
+    const lines = await readPdf(item.file);
+    if(!lines.length) return;
+    const res = await fetch('/api/leases/abstract', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ lines: lines, text: lines.join('\n'), fileName: item.file.name })
+    }).then(r=>r.json());
+    if(!res || !res.success) return;
+    const p = res.proposal;
+    // Only interrupt for something worth reading. A lease or an amendment
+    // files itself silently, exactly as it did before.
+    if(p.docType !== 'cam-recon') return;
+    ABS = { p: p, current: res.current, fileName: item.file.name };
+    ABS_EDIT = {
+      salonNum: (p.salonGuesses[0] && p.salonGuesses[0].salonNum) || item.meta.salonNum || '',
+      expenseYear: p.expenseYear || '',
+      camMonthly: '',
+    };
+    renderAbstract();
+    $('abstract-card').scrollIntoView({ behavior:'smooth', block:'nearest' });
+  }catch(e){
+    // Reading is a convenience on top of an upload that already worked. It
+    // must never turn a filed document into a failed one.
+    console.warn('could not read', item.file.name, e);
+  }
+}
+
+function absSet(k, v){ if(ABS_EDIT){ ABS_EDIT[k] = v; renderAbstract(); } }
+function absDismiss(){ ABS = null; ABS_EDIT = null; $('abstract-card').style.display = 'none'; }
+
+function m2(n){ return (Math.round(Number(n)*100)/100).toLocaleString('en-US',{minimumFractionDigits:2, maximumFractionDigits:2}); }
+
+function renderAbstract(){
+  const card = $('abstract-card'), out = $('abstract-out');
+  if(!ABS){ card.style.display = 'none'; return; }
+  card.style.display = '';
+  const p = ABS.p, e = ABS_EDIT;
+
+  const opts = ['<option value="">&mdash; pick a salon &mdash;</option>'].concat(
+    SALONS.map(s => '<option value="' + s.salonNum + '"' + (e.salonNum === String(s.salonNum) ? ' selected' : '')
+      + '>' + esc(s.salonNum + (s.name ? ' · ' + s.name : '')) + '</option>')).join('');
+
+  const th = 'padding:6px 9px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);text-align:right;';
+  const td = 'padding:6px 9px;font-size:12.5px;text-align:right;border-top:1px solid var(--border);';
+  let rows = '';
+  p.pools.forEach(r => {
+    rows += '<tr><td style="' + td + 'text-align:left;font-weight:600;">' + esc(r.poolLabel)
+      + '<div style="font-size:10.5px;font-weight:400;color:var(--text-muted);">' + esc(r.pool) + '</div></td>'
+      + '<td style="' + td + '">' + m2(r.poolNet) + '</td>'
+      + '<td style="' + td + '">' + m2(r.denominatorSf) + '</td>'
+      + '<td style="' + td + '">' + r.sharePct + '%</td>'
+      + '<td style="' + td + '">' + m2(r.netShare) + '</td>'
+      + '<td style="' + td + (r.adminFee ? 'color:#8a1a1a;font-weight:600;' : '') + '">' + m2(r.adminFee) + '</td>'
+      + '<td style="' + td + 'font-weight:700;">' + m2(r.totalShare) + '</td>'
+      + '<td style="' + td + '">' + m2(r.billed) + '</td>'
+      + '<td style="' + td + (r.due < 0 ? 'color:#1a5c0a;' : '') + '">' + m2(r.due) + '</td></tr>';
+  });
+  if(p.totals){
+    rows += '<tr style="background:#f4f7f6;"><td style="' + td + 'text-align:left;font-weight:700;">Total</td>'
+      + '<td style="' + td + '"></td><td style="' + td + '"></td><td style="' + td + '"></td>'
+      + '<td style="' + td + 'font-weight:700;">' + m2(p.totals.netShare) + '</td>'
+      + '<td style="' + td + 'font-weight:700;">' + m2(p.totals.adminFee) + '</td>'
+      + '<td style="' + td + 'font-weight:700;">' + m2(p.totals.totalShare) + '</td>'
+      + '<td style="' + td + 'font-weight:700;">' + m2(p.totals.billed) + '</td>'
+      + '<td style="' + td + 'font-weight:700;">' + m2(p.totals.due) + '</td></tr>';
+  }
+
+  const cur = ABS.current;
+  const implied = p.totals ? p.totals.totalShare / 12 : 0;
+  const camNote = (cur && implied)
+    ? 'The record for ' + esc(cur.locationName || cur.salonNum) + ' carries <b>$' + m2(cur.camMonthly)
+      + '</b> a month. This year reconciled to <b>$' + m2(implied) + '</b> a month.'
+      + (Math.abs(cur.camMonthly - implied) > 1
+          ? ' A difference of $' + m2(Math.abs(cur.camMonthly - implied)) + ' a month.'
+          : '')
+    : '';
+
+  const detail = p.expenseDetail.filter(x => !x.total);
+  const detailHtml = detail.length
+    ? '<details style="margin-top:14px;"><summary style="cursor:pointer;font-size:12.5px;font-weight:600;">'
+      + 'What is in the pools &mdash; ' + detail.length + ' lines from the landlord</summary>'
+      + '<div style="max-height:280px;overflow:auto;margin-top:8px;border:1px solid var(--border);border-radius:8px;">'
+      + '<table style="width:100%;border-collapse:collapse;">'
+      + detail.sort((a,b)=>b.amount-a.amount).map(x =>
+          '<tr><td style="' + td + 'text-align:left;">' + esc(x.label) + '</td>'
+          + '<td style="' + td + '">' + m2(x.amount) + '</td></tr>').join('')
+      + '</table></div>'
+      + '<div style="font-size:11px;color:var(--text-muted);margin-top:6px;">'
+      + 'Reference only &mdash; this list is not saved. It is here to read against whatever the lease '
+      + 'excludes from common area expenses.</div></details>'
+    : '';
+
+  out.innerHTML =
+    '<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin-bottom:10px;">'
+      + '<div style="font-weight:700;font-size:13.5px;">' + esc(p.landlord || 'Reconciliation') + '</div>'
+      + '<div style="font-size:12px;color:var(--text-muted);">' + esc(ABS.fileName)
+        + (p.invoiceDate ? ' · invoiced ' + esc(p.invoiceDate) : '')
+        + (p.propertyCode ? ' · property ' + esc(p.propertyCode) : '')
+        + (p.tenantCode ? ' · tenant ' + esc(p.tenantCode) : '') + '</div>'
+      + '<button class="btn" style="margin-left:auto;" onclick="absDismiss()">Dismiss</button>'
+    + '</div>'
+    + (p.warnings.length
+        ? '<div style="background:var(--wrn-bg);border:1px solid var(--wrn-border);color:var(--wrn-text);'
+          + 'border-radius:8px;padding:9px 12px;font-size:12.5px;margin-bottom:10px;">'
+          + p.warnings.map(w => '<div>' + esc(w) + '</div>').join('') + '</div>'
+        : '')
+    + (p.findings.length
+        ? '<div style="background:var(--accent-light);border:1px solid var(--accent);border-radius:8px;'
+          + 'padding:9px 12px;font-size:12.5px;margin-bottom:12px;">'
+          + p.findings.map(f => '<div style="margin:2px 0;">' + esc(f) + '</div>').join('') + '</div>'
+        : '')
+    + '<div class="filegrid" style="margin-bottom:12px;">'
+      + '<label class="fld">Salon<select onchange="absSet(' + "'salonNum'" + ', this.value)">' + opts + '</select></label>'
+      + '<label class="fld">Expense year<input type="text" value="' + esc(e.expenseYear)
+        + '" placeholder="2025" onchange="absSet(' + "'expenseYear'" + ', this.value.trim())"></label>'
+      + '<label class="fld">Set the monthly CAM estimate to (optional)'
+        + '<input type="text" value="' + esc(e.camMonthly) + '" placeholder="'
+        + (implied ? m2(implied) : 'leave blank to keep it') + '" '
+        + 'onchange="absSet(' + "'camMonthly'" + ', this.value.trim())"></label>'
+    + '</div>'
+    + (camNote ? '<div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">' + camNote
+        + ' The estimate is what the landlord bills monthly going forward, which is their decision to '
+        + 'make &mdash; so it is only changed if you fill that box in.</div>' : '')
+    + (p.pools.length
+      ? '<div style="overflow-x:auto;border:1px solid var(--border);border-radius:10px;">'
+        + '<table style="width:100%;border-collapse:collapse;background:#fff;"><thead><tr>'
+        + '<th style="' + th + 'text-align:left;">Pool</th><th style="' + th + '">Expenses</th>'
+        + '<th style="' + th + '">Denominator SF</th><th style="' + th + '">Share</th>'
+        + '<th style="' + th + '">Net share</th><th style="' + th + '">Admin fee</th>'
+        + '<th style="' + th + '">Total</th><th style="' + th + '">Billed</th><th style="' + th + '">Due</th>'
+        + '</tr></thead><tbody>' + rows + '</tbody></table></div>'
+      : '')
+    + detailHtml
+    + '<div style="display:flex;gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap;">'
+      + '<button class="btn primary" onclick="absSave()"' + (p.pools.length ? '' : ' disabled') + '>'
+        + 'Save this reconciliation</button>'
+      + '<span id="abs-msg" style="font-size:12.5px;color:var(--text-muted);"></span>'
+    + '</div>';
+}
+
+async function absSave(){
+  if(!ABS || !ABS_EDIT) return;
+  const msg = $('abs-msg');
+  if(!ABS_EDIT.salonNum){ msg.textContent = 'Pick a salon first.'; return; }
+  if(!/^\d{4}$/.test(ABS_EDIT.expenseYear || '')){ msg.textContent = 'Give the expense year as four digits.'; return; }
+  msg.textContent = 'Saving…';
+  try{
+    const body = {
+      salonNum: ABS_EDIT.salonNum,
+      expenseYear: ABS_EDIT.expenseYear,
+      landlord: ABS.p.landlord,
+      invoiceDate: ABS.p.invoiceDate,
+      sourceFile: ABS.fileName,
+      rows: ABS.p.pools,
+    };
+    if(ABS_EDIT.camMonthly !== '') body.camMonthly = Number(String(ABS_EDIT.camMonthly).replace(/[$,]/g,''));
+    const res = await fetch('/api/leases/cam', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
+    }).then(r=>r.json());
+    if(!res.success) throw new Error(res.error || 'could not save');
+    msg.textContent = 'Saved ' + res.saved + ' pools for ' + ABS_EDIT.expenseYear
+      + (res.leaseUpdated ? ' · monthly CAM set to $' + m2(res.leaseUpdated.camMonthly)
+          + ' (was $' + m2(res.leaseUpdated.was) + ')' : '');
+    loadRecons();
+    setTimeout(absDismiss, 2500);
+  }catch(err){
+    msg.textContent = (err && err.message) ? err.message : 'could not save';
+  }
+}
+
+// ── what has been reconciled so far ───────────────────────────────────────
+async function loadRecons(){
+  const out = $('recon-out');
+  try{
+    const res = await fetch('/api/leases/cam').then(r=>r.json());
+    if(!res.success) throw new Error(res.error || 'could not load');
+    renderRecons(res.summaries || []);
+  }catch(e){
+    out.innerHTML = '<div class="loading">' + esc((e && e.message) || 'could not load') + '</div>';
+  }
+}
+function renderRecons(list){
+  const out = $('recon-out');
+  $('recon-sub').textContent = list.length
+    ? list.length + (list.length === 1 ? ' year on file' : ' salon-years on file')
+    : 'nothing on file yet';
+  if(!list.length){
+    out.innerHTML = '<div class="loading">Nothing yet. Drop a reconciliation letter above and it will '
+      + 'be read, shown to you and filed here once you accept it.</div>';
+    return;
+  }
+  const th = 'padding:6px 9px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);text-align:right;';
+  const td = 'padding:6px 9px;font-size:12.5px;text-align:right;border-top:1px solid var(--border);';
+  out.innerHTML = '<div style="overflow-x:auto;">'
+    + '<table style="width:100%;border-collapse:collapse;"><thead><tr>'
+    + '<th style="' + th + 'text-align:left;">Salon</th><th style="' + th + 'text-align:left;">Year</th>'
+    + '<th style="' + th + '">Pools</th><th style="' + th + '">Net share</th><th style="' + th + '">Admin fee</th>'
+    + '<th style="' + th + '">Total</th><th style="' + th + '">Billed</th><th style="' + th + '">Due</th>'
+    + '<th style="' + th + '">Implied /mo</th></tr></thead><tbody>'
+    + list.map(r =>
+        '<tr><td style="' + td + 'text-align:left;font-weight:600;">' + esc(salonLabel(r.salonNum)) + '</td>'
+        + '<td style="' + td + 'text-align:left;">' + esc(r.expenseYear) + '</td>'
+        + '<td style="' + td + '">' + r.pools + '</td>'
+        + '<td style="' + td + '">' + m2(r.netShare) + '</td>'
+        + '<td style="' + td + (r.adminFee ? 'color:#8a1a1a;font-weight:600;' : '') + '">' + m2(r.adminFee) + '</td>'
+        + '<td style="' + td + 'font-weight:700;">' + m2(r.totalShare) + '</td>'
+        + '<td style="' + td + '">' + m2(r.billed) + '</td>'
+        + '<td style="' + td + (r.due < 0 ? 'color:#1a5c0a;' : '') + '">' + m2(r.due) + '</td>'
+        + '<td style="' + td + '">' + m2(r.impliedMonthly) + '</td></tr>').join('')
+    + '</tbody></table></div>'
+    + '<div style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.6;">'
+    + '<b>Implied /mo</b> is the reconciled total over twelve months &mdash; what the monthly estimate '
+    + 'would have had to be to come out level. <b>Admin fee</b> is shown separately on purpose: a lease '
+    + 'that struck the administrative fee and a landlord that charges it anyway is worth hundreds a year, '
+    + 'and it is invisible once the fee is folded into a total.</div>';
 }
 
 // ── Uploading ─────────────────────────────────────────────────
@@ -555,6 +861,9 @@ async function uploadOne(item){
       if(!res.success) throw new Error(res.error || 'could not record the file');
     }
     item.state = 'done'; item.pct = 100;
+    // Only once it is filed. Reading a document we failed to store would offer
+    // to update records against something nobody can go back and check.
+    abstractItem(item);
   }catch(e){
     item.state = 'error';
     let msg = (e && e.message) ? e.message : 'upload failed';
