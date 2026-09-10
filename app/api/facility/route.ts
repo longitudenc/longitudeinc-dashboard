@@ -22,6 +22,7 @@ import {
   listReviews, listPhotos, saveReview, savePhotos, assignPhoto, removeReview,
 } from '@/lib/facility'
 import { del } from '@vercel/blob'
+import { readSheet, rowsToObjects } from '@/lib/sheets'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -38,8 +39,35 @@ export async function GET() {
     const comments = await listComments(items.map(i => i.itemId))
     const reviews = (await listReviews()).filter(r => canSeeSalon(gate.access, r.salonNum))
     const photos = (await listPhotos()).filter(p => canSeeSalon(gate.access, p.salonNum))
+
+    // SALON-RAISED REQUESTS, read where they already live. The maintenance form
+    // keeps its own status (submitted → in review → complete) in the forms
+    // engine, and copying them into this tracker would give every request two
+    // statuses that drift apart. So they are READ here and managed there: the
+    // tracker counts them and lists them, and clicking one opens the request.
+    let requests: any[] = []
+    try {
+      const subs = rowsToObjects((await readSheet('FormSubmissions')) || [])
+      requests = subs
+        .filter(x => S(x.formId, 60) === 'maintenance' && canSeeSalon(gate.access, S(x.salonNum, 10)))
+        .map(x => {
+          let data: any = {}
+          try { data = JSON.parse(String(x.dataJson || '{}')) } catch { data = {} }
+          return {
+            submissionId: S(x.submissionId, 60),
+            salonNum: S(x.salonNum, 10),
+            status: S(x.status, 20) || 'submitted',
+            submittedAt: S(x.submittedAt, 40),
+            submittedBy: S(x.submittedByName, 120),
+            issueType: S(data.issueType, 80),
+            urgency: S(data.urgency, 80),
+            description: S(data.description, 600) || S(x.summary, 600),
+          }
+        })
+    } catch { /* no forms tab: no salon requests, not an error */ }
+
     return NextResponse.json({
-      success: true, items, comments, reviews, photos,
+      success: true, items, comments, reviews, photos, requests,
       summary: summarise(items, todayIso()),
       statuses: [...FACILITY_STATUSES],
       today: todayIso(),
