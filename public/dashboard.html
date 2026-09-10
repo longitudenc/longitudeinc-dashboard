@@ -16886,6 +16886,12 @@ function ssEnhanceAll(root){
 // quotes that rule, so the screen states where each salon stands against it
 // rather than leaving it to be counted by eye.
 let S_facData = null, S_facSalon = '', S_facStatus = 'open', S_facOpenItem = '', S_facProposal = null;
+// With every salon loaded the list runs to sixty findings, and a wall of rows
+// answers no question anybody asks at that level. The cards already say where
+// each salon stands, so they ARE the every-salon view; the findings belong to
+// the salon you click. The full list stays one link away, off by default, for
+// the cross-salon questions ("everything overdue").
+let S_facShowAll = false;
 
 const FAC_STATUS_LABEL = { open:'Open', in_progress:'In progress',
   fixed:'Fixed — awaiting green flag', verified:'Verified', waived:'Waived' };
@@ -16917,7 +16923,15 @@ function loadFacility(){
   });
 }
 
-function facSetSalon(v){ S_facSalon = v; paintFacility(); }
+function facSetSalon(v){
+  S_facSalon = v;
+  if(!v) S_facShowAll = false;
+  paintFacility();
+  // A card near the bottom of the grid swaps for that salon's card at the top;
+  // without this the page stays scrolled to where the grid used to end.
+  const m = document.querySelector('.content'); if(m) m.scrollTop = 0;
+}
+function facShowAll(on){ S_facShowAll = !!on; paintFacility(); }
 function facSetStatus(v){ S_facStatus = v; paintFacility(); }
 function facToggle(id){ S_facOpenItem = (S_facOpenItem === id) ? '' : id; paintFacility(); }
 
@@ -17783,7 +17797,26 @@ function paintFacility(){
   // Summary first, then where each salon stands, then the work, then the
   // archive — and loading a new review last, because it happens every nine
   // months and reading what is open happens every day.
-  host.innerHTML = summaryTop + strip + filters + list + facRequestRows(reqList) + facArchive()
+  const openCount = all.filter(function(i){ return FAC_OPEN[i.status]; }).length;
+  const openReqCount = (d.requests || []).filter(function(r){ return FAC_REQ_OPEN[r.status]; }).length;
+  const listing = (S_facSalon || S_facShowAll)
+    ? (S_facShowAll && !S_facSalon
+        ? '<div style="margin:-6px 0 10px;"><a href="javascript:void(0)" onclick="facShowAll(false)" '
+          + 'style="font-size:12px;color:var(--primary);font-weight:600;text-decoration:none;">'
+          + '&larr; Back to the salon cards</a></div>'
+        : '')
+      + filters + list + facRequestRows(reqList)
+    : '<div style="font-size:12.5px;color:var(--text-muted);margin:-4px 0 18px;">'
+      + 'Click a salon to see its findings'
+      + (openCount || openReqCount
+          ? ' &middot; or <a href="javascript:void(0)" onclick="facShowAll(true)" '
+            + 'style="color:var(--primary);font-weight:600;text-decoration:none;">list all '
+            + openCount + ' open finding' + (openCount===1?'':'s')
+            + (openReqCount ? ' and ' + openReqCount + ' salon request' + (openReqCount===1?'':'s') : '')
+            + ' across every salon</a>'
+          : '')
+      + '</div>';
+  host.innerHTML = summaryTop + strip + listing + facArchive()
     + '<div style="font-weight:700;font-size:12.5px;margin:26px 0 8px;">Load a facility review</div>'
     + facPaint_proposal() + drop
     + '<div style="font-size:11px;color:var(--text-muted);margin-top:14px;line-height:1.6;">'
