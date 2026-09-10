@@ -2384,7 +2384,11 @@ function salonContacts(num){
     + '<th>Phone</th><th>Address</th><th></th></tr></thead><tbody>';
   contacts.forEach(c=>{
     h += '<tr><td><span class="pill">'+esc(c.role||'\u2014')+'</span></td>'
-      + '<td><b>'+esc(c.org||'')+'</b>'+(c.name?'<div>'+esc(c.name)+'</div>':'')
+      // The person first: that is who you are looking for. The company sits
+      // under it, and takes the bold line only when no one is named.
+      + '<td>'+(c.name
+          ? '<b>'+esc(c.name)+'</b>'+(c.org?'<div class="muted">'+esc(c.org)+'</div>':'')
+          : '<b>'+esc(c.org||'')+'</b>')
       + (c.note?'<div class="hint">'+txt(c.note)+'</div>':'')+'</td>'
       + '<td>'+(c.email?'<a href="mailto:'+esc(c.email)+'">'+esc(c.email)+'</a>':'\u2014')+'</td>'
       + '<td class="nowrap">'+esc(c.phone||'\u2014')+'</td>'
