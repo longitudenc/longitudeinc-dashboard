@@ -17571,11 +17571,12 @@ function facTimeline(st, today){
         + 'width:10px;height:16px;border-radius:3px;background:' + col + ';border:2px solid #fff;'
         + 'box-shadow:0 0 0 1px ' + col + ';"></div>'
     + '</div>'
-    + '<div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--text-muted);margin-top:6px;">'
-      + '<span>Reviewed ' + hEsc(pDate(st.last)) + '</span>'
+    + '<div style="display:flex;justify-content:space-between;gap:6px;font-size:10.5px;color:var(--text-muted);margin-top:6px;white-space:nowrap;">'
+      + '<span title="Date on the review email">Reviewed ' + hEsc(pDate(st.last)) + '</span>'
       + (late
           ? '<span style="color:#b3261e;font-weight:700;">next review due now</span>'
-          : '<span>next ~' + hEsc(pDate(st.next)) + ' &middot; ' + facDays(today, st.next) + ' days</span>')
+          : '<span title="Estimated: 9 months after the last review, ' + facDays(today, st.next) + ' days away">'
+            + 'Next ~' + hEsc(pDate(st.next)) + '</span>')
     + '</div>'
     + (st.fromLast
         ? '<div style="font-size:11px;margin-top:6px;"><b>' + st.resolved + ' of ' + st.fromLast + '</b> '
@@ -17598,13 +17599,16 @@ function facSalonCard(st, today, big){
         + label + '</div></div>';
   };
   return '<div ' + (big ? '' : 'class="fac-card" onclick="facSetSalon(' + "'" + hEsc(st.sn) + "'" + ')" ')
-      + 'style="border:1px solid ' + (bad ? '#f4c4be' : 'var(--border)') + ';background:' + (bad ? '#fffafa' : '#fff')
-      + ';border-radius:12px;padding:12px 14px;' + (big ? '' : 'cursor:pointer;') + '">'
-    + '<div style="display:flex;align-items:center;gap:8px;">'
-      + '<div style="font-weight:700;font-size:' + (big ? '15' : '13') + 'px;">' + hEsc(salonDisplay(st.sn)) + '</div>'
+      + 'style="border:1px solid var(--border);border-left:4px solid ' + (bad ? '#b3261e' : clear ? '#2e7d4f' : 'var(--border)')
+      + ';background:#fff;border-radius:10px;padding:11px 13px;' + (big ? '' : 'cursor:pointer;') + '">'
+    // One line: the name never wraps under a badge. The coloured edge carries
+    // compliance at a glance; the word is there for anyone reading closely.
+    + '<div style="display:flex;align-items:baseline;gap:8px;min-width:0;">'
+      + '<div style="font-weight:700;font-size:' + (big ? '15' : '13') + 'px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;">'
+        + hEsc(salonDisplay(st.sn)) + '</div>'
       + (bad
-          ? '<span style="margin-left:auto;font-size:9.5px;font-weight:700;color:#b3261e;background:#fdecea;'
-            + 'border:1px solid #f4c4be;border-radius:4px;padding:1px 5px;white-space:nowrap;">COMPLIANCE ACTION</span>'
+          ? '<span title="A critical item open, or five or more action items" style="margin-left:auto;font-size:9.5px;'
+            + 'font-weight:700;color:#b3261e;white-space:nowrap;">COMPLIANCE</span>'
           : clear
             ? '<span style="margin-left:auto;font-size:9.5px;font-weight:700;color:#2e7d4f;white-space:nowrap;">ALL CLEAR</span>'
             : '')
@@ -17651,8 +17655,13 @@ function facSummaryTop(states, today){
     if(st.compliance) a.comp.push(st.sn);
     return a;
   }, { c:0, a:0, r:0, o:0, comp:[] });
-  const upcoming = states.filter(function(st){ return st.next; })
-    .sort(function(x, y){ return x.next.localeCompare(y.next); })[0];
+  // The next review is OUR estimate (last review + ~9 months), and reviewers
+  // do several salons in one trip, so the soonest date is shared: name every
+  // salon expected within two weeks of it, not just whichever sorted first.
+  const byNext = states.filter(function(st){ return st.next; })
+    .sort(function(x, y){ return x.next.localeCompare(y.next); });
+  const upcoming = byNext[0];
+  const soonGroup = upcoming ? byNext.filter(function(st){ return facDays(upcoming.next, st.next) <= 14; }) : [];
   const tile = function(label, value, sub, col){
     return '<div style="flex:1 1 150px;min-width:140px;background:#fff;border:1px solid var(--border);'
       + 'border-radius:10px;padding:11px 14px;' + (col ? 'border-left:3px solid ' + col + ';' : '') + '">'
@@ -17666,11 +17675,11 @@ function facSummaryTop(states, today){
     + tile('Open action items', t.a, 'five or more triggers action', t.a ? '#c98a12' : '')
     + tile('Salon requests', t.r, 'open maintenance requests', t.r ? 'var(--primary-dark)' : '')
     + tile('Past fix-by', t.o, t.o ? 'need a new date or a push' : 'nothing overdue', t.o ? '#8a5a12' : '')
-    + tile('Compliance action', t.comp.length,
-        t.comp.length ? t.comp.map(function(sn){ return hEsc(salonDisplay(sn)); }).join(', ') : 'no salon triggered',
-        t.comp.length ? '#b3261e' : '')
-    + tile('Next review', upcoming ? hEsc(pDate(upcoming.next)) : '&mdash;',
-        upcoming ? hEsc(salonDisplay(upcoming.sn)) + ' &middot; expected, &plusmn; 2 weeks' : 'no reviews on file')
+    + tile('Next review (est.)', upcoming ? '~' + hEsc(pDate(upcoming.next)) : '&mdash;',
+        upcoming
+          ? hEsc(soonGroup.map(function(st){ return salonDisplay(st.sn); }).join(', '))
+            + '<br>9 months after the last review'
+          : 'no reviews on file')
     + '</div>';
 }
 
