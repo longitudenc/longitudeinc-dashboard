@@ -16921,6 +16921,72 @@ let S_facData = null, S_facSalon = '', S_facStatus = 'open', S_facOpenItem = '',
 // the cross-salon questions ("everything overdue").
 let S_facShowAll = false;
 
+// FAC-ISSUE-FILTER-v1 — "every salon with wall issues". Review findings are
+// named by Great Clips' own component list and salon requests by the
+// maintenance form's issue type; both fold into one set of plain groups so a
+// wall finding and a wall request land under the same chip. First match wins,
+// so "Vinyl Transition and Wall Base" is a wall, not flooring.
+let S_facIssue = '';
+const FAC_ISSUE_GROUPS = [
+  ['Walls',                /\bwall/i],
+  ['Workstations',         /workstation|flex station/i],
+  ['Styling chairs',       /\bchairs?\b/i],
+  ['Ceiling & sails',      /ceiling|\bsails?\b/i],
+  ['Flooring & mats',      /floor|\bmats?\b/i],
+  ['Doors',                /\bdoors?\b/i],
+  ['Front desk',           /front desk/i],
+  ['Cabinets',             /cabinet/i],
+  ['Shampoo stations',     /shampoo/i],
+  ['Mirrors',              /mirror/i],
+  ['Windows & signage',    /window|poster|signage|\bsigns?\b/i],
+  ['Lighting',             /light/i],
+  ['Plumbing',             /plumb/i],
+  ['Electrical',           /electric/i],
+  ['HVAC',                 /hvac|heating|air cond/i],
+  ['Equipment & fixtures', /equipment|fixture|furniture|dryer|cart|screen/i],
+];
+function facIssueOf(text){
+  const t = String(text || '');
+  for(let k = 0; k < FAC_ISSUE_GROUPS.length; k++){ if(FAC_ISSUE_GROUPS[k][1].test(t)) return FAC_ISSUE_GROUPS[k][0]; }
+  return 'Other';
+}
+function facIssueOk(i){ return !S_facIssue || facIssueOf(i.component) === S_facIssue; }
+function facReqIssueOk(r){ return !S_facIssue || facIssueOf(r.issueType) === S_facIssue; }
+function facSetIssue(v){
+  S_facIssue = (S_facIssue === v) ? '' : v;
+  paintFacility();
+}
+/** One chip per issue group with anything open, counted across the salons in view. */
+function facIssueBar(scopeSalons){
+  const d = S_facData || {}, inScope = new Set(scopeSalons);
+  const n = {};
+  (d.items || []).forEach(function(i){
+    if(inScope.has(i.salonNum) && FAC_OPEN[i.status]){ const g = facIssueOf(i.component); n[g] = (n[g] || 0) + 1; }
+  });
+  (d.requests || []).forEach(function(r){
+    if(inScope.has(r.salonNum) && FAC_REQ_OPEN[r.status]){ const g = facIssueOf(r.issueType); n[g] = (n[g] || 0) + 1; }
+  });
+  const order = FAC_ISSUE_GROUPS.map(function(g){ return g[0]; }).concat(['Other']);
+  const shown = order.filter(function(g){ return n[g] || g === S_facIssue; });
+  if(!shown.length) return '';
+  const chip = function(g){
+    const on = g === S_facIssue;
+    return '<button onclick="facSetIssue(' + "'" + hEsc(g).replace(/'/g, '&#39;') + "'" + ')" '
+      + 'style="border:1px solid ' + (on ? 'var(--primary)' : 'var(--border)') + ';'
+      + 'background:' + (on ? 'var(--primary)' : '#fff') + ';color:' + (on ? '#fff' : 'inherit') + ';'
+      + 'border-radius:999px;padding:4px 11px;font-size:12px;cursor:pointer;white-space:nowrap;">'
+      + hEsc(g) + ' <b style="opacity:.75;">' + (n[g] || 0) + '</b></button>';
+  };
+  return '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:14px;">'
+    + '<span style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-right:2px;">Issue type</span>'
+    + shown.map(chip).join('')
+    + (S_facIssue
+        ? '<a href="javascript:void(0)" onclick="facSetIssue(' + "''" + ')" '
+          + 'style="font-size:12px;color:var(--primary);font-weight:600;text-decoration:none;margin-left:4px;">clear</a>'
+        : '')
+    + '</div>';
+}
+
 // An item is only DONE when Great Clips says so: a green flag, or an approved
 // variance. "Fixed" and "requested" are our half of the conversation, so they
 // still count against the salon for the compliance rule.
@@ -17450,12 +17516,15 @@ function facDays(a, b){
 
 function facSalonState(sn){
   const d = S_facData || {}, today = d.today;
-  const items = (d.items || []).filter(function(i){ return i.salonNum === sn; });
+  // Review dates come from EVERY item: the review cycle is the salon's, whatever
+  // issue type is picked. The counts and progress below follow the filter.
+  const here = (d.items || []).filter(function(i){ return i.salonNum === sn; });
+  const items = here.filter(facIssueOk);
   const open = items.filter(function(i){ return FAC_OPEN[i.status]; });
-  const reqs = (d.requests || []).filter(function(r){ return r.salonNum === sn && FAC_REQ_OPEN[r.status]; });
+  const reqs = (d.requests || []).filter(function(r){ return r.salonNum === sn && FAC_REQ_OPEN[r.status] && facReqIssueOk(r); });
   const dates = (d.reviews || []).filter(function(r){ return r.salonNum === sn; })
     .map(function(r){ return r.reviewDate; })
-    .concat(items.map(function(i){ return i.reviewDate; }))
+    .concat(here.map(function(i){ return i.reviewDate; }))
     .filter(Boolean).sort();
   const last = dates.length ? dates[dates.length - 1] : '';
   // Progress is measured against the LATEST review — an older one's leftovers
@@ -17473,6 +17542,7 @@ function facSalonState(sn){
     fromLast: fromLast.length,
     resolved: fromLast.filter(function(i){ return !FAC_OPEN[i.status]; }).length,
     due: open.map(function(i){ return i.dueDate; }).filter(Boolean).sort()[0] || '',
+    openList: open, reqList: reqs,
   };
 }
 
@@ -17548,7 +17618,29 @@ function facSalonCard(st, today, big){
         ? '<div style="font-size:11px;color:#8a5a12;font-weight:700;margin-top:6px;text-align:center;">'
           + st.overdue + ' past fix-by</div>'
         : '')
+    + (S_facIssue && !big ? facIssueSnippets(st) : '')
     + facTimeline(st, today)
+    + '</div>';
+}
+
+/** With an issue picked, what exactly is wrong at this salon, one line each. */
+function facIssueSnippets(st){
+  const lines = (st.openList || []).map(function(i){
+      return { crit: i.category === 'critical', head: i.component, body: String(i.detail || '').split('\n')[0] };
+    }).sort(function(a, b){ return (b.crit ? 1 : 0) - (a.crit ? 1 : 0); })
+    .concat((st.reqList || []).map(function(r){
+      return { crit: false, head: 'Salon request', body: String(r.description || '') };
+    }));
+  if(!lines.length) return '';
+  const more = lines.length - 3;
+  return '<div style="margin-top:9px;border-top:1px solid var(--border);padding-top:7px;">'
+    + lines.slice(0, 3).map(function(l){
+        return '<div style="font-size:11.5px;line-height:1.4;margin-bottom:4px;overflow:hidden;'
+          + 'display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">'
+          + '<b style="color:' + (l.crit ? '#b3261e' : 'inherit') + ';">' + hEsc(l.head) + ':</b> '
+          + '<span style="color:var(--text-muted);">' + hEsc(l.body) + '</span></div>';
+      }).join('')
+    + (more > 0 ? '<div style="font-size:11px;color:var(--text-muted);">+' + more + ' more</div>' : '')
     + '</div>';
 }
 
@@ -18046,13 +18138,14 @@ function paintFacility(){
     .sort(function(a,b){ return (parseInt(a,10)||0)-(parseInt(b,10)||0); });
   let items = all.slice();
   if(S_facSalon) items = items.filter(function(i){ return i.salonNum === S_facSalon; });
+  items = items.filter(facIssueOk);
   if(S_facStatus === 'open') items = items.filter(function(i){ return FAC_OPEN[i.status]; });
   else if(S_facStatus === 'critical') items = items.filter(function(i){ return FAC_OPEN[i.status] && i.category==='critical'; });
   else if(S_facStatus === 'overdue') items = items.filter(function(i){ return FAC_WORK[i.status] && i.dueDate && i.dueDate < today; });
   else if(S_facStatus === 'requests') items = [];
   else if(S_facStatus === 'resolved') items = items.filter(function(i){ return !FAC_OPEN[i.status]; });
   else if(S_facStatus !== 'all') items = items.filter(function(i){ return i.status === S_facStatus; });
-  let reqList = (d.requests || []).filter(function(r){ return !S_facSalon || r.salonNum === S_facSalon; });
+  let reqList = (d.requests || []).filter(function(r){ return (!S_facSalon || r.salonNum === S_facSalon) && facReqIssueOk(r); });
   if(S_facStatus === 'open' || S_facStatus === 'requests') reqList = reqList.filter(function(r){ return FAC_REQ_OPEN[r.status]; });
   else if(S_facStatus !== 'all') reqList = [];
   reqList.sort(function(a,b){ return String(b.submittedAt).localeCompare(String(a.submittedAt)); });
@@ -18098,7 +18191,12 @@ function paintFacility(){
   (d.reviews || []).forEach(function(r){ seen.add(r.salonNum); });
   const scopeSalons = S_facSalon ? [S_facSalon]
     : [...seen].filter(Boolean).sort(function(a,b){ return (parseInt(a,10)||0)-(parseInt(b,10)||0); });
-  const states = scopeSalons.map(facSalonState);
+  const issueBar = facIssueBar(S_facSalon ? [S_facSalon] : scopeSalons);
+  // With an issue picked, the grid answers "which salons have this": a salon
+  // with none of it is left out rather than shown as an empty card.
+  const states = scopeSalons.map(facSalonState).filter(function(st){
+    return S_facSalon || !S_facIssue || st.openCritical + st.openAction + st.openReqs > 0;
+  });
   const summaryTop = facSummaryTop(states, today);
   const canGf = !!S_facSalon && all.some(function(i){
     return i.salonNum === S_facSalon && i.source === 'review' && FAC_GF_ELIGIBLE[i.status]; });
@@ -18112,8 +18210,15 @@ function paintFacility(){
               : '')
         + '</div>'
         + facSalonCard(states[0], today, true) + '</div>'
-    : '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(235px,1fr));gap:10px;margin-bottom:18px;">'
-        + states.map(function(st){ return facSalonCard(st, today, false); }).join('') + '</div>';
+    : (S_facIssue
+        ? '<div style="font-size:13px;margin:0 0 10px;"><b>' + states.length + ' salon' + (states.length === 1 ? '' : 's')
+          + '</b> with open ' + hEsc(S_facIssue.toLowerCase()) + ' issues</div>'
+        : '')
+      + (states.length
+        ? '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(235px,1fr));gap:10px;margin-bottom:18px;">'
+          + states.map(function(st){ return facSalonCard(st, today, false); }).join('') + '</div>'
+        : '<div class="no-data" style="padding:18px;margin-bottom:18px;">No salon has anything open under '
+          + hEsc(S_facIssue) + '.</div>');
 
   // ── filters ──
   const sOpts = ['<option value="">Every salon</option>'].concat(salons.map(function(sn){
@@ -18135,7 +18240,7 @@ function paintFacility(){
   // with its filters, because there the salon is the thing being compared.
   let list = '';
   if(S_facSalon){
-    const mine = all.filter(function(i){ return i.salonNum === S_facSalon; });
+    const mine = all.filter(function(i){ return i.salonNum === S_facSalon && facIssueOk(i); });
     const byDue = function(a, b){
       return String(a.dueDate || '9999').localeCompare(String(b.dueDate || '9999'))
         || String(a.component).localeCompare(String(b.component));
@@ -18143,7 +18248,7 @@ function paintFacility(){
     const crit = mine.filter(function(i){ return FAC_OPEN[i.status] && i.category === 'critical'; }).sort(byDue);
     const act = mine.filter(function(i){ return FAC_OPEN[i.status] && i.category !== 'critical'; }).sort(byDue);
     const done = mine.filter(function(i){ return !FAC_OPEN[i.status]; }).sort(byDue);
-    const here = (d.requests || []).filter(function(r){ return r.salonNum === S_facSalon && FAC_REQ_OPEN[r.status]; });
+    const here = (d.requests || []).filter(function(r){ return r.salonNum === S_facSalon && FAC_REQ_OPEN[r.status] && facReqIssueOk(r); });
     list = facSection('Critical brand elements', crit, '#b3261e', 'Any one open means a compliance action')
       + facSection('Action items', act, '#c98a12', 'Five or more open means a compliance action')
       + facRequestRows(here)
@@ -18167,8 +18272,8 @@ function paintFacility(){
   // Summary first, then where each salon stands, then the work, then the
   // archive — and loading a new review last, because it happens every nine
   // months and reading what is open happens every day.
-  const openCount = all.filter(function(i){ return FAC_OPEN[i.status]; }).length;
-  const openReqCount = (d.requests || []).filter(function(r){ return FAC_REQ_OPEN[r.status]; }).length;
+  const openCount = all.filter(function(i){ return FAC_OPEN[i.status] && facIssueOk(i); }).length;
+  const openReqCount = (d.requests || []).filter(function(r){ return FAC_REQ_OPEN[r.status] && facReqIssueOk(r); }).length;
   const listing = S_facSalon ? list
     : S_facShowAll
       ? '<div style="margin:-6px 0 10px;"><a href="javascript:void(0)" onclick="facShowAll(false)" '
@@ -18195,7 +18300,7 @@ function paintFacility(){
   const loadSection = (S_facSalon && !S_facProposal) ? ''
     : '<div style="font-weight:700;font-size:14px;margin:30px 0 8px;">Load a facility review</div>'
       + facPaint_proposal() + drop;
-  host.innerHTML = banner + (S_facSalon ? '' : summaryTop) + strip + listing + facArchive() + loadSection
+  host.innerHTML = banner + (S_facSalon ? '' : summaryTop) + issueBar + strip + listing + facArchive() + loadSection
     + '<details style="margin-top:18px;font-size:12.5px;color:var(--text-muted);">'
     + '<summary style="cursor:pointer;font-weight:600;">How this tracker works</summary>'
     + '<ul style="margin:8px 0 0;padding-left:18px;line-height:1.75;">'
@@ -21735,14 +21840,23 @@ function respCell(f,v){
 function renderResponsesTable(formId){
   const rows=responsesFor(formId), fields=responsesColumns(formId);
   if(!rows.length) return '<div class="no-data"><div class="no-data-icon">📭</div>No responses yet.</div>';
+  // Each row opens the same detail panel as the status view -- workflow
+  // buttons, note and conversation included -- so filtering to one form is a
+  // way of working through it, not a read-only report. The panel sits sticky
+  // at the left of the scrolling table so a wide form does not push it off
+  // screen.
+  const cols=4+fields.length;
   const head=`<th>Submitted</th><th>By</th><th>Salon</th><th>Status</th>`+fields.map(f=>`<th>${hEsc(f.label)}</th>`).join('');
-  const body=rows.map(s=>`<tr>
+  const body=rows.map(s=>{ const k='r-'+s.submissionId; return `<tr class="sub-row" onclick="toggleSubmission('${hEsc(k)}')" style="cursor:pointer;">
       <td style="white-space:nowrap;">${hEsc(s.submittedAt?pDate(s.submittedAt.slice(0,10)):'—')}</td>
       <td>${hEsc(fmtName(s.submittedByName||''))}</td>
       <td>${hEsc(s.salonNum||'—')}</td>
       <td>${statusPill(s.status, s.formId)}</td>
       ${fields.map(f=>`<td>${hEsc(respCell(f,(s.data||{})[f.fieldKey]))}</td>`).join('')}
-    </tr>`).join('');
+    </tr>
+    <tr id="sub-${hEsc(k)}" style="display:none;" onclick="event.stopPropagation();"><td colspan="${cols}" style="padding:0;">
+      <div style="position:sticky;left:0;max-width:min(900px,calc(100vw - 60px));padding:10px 12px;">${submissionDetail(s,'r-')}</div>
+    </td></tr>`; }).join('');
   return `<div class="home-sec-title" style="margin-bottom:.6rem;">${rows.length} response${rows.length===1?'':'s'}</div>
     <div class="table-card" style="overflow:auto;"><table class="data-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
