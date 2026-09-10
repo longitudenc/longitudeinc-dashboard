@@ -138,6 +138,22 @@
 </style>
 </head>
 <body>
+<script>
+/* EMBEDDED-v1: opened inside the dashboard, which already has the header and
+   top nav. Drop this page's own header, and send links to the dashboard to the
+   top window rather than loading a dashboard inside the dashboard. */
+(function(){
+  if(window.self === window.top) return;
+  document.documentElement.classList.add('embedded');
+  var st = document.createElement('style');
+  st.textContent = '.embedded .app-header{display:none!important}.embedded .tabs{top:0!important}';
+  document.head.appendChild(st);
+  document.addEventListener('click', function(e){
+    var a = e.target && e.target.closest ? e.target.closest('a[href*="dashboard.html"]') : null;
+    if(a) a.target = '_top';
+  }, true);
+})();
+</script>
 
 <div class="app-header">
   <h1>Office Tools — Payroll</h1>

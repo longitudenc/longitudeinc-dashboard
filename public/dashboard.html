@@ -5107,7 +5107,7 @@ function setupSidebar(){
       html += `<button class="am-btn" onclick="switchToAdmin()" id="btn-admin">
         <div class="am-avatar" style="background:#eee;color:#555;">⚙</div>Admin / Upload
       </button>`;
-      html += `<button class="am-btn" onclick="window.location.href='/office.html'" id="btn-office">
+      html += `<button class="am-btn" onclick="showEmbeddedPage('payroll')" id="btn-office">
         <div class="am-avatar" style="background:#eee;color:#555;">🧾</div>Office / Payroll
       </button>`;
     }
@@ -11359,6 +11359,7 @@ function applyRoute(){
       case 'effective-wage': showEffWageReport(); break;
       case 'pay-trends': showPayTrends(seg[1] || '', seg[2] || ''); break;
       case 'facility':  showFacility(); break;
+      case 'page':      showEmbeddedPage(seg[1] || ''); break;
       case 'supplies':  showSupplyCatalog(); break;
       case 'request':   if(seg[1]) openRequestDeepLink(seg[1]); break;
       case 'event':     if(seg[1]) openEventDetail(seg[1]); break;
@@ -11680,7 +11681,11 @@ function hubGo(btn){
   });
   const card = allowed[i];
   if(!card || card.soon) return;
-  if(card.href){ window.location.href = card.href; return; }
+  if(card.href){
+    const ek = embedKeyFor(card.href);
+    if(ek){ showEmbeddedPage(ek); return; }
+    window.location.href = card.href; return;
+  }
 
   if(card.dest){
     const fn = (S_hubScope === 'company') ? card.dest.company
@@ -17006,6 +17011,40 @@ const FAC_STATUS_STYLE = {
   variance_approved:   { bg:'#e6f4e0', fg:'#1a5c0a', bd:'#a8d890' },
 };
 
+// EMBED-PAGES-v1 — the tools that live in their own files (leases, market,
+// payroll, newsletter, flexibility) open INSIDE the dashboard, under the same
+// header and top nav, instead of replacing it with a page that has its own
+// header and a "← Dashboard" link. Each page hides its own header when framed.
+// Its internal navigation joins the browser history, so Back steps through the
+// tool first and then back out to wherever you came from.
+const EMBED_PAGES = {
+  leases:      { src:'/leases.html',                       nav:'office' },
+  market:      { src:'/market.html',                       nav:'market' },
+  payroll:     { src:'/office.html',                       nav:'office' },
+  newsletter:  { src:'/newsletter.html',                   nav:'office' },
+  flexibility: { src:'/flexibility_reliability_tool.html', nav:'people' },
+};
+function embedKeyFor(href){
+  for(const k in EMBED_PAGES){ if(EMBED_PAGES[k].src === href) return k; }
+  return '';
+}
+function showEmbeddedPage(key){
+  const p = EMBED_PAGES[key];
+  if(!p){ switchToHome(); return; }
+  _route('#/page/' + key);
+  clearActive();
+  const pg = document.getElementById('page-hub'); if(!pg) return;
+  pg.classList.add('active');
+  S_topNav = p.nav; if(typeof renderTopNav === 'function') renderTopNav();
+  // Already showing this tool (Back from inside it, say): keep it, and the
+  // place you had got to in it, rather than reloading from the top.
+  const cur = document.getElementById('embed-frame');
+  if(cur && cur.getAttribute('data-key') === key) return;
+  pg.innerHTML = '<iframe id="embed-frame" data-key="' + key + '" src="' + p.src + '" title="' + key + '" '
+    + 'style="display:block;width:100%;height:calc(100vh - var(--hdr-h, 56px) - 48px);border:0;'
+    + 'border-radius:10px;background:#fff;"></iframe>';
+}
+
 function showFacility(){
   _route('#/facility');
   clearActive();
@@ -18440,6 +18479,24 @@ function ptCloseBig(forget){
 }
 function ptBigKey(e){ if(e.key === 'Escape') ptCloseBig(true); }
 
+// A per-hour line that never moves (a $14.00 base every month) was drawn as a
+// mountain range: the months differ in the fifth decimal, and an axis that does
+// not start at zero zooms to fit whatever spread there is. Cents are the real
+// resolution, and the axis never spans less than a dollar or a tenth of the
+// value, so only a real change in rate looks like one.
+function ptR2(v){ return (v === null || v === undefined) ? v : Math.round(v * 100) / 100; }
+function ptYBounds(lists){
+  if(!S_ptPerHour) return {};
+  const vals = [].concat.apply([], lists.filter(Boolean))
+    .filter(function(v){ return v !== null && v !== undefined && isFinite(v); });
+  if(!vals.length) return {};
+  const lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+  const minSpan = Math.max(1, Math.abs(hi) * 0.1);
+  if(hi - lo >= minSpan) return {};
+  const mid = (hi + lo) / 2;
+  return { min: Math.max(0, Math.floor(mid - minSpan / 2)), max: Math.ceil(mid + minSpan / 2) };
+}
+
 function ptOpenBig(k){
   const b = ptBucket(k), C = S_ptCtx;
   if(!b || !C) return;
@@ -18447,8 +18504,8 @@ function ptOpenBig(k){
   S_ptBig = k;
 
   const labels = C.cols.map(function(i){ return (C.MK[i] && C.MK[i].full) || (C.MK[i] && C.MK[i].label) || ''; });
-  const now = C.cols.map(function(i){ return ptVal(C.roll.months[i], b); });
-  const was = C.PRIOR ? C.cols.map(function(i){ return ptVal(C.priorMonth(i), b); }) : null;
+  const now = C.cols.map(function(i){ return ptR2(ptVal(C.roll.months[i], b)); });
+  const was = C.PRIOR ? C.cols.map(function(i){ return ptR2(ptVal(C.priorMonth(i), b)); }) : null;
   const hasWas = was && was.some(function(v){ return v !== null && v !== undefined; });
 
   const th = 'padding:6px 10px;font-size:10.5px;font-weight:700;text-transform:uppercase;'
@@ -18535,10 +18592,10 @@ function ptOpenBig(k){
         scales:{
           // Dollars per hour never sensibly starts at zero -- on a $15 base wage
           // it would flatten the line. A dollar total does.
-          y:{ beginAtZero: !S_ptPerHour, title:{ display:true,
+          y:Object.assign({ beginAtZero: !S_ptPerHour, title:{ display:true,
                 text: S_ptPerHour ? '$ per floor hour' : 'Total dollars' },
-              ticks:{ callback:function(v){ return '$' + v.toLocaleString('en-US'); } },
-              grid:{ color:'rgba(0,0,0,.06)' } },
+              ticks:{ callback:function(v){ return '$' + v.toLocaleString('en-US', { maximumFractionDigits: 2 }); } },
+              grid:{ color:'rgba(0,0,0,.06)' } }, ptYBounds([now, hasWas ? was : null])),
           x:{ title:{ display:true, text:'Month' }, grid:{ display:false } },
         },
       },
@@ -18769,8 +18826,8 @@ function paintPayTrends(){
     PT_BUCKETS.forEach(function(b){
       const el = document.getElementById('pt-c-' + b.k);
       if(!el || cols.length < 2) return;
-      const now = cols.map(function(i){ return ptVal(roll.months[i], b.k); });
-      const was = PRIOR ? cols.map(function(i){ return ptVal(priorMonth(i), b.k); }) : null;
+      const now = cols.map(function(i){ return ptR2(ptVal(roll.months[i], b.k)); });
+      const was = PRIOR ? cols.map(function(i){ return ptR2(ptVal(priorMonth(i), b.k)); }) : null;
       const sets = [{ label:'This period', data: now, borderColor: b.col, backgroundColor: b.col + '22',
         borderWidth: 2.2, pointRadius: 0, tension: 0.3, fill: true, spanGaps: true }];
       if(was && was.some(function(v){ return v !== null && v !== undefined; })){
@@ -18791,7 +18848,7 @@ function paintPayTrends(){
               } } } },
             // No axes on a card this size -- the number above it is the value,
             // and the line is only there to show the shape.
-            scales:{ x:{ display:false }, y:{ display:false, beginAtZero: !S_ptPerHour } },
+            scales:{ x:{ display:false }, y:Object.assign({ display:false, beginAtZero: !S_ptPerHour }, ptYBounds([now, was])) },
           },
         }));
       }catch(e){}

@@ -103,6 +103,18 @@
 </style>
 </head>
 <body>
+<script>
+/* EMBEDDED-v1: opened inside the dashboard. This header carries the map
+   controls, so it stays; only the way back and the user chip go, since the
+   dashboard's own header already has both. */
+(function(){
+  if(window.self === window.top) return;
+  document.documentElement.classList.add('embedded');
+  var st = document.createElement('style');
+  st.textContent = '.embedded header .back,.embedded header #user-chip{display:none!important}';
+  document.head.appendChild(st);
+})();
+</script>
 <header>
   <h1>🗺 CLT Market Compare</h1>
   <span class="modetog"><button id="mode-map" class="active" onclick="setMode('map')">🗺 Map</button><button id="mode-trends" onclick="setMode('trends')">📈 Trends</button><button id="mode-score" onclick="setMode('score')">🏆 Scoreboard</button></span>
@@ -901,11 +913,11 @@ function updateTrendStats(){
 
 // ── Init ──────────────────────────────────────────────────────
 fetch('/api/auth/me').then(r=>r.json()).then(me=>{
-  if(!me||!me.access){ window.location.href='/dashboard.html'; return; }
+  if(!me||!me.access){ (window.top||window).location.href='/dashboard.html'; return; }
   if(me.access.role==='none'){ document.getElementById('root').innerHTML='<div class="loading">Your account doesn’t have dashboard access yet.</div>'; return; }
   const chip=document.getElementById('user-chip'); if(chip) chip.textContent=me.email||'';
   loadAll().catch(e=>{ document.getElementById('root').innerHTML='<div class="loading">Failed to load market data: '+esc(e.message)+'</div>'; });
-}).catch(()=>{ window.location.href='/dashboard.html'; });
+}).catch(()=>{ (window.top||window).location.href='/dashboard.html'; });
 </script>
 </body>
 </html>
