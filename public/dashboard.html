@@ -16893,9 +16893,24 @@ let S_facData = null, S_facSalon = '', S_facStatus = 'open', S_facOpenItem = '',
 // the cross-salon questions ("everything overdue").
 let S_facShowAll = false;
 
-const FAC_STATUS_LABEL = { open:'Open', in_progress:'In progress',
-  fixed:'Fixed — awaiting green flag', verified:'Verified', waived:'Waived' };
-const FAC_OPEN = { open:1, in_progress:1 };
+// An item is only DONE when Great Clips says so: a green flag, or an approved
+// variance. "Fixed" and "requested" are our half of the conversation, so they
+// still count against the salon for the compliance rule.
+const FAC_STATUS_LABEL = { open:'Open', in_progress:'In progress', fixed:'Fixed',
+  greenflag_requested:'Green flag requested', greenflag_approved:'Green flag approved',
+  variance_requested:'Variance requested', variance_approved:'Variance approved' };
+const FAC_OPEN = { open:1, in_progress:1, fixed:1, greenflag_requested:1, variance_requested:1 };
+/** Waiting on US — the only statuses that can sensibly be past a fix-by date. */
+const FAC_WORK = { open:1, in_progress:1 };
+const FAC_STATUS_STYLE = {
+  open:                { bg:'#ffffff', fg:'#555',    bd:'#d8dcd9' },
+  in_progress:         { bg:'#eef4fb', fg:'#1f5f99', bd:'#c6dbef' },
+  fixed:               { bg:'#eaf6f1', fg:'#0b6b4d', bd:'#bfe0d2' },
+  greenflag_requested: { bg:'#fff4df', fg:'#8a5a12', bd:'#f0d49a' },
+  greenflag_approved:  { bg:'#e6f4e0', fg:'#1a5c0a', bd:'#a8d890' },
+  variance_requested:  { bg:'#f3eefb', fg:'#5b3a8c', bd:'#d9c9ef' },
+  variance_approved:   { bg:'#e6f4e0', fg:'#1a5c0a', bd:'#a8d890' },
+};
 
 function showFacility(){
   _route('#/facility');
@@ -16925,6 +16940,7 @@ function loadFacility(){
 
 function facSetSalon(v){
   S_facSalon = v;
+  S_facBanner = '';
   if(!v) S_facShowAll = false;
   paintFacility();
   // A card near the bottom of the grid swaps for that salon's card at the top;
@@ -17293,8 +17309,7 @@ function facPaint_proposal(){
       + '<button class="btn btn-sm btn-secondary" onclick="facDueOffset(30)">+30 days</button>'
       + '<button class="btn btn-sm btn-secondary" onclick="facDueOffset(60)">+60</button>'
       + '<button class="btn btn-sm btn-secondary" onclick="facDueOffset(90)">+90</button>'
-      + '<span style="color:var(--text-muted);">from the review date. The email does not give one &mdash; '
-        + 'it says the items must be addressed, so this deadline is ours.</span>'
+      + '<span style="color:var(--text-muted);">from the review date &middot; the email gives no deadline</span>'
     + '</div>'
     + '<div style="overflow-x:auto;border:1px solid var(--border);border-radius:10px;">'
       + '<table style="width:100%;border-collapse:collapse;">' + rows + '</table></div>'
@@ -17310,9 +17325,7 @@ function facPaint_proposal(){
           + '<div style="font-size:12.5px;font-weight:700;margin-bottom:4px;">'
             + P.photos.length + ' photo' + (P.photos.length===1?'':'s') + ' kept with this review</div>'
           + '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:8px;">'
-            + 'They arrive attached to the review, not to an item &mdash; the email does not say which '
-            + 'photo is the front desk, and the filenames are camera serials. Assign them once they are '
-            + 'in, from the item itself.'
+            + 'Attach each to the item it shows once they are added &mdash; the email does not say which is which.'
             + (P.seen > P.photos.length
                 ? ' ' + (P.seen - P.photos.length) + ' small attachment'
                   + ((P.seen - P.photos.length)===1?' was':'s were') + ' skipped as message furniture.'
@@ -17334,8 +17347,7 @@ function facPaint_proposal(){
             + (S_facLastOffset ? '; each gets +' + S_facLastOffset + ' days from its own review date' : '') + '">'
             + 'Add this and the ' + S_facQueue.length + ' waiting</button>'
           : '')
-      + '<span style="font-size:12px;color:var(--text-muted);">Loading the same review twice will not duplicate '
-        + 'it &mdash; a component already on the list keeps its status and its comments.</span>'
+      + ''
     + '</div></div>';
 }
 
@@ -17356,6 +17368,8 @@ function facPhotoStrip(it){
   ((S_facData && S_facData.reviews) || []).forEach(function(r){ revDate[r.reviewId] = r.reviewDate; });
   const pool = all.filter(function(p){
     if(p.itemId || p.salonNum !== it.salonNum) return false;
+    // "After" photos sent with a green-flag request are not review evidence.
+    if(String(p.reviewId).indexOf('gf_') === 0) return false;
     const d = revDate[p.reviewId];
     return !d || !it.reviewDate || d === it.reviewDate;
   });
@@ -17381,8 +17395,8 @@ function facPhotoStrip(it){
     + (pool.length
         ? '<details' + (mine.length ? '' : ' open') + '>'
           + '<summary style="cursor:pointer;font-size:11.5px;color:var(--text-muted);">'
-          + pool.length + ' photo' + (pool.length===1?'':'s') + ' from this review not yet on an item'
-          + ' &mdash; click <b>+</b> to attach one here</summary>'
+          + pool.length + ' review photo' + (pool.length===1?'':'s') + ' to sort'
+          + ' &mdash; tap <b>+</b> on any that show this</summary>'
           + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">'
           + pool.map(function(p){ return thumb(p, false); }).join('') + '</div></details>'
         : '')
@@ -17426,7 +17440,7 @@ function facSalonState(sn){
     sn: sn, last: last,
     next: last ? dIsoAddDays(last, FAC_REVIEW_CYCLE_DAYS) : '',
     openCritical: openCritical, openAction: openAction, openReqs: reqs.length,
-    overdue: open.filter(function(i){ return i.dueDate && i.dueDate < today; }).length,
+    overdue: open.filter(function(i){ return FAC_WORK[i.status] && i.dueDate && i.dueDate < today; }).length,
     compliance: openCritical > 0 || openAction >= 5,
     fromLast: fromLast.length,
     resolved: fromLast.filter(function(i){ return !FAC_OPEN[i.status]; }).length,
@@ -17543,8 +17557,7 @@ function facSummaryTop(states, today){
 /** Salon-raised requests. Read here, managed in Forms — one status, not two. */
 function facRequestRows(reqs){
   if(!reqs.length) return '';
-  return '<div style="font-weight:700;font-size:12.5px;margin:18px 0 8px;">Salon requests '
-      + '<span style="font-weight:400;color:var(--text-muted);">&mdash; managed in Forms; click one to open it</span></div>'
+  return facSectionHead('Salon requests', reqs.length, 'var(--primary-dark)', 'Managed in Forms &mdash; click one to open it')
     + reqs.map(function(r){
         const urgent = /emergency|high/i.test(r.urgency || '');
         return '<div onclick="facOpenRequest(' + "'" + hEsc(r.submissionId) + "'" + ')" '
@@ -17572,6 +17585,394 @@ function facRequestRows(reqs){
 }
 function facOpenRequest(id){ _route('#/request/' + encodeURIComponent(id)); applyRoute(); }
 
+// ── one finding, as a row that opens ─────────────────────────────────────
+// Closed, a row is three things: what it is, the first line of what is wrong,
+// and where it stands. Open, it reads top to bottom in the order the work
+// happens — what needs fixing, the photos, progress, then the conversation —
+// each under a small label, instead of everything run together in one block.
+function facSectionHead(title, n, col, hint){
+  return '<div style="margin:22px 0 8px;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;">'
+    + '<span style="width:9px;height:9px;border-radius:2px;background:' + col + ';display:inline-block;"></span>'
+    + '<span style="font-weight:700;font-size:14.5px;">' + title + '</span>'
+    + '<span style="font-size:12.5px;color:var(--text-muted);">' + n + ' open</span>'
+    + (hint ? '<span style="font-size:11.5px;color:var(--text-muted);margin-left:auto;">' + hint + '</span>' : '')
+    + '</div>';
+}
+function facSection(title, rows, col, hint){
+  if(!rows.length) return '';
+  return facSectionHead(title, rows.length, col, hint)
+    + rows.map(function(it){ return facRow(it, {}); }).join('');
+}
+
+function facPill(status){
+  const st = FAC_STATUS_STYLE[status] || FAC_STATUS_STYLE.open;
+  return '<span style="background:' + st.bg + ';color:' + st.fg + ';border:1px solid ' + st.bd + ';'
+    + 'border-radius:999px;padding:2px 9px;font-size:11px;font-weight:600;white-space:nowrap;">'
+    + hEsc(FAC_STATUS_LABEL[status] || status) + '</span>';
+}
+
+function facRow(it, opts){
+  opts = opts || {};
+  const d = S_facData || {}, today = d.today;
+  const open = S_facOpenItem === it.itemId;
+  const late = FAC_WORK[it.status] && it.dueDate && it.dueDate < today;
+  const cs = (d.comments || {})[it.itemId] || [];
+  const ls = facLines(it);
+  const id = "'" + hEsc(it.itemId) + "'";
+  const label = function(t){
+    return '<div style="font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;'
+      + 'color:var(--text-muted);margin:16px 0 6px;">' + t + '</div>';
+  };
+  const field = function(t, control){
+    return '<label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--text-muted);">'
+      + t + control + '</label>';
+  };
+  const ctl = 'padding:6px 8px;border:1px solid var(--border);border-radius:7px;font:inherit;font-size:13px;';
+
+  const tag = !opts.showTag ? ''
+    : it.category === 'critical'
+      ? '<span style="background:#fdecea;color:#b3261e;border:1px solid #f4c4be;border-radius:4px;padding:1px 6px;'
+        + 'font-size:10px;font-weight:700;text-transform:uppercase;white-space:nowrap;">Critical</span>'
+      : '<span style="background:#f4f4f2;color:var(--text-muted);border:1px solid var(--border);border-radius:4px;'
+        + 'padding:1px 6px;font-size:10px;font-weight:700;text-transform:uppercase;white-space:nowrap;">Action</span>';
+
+  const head = '<div onclick="facToggle(' + id + ')" style="display:flex;gap:12px;align-items:center;'
+      + 'padding:12px 16px;cursor:pointer;flex-wrap:wrap;">'
+    + tag
+    + '<div style="flex:1 1 320px;min-width:0;">'
+      + '<div style="font-weight:600;font-size:14px;">' + hEsc(it.component)
+        + (opts.showSalon ? ' <span style="font-weight:400;font-size:12px;color:var(--text-muted);">'
+            + hEsc(salonDisplay(it.salonNum)) + '</span>' : '') + '</div>'
+      + (open ? ''
+          : '<div style="font-size:12.5px;color:var(--text-muted);line-height:1.45;margin-top:2px;'
+            + 'display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;">'
+            + hEsc(ls[0] || '')
+            + (ls.length > 1 ? ' <span style="color:var(--primary);font-weight:600;">+' + (ls.length - 1) + ' more</span>' : '')
+            + '</div>')
+    + '</div>'
+    + '<div style="display:flex;gap:10px;align-items:center;margin-left:auto;">'
+      + (it.dueDate
+          ? '<span style="font-size:11.5px;white-space:nowrap;' + (late ? 'color:#8a5a12;font-weight:700;' : 'color:var(--text-muted);') + '">'
+            + (late ? 'Past fix-by ' : 'Fix by ') + hEsc(pDate(it.dueDate)) + '</span>'
+          : '')
+      + facPill(it.status)
+      + (cs.length ? '<span style="font-size:11.5px;color:var(--text-muted);white-space:nowrap;">' + cs.length
+          + ' comment' + (cs.length === 1 ? '' : 's') + '</span>' : '')
+      + '<span style="color:var(--text-muted);font-size:11px;">' + (open ? '&#9650;' : '&#9660;') + '</span>'
+    + '</div></div>';
+
+  let body = '';
+  if(open){
+    const photos = facPhotoStrip(it);
+    body = '<div style="padding:0 16px 16px;border-top:1px solid var(--border);">'
+      + label('What needs fixing')
+      + (ls.length > 1
+          ? '<ul style="margin:0;padding-left:18px;font-size:13.5px;line-height:1.6;">'
+            + ls.map(function(l){ return '<li style="margin:2px 0;">' + hEsc(l) + '</li>'; }).join('') + '</ul>'
+          : '<div style="font-size:13.5px;line-height:1.6;">' + hEsc(ls[0] || it.detail) + '</div>')
+      + (photos ? label('Photos') + photos : '')
+      + label('Progress')
+      + '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">'
+        + field('Status', '<select style="' + ctl + '" onchange="facUpdate(' + id + ', {status:this.value})">'
+            + Object.keys(FAC_STATUS_LABEL).map(function(k){
+                return '<option value="' + k + '"' + (it.status === k ? ' selected' : '') + '>' + FAC_STATUS_LABEL[k] + '</option>';
+              }).join('') + '</select>')
+        + field('Fix by', '<input type="date" value="' + hEsc(it.dueDate) + '" style="' + ctl + '" '
+            + 'onchange="facUpdate(' + id + ', {dueDate:this.value})">')
+        + field('Who is doing it', '<input type="text" value="' + hEsc(it.assignee) + '" style="' + ctl + 'width:170px;" '
+            + 'onchange="facUpdate(' + id + ', {assignee:this.value})">')
+        + field('Cost', '<input type="text" value="' + (it.cost ? hEsc(String(it.cost)) : '') + '" style="' + ctl + 'width:90px;" '
+            + 'onchange="facUpdate(' + id + ', {cost:this.value})">')
+      + '</div>'
+      + label('Comments' + (cs.length ? ' &middot; ' + cs.length : ''))
+      + cs.map(function(c){
+          return '<div style="margin-bottom:10px;padding-left:10px;border-left:2px solid var(--border);">'
+            + '<div style="font-size:11px;color:var(--text-muted);">' + hEsc(c.author)
+              + ' &middot; ' + hEsc(pDate(String(c.createdAt).slice(0, 10))) + '</div>'
+            + '<div style="font-size:13px;white-space:pre-wrap;line-height:1.5;">' + hEsc(c.body) + '</div></div>';
+        }).join('')
+      + '<div style="display:flex;gap:8px;align-items:flex-start;">'
+        + '<textarea id="fac-c-' + hEsc(it.itemId) + '" class="ff-input" rows="2" '
+          + 'placeholder="Add a comment" style="flex:1;font-size:13px;"></textarea>'
+        + '<button class="btn btn-sm btn-secondary" onclick="facComment(' + id + ')">Post</button>'
+      + '</div>'
+      + '<div style="font-size:11px;color:var(--text-muted);margin-top:14px;">'
+        + (it.source === 'review' ? 'From the ' + hEsc(pDate(it.reviewDate) || '?') + ' facility review' : 'Raised in salon')
+        + (it.closedAt ? ' &middot; closed ' + hEsc(pDate(String(it.closedAt).slice(0, 10))) + ' by ' + hEsc(it.closedBy) : '')
+      + '</div>'
+    + '</div>';
+  }
+  return '<div style="border:1px solid ' + (late ? '#e0a24a' : 'var(--border)') + ';border-radius:12px;'
+    + 'background:#fff;margin-bottom:8px;overflow:hidden;">' + head + body + '</div>';
+}
+
+// ── green-flag requests ───────────────────────────────────────────────────
+// What every review email tells you to do — "email a photo of the fixed items
+// with a short message including your salon number to GF@greatclips.com" —
+// done from the salon it is about: tick the items, add the photos, send. The
+// photos go as attachments, the owner and the sender are copied, and the items
+// move to "green flag requested" only once the email has actually gone.
+let S_facGf = null, S_facBanner = '';
+const FAC_GF_TO = 'GF@greatclips.com';
+/** Items that can sensibly be put forward for a green flag. */
+const FAC_GF_ELIGIBLE = { open:1, in_progress:1, fixed:1 };
+
+function facGreenFlagHistory(sn){
+  const gfs = ((S_facData && S_facData.greenflags) || []).filter(function(g){ return g.salonNum === sn; })
+    .sort(function(a, b){ return String(b.sentAt).localeCompare(String(a.sentAt)); });
+  if(!gfs.length) return '';
+  const items = (S_facData && S_facData.items) || [];
+  const photos = (S_facData && S_facData.photos) || [];
+  return '<div style="margin:24px 0 8px;font-weight:700;font-size:14.5px;">Green flag requests</div>'
+    + gfs.map(function(g){
+        const mine = items.filter(function(i){ return g.itemIds.indexOf(i.itemId) >= 0; });
+        const waiting = mine.filter(function(i){ return i.status === 'greenflag_requested'; });
+        const pics = photos.filter(function(p){ return p.reviewId === g.requestId; });
+        return '<div style="border:1px solid var(--border);border-radius:12px;background:#fff;padding:12px 16px;margin-bottom:8px;">'
+          + '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:13px;">'
+            + '<b>Sent ' + hEsc(pDate(String(g.sentAt).slice(0, 10))) + '</b>'
+            + '<span style="color:var(--text-muted);">' + g.itemIds.length + ' item' + (g.itemIds.length === 1 ? '' : 's')
+              + ' &middot; ' + pics.length + ' photo' + (pics.length === 1 ? '' : 's') + ' &middot; by ' + hEsc(g.sentBy) + '</span>'
+            + (waiting.length
+                ? '<button class="btn btn-sm btn-secondary" style="margin-left:auto;" '
+                  + 'onclick="facGfApproved(' + "'" + hEsc(g.requestId) + "'" + ')">Mark green flag approved</button>'
+                : '<span style="margin-left:auto;">' + facPill('greenflag_approved') + '</span>')
+          + '</div>'
+          + '<div style="font-size:12.5px;color:var(--text-muted);margin-top:6px;">'
+            + mine.map(function(i){ return hEsc(i.component); }).join(' &middot; ') + '</div>'
+          + (pics.length
+              ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">'
+                + pics.map(function(p){
+                    return '<img src="/api/facility/file?photoId=' + encodeURIComponent(p.photoId) + '" loading="lazy" '
+                      + 'onclick="facZoom(' + "'" + hEsc(p.photoId) + "','" + hEsc(p.fileName).replace(/'/g, '') + "'" + ')" '
+                      + 'style="width:60px;height:60px;object-fit:cover;border-radius:6px;border:1px solid var(--border);cursor:zoom-in;">';
+                  }).join('') + '</div>'
+              : '')
+          + '</div>';
+      }).join('');
+}
+
+/** Great Clips said yes: move every item still waiting on that request. */
+function facGfApproved(requestId){
+  const g = ((S_facData && S_facData.greenflags) || []).filter(function(x){ return x.requestId === requestId; })[0];
+  if(!g) return;
+  const ids = ((S_facData && S_facData.items) || [])
+    .filter(function(i){ return g.itemIds.indexOf(i.itemId) >= 0 && i.status === 'greenflag_requested'; })
+    .map(function(i){ return i.itemId; });
+  if(!ids.length || !confirm('Mark ' + ids.length + ' item' + (ids.length === 1 ? '' : 's') + ' as green flag approved?')) return;
+  let chain = Promise.resolve();
+  ids.forEach(function(itemId){
+    chain = chain.then(function(){
+      return fetch('/api/facility', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ kind:'update', itemId: itemId, status:'greenflag_approved' }) }).then(facJson);
+    });
+  });
+  chain.then(function(){ S_facBanner = 'Marked ' + ids.length + ' item' + (ids.length === 1 ? '' : 's') + ' green flag approved.'; loadFacility(); })
+    .catch(function(e){ alert((e && e.message) || 'could not update'); });
+}
+
+function facOpenGreenFlag(){
+  if(!S_facSalon || !S_facData) return;
+  const items = (S_facData.items || []).filter(function(i){
+    return i.salonNum === S_facSalon && i.source === 'review' && FAC_GF_ELIGIBLE[i.status]; });
+  const picked = {};
+  items.forEach(function(i){ if(i.status === 'fixed') picked[i.itemId] = true; });
+  S_facGf = { salon: S_facSalon, requestId: 'gf_' + facUid(), items: items, picked: picked,
+    files: [], note: '', busy: '', sending: false };
+  facGfPaint();
+}
+function facGfClose(){
+  const el = document.getElementById('fac-gf'); if(el) el.remove();
+  if(S_facGf) S_facGf.files.forEach(function(f){ if(f.url) URL.revokeObjectURL(f.url); });
+  S_facGf = null;
+}
+function facGfToggle(id, on){
+  if(!S_facGf) return;
+  if(on) S_facGf.picked[id] = true; else delete S_facGf.picked[id];
+  facGfPaint();
+}
+function facGfNote(v){ if(S_facGf) S_facGf.note = v; }
+
+/** A phone photo, ready to send: HEIC converted, shrunk to 1600px JPEG. */
+function facGfPrep(file){
+  let chain = Promise.resolve(file);
+  if(typeof ffIsHeic === 'function' && ffIsHeic(file)){
+    chain = ffLoadHeic().then(function(){
+      return window.heic2any({ blob: file, toType: 'image/jpeg', quality: 0.9 });
+    }).then(function(out){
+      return new File([Array.isArray(out) ? out[0] : out],
+        String(file.name || 'photo').replace(/\.(heic|heif)$/i, '.jpg'), { type: 'image/jpeg' });
+    });
+  }
+  return chain.then(function(f){
+    return ffPhotoCompress(f).then(function(blob){
+      return { name: String(f.name || 'photo').replace(/\.[^.]+$/, '') + '.jpg', blob: blob,
+        url: URL.createObjectURL(blob), photoId: '' };
+    });
+  });
+}
+function facGfAdd(input){
+  const files = Array.prototype.slice.call(input.files || []);
+  input.value = '';
+  if(!S_facGf || !files.length) return;
+  S_facGf.busy = 'Preparing ' + files.length + ' photo' + (files.length === 1 ? '' : 's') + '…';
+  facGfPaint();
+  const bad = [];
+  let chain = Promise.resolve();
+  files.forEach(function(file){
+    chain = chain.then(function(){
+      return facGfPrep(file).then(function(p){ if(S_facGf) S_facGf.files.push(p); })
+        .catch(function(){ bad.push(file.name); });
+    });
+  });
+  chain.then(function(){
+    if(!S_facGf) return;
+    S_facGf.busy = bad.length ? 'Could not read ' + bad.join(', ') : '';
+    facGfPaint();
+  });
+}
+function facGfRemove(k){
+  if(!S_facGf) return;
+  const f = S_facGf.files[k];
+  if(f && f.url) URL.revokeObjectURL(f.url);
+  S_facGf.files.splice(k, 1);
+  facGfPaint();
+}
+
+function facGfPaint(){
+  const G = S_facGf; if(!G) return;
+  let wrap = document.getElementById('fac-gf');
+  if(!wrap){
+    wrap = document.createElement('div');
+    wrap.id = 'fac-gf';
+    wrap.setAttribute('style', 'position:fixed;inset:0;z-index:9500;background:rgba(15,25,20,.55);'
+      + 'display:flex;align-items:flex-start;justify-content:center;padding:32px 16px;overflow:auto;');
+    wrap.addEventListener('click', function(e){ if(e.target === wrap && S_facGf && !S_facGf.sending) facGfClose(); });
+    document.body.appendChild(wrap);
+  }
+  const n = Object.keys(G.picked).length;
+  const step = function(num, title, meta){
+    return '<div style="display:flex;align-items:center;gap:9px;margin:20px 0 8px;">'
+      + '<span style="width:22px;height:22px;border-radius:50%;background:var(--primary);color:#fff;font-size:12px;'
+        + 'font-weight:700;display:inline-flex;align-items:center;justify-content:center;">' + num + '</span>'
+      + '<span style="font-weight:700;font-size:14.5px;">' + title + '</span>'
+      + '<span style="font-size:12px;color:var(--text-muted);">' + meta + '</span></div>';
+  };
+  const group = function(title, list, col){
+    if(!list.length) return '';
+    return '<div style="font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:' + col + ';'
+        + 'margin:10px 0 6px;">' + title + '</div>'
+      + list.map(function(it){
+          const on = !!G.picked[it.itemId];
+          return '<label style="display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid '
+              + (on ? 'var(--primary)' : 'var(--border)') + ';background:' + (on ? '#f3faf7' : '#fff')
+              + ';border-radius:10px;margin-bottom:6px;cursor:pointer;">'
+            + '<input type="checkbox" ' + (on ? 'checked' : '') + ' style="margin-top:3px;" '
+              + 'onchange="facGfToggle(' + "'" + hEsc(it.itemId) + "'" + ', this.checked)">'
+            + '<span style="flex:1;min-width:0;"><span style="font-weight:600;font-size:13.5px;">' + hEsc(it.component) + '</span>'
+              + '<span style="display:block;font-size:12px;color:var(--text-muted);margin-top:1px;">'
+              + hEsc(facLines(it)[0] || '') + '</span></span>'
+            + facPill(it.status)
+            + '</label>';
+        }).join('');
+  };
+  const crit = G.items.filter(function(i){ return i.category === 'critical'; });
+  const act = G.items.filter(function(i){ return i.category !== 'critical'; });
+  const thumbs = G.files.map(function(f, k){
+      return '<div style="position:relative;width:86px;height:86px;">'
+        + '<img src="' + f.url + '" style="width:86px;height:86px;object-fit:cover;border-radius:9px;border:1px solid var(--border);">'
+        + (G.sending ? ''
+            : '<button onclick="facGfRemove(' + k + ')" title="Remove" style="position:absolute;top:4px;right:4px;border:none;'
+              + 'border-radius:6px;background:rgba(255,255,255,.94);color:#b3261e;font-weight:700;cursor:pointer;'
+              + 'font-size:12px;line-height:1;padding:3px 6px;">&times;</button>')
+        + '</div>';
+    }).join('')
+    + (G.sending ? ''
+        : '<label style="width:86px;height:86px;border:2px dashed #b9c8c1;border-radius:9px;display:flex;flex-direction:column;'
+          + 'align-items:center;justify-content:center;cursor:pointer;color:var(--primary-dark);font-size:11.5px;font-weight:600;'
+          + 'text-align:center;">'
+          + '<span style="font-size:22px;line-height:1;">+</span>Add photos'
+          + '<input type="file" accept="image/*,.heic,.heif" multiple style="display:none;" onchange="facGfAdd(this)"></label>');
+
+  wrap.innerHTML = '<div style="background:#fff;border-radius:16px;max-width:720px;width:100%;'
+      + 'box-shadow:0 18px 60px rgba(0,0,0,.3);">'
+    + '<div style="display:flex;align-items:center;gap:10px;padding:16px 22px;border-bottom:1px solid var(--border);">'
+      + '<div><div style="font-weight:700;font-size:16.5px;">&#128681; Request a green flag</div>'
+        + '<div style="font-size:12.5px;color:var(--text-muted);">' + hEsc(salonDisplay(G.salon)) + '</div></div>'
+      + '<button class="btn btn-sm btn-secondary" style="margin-left:auto;" ' + (G.sending ? 'disabled' : '')
+        + ' onclick="facGfClose()">Close</button>'
+    + '</div>'
+    + '<div style="padding:4px 22px 18px;">'
+      + step(1, 'Which items are fixed?', n + ' selected')
+      + (G.items.length ? group('Critical brand elements', crit, '#b3261e') + group('Action items', act, '#c98a12')
+          : '<div class="no-data" style="padding:14px;">Nothing at this salon is waiting on a green flag.</div>')
+      + step(2, 'Photos of the fixes', G.files.length ? G.files.length + ' added' : 'Great Clips asks for these')
+      + '<div style="display:flex;gap:8px;flex-wrap:wrap;">' + thumbs + '</div>'
+      + step(3, 'Message', 'optional')
+      + '<textarea class="ff-input" rows="3" style="width:100%;font-size:13px;" ' + (G.sending ? 'disabled' : '')
+        + ' placeholder="Anything Great Clips should know" oninput="facGfNote(this.value)">' + hEsc(G.note) + '</textarea>'
+    + '</div>'
+    + '<div style="padding:14px 22px;border-top:1px solid var(--border);background:#fafcfb;border-radius:0 0 16px 16px;'
+        + 'display:flex;gap:12px;align-items:center;flex-wrap:wrap;">'
+      + '<div style="font-size:12px;color:var(--text-muted);flex:1;min-width:230px;line-height:1.5;">'
+        + 'Emails <b>' + FAC_GF_TO + '</b> with the photos attached. You and the owner are copied, and their reply comes to you.'
+        + (G.busy ? '<div style="color:var(--text);font-weight:600;margin-top:4px;">' + hEsc(G.busy) + '</div>' : '')
+      + '</div>'
+      + '<button class="btn btn-primary btn-sm" ' + (G.sending ? 'disabled' : '') + ' onclick="facGfSend()">'
+        + (G.sending ? 'Sending&hellip;' : 'Send request') + '</button>'
+    + '</div></div>';
+}
+
+function facGfSend(){
+  const G = S_facGf; if(!G || G.sending) return;
+  const ids = Object.keys(G.picked);
+  if(!ids.length){ G.busy = 'Tick at least one fixed item.'; facGfPaint(); return; }
+  if(!G.files.length){ G.busy = 'Add at least one photo of the fixes — Great Clips asks for them.'; facGfPaint(); return; }
+  const NL = String.fromCharCode(10);
+  if(!confirm('Send a green flag request to ' + FAC_GF_TO + '?' + NL + NL
+    + ids.length + ' item' + (ids.length === 1 ? '' : 's') + ', ' + G.files.length + ' photo' + (G.files.length === 1 ? '' : 's')
+    + '.' + NL + 'You and the owner will be copied.')) return;
+  G.sending = true;
+  facGfPaint();
+  let chain = Promise.resolve();
+  G.files.forEach(function(f, k){
+    chain = chain.then(function(){
+      if(f.photoId) return;   // already up from an earlier attempt
+      G.busy = 'Uploading photo ' + (k + 1) + ' of ' + G.files.length + '…';
+      facGfPaint();
+      const fd = new FormData();
+      fd.append('file', f.blob, f.name);
+      fd.append('salonNum', G.salon);
+      fd.append('requestId', G.requestId);
+      return fetch('/api/facility/photo', { method:'POST', body: fd }).then(facJson).then(function(res){
+        if(!res.success || !res.photo) throw new Error(res.error || 'a photo did not upload');
+        f.photoId = res.photo.photoId;
+      });
+    });
+  });
+  chain.then(function(){
+    G.busy = 'Sending the email…';
+    facGfPaint();
+    return fetch('/api/facility/greenflag', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ requestId: G.requestId, salonNum: G.salon, itemIds: ids,
+        photoIds: G.files.map(function(f){ return f.photoId; }), note: G.note }),
+    }).then(facJson);
+  }).then(function(res){
+    if(!res.success) throw new Error(res.error || 'the email did not send');
+    facGfClose();
+    S_facBanner = 'Green flag request sent to ' + res.sentTo + ' — ' + res.items + ' item' + (res.items === 1 ? '' : 's')
+      + ', ' + res.photos + ' photo' + (res.photos === 1 ? '' : 's')
+      + (res.cc && res.cc.length ? '. Copied to ' + res.cc.join(', ') : '') + '.';
+    loadFacility();
+  }).catch(function(e){
+    if(!S_facGf) return;
+    S_facGf.sending = false;
+    S_facGf.busy = (e && e.message) || 'the email did not send';
+    facGfPaint();
+  });
+}
+
 /** Every review email we hold, newest first. The repository. */
 function facArchive(){
   const revs = ((S_facData && S_facData.reviews) || []).slice()
@@ -17582,8 +17983,7 @@ function facArchive(){
   return '<details style="margin-top:20px;"><summary style="cursor:pointer;font-weight:700;font-size:12.5px;">'
     + 'Reviews on file (' + revs.length + ')</summary>'
     + '<div style="font-size:11.5px;color:var(--text-muted);margin:6px 0 8px;">'
-    + 'Every email dropped in, kept whole with its photos. A review lands about every nine months, and by '
-    + 'the next one the original is the only thing that settles what was actually written.</div>'
+    + 'Every review email dropped in, kept whole with its photos.</div>'
     + '<div style="overflow-x:auto;border:1px solid var(--border);border-radius:10px;">'
     + '<table style="width:100%;border-collapse:collapse;background:#fff;">'
     + revs.map(function(r){
@@ -17620,8 +18020,9 @@ function paintFacility(){
   if(S_facSalon) items = items.filter(function(i){ return i.salonNum === S_facSalon; });
   if(S_facStatus === 'open') items = items.filter(function(i){ return FAC_OPEN[i.status]; });
   else if(S_facStatus === 'critical') items = items.filter(function(i){ return FAC_OPEN[i.status] && i.category==='critical'; });
-  else if(S_facStatus === 'overdue') items = items.filter(function(i){ return FAC_OPEN[i.status] && i.dueDate && i.dueDate < today; });
+  else if(S_facStatus === 'overdue') items = items.filter(function(i){ return FAC_WORK[i.status] && i.dueDate && i.dueDate < today; });
   else if(S_facStatus === 'requests') items = [];
+  else if(S_facStatus === 'resolved') items = items.filter(function(i){ return !FAC_OPEN[i.status]; });
   else if(S_facStatus !== 'all') items = items.filter(function(i){ return i.status === S_facStatus; });
   let reqList = (d.requests || []).filter(function(r){ return !S_facSalon || r.salonNum === S_facSalon; });
   if(S_facStatus === 'open' || S_facStatus === 'requests') reqList = reqList.filter(function(r){ return FAC_REQ_OPEN[r.status]; });
@@ -17671,9 +18072,17 @@ function paintFacility(){
     : [...seen].filter(Boolean).sort(function(a,b){ return (parseInt(a,10)||0)-(parseInt(b,10)||0); });
   const states = scopeSalons.map(facSalonState);
   const summaryTop = facSummaryTop(states, today);
+  const canGf = !!S_facSalon && all.some(function(i){
+    return i.salonNum === S_facSalon && i.source === 'review' && FAC_GF_ELIGIBLE[i.status]; });
   const strip = S_facSalon
-    ? '<div style="margin-bottom:16px;">'
-        + '<button class="btn btn-sm btn-secondary" style="margin-bottom:8px;" onclick="facSetSalon(' + "''" + ')">&larr; Every salon</button>'
+    ? '<div style="margin-bottom:6px;">'
+        + '<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">'
+          + '<button class="btn btn-sm btn-secondary" onclick="facSetSalon(' + "''" + ')">&larr; Every salon</button>'
+          + (canGf
+              ? '<button class="btn btn-sm btn-primary" style="margin-left:auto;" onclick="facOpenGreenFlag()">'
+                + '&#128681; Request a green flag</button>'
+              : '')
+        + '</div>'
         + facSalonCard(states[0], today, true) + '</div>'
     : '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(235px,1fr));gap:10px;margin-bottom:18px;">'
         + states.map(function(st){ return facSalonCard(st, today, false); }).join('') + '</div>';
@@ -17682,8 +18091,8 @@ function paintFacility(){
   const sOpts = ['<option value="">Every salon</option>'].concat(salons.map(function(sn){
     return '<option value="' + hEsc(sn) + '"' + (S_facSalon===sn?' selected':'') + '>' + hEsc(salonDisplay(sn)) + '</option>';
   })).join('');
-  const stOpts = [['open','Still open'],['critical','Open critical only'],['requests','Salon requests only'],['overdue','Overdue'],
-    ['fixed','Fixed — awaiting green flag'],['verified','Verified'],['waived','Waived'],['all','Everything']]
+  const stOpts = [['open','Still open'],['critical','Open critical only'],['requests','Salon requests only'],['overdue','Past fix-by'],
+    ['greenflag_requested','Green flag requested'],['variance_requested','Variance requested'],['resolved','Approved by Great Clips'],['all','Everything']]
     .map(function(o){ return '<option value="' + o[0] + '"' + (S_facStatus===o[0]?' selected':'') + '>' + o[1] + '</option>'; }).join('');
   const filters = '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">'
     + '<select class="ff-select" style="width:auto;font-size:12.5px;padding:6px 9px;" onchange="facSetSalon(this.value)">' + sOpts + '</select>'
@@ -17693,105 +18102,38 @@ function paintFacility(){
     + '</div>';
 
   // ── the list ──
+  // One salon: its findings in sections, most serious first, what Great Clips
+  // has approved folded away at the bottom. The cross-salon list stays flat,
+  // with its filters, because there the salon is the thing being compared.
   let list = '';
-  if(!items.length){
+  if(S_facSalon){
+    const mine = all.filter(function(i){ return i.salonNum === S_facSalon; });
+    const byDue = function(a, b){
+      return String(a.dueDate || '9999').localeCompare(String(b.dueDate || '9999'))
+        || String(a.component).localeCompare(String(b.component));
+    };
+    const crit = mine.filter(function(i){ return FAC_OPEN[i.status] && i.category === 'critical'; }).sort(byDue);
+    const act = mine.filter(function(i){ return FAC_OPEN[i.status] && i.category !== 'critical'; }).sort(byDue);
+    const done = mine.filter(function(i){ return !FAC_OPEN[i.status]; }).sort(byDue);
+    const here = (d.requests || []).filter(function(r){ return r.salonNum === S_facSalon && FAC_REQ_OPEN[r.status]; });
+    list = facSection('Critical brand elements', crit, '#b3261e', 'Any one open means a compliance action')
+      + facSection('Action items', act, '#c98a12', 'Five or more open means a compliance action')
+      + facRequestRows(here)
+      + (crit.length || act.length || here.length ? ''
+          : '<div class="no-data" style="padding:22px;">Nothing open at this salon.</div>')
+      + (done.length
+          ? '<details style="margin-top:18px;"><summary style="cursor:pointer;font-weight:700;font-size:14px;">'
+            + 'Approved by Great Clips <span style="font-weight:400;font-size:12.5px;color:var(--text-muted);">'
+            + done.length + '</span></summary><div style="margin-top:8px;">'
+            + done.map(function(it){ return facRow(it, {}); }).join('') + '</div></details>'
+          : '')
+      + facGreenFlagHistory(S_facSalon);
+  } else if(!items.length){
     list = '<div class="no-data" style="padding:24px;">'
       + (all.length ? 'No review findings match that filter.' : 'No review findings yet. Drop a review email at the bottom of the page.')
       + '</div>';
   } else {
-    list = items.map(function(it){
-      const open = S_facOpenItem === it.itemId;
-      const overdue = FAC_OPEN[it.status] && it.dueDate && it.dueDate < today;
-      const cs = comments[it.itemId] || [];
-      const tag = it.category === 'critical'
-        ? '<span style="background:#fdecea;color:#b3261e;border:1px solid #f4c4be;border-radius:4px;padding:1px 6px;'
-          + 'font-size:10px;font-weight:700;text-transform:uppercase;white-space:nowrap;">Critical</span>'
-        : '<span style="background:#f4f4f2;color:var(--text-muted);border:1px solid var(--border);border-radius:4px;'
-          + 'padding:1px 6px;font-size:10px;font-weight:700;text-transform:uppercase;white-space:nowrap;">Action</span>';
-      let body = '';
-      if(open){
-        body = '<div style="padding:0 14px 14px;border-top:1px solid var(--border);">'
-          + (function(){
-              const ls = facLines(it);
-              if(ls.length <= 1) return '<div style="font-size:13px;line-height:1.6;margin:10px 0 12px;">'
-                + hEsc(ls[0] || it.detail) + '</div>';
-              return '<ul style="font-size:13px;line-height:1.65;margin:10px 0 12px;padding-left:20px;">'
-                + ls.map(function(l){ return '<li style="margin:2px 0;">' + hEsc(l) + '</li>'; }).join('')
-                + '</ul>';
-            })()
-          + facPhotoStrip(it)
-          + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">'
-            + '<select class="ff-select" style="width:auto;font-size:12.5px;padding:5px 8px;" '
-              + 'onchange="facUpdate(' + "'" + hEsc(it.itemId) + "'" + ', {status:this.value})">'
-              + Object.keys(FAC_STATUS_LABEL).map(function(k){
-                  return '<option value="' + k + '"' + (it.status===k?' selected':'') + '>' + FAC_STATUS_LABEL[k] + '</option>';
-                }).join('')
-            + '</select>'
-            + '<label style="font-size:12px;color:var(--text-muted);">Fix by</label>'
-            + '<input type="date" value="' + hEsc(it.dueDate) + '" '
-              + 'onchange="facUpdate(' + "'" + hEsc(it.itemId) + "'" + ', {dueDate:this.value})" '
-              + 'style="padding:4px 7px;border:1px solid var(--border);border-radius:6px;font:inherit;font-size:12.5px;">'
-            + '<input type="text" value="' + hEsc(it.assignee) + '" placeholder="Who is doing it" '
-              + 'onchange="facUpdate(' + "'" + hEsc(it.itemId) + "'" + ', {assignee:this.value})" '
-              + 'style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font:inherit;font-size:12.5px;max-width:170px;">'
-            + '<input type="text" value="' + (it.cost ? hEsc(String(it.cost)) : '') + '" placeholder="Cost" '
-              + 'onchange="facUpdate(' + "'" + hEsc(it.itemId) + "'" + ', {cost:this.value})" '
-              + 'style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font:inherit;font-size:12.5px;max-width:90px;">'
-          + '</div>'
-          + '<div style="font-size:11.5px;color:var(--text-muted);margin-bottom:8px;">'
-            + (it.source === 'review' ? 'From the facility review of ' + hEsc(pDate(it.reviewDate) || '?') : 'Raised in salon')
-            + (it.sourceRef ? ' &middot; ' + hEsc(it.sourceRef) : '')
-            + (it.closedAt ? ' &middot; closed ' + hEsc(pDate(String(it.closedAt).slice(0,10))) + ' by ' + hEsc(it.closedBy) : '')
-          + '</div>'
-          + '<div style="border-top:1px dashed var(--border);padding-top:10px;">'
-            + (cs.length
-                ? cs.map(function(c){
-                    return '<div style="margin-bottom:8px;">'
-                      + '<div style="font-size:11px;color:var(--text-muted);">' + hEsc(c.author)
-                        + ' &middot; ' + hEsc(pDate(String(c.createdAt).slice(0,10))) + '</div>'
-                      + '<div style="font-size:12.5px;white-space:pre-wrap;">' + hEsc(c.body) + '</div></div>';
-                  }).join('')
-                : '<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">No comments yet.</div>')
-            + '<div style="display:flex;gap:8px;align-items:flex-start;">'
-              + '<textarea id="fac-c-' + hEsc(it.itemId) + '" class="ff-input" rows="2" '
-                + 'placeholder="Add a comment — quote, vendor, photo sent…" style="flex:1;font-size:12.5px;"></textarea>'
-              + '<button class="btn btn-sm btn-secondary" onclick="facComment(' + "'" + hEsc(it.itemId) + "'" + ')">Post</button>'
-            + '</div>'
-          + '</div></div>';
-      }
-      return '<div style="border:1px solid ' + (overdue?'#e0a24a':'var(--border)') + ';border-radius:10px;'
-          + 'background:#fff;margin-bottom:8px;overflow:hidden;">'
-        + '<div onclick="facToggle(' + "'" + hEsc(it.itemId) + "'" + ')" style="display:flex;gap:10px;'
-          + 'align-items:center;padding:11px 14px;cursor:pointer;flex-wrap:wrap;">'
-          + tag
-          // A component name alone says nothing you can act on: "Walls" is not
-          // a repair, "wall has damage by jade sail near back of salon" is. The
-          // first line of the finding rides along, and a component carrying
-          // several repairs says how many rather than pretending to be one.
-          + '<div style="min-width:220px;flex:1 1 340px;">'
-            + '<div style="font-weight:600;font-size:13.5px;">' + hEsc(it.component)
-              + ' <span style="font-weight:400;font-size:12px;color:var(--text-muted);">'
-              + hEsc(salonDisplay(it.salonNum)) + '</span></div>'
-            + '<div style="font-size:12px;color:var(--text-muted);line-height:1.45;margin-top:1px;'
-              + 'display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">'
-              + hEsc(facLines(it)[0] || '')
-              + (facLines(it).length > 1
-                  ? ' <b style="color:var(--primary);">+' + (facLines(it).length - 1) + ' more</b>'
-                  : '')
-            + '</div>'
-          + '</div>'
-          + '<div style="margin-left:auto;display:flex;gap:10px;align-items:center;font-size:11.5px;">'
-            + (it.dueDate
-                ? '<span style="' + (overdue?'color:#8a5a12;font-weight:700;':'color:var(--text-muted);') + '">'
-                  + (overdue?'overdue ':'due ') + hEsc(pDate(it.dueDate)) + '</span>'
-                : '<span style="color:var(--text-muted);">no date set</span>')
-            + '<span style="border:1px solid var(--border);border-radius:5px;padding:1px 7px;color:var(--text-muted);">'
-              + hEsc(FAC_STATUS_LABEL[it.status] || it.status) + '</span>'
-            + (cs.length ? '<span style="color:var(--text-muted);">' + cs.length + ' 💬</span>' : '')
-            + '<span style="color:var(--text-muted);">' + (open?'▲':'▼') + '</span>'
-          + '</div>'
-        + '</div>' + body + '</div>';
-    }).join('');
+    list = items.map(function(it){ return facRow(it, { showSalon: true, showTag: true }); }).join('');
   }
 
   // Summary first, then where each salon stands, then the work, then the
@@ -17799,34 +18141,42 @@ function paintFacility(){
   // months and reading what is open happens every day.
   const openCount = all.filter(function(i){ return FAC_OPEN[i.status]; }).length;
   const openReqCount = (d.requests || []).filter(function(r){ return FAC_REQ_OPEN[r.status]; }).length;
-  const listing = (S_facSalon || S_facShowAll)
-    ? (S_facShowAll && !S_facSalon
-        ? '<div style="margin:-6px 0 10px;"><a href="javascript:void(0)" onclick="facShowAll(false)" '
+  const listing = S_facSalon ? list
+    : S_facShowAll
+      ? '<div style="margin:-6px 0 10px;"><a href="javascript:void(0)" onclick="facShowAll(false)" '
           + 'style="font-size:12px;color:var(--primary);font-weight:600;text-decoration:none;">'
           + '&larr; Back to the salon cards</a></div>'
-        : '')
-      + filters + list + facRequestRows(reqList)
-    : '<div style="font-size:12.5px;color:var(--text-muted);margin:-4px 0 18px;">'
-      + 'Click a salon to see its findings'
-      + (openCount || openReqCount
-          ? ' &middot; or <a href="javascript:void(0)" onclick="facShowAll(true)" '
-            + 'style="color:var(--primary);font-weight:600;text-decoration:none;">list all '
-            + openCount + ' open finding' + (openCount===1?'':'s')
-            + (openReqCount ? ' and ' + openReqCount + ' salon request' + (openReqCount===1?'':'s') : '')
-            + ' across every salon</a>'
-          : '')
-      + '</div>';
-  host.innerHTML = summaryTop + strip + listing + facArchive()
-    + '<div style="font-weight:700;font-size:12.5px;margin:26px 0 8px;">Load a facility review</div>'
-    + facPaint_proposal() + drop
-    + '<div style="font-size:11px;color:var(--text-muted);margin-top:14px;line-height:1.6;">'
-    + '<b>Critical brand elements</b> trigger a compliance action on their own; ordinary action items do at five. '
-    + 'That is the rule the review emails quote, and the salon cards above apply it to what is still open. '
-    + 'A review carries no deadline of its own, so <b>fix by</b> is yours to set. '
-    + 'Marking an item <b>fixed</b> is the point to email the photo to GF@greatclips.com for a green flag; '
-    + '<b>verified</b> is when they lift it. '
-    + '<b>Photos</b> arrive attached to the review rather than to an item: nothing in the email says which '
-    + 'photo is the front desk, so pairing them is a judgement and a guess would mislabel evidence.</div>';
+        + filters + list + facRequestRows(reqList)
+      : '<div style="font-size:12.5px;color:var(--text-muted);margin:-4px 0 18px;">'
+          + 'Click a salon to see its findings'
+          + (openCount || openReqCount
+              ? ' &middot; or <a href="javascript:void(0)" onclick="facShowAll(true)" '
+                + 'style="color:var(--primary);font-weight:600;text-decoration:none;">list all '
+                + openCount + ' open finding' + (openCount===1?'':'s')
+                + (openReqCount ? ' and ' + openReqCount + ' salon request' + (openReqCount===1?'':'s') : '')
+                + ' across every salon</a>'
+              : '')
+          + '</div>';
+  const banner = S_facBanner
+    ? '<div style="background:#e6f4e0;border:1px solid #a8d890;color:#1a5c0a;border-radius:10px;'
+      + 'padding:10px 14px;font-size:13px;margin-bottom:14px;">' + hEsc(S_facBanner) + '</div>'
+    : '';
+  // Inside one salon the page is about that salon: no estate summary above the
+  // card that already says the same thing, and no upload box below it unless a
+  // review is mid-way through being loaded.
+  const loadSection = (S_facSalon && !S_facProposal) ? ''
+    : '<div style="font-weight:700;font-size:14px;margin:30px 0 8px;">Load a facility review</div>'
+      + facPaint_proposal() + drop;
+  host.innerHTML = banner + (S_facSalon ? '' : summaryTop) + strip + listing + facArchive() + loadSection
+    + '<details style="margin-top:18px;font-size:12.5px;color:var(--text-muted);">'
+    + '<summary style="cursor:pointer;font-weight:600;">How this tracker works</summary>'
+    + '<ul style="margin:8px 0 0;padding-left:18px;line-height:1.75;">'
+    + '<li><b>Critical brand elements</b> mean a compliance action on their own; <b>action items</b> do at five or more.</li>'
+    + '<li>An item is only done when Great Clips approves it &mdash; a <b>green flag</b> or an approved <b>variance</b>.</li>'
+    + '<li>Review emails give no deadline, so <b>fix by</b> is yours to set.</li>'
+    + '<li><b>Request a green flag</b> on a salon emails your photos to GF@greatclips.com and copies you and the owner.</li>'
+    + '<li>Review photos arrive on the review; attach each one to the item it shows.</li>'
+    + '</ul></details>';
 }
 
 // ── Pay trends ────────────────────────────────────────────────────────────

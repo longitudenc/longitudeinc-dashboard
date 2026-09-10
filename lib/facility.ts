@@ -32,15 +32,36 @@ export const FACILITY_COLUMNS = [
   'addedAt', 'addedBy', 'closedAt', 'closedBy', 'note',
 ] as const
 
-/** open → in progress → fixed (photo sent for a green flag) → verified. */
-export const FACILITY_STATUSES = ['open', 'in_progress', 'fixed', 'verified', 'waived'] as const
+/**
+ * The life of a finding, as Great Clips actually runs it:
+ *
+ *   open → in progress → fixed → green flag requested → green flag approved
+ *                     ↘ variance requested → variance approved
+ *
+ * A finding is only DONE when corporate says so — a green flag or an approved
+ * variance. Until then it still counts against the salon for the compliance
+ * rule, however finished it looks on site: "fixed" and "requested" are our side
+ * of the conversation, "approved" is theirs.
+ */
+export const FACILITY_STATUSES = [
+  'open', 'in_progress', 'fixed',
+  'greenflag_requested', 'greenflag_approved',
+  'variance_requested', 'variance_approved',
+] as const
 export type FacilityStatus = typeof FACILITY_STATUSES[number]
 export const STATUS_LABEL: Record<string, string> = {
-  open: 'Open', in_progress: 'In progress', fixed: 'Fixed — awaiting green flag',
-  verified: 'Verified', waived: 'Waived',
+  open: 'Open', in_progress: 'In progress', fixed: 'Fixed',
+  greenflag_requested: 'Green flag requested', greenflag_approved: 'Green flag approved',
+  variance_requested: 'Variance requested', variance_approved: 'Variance approved',
 }
-/** The two that still count against the salon. */
-export const OPEN_STATUSES = new Set(['open', 'in_progress'])
+/** Corporate has closed it. Nothing else is finished. */
+export const RESOLVED_STATUSES = new Set(['greenflag_approved', 'variance_approved'])
+/** Everything still counting against the salon. */
+export const OPEN_STATUSES = new Set<string>(FACILITY_STATUSES.filter(x => !RESOLVED_STATUSES.has(x)))
+/** Still waiting on US — the only ones that can sensibly be "past fix-by". */
+export const WORK_STATUSES = new Set(['open', 'in_progress'])
+/** The two statuses this replaced, mapped rather than reset to open. */
+const LEGACY_STATUS: Record<string, string> = { verified: 'greenflag_approved', waived: 'variance_approved' }
 
 export interface FacilityItem {
   itemId: string
@@ -119,7 +140,10 @@ function toItem(o: Record<string, any>): FacilityItem {
     category: (S(o.category, 20) === 'critical' ? 'critical' : 'action'),
     categoryLabel: S(o.categoryLabel, 80), component: S(o.component, 200),
     detail: S(o.detail, 4000),
-    status: (FACILITY_STATUSES as readonly string[]).includes(S(o.status, 20)) ? S(o.status, 20) : 'open',
+    status: (() => {
+      const raw = LEGACY_STATUS[S(o.status, 30)] || S(o.status, 30)
+      return (FACILITY_STATUSES as readonly string[]).includes(raw) ? raw : 'open'
+    })(),
     dueDate: S(o.dueDate, 10), assignee: S(o.assignee, 120), cost: N(o.cost),
     addedAt: S(o.addedAt, 40), addedBy: S(o.addedBy, 120),
     closedAt: S(o.closedAt, 40), closedBy: S(o.closedBy, 120), note: S(o.note, 2000),
@@ -181,8 +205,8 @@ export async function updateItem(
   const next = toItem({ ...before, ...patch, itemId: before.itemId })
   // Closing stamps who and when; reopening clears it, so the stamp never
   // describes a state the item is no longer in.
-  const wasOpen = OPEN_STATUSES.has(before.status)
-  const nowOpen = OPEN_STATUSES.has(next.status)
+  const wasOpen = !RESOLVED_STATUSES.has(before.status)
+  const nowOpen = !RESOLVED_STATUSES.has(next.status)
   if (wasOpen && !nowOpen) { next.closedAt = new Date().toISOString(); next.closedBy = by }
   if (!wasOpen && nowOpen) { next.closedAt = ''; next.closedBy = '' }
   all[idx] = next
@@ -387,6 +411,42 @@ export async function assignPhoto(photoId: string, itemId: string): Promise<bool
   return true
 }
 
+// ── green-flag requests ───────────────────────────────────────────────────
+// One row per email sent to Great Clips asking for a green flag, so the
+// question "did we ask, when, for what, with which photos" has an answer that
+// does not depend on somebody's sent-items folder.
+export const TAB_GREENFLAGS = 'FacilityGreenFlags'
+export const GREENFLAG_COLUMNS = [
+  'requestId', 'salonNum', 'itemIds', 'photoIds', 'sentTo', 'cc',
+  'note', 'sentAt', 'sentBy',
+] as const
+export interface GreenFlagRequest {
+  requestId: string; salonNum: string; itemIds: string[]; photoIds: string[]
+  sentTo: string; cc: string; note: string; sentAt: string; sentBy: string
+}
+
+export async function listGreenFlags(fresh = false): Promise<GreenFlagRequest[]> {
+  const rows = await readTable(TAB_GREENFLAGS, GREENFLAG_COLUMNS, fresh)
+  return rows.map(o => ({
+    requestId: S(o.requestId, 60), salonNum: S(o.salonNum, 10),
+    itemIds: S(o.itemIds, 4000).split(',').map(x => x.trim()).filter(Boolean),
+    photoIds: S(o.photoIds, 4000).split(',').map(x => x.trim()).filter(Boolean),
+    sentTo: S(o.sentTo, 300), cc: S(o.cc, 1000), note: S(o.note, 2000),
+    sentAt: S(o.sentAt, 40), sentBy: S(o.sentBy, 120),
+  })).filter(g => g.requestId && g.salonNum)
+}
+
+export async function saveGreenFlag(g: GreenFlagRequest): Promise<void> {
+  await ensureHeader(TAB_GREENFLAGS, GREENFLAG_COLUMNS)
+  const row: Record<string, string> = {
+    requestId: g.requestId, salonNum: g.salonNum,
+    itemIds: g.itemIds.join(','), photoIds: g.photoIds.join(','),
+    sentTo: g.sentTo, cc: g.cc, note: g.note, sentAt: g.sentAt, sentBy: g.sentBy,
+  }
+  const cols = GREENFLAG_COLUMNS as unknown as string[]
+  await appendSheet(TAB_GREENFLAGS, [cols.map(c => row[c] ?? '')])
+}
+
 // ── what a salon looks like right now ────────────────────────────────────
 export interface SalonFacility {
   salonNum: string
@@ -410,7 +470,7 @@ export function summarise(items: FacilityItem[], todayIso: string): SalonFacilit
     return {
       salonNum,
       openCritical, openAction,
-      overdue: open.filter(i => i.dueDate && i.dueDate < todayIso).length,
+      overdue: open.filter(i => WORK_STATUSES.has(i.status) && i.dueDate && i.dueDate < todayIso).length,
       compliance: openCritical > 0 || openAction >= 5,
       nextDue: due[0] || '',
       total: list.length,

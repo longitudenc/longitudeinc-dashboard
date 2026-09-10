@@ -19,7 +19,7 @@ import { canSeeSalon } from '@/lib/scope-filter'
 import {
   listFacility, addItems, updateItem, removeItem, summarise,
   listComments, addComment, FACILITY_STATUSES,
-  listReviews, listPhotos, saveReview, savePhotos, assignPhoto, removeReview,
+  listReviews, listPhotos, saveReview, savePhotos, assignPhoto, removeReview, listGreenFlags,
 } from '@/lib/facility'
 import { del } from '@vercel/blob'
 import { readSheet, rowsToObjects } from '@/lib/sheets'
@@ -68,6 +68,7 @@ export async function GET() {
 
     return NextResponse.json({
       success: true, items, comments, reviews, photos, requests,
+      greenflags: (await listGreenFlags()).filter(g => canSeeSalon(gate.access, g.salonNum)),
       summary: summarise(items, todayIso()),
       statuses: [...FACILITY_STATUSES],
       today: todayIso(),
