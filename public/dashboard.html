@@ -16923,29 +16923,127 @@ function facToggle(id){ S_facOpenItem = (S_facOpenItem === id) ? '' : id; paintF
 
 // ── dropping an email in ──────────────────────────────────────────────────
 function facDragOver(ev, on){ ev.preventDefault(); const d=document.getElementById('fac-drop'); if(d) d.classList.toggle('over', on); }
+// ── dropping several at once, of any size ─────────────────────────────────
+// A drop used to read files[0] and silently ignore the rest, which is worse
+// than refusing them: five emails in, one review out, and nothing said.
+//
+// Every file now goes up IN PIECES. The platform caps a request body at
+// 4.5 MB and enforces it before our code runs — an email with a dozen phone
+// photos came back as a plain-text "Request Entity Too Large" that the page
+// then choked on as JSON. Pieces under the cap make the email's size stop
+// mattering, and one path for every file means the big ones are not a special
+// case that only gets exercised when it matters.
+//
+// Reviews are read one after another and QUEUED: the first shows as soon as it
+// is ready, the rest wait behind it, and each is still accepted by a person —
+// "Add this and the 4 waiting" is there for when they all look right.
+let S_facQueue = [], S_facBusy = false, S_facLastOffset = 0;
+const FAC_CHUNK = Math.floor(3.5 * 1024 * 1024);
+
 function facDrop(ev){
   ev.preventDefault();
   const d=document.getElementById('fac-drop'); if(d) d.classList.remove('over');
-  const f = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
-  if(f) facSend(f);
+  const files = (ev.dataTransfer && ev.dataTransfer.files) ? Array.prototype.slice.call(ev.dataTransfer.files) : [];
+  if(files.length) facSendMany(files);
   else facMsg('That drop carried no file. Outlook sometimes drags a message as text — '
     + 'use Paste the email below instead.');
 }
-function facPick(ev){ const f = ev.target.files && ev.target.files[0]; if(f) facSend(f); }
+function facPick(ev){
+  const files = ev.target.files ? Array.prototype.slice.call(ev.target.files) : [];
+  ev.target.value = '';   // so choosing the same file again still does something
+  if(files.length) facSendMany(files);
+}
+function facSend(file){ facSendMany([file]); }
+
+/** Read a response as JSON — including the plain-text errors the platform sends. */
+function facJson(r){
+  return r.text().then(function(t){
+    try { return JSON.parse(t); }
+    catch(e){
+      return { success:false, error: r.status === 413
+        ? 'That was too large to send in one request.'
+        : ('The server answered ' + r.status + ': ' + String(t || '').slice(0, 140)) };
+    }
+  });
+}
+
+function facUid(){ return (Date.now().toString(36) + Math.random().toString(36).slice(2, 10)).replace(/[^a-z0-9]/g, ''); }
+
+/** One file, in pieces under the request cap, then read as a whole. */
+function facUpload(file, onPart){
+  const id = facUid();
+  const parts = Math.max(1, Math.ceil(file.size / FAC_CHUNK));
+  let chain = Promise.resolve();
+  for(let n = 0; n < parts; n++){
+    chain = chain.then(function(){
+      if(onPart) onPart(n + 1, parts);
+      return fetch('/api/facility/upload-chunk?id=' + id + '&n=' + n, {
+        method:'POST', headers:{'Content-Type':'application/octet-stream'},
+        body: file.slice(n * FAC_CHUNK, Math.min(file.size, (n + 1) * FAC_CHUNK)),
+      }).then(facJson).then(function(res){
+        if(!res || !res.success) throw new Error((res && res.error) || 'upload failed');
+      });
+    });
+  }
+  return chain.then(function(){
+    return fetch('/api/facility/ingest', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ uploadId: id, parts: parts, name: file.name }),
+    }).then(facJson);
+  });
+}
+
+/** Every dropped file in turn: reviews queue up, everything else is reported. */
+function facSendMany(files){
+  if(S_facBusy){ facMsg('Still reading the last drop — give it a moment.'); return; }
+  S_facBusy = true;
+  const notReviews = [], failed = [];
+  let queued = 0, i = 0;
+  const next = function(){
+    if(i >= files.length){
+      S_facBusy = false;
+      const bits = [];
+      if(queued) bits.push(queued + ' review' + (queued === 1 ? '' : 's') + ' read');
+      if(notReviews.length) bits.push(notReviews.length + ' not a facility review, skipped ('
+        + notReviews.join(', ') + ')');
+      if(failed.length) bits.push('could not read ' + failed.join('; '));
+      paintFacility();
+      facMsg(bits.join(' · ') || 'Nothing was read.');
+      return;
+    }
+    const file = files[i++];
+    const tag = files.length > 1 ? (i + ' of ' + files.length + ' — ') : '';
+    facMsg('Reading ' + tag + file.name + '…');
+    facUpload(file, function(n, parts){
+      if(parts > 1) facMsg('Uploading ' + tag + file.name + ' — part ' + n + ' of ' + parts + '…');
+    }).then(function(res){
+      if(!res || !res.success) throw new Error((res && res.error) || 'could not read it');
+      // A review with a salon on it is worth showing even if it found nothing
+      // to fix — a clean review is an answer. Anything without one is not a
+      // review at all.
+      const pr = res.parsed;
+      if(!pr || (!pr.ok && !pr.salonNum)){ notReviews.push(file.name); return; }
+      S_facQueue.push({ parsed: pr, source: res.source || file.name, extra: res });
+      queued++;
+      if(!S_facProposal) facNext(); else paintFacility();
+    }).catch(function(e){ failed.push(file.name + ': ' + ((e && e.message) || 'failed')); })
+      .then(next);
+  };
+  next();
+}
+
+/** Bring the next waiting review forward, or clear the panel. */
+function facNext(){
+  const q = S_facQueue.shift();
+  if(q) facShowProposal(q.parsed, q.source, q.extra);
+  else { S_facProposal = null; paintFacility(); }
+}
 function facMsg(t){
   S_facMsgText = t || '';
   const el = document.getElementById('fac-msg');
   if(el) el.innerHTML = S_facMsgText ? hEsc(S_facMsgText) : '';
 }
 
-function facSend(file){
-  facMsg('Reading ' + file.name + '…');
-  const fd = new FormData(); fd.append('file', file);
-  fetch('/api/facility/ingest', { method:'POST', body: fd }).then(r=>r.json()).then(function(res){
-    if(!res || !res.success) throw new Error((res && res.error) || 'could not read that file');
-    facShowProposal(res.parsed, res.source || file.name, res);
-  }).catch(function(e){ facMsg((e && e.message) || 'could not read that file'); });
-}
 function facPaste(){
   const box = document.getElementById('fac-paste');
   const txt = box ? box.value.trim() : '';
@@ -16954,9 +17052,10 @@ function facPaste(){
   fetch('/api/facility/ingest', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({ html: txt }),
-  }).then(r=>r.json()).then(function(res){
+  }).then(facJson).then(function(res){
     if(!res || !res.success) throw new Error((res && res.error) || 'could not read that');
-    facShowProposal(res.parsed, 'pasted');
+    S_facQueue.push({ parsed: res.parsed, source: 'pasted', extra: {} });
+    if(!S_facProposal) facNext(); else { paintFacility(); facMsg('Added to the queue behind the review on screen.'); }
   }).catch(function(e){ facMsg((e && e.message) || 'could not read that'); });
 }
 
@@ -16981,15 +17080,18 @@ function facDueOffset(days){
   if(!S_facProposal) return;
   const base = S_facProposal.p.reviewDate || new Date().toISOString().slice(0,10);
   S_facProposal.due = dIsoAddDays(base, days);
+  // Remembered so "add all" can give each waiting review the same +N from ITS
+  // OWN review date, rather than one calendar date that is wrong for most.
+  S_facLastOffset = days;
   paintFacility();
 }
 function facKeep(i, on){ if(S_facProposal) S_facProposal.keep[i] = !!on; }
-function facDiscard(){ S_facProposal = null; paintFacility(); }
+function facDiscard(){ facNext(); }
 
-function facSaveProposal(){
-  if(!S_facProposal) return;
-  const P = S_facProposal, p = P.p;
-  if(!p.salonNum){ facMsg('No salon on this review — the parse needs a salon number.'); return; }
+/** Save one proposal. Resolves with the server's answer; rejects with a sentence. */
+function facSaveOne(P){
+  const p = P.p;
+  if(!p.salonNum) return Promise.reject(new Error('No salon on the ' + (P.source || 'review') + ' — it needs a salon number.'));
   const items = p.items.filter(function(_, i){ return P.keep[i] !== false; }).map(function(it){
     return { salonNum: p.salonNum, salonName: p.salonName, source: 'review',
       sourceRef: P.source, reviewDate: p.reviewDate,
@@ -16997,22 +17099,64 @@ function facSaveProposal(){
       component: it.component, detail: it.detail,
       status: 'open', dueDate: P.due };
   });
-  if(!items.length){ facMsg('Nothing ticked to save.'); return; }
-  facMsg('Saving…');
-  fetch('/api/facility', {
+  if(!items.length) return Promise.reject(new Error('Nothing ticked to save on ' + salonDisplay(p.salonNum) + '.'));
+  return fetch('/api/facility', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({ kind:'items', items: items,
       review: { salonNum: p.salonNum, salonName: p.salonName, reviewDate: p.reviewDate,
         subject: P.subject, sourceFile: P.source, msgPathname: P.msgPathname },
       photos: P.photos }),
-  }).then(r=>r.json()).then(function(res){
+  }).then(facJson).then(function(res){
     if(!res.success) throw new Error(res.error || 'could not save');
-    S_facProposal = null;
+    return res;
+  });
+}
+
+function facSaveProposal(){
+  if(!S_facProposal) return;
+  facMsg('Saving…');
+  facSaveOne(S_facProposal).then(function(res){
+    facNext();
     facMsg(res.added + ' item' + (res.added===1?'':'s') + ' added'
       + (res.skipped ? ' · ' + res.skipped + ' already on the list' : '')
-      + (res.photos ? ' · ' + res.photos + ' photos kept' : ''));
+      + (res.photos ? ' · ' + res.photos + ' photos kept' : '')
+      + (S_facProposal ? ' · next review below' : ''));
     loadFacility();
   }).catch(function(e){ facMsg((e && e.message) || 'could not save'); });
+}
+
+/**
+ * The one on screen and everything waiting behind it, as they stand.
+ * Each keeps every item ticked; if a "+N days" was chosen on this one, each
+ * waiting review gets the same +N from its own review date.
+ */
+function facSaveAll(){
+  if(!S_facProposal) return;
+  const all = [S_facProposal].concat(S_facQueue.map(function(q){
+    const P = { p: q.parsed, source: q.source, due: '',
+      keep: q.parsed.items.map(function(){ return true; }),
+      photos: (q.extra && q.extra.photos) || [], msgPathname: (q.extra && q.extra.msgPathname) || '',
+      subject: (q.extra && q.extra.subject) || '' };
+    if(S_facLastOffset && q.parsed.reviewDate) P.due = dIsoAddDays(q.parsed.reviewDate, S_facLastOffset);
+    return P;
+  }));
+  S_facQueue = [];
+  let added = 0, done = 0;
+  const failed = [];
+  const step = function(k){
+    if(k >= all.length){
+      S_facProposal = null;
+      loadFacility();
+      facMsg(done + ' review' + (done===1?'':'s') + ' added · ' + added + ' item' + (added===1?'':'s')
+        + (failed.length ? ' · not added: ' + failed.join('; ') : ''));
+      return;
+    }
+    facMsg('Adding ' + (k + 1) + ' of ' + all.length + '…');
+    facSaveOne(all[k]).then(function(res){ done++; added += res.added || 0; })
+      .catch(function(e){ failed.push((e && e.message) || 'failed'); })
+      .then(function(){ step(k + 1); });
+  };
+  step(0);
 }
 
 // ── editing an item ───────────────────────────────────────────────────────
@@ -17107,7 +17251,12 @@ function facPaint_proposal(){
         + hEsc(p.salonNum ? salonDisplay(p.salonNum) : 'salon not found')
         + (p.reviewDate ? ' &middot; ' + hEsc(pDate(p.reviewDate)) : '') + '</div>'
       + '<div style="font-size:12px;color:var(--text-muted);">' + hEsc(P.source) + '</div>'
-      + '<button class="btn btn-sm btn-secondary" style="margin-left:auto;" onclick="facDiscard()">Discard</button>'
+      + (S_facQueue.length
+          ? '<span style="margin-left:auto;font-size:11.5px;font-weight:700;color:var(--primary-dark);">'
+            + S_facQueue.length + ' more waiting</span>'
+          : '')
+      + '<button class="btn btn-sm btn-secondary" style="' + (S_facQueue.length ? '' : 'margin-left:auto;')
+        + '" onclick="facDiscard()">' + (S_facQueue.length ? 'Skip this one' : 'Discard') + '</button>'
     + '</div>'
     + (p.compliance
         ? '<div style="background:#fdecea;border:1px solid #f4c4be;color:#8a1a1a;border-radius:8px;'
@@ -17164,7 +17313,13 @@ function facPaint_proposal(){
           + '</div></div>'
         : '')
     + '<div style="margin-top:12px;display:flex;gap:10px;align-items:center;">'
-      + '<button class="btn btn-primary btn-sm" onclick="facSaveProposal()">Add to the tracker</button>'
+      + '<button class="btn btn-primary btn-sm" onclick="facSaveProposal()">'
+        + (S_facQueue.length ? 'Add this one' : 'Add to the tracker') + '</button>'
+      + (S_facQueue.length
+          ? '<button class="btn btn-secondary btn-sm" onclick="facSaveAll()" title="Everything ticked, as it stands'
+            + (S_facLastOffset ? '; each gets +' + S_facLastOffset + ' days from its own review date' : '') + '">'
+            + 'Add this and the ' + S_facQueue.length + ' waiting</button>'
+          : '')
       + '<span style="font-size:12px;color:var(--text-muted);">Loading the same review twice will not duplicate '
         + 'it &mdash; a component already on the list keeps its status and its comments.</span>'
     + '</div></div>';
@@ -17473,11 +17628,11 @@ function paintFacility(){
       + '<div id="fac-drop" class="fac-drop" ondragover="facDragOver(event,true)" '
         + 'ondragleave="facDragOver(event,false)" ondrop="facDrop(event)" '
         + 'onclick="document.getElementById(' + "'fac-file'" + ').click()">'
-        + '<div style="font-size:15px;font-weight:600;color:var(--primary-dark);">Drop a facility review email here</div>'
+        + '<div style="font-size:15px;font-weight:600;color:var(--primary-dark);">Drop facility review emails here</div>'
         + '<div style="font-size:12.5px;color:var(--text-muted);margin-top:3px;">'
-        + 'Drag it straight out of Outlook &middot; .msg or .eml</div>'
+        + 'Drag them straight out of Outlook &middot; .msg or .eml &middot; several at once, any size</div>'
       + '</div>'
-      + '<input type="file" id="fac-file" accept=".msg,.eml,.html,.txt" style="display:none;" onchange="facPick(event)">'
+      + '<input type="file" id="fac-file" accept=".msg,.eml,.html,.txt" multiple style="display:none;" onchange="facPick(event)">'
     + '</div>'
     + '<div style="flex:1 1 300px;min-width:280px;">'
       + '<textarea id="fac-paste" class="ff-input" rows="3" placeholder="…or paste the email body here"'

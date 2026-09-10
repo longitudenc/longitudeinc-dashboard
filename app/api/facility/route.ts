@@ -127,11 +127,24 @@ export async function POST(req: Request) {
       }
       let photos: any[] = []
       if (Array.isArray(body?.photos) && body.photos.length && review) {
-        photos = await savePhotos(body.photos.slice(0, 100).map((p: any) => ({
+        const incoming = body.photos.slice(0, 100)
+        photos = await savePhotos(incoming.map((p: any) => ({
           reviewId: review.reviewId, salonNum: review.salonNum, itemId: '',
           fileName: S(p?.fileName, 200), pathname: S(p?.pathname, 300),
           contentType: S(p?.contentType, 60), size: Number(p?.size) || 0,
         })), gate.email)
+        // Re-importing the same email re-uploads its photos; the rows are
+        // de-duplicated, so the second copy of the bytes has nothing pointing
+        // at it. Delete it rather than leave it paid-for and invisible.
+        const keptPaths = new Set(photos.map((p: any) => p.pathname))
+        for (const p of incoming) {
+          const path = S(p?.pathname, 300)
+          if (path && !keptPaths.has(path)) { try { await del(path) } catch { /* orphan */ } }
+        }
+        // The archive line counts every photo held for the visit, not only the
+        // ones this particular drop added.
+        const held = (await listPhotos(true)).filter(p => p.reviewId === review.reviewId).length
+        if (held !== review.photos) review = await saveReview({ ...review, photos: held }, gate.email)
       }
       return NextResponse.json({
         success: true, added: res.added.length, skipped: res.skipped, items: res.added,

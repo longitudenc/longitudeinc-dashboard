@@ -16,7 +16,7 @@
 // server's job. They are small: this sample is 178 KB, well inside a request.
 
 import { NextResponse } from 'next/server'
-import { put } from '@vercel/blob'
+import { put, get, del } from '@vercel/blob'
 import { requireCapability } from '@/lib/require-role'
 import { isMsg, readMsg, type MsgAttachment } from '@/lib/msg-reader'
 import { parseFacilityReview } from '@/lib/facility-parse'
@@ -79,35 +79,28 @@ export async function POST(req: Request) {
   try {
     const type = req.headers.get('content-type') || ''
 
-    if (type.includes('multipart/form-data')) {
-      const form = await req.formData()
-      const file = form.get('file')
-      if (!file || typeof file === 'string') {
-        return NextResponse.json({ success: false, error: 'no file' }, { status: 400 })
-      }
-      const buf = Buffer.from(await (file as File).arrayBuffer())
-      if (buf.length > MAX_BYTES) {
-        return NextResponse.json({ success: false, error:
-        'That file is ' + (buf.length / 1048576).toFixed(1) + ' MB and the limit is 4 MB. '
-        + 'A review email with a lot of photos can go over — save the photos out of it and drop them '
-        + 'separately, or paste the body text instead.' }, { status: 400 })
-      }
-      const name = String((file as File).name || '')
-
+    // One reading of a file, however it arrived — whole in a form post, or in
+    // pieces reassembled from the store.
+    const handleFile = async (buf: Buffer, name: string) => {
       if (isMsg(buf)) {
         const msg = readMsg(buf)
         const parsed = parseFacilityReview({ html: msg.html, text: msg.text, subject: msg.subject })
-        const kept = await stash(parsed.salonNum, parsed.reviewDate, buf, name, msg.attachments)
+        // Only a review is worth keeping. An ordinary email dropped by mistake
+        // used to be filed under facility/unfiled/ with nothing ever pointing
+        // at it again; now it is read, refused, and not stored.
+        const kept = parsed.ok
+          ? await stash(parsed.salonNum, parsed.reviewDate, buf, name, msg.attachments)
+          : { msgPathname: '', photos: [], failed: 0 }
         // Photos come back attached to the REVIEW, never guessed onto items:
         // in the sample they are ordinary attachments with camera-serial names
         // and the body carries one cid, for a signature logo. Nothing in the
         // message says which photo is the front desk.
-        return NextResponse.json({
+        return {
           success: true, parsed, source: name, subject: msg.subject,
           msgPathname: kept.msgPathname, photos: kept.photos,
           attachmentsSeen: msg.attachments.length,
           storeFailed: kept.failed,
-        })
+        }
       }
       // .eml, .html, .txt: the body is already text. An .eml may be
       // quoted-printable, which turns "=93" into a soft break mid-word, so the
@@ -118,11 +111,56 @@ export async function POST(req: Request) {
           (_, h) => String.fromCharCode(parseInt(h, 16)))
       }
       const subject = (raw.match(/^Subject:\s*(.+)$/im) || [])[1] || name
-      const parsed = parseFacilityReview({ html: raw, text: raw, subject })
-      return NextResponse.json({ success: true, parsed, source: name, subject })
+      return { success: true, parsed: parseFacilityReview({ html: raw, text: raw, subject }), source: name, subject }
+    }
+
+    if (type.includes('multipart/form-data')) {
+      const form = await req.formData()
+      const file = form.get('file')
+      if (!file || typeof file === 'string') {
+        return NextResponse.json({ success: false, error: 'no file' }, { status: 400 })
+      }
+      const buf = Buffer.from(await (file as File).arrayBuffer())
+      if (buf.length > MAX_BYTES) {
+        return NextResponse.json({ success: false, error:
+          'That file is ' + (buf.length / 1048576).toFixed(1) + ' MB — too big to send in one piece. '
+          + 'Reload the page: the tracker now uploads large emails in parts.' }, { status: 400 })
+      }
+      return NextResponse.json(await handleFile(buf, String((file as File).name || '')))
     }
 
     const body = await req.json().catch(() => null)
+
+    // ── an email that arrived in pieces ──
+    // The browser parked it under facility/_incoming/<id>/000, 001, … so no
+    // single request came near the platform's 4.5 MB body cap. Put it back
+    // together, read it exactly as if it had come whole, then clear the pieces.
+    if (body?.uploadId) {
+      const id = String(body.uploadId)
+      const parts = Number(body.parts)
+      if (!/^[a-z0-9]{8,40}$/.test(id) || !Number.isInteger(parts) || parts < 1 || parts > 60) {
+        return NextResponse.json({ success: false, error: 'bad upload reference' }, { status: 400 })
+      }
+      const paths = Array.from({ length: parts }, (_, n) => `facility/_incoming/${id}/${String(n).padStart(3, '0')}`)
+      try {
+        const bufs: Buffer[] = []
+        for (const path of paths) {
+          const got = await get(path, { access: 'private' })
+          if (!got || !got.stream) {
+            return NextResponse.json({ success: false, error:
+              'Part of that upload went missing before it could be read. Drop the email again.' }, { status: 400 })
+          }
+          bufs.push(Buffer.from(await new Response(got.stream as any).arrayBuffer()))
+        }
+        return NextResponse.json(await handleFile(Buffer.concat(bufs), String(body.name || '').slice(0, 200)))
+      } finally {
+        // The pieces were only ever a way to carry the file; the file itself is
+        // stored by handleFile if it was a review. Failing to delete leaves an
+        // orphan, not a broken record, so it must not fail the request.
+        for (const path of paths) { try { await del(path) } catch { /* orphan */ } }
+      }
+    }
+
     const html = String(body?.html || '')
     const text = String(body?.text || '')
     if (!html && !text) {

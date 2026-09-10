@@ -300,8 +300,14 @@ export async function listPhotos(fresh = false): Promise<FacilityPhoto[]> {
 export async function saveReview(r: Partial<FacilityReview>, by: string): Promise<FacilityReview> {
   await ensureHeader(TAB_REVIEWS, REVIEW_COLUMNS)
   const all = await listReviews(true)
+  // The SAME visit keeps the SAME id. A fresh id on re-import orphaned every
+  // photo stored under the old one — they fell into every item's "not yet
+  // attached" pool, and a second drop of the email doubled them.
+  const prior = all.find(x => x.salonNum === S(r.salonNum, 10) && S(r.reviewDate, 10)
+    && x.reviewDate === S(r.reviewDate, 10))
   const row: FacilityReview = {
-    reviewId: S(r.reviewId, 60) || 'rev_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+    reviewId: S(r.reviewId, 60) || prior?.reviewId
+      || 'rev_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
     salonNum: S(r.salonNum, 10), salonName: S(r.salonName, 120), reviewDate: S(r.reviewDate, 10),
     subject: S(r.subject, 300), sourceFile: S(r.sourceFile, 300), msgPathname: S(r.msgPathname, 300),
     items: N(r.items), critical: N(r.critical), photos: N(r.photos),
@@ -318,13 +324,17 @@ export async function saveReview(r: Partial<FacilityReview>, by: string): Promis
 export async function savePhotos(list: Partial<FacilityPhoto>[], by: string): Promise<FacilityPhoto[]> {
   if (!list.length) return []
   await ensureHeader(TAB_PHOTOS, PHOTO_COLUMNS)
+  // A photo already held for this review — same name, same size — is the same
+  // photo arriving again with the same email, not a new one.
+  const held = new Set((await listPhotos(true)).map(p => [p.reviewId, p.fileName, p.size].join('|')))
   const now = new Date().toISOString()
   const rows: FacilityPhoto[] = list.map((p, i) => ({
     photoId: S(p.photoId, 60) || 'ph_' + Date.now().toString(36) + i.toString(36) + Math.random().toString(36).slice(2, 4),
     reviewId: S(p.reviewId, 60), salonNum: S(p.salonNum, 10), itemId: S(p.itemId, 60),
     fileName: S(p.fileName, 200), pathname: S(p.pathname, 300),
     contentType: S(p.contentType, 60), size: N(p.size), addedAt: now, addedBy: by,
-  })).filter(p => p.pathname && p.salonNum)
+  })).filter(p => p.pathname && p.salonNum && !held.has([p.reviewId, p.fileName, p.size].join('|')))
+  if (!rows.length) return []
   const cols = PHOTO_COLUMNS as unknown as string[]
   await appendSheet(TAB_PHOTOS, rows.map(p => cols.map(c => String((p as any)[c] ?? ''))))
   return rows
