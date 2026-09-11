@@ -7851,7 +7851,18 @@ function renderSdTrendsShell(){
     +'<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px;">'+mbtns+'</div>'
     +'<div id="sd-trend-host" style="min-height:380px;"></div></div>';
 }
-function sdSetTrendWin(w){ S_trendWindow=(w==='ytd'||w==='all')?w:parseInt(w,10); sdDrawTrends(); }
+function sdSetTrendWin(w){
+  if(w === 'custom' && (!S_trendFrom || !S_trendTo)){
+    const sd = trendSeedCustom(trendAllWeekIsos(), S_trendWindow, S_trendFrom, S_trendTo);
+    S_trendFrom = sd.from; S_trendTo = sd.to;
+  }
+  S_trendWindow=(w==='ytd'||w==='all'||w==='custom')?w:parseInt(w,10); sdDrawTrends();
+}
+function sdSetTrendWinDates(a, b){
+  const r = trendApplyDates(trendAllWeekIsos(), { from:S_trendFrom, to:S_trendTo }, a, b);
+  if(r){ S_trendFrom = r.from; S_trendTo = r.to; }
+  sdSetTrendWin('custom');
+}
 function sdDrawTrends(metric){
   if(metric) S_sdTrendMetrics=[metric];
   if(!S_sdTrendMetrics || !S_sdTrendMetrics.length) S_sdTrendMetrics=[S_trendMetric||'cc'];
@@ -7883,10 +7894,8 @@ function sdDrawMultiMetric(){
   const keys=S_sdTrendMetrics.slice(0,2);
   const today=_sdTodayIso();
   const allWeeks=[...S.weekHistory].filter(w=>String(w.weekEnding)<today).sort((a,b)=>new Date(a.weekEnding)-new Date(b.weekEnding));
-  let weeks=allWeeks;
-  if(S_trendWindow==='all'){}
-  else if(S_trendWindow==='ytd'){ const anc=allWeeks.length?fiscalYearStartIso(allWeeks[allWeeks.length-1].weekEnding):''; weeks=allWeeks.filter(w=>w.weekEnding>=anc); }
-  else { weeks=allWeeks.slice(-S_trendWindow); }
+  let weeks=trendPickIdx(allWeeks.map(function(w){ return String(w.weekEnding); }), S_trendWindow, S_trendFrom, S_trendTo)
+    .map(function(i){ return allWeeks[i]; });
   const labels=weeks.map(function(w){ var pr=String(w.weekEnding).split('-'); return parseInt(pr[1],10)+'/'+parseInt(pr[2],10); });
   const rowFieldMap={cc:'ccThis',ccG:'ccGrowth',sgr:'salesGrowth',prod:'product',nr:'nr',rr:'rr',hc:'hcTime',mbc:'mbc',ssW:'ssWaits',wts:'waits',noc:'nonOciWaits',pay:'payroll',cph:'cph'};
   const sn=S_sdSalon;
@@ -7894,7 +7903,7 @@ function sdDrawMultiMetric(){
   const colors=['#2a6a9a','#9a5a2a'];
   const lbl=function(k){ return (TREND_METRICS[k]&&TREND_METRICS[k].label)||k; };
   const datasets=keys.map(function(k,idx){ return { label:lbl(k), data:seriesFor(k), borderColor:colors[idx], backgroundColor:'transparent', borderWidth:2.5, pointRadius:3, pointHoverRadius:6, tension:0.3, fill:false, yAxisID:idx===0?'yA':'yB' }; });
-  const winHtml=[{w:20,l:'20 wk'},{w:52,l:'52 wk'},{w:'ytd',l:'YTD'},{w:'all',l:'All'}].map(function(o){ var arg=typeof o.w==='string'?("'"+o.w+"'"):o.w; var active=S_trendWindow===o.w; return '<button onclick="sdSetTrendWin('+arg+')" style="padding:4px 12px;border-radius:16px;border:1px solid var(--border);font-size:11px;font-weight:600;cursor:pointer;background:'+(active?'var(--primary)':'white')+';color:'+(active?'white':'var(--text)')+';">'+o.l+'</button>'; }).join('');
+  const winHtml=trendRangeControls(S_trendWindow, S_trendFrom, S_trendTo, 'sdSetTrendWin');
   host.innerHTML='<div class="drill-header"><div><div class="trend-chart-title">'+keys.map(lbl).join('  vs  ')+'</div><div class="trend-chart-sub">'+salonDisplay(sn)+' · '+weeks.length+' weeks · dual axis</div></div><div style="margin-left:auto;display:flex;gap:4px;align-items:center;">'+winHtml+'</div></div><div class="chart-canvas-wrap"><canvas id="trend-canvas"></canvas></div>';
   if(S_trendChart){ try{S_trendChart.destroy();}catch(e){} S_trendChart=null; }
   const ctx=document.getElementById('trend-canvas'); if(!ctx) return;
@@ -8437,7 +8446,74 @@ function drillBack(){
 
 // ── Trend Charts ─────────────────────────────────────────────
 let S_trendMetric = 'cc';
-let S_trendWindow = 20; // Trends weeks shown: 20 | 52 | 'ytd' | 'all' (default: recent 20)
+let S_trendWindow = 20; // Trends weeks shown: 13 | 20 | 26 | 52 | 'ytd' | 'all' | 'custom' (default: recent 20)
+
+// TREND-RANGE-v1 — one date control for every trend chart, in the same format
+// as Effective wage and Day of Week: preset pills, plus Custom, which opens a
+// from/to pair. A window is a preset (a week count, 'ytd', 'all') or 'custom'
+// with its own dates, and every chart picks its weeks through trendPickIdx, so
+// no two charts can disagree about what "YTD" or a date range contains.
+let S_trendFrom = '', S_trendTo = '';
+const TREND_PRESETS = [[13,'13 wk'],[20,'20 wk'],[26,'26 wk'],[52,'52 wk'],['ytd','YTD'],['all','All'],['custom','Custom']];
+/** Indexes into an ascending list of week-ending ISO dates that fall in the window. */
+function trendPickIdx(isoList, win, from, to){
+  const n = isoList.length;
+  const all = isoList.map(function(_, i){ return i; });
+  if(!n) return [];
+  if(win === 'all') return all;
+  if(win === 'ytd'){
+    const anc = fiscalYearStartIso(isoList[n - 1]);
+    return all.filter(function(i){ return isoList[i] >= anc; });
+  }
+  if(win === 'custom'){
+    // A week belongs to the range when it ENDS inside it.
+    const a = from || isoList[0], b = to || isoList[n - 1];
+    return all.filter(function(i){ return isoList[i] >= a && isoList[i] <= b; });
+  }
+  return all.slice(Math.max(0, n - (parseInt(win, 10) || 20)));
+}
+/** Custom opens on the weeks that were already showing, not on an empty pair of boxes. */
+function trendSeedCustom(isoList, win, from, to){
+  const idx = trendPickIdx(isoList, win === 'custom' ? 20 : win, from, to);
+  if(!idx.length) return { from:'', to:'' };
+  return { from: dIsoAddDays(isoList[idx[0]], -6), to: isoList[idx[idx.length - 1]] };
+}
+/** A picked range with no weeks in it is refused: an empty chart also loses its controls. */
+function trendApplyDates(isoList, cur, a, b){
+  let from = (a !== null && a !== undefined) ? a : cur.from;
+  let to   = (b !== null && b !== undefined) ? b : cur.to;
+  if(from && to && from > to){ const t = from; from = to; to = t; }
+  if(!trendPickIdx(isoList, 'custom', from, to).length){
+    alert('No weeks fall between those dates.');
+    return null;
+  }
+  return { from: from, to: to };
+}
+function trendAllWeekIsos(){
+  return [...S.weekHistory].map(function(w){ return String(w.weekEnding); })
+    .filter(function(w){ return w < _sdTodayIso(); }).sort();
+}
+/** The control. `fn(win)` sets the window; `fn + 'Dates'(from, to)` sets the custom dates. */
+function trendRangeControls(win, from, to, fn){
+  const pills = TREND_PRESETS.map(function(o){
+    const on = win === o[0];
+    const arg = typeof o[0] === 'string' ? "'" + o[0] + "'" : o[0];
+    return '<button onclick="' + fn + '(' + arg + ')" style="width:auto;flex:0 0 auto;font-size:12px;'
+      + 'padding:5px 11px;line-height:1.2;border:1px solid ' + (on ? 'var(--primary-dark)' : 'var(--border)')
+      + ';border-radius:7px;background:' + (on ? 'var(--primary-dark)' : '#fff') + ';color:' + (on ? '#fff' : 'var(--text)')
+      + ';font-weight:' + (on ? '700' : '500') + ';cursor:pointer;">' + o[1] + '</button>';
+  }).join('');
+  const dateIn = 'padding:4px 7px;border:1px solid var(--border);border-radius:6px;font:inherit;font-size:12px;';
+  return '<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;">' + pills
+    + (win === 'custom'
+        ? '<span style="display:inline-flex;gap:6px;align-items:center;margin-left:6px;">'
+          + '<input type="date" value="' + hEsc(from || '') + '" onchange="' + fn + 'Dates(this.value, null)" style="' + dateIn + '">'
+          + '<span style="color:var(--text-muted);">&rarr;</span>'
+          + '<input type="date" value="' + hEsc(to || '') + '" onchange="' + fn + 'Dates(null, this.value)" style="' + dateIn + '">'
+          + '</span>'
+        : '')
+    + '</div>';
+}
 // Week by week, or collapsed into months. Fifty-two points across eighteen
 // salons is a thicket; twelve is a shape. The value plotted for a month is the
 // MEAN OF ITS WEEKS, not their sum, so the axis, the target lines and the
@@ -8487,7 +8563,16 @@ function setTrendWindow(w){
   // this the chart rebuilds fresh (all lines visible) because the metric is
   // unchanged, so selectTrendMetric skips its own snapshot.
   if(S_trendChart){ try{ const snap={}; S_trendChart.data.datasets.forEach((ds,i)=>{ const base=(ds.label||'').endsWith(' (PY)')?ds.label.slice(0,-5):(ds.label||''); snap[base]=S_trendChart.isDatasetVisible(i); }); S_trendVisSnapshot=snap; }catch(e){} }
+  if(w === 'custom' && (!S_trendFrom || !S_trendTo)){
+    const sd = trendSeedCustom(trendAllWeekIsos(), S_trendWindow, S_trendFrom, S_trendTo);
+    S_trendFrom = sd.from; S_trendTo = sd.to;
+  }
   S_trendWindow = w; renderTrends();
+}
+function setTrendWindowDates(a, b){
+  const r = trendApplyDates(trendAllWeekIsos(), { from:S_trendFrom, to:S_trendTo }, a, b);
+  if(r){ S_trendFrom = r.from; S_trendTo = r.to; }
+  setTrendWindow('custom');
 }
 
 // Print the manager-bonus statement for the selected period. Reuses the exact
@@ -8817,15 +8902,8 @@ function selectTrendMetric(key, btn, overrideSalon, hostId, storeView){
   if(!metric || !am) return;
 
   const allWeeksSorted = [...S.weekHistory].filter(w=>String(w.weekEnding) < _sdTodayIso()).sort((a,b)=>new Date(a.weekEnding)-new Date(b.weekEnding));
-  let weeks;
-  if (S_trendWindow === 'all') {
-    weeks = allWeeksSorted;
-  } else if (S_trendWindow === 'ytd') {
-    const anchorIso = allWeeksSorted.length ? fiscalYearStartIso(allWeeksSorted[allWeeksSorted.length-1].weekEnding) : '';
-    weeks = allWeeksSorted.filter(w => w.weekEnding >= anchorIso);
-  } else {
-    weeks = allWeeksSorted.slice(-S_trendWindow);
-  }
+  let weeks = trendPickIdx(allWeeksSorted.map(w => String(w.weekEnding)), S_trendWindow, S_trendFrom, S_trendTo)
+    .map(i => allWeeksSorted[i]);
   if(!weeks.length){
     document.getElementById(hostId||'trend-chart-area').innerHTML='<div class="no-data"><div class="no-data-icon">📈</div>No data yet — upload weekly reports to see trends</div>';
     return;
@@ -9098,7 +9176,7 @@ function selectTrendMetric(key, btn, overrideSalon, hostId, storeView){
         <div class="trend-chart-title">${chartTitle}</div>
         <div class="trend-chart-sub">${chartSub}</div>
       </div>
-      <div style="margin-left:auto;display:flex;gap:4px;align-items:center;">
+      <div style="margin-left:auto;display:flex;gap:4px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
         <button onclick="${pyFn}" title="Overlay the same window from the previous year"
           style="padding:4px 12px;border-radius:16px;border:1px solid ${S_trendPriorYear?'var(--primary)':'var(--border)'};font-size:11px;font-weight:600;cursor:pointer;background:${S_trendPriorYear?'var(--primary)':'white'};color:${S_trendPriorYear?'white':'var(--text)'};margin-right:8px;">
           ${S_trendPriorYear?'✓ ':''}Prior Year
@@ -9109,11 +9187,7 @@ function selectTrendMetric(key, btn, overrideSalon, hostId, storeView){
             style="padding:4px 12px;border-radius:16px;border:1px solid var(--border);font-size:11px;font-weight:600;cursor:pointer;background:${active?'var(--primary)':'white'};color:${active?'white':'var(--text)'};">${o[1]}</button>`;
         }).join('')}
         <span style="width:8px;"></span>
-        ${[{w:20,l:'20 wk'},{w:52,l:'52 wk'},{w:'ytd',l:'YTD'},{w:'all',l:'All'}].map(o=>{
-          const arg = typeof o.w === 'string' ? "'"+o.w+"'" : o.w;
-          const active = S_trendWindow===o.w;
-          return `<button onclick="${winFn}(${arg})" style="padding:4px 12px;border-radius:16px;border:1px solid var(--border);font-size:11px;font-weight:600;cursor:pointer;background:${active?'var(--primary)':'white'};color:${active?'white':'var(--text)'};">${o.l}</button>`;
-        }).join('')}
+        ${trendRangeControls(S_trendWindow, S_trendFrom, S_trendTo, winFn)}
       </div>
     </div>
     ${periodStatsHtml}
@@ -14904,7 +14978,8 @@ function buildCoBonusYTDSalon(){
 
 // ── Stylist Profile Drawer ───────────────────────────────────
 let profileCharts = []; // track Chart instances for cleanup
-let S_profileTrendWindow = 20; // profile Trends window: 20 | 52 | 'ytd' | 'all' (default recent 20)
+let S_profileTrendWindow = 20; // profile Trends window: a TREND_PRESETS key or 'custom' (default recent 20)
+let S_profileTrendFrom = '', S_profileTrendTo = '';
 let S_profileTrendPriorYear = false; // overlay the same window from the prior year (−364d)
 let S_profileBonusRange = 'ytd'; // profile Bonus History range: ytd | prior | r12 | all
 let S_profileWeeklyGrain = 'weekly';   // profile Weekly view grain: 'weekly' | 'monthly'
@@ -18918,11 +18993,7 @@ function switchProfileMetric(mk){
 function profileTrendBar(){
   const py = `<button onclick="toggleProfileTrendPriorYear()" title="Overlay the same window from the previous year"
       style="padding:4px 12px;border-radius:16px;border:1px solid ${S_profileTrendPriorYear?'var(--primary)':'var(--border)'};font-size:11px;font-weight:600;cursor:pointer;background:${S_profileTrendPriorYear?'var(--primary)':'white'};color:${S_profileTrendPriorYear?'white':'var(--text)'};margin-right:8px;">${S_profileTrendPriorYear?'✓ ':''}Prior Year</button>`;
-  const wins = [{w:20,l:'20 wk'},{w:52,l:'52 wk'},{w:'ytd',l:'YTD'},{w:'all',l:'All'}].map(o=>{
-    const arg = typeof o.w==='string' ? "'"+o.w+"'" : o.w;
-    const active = S_profileTrendWindow===o.w;
-    return `<button onclick="setProfileTrendWindow(${arg})" style="padding:4px 12px;border-radius:16px;border:1px solid var(--border);font-size:11px;font-weight:600;cursor:pointer;background:${active?'var(--primary)':'white'};color:${active?'white':'var(--text)'};">${o.l}</button>`;
-  }).join('');
+  const wins = trendRangeControls(S_profileTrendWindow, S_profileTrendFrom, S_profileTrendTo, 'setProfileTrendWindow');
   return py + wins;
 }
 function toggleProfileTrendPriorYear(){
@@ -18932,7 +19003,16 @@ function toggleProfileTrendPriorYear(){
   const mk = window._activeProfileMetric || ((window._profileMetrics||[])[0]||{}).k;
   if(mk) drawProfileChart(mk);
 }
+function setProfileTrendWindowDates(a, b){
+  const r = trendApplyDates(window._profileWeeks || [], { from:S_profileTrendFrom, to:S_profileTrendTo }, a, b);
+  if(r){ S_profileTrendFrom = r.from; S_profileTrendTo = r.to; }
+  setProfileTrendWindow('custom');
+}
 function setProfileTrendWindow(w){
+  if(w === 'custom' && (!S_profileTrendFrom || !S_profileTrendTo)){
+    const sd = trendSeedCustom(window._profileWeeks || [], S_profileTrendWindow, S_profileTrendFrom, S_profileTrendTo);
+    S_profileTrendFrom = sd.from; S_profileTrendTo = sd.to;
+  }
   S_profileTrendWindow = w;
   const bar = document.getElementById('profile-trend-bar');
   if(bar) bar.innerHTML = profileTrendBar();
@@ -18955,10 +19035,7 @@ function drawProfileChart(mk){
   // Apply the selected window (20 | 52 | 'ytd' | 'all') to the aligned arrays.
   // m.data and m.liAvg are parallel to fullWeeks, so we slice all three by index.
   const W = (typeof S_profileTrendWindow!=='undefined') ? S_profileTrendWindow : 'all';
-  let idx;
-  if(W==='all'){ idx = fullWeeks.map((_,i)=>i); }
-  else if(W==='ytd'){ const anchor = fiscalYearStartIso(fullWeeks[fullWeeks.length-1]); idx = fullWeeks.map((we,i)=>we>=anchor?i:-1).filter(i=>i>=0); }
-  else { idx = fullWeeks.map((_,i)=>i).slice(Math.max(0, fullWeeks.length - W)); }
+  let idx = trendPickIdx(fullWeeks, W, S_profileTrendFrom, S_profileTrendTo);
   if(!idx.length) idx = fullWeeks.map((_,i)=>i);
 
   const labels = idx.map(i=>{ const pr=String(fullWeeks[i]).split('-'); return pr.length>=3 ? (parseInt(pr[1],10)+'/'+parseInt(pr[2],10)) : fullWeeks[i]; });
