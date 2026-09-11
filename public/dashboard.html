@@ -7293,14 +7293,16 @@ function renderReviewsTab(hostId, windowKind){
   const salons = reviewSalonList();
   if(!S_reviewSalonSel || (S_reviewSalonSel!=='ALL' && !salons.includes(S_reviewSalonSel))) S_reviewSalonSel = salons[0]||'';
 
-  // Managers (once they get access) only ever see their own salon review.
+  // A manager sees their own salon only -- no "View All Salons" -- but both
+  // halves of it: their own Salon / Manager review and their team's stylist
+  // reviews. getReviewData already allows the team (seesEmployee: homed at
+  // their salon); this screen used to pin them to the first half.
   const mgrOnly = (typeof roleClean==='function' && roleClean()==='manager');
-  if(mgrOnly) S_reviewMode='salon';
 
   const allOpt = (!mgrOnly && salons.length>1) ? `<option value="ALL" ${S_reviewSalonSel==='ALL'?'selected':''}>View All Salons</option>` : '';
   const salonOpts = allOpt + (salons.map(sn=>`<option value="${sn}" ${sn===S_reviewSalonSel?'selected':''}>${salonDisplay(sn)}</option>`).join('') || '<option value="">No salons</option>');
   const tBtn = (mode,label)=>`<button onclick="setReviewMode('${mode}')" style="padding:4px 14px;border-radius:12px;border:none;font-size:12px;font-weight:700;cursor:pointer;background:${S_reviewMode===mode?'var(--primary)':'transparent'};color:${S_reviewMode===mode?'#fff':'var(--primary)'};">${label}</button>`;
-  const toggle = mgrOnly ? '' : `<span style="display:inline-flex;gap:2px;background:#e9e9e9;border:1px solid var(--border);border-radius:14px;padding:2px;">${tBtn('salon','Salon / Manager')}${tBtn('stylist','Stylist')}</span>`;
+  const toggle = `<span style="display:inline-flex;gap:2px;background:#e9e9e9;border:1px solid var(--border);border-radius:14px;padding:2px;">${tBtn('salon','Salon / Manager')}${tBtn('stylist','Stylist')}</span>`;
 
   let bodyHtml='';
   if(!S_reviewSalonSel){
@@ -8007,10 +8009,83 @@ function _sdStylistBonus(snum, normLabel){
   const stys=(bp.employees||[]).filter(e=>String(e.salonNum||'').trim()===String(snum).trim() && isStylist(e));
   if(!stys.length) return '<div style="color:var(--text-muted);padding:10px;">No stylists with bonus rows at this salon this month.</div>';
   stys.sort((a,b)=>(parseFloat(b.payout)||0)-(parseFloat(a.payout)||0));
-  const rows=stys.map(function(e){ var pot=parseFloat(e.potential)||0; var pay=payablePayout(e, bp.periodKey); var pct=pot>0?(pay/pot*100):0; var nm=fmtName(e.empName||''); var nmSafe=nm.replace(/'/g,''); var gid=(e.globalId||'').trim();
-    var nameCell=gid?('<span class="salon-link" onclick="openStylistBonus(\''+gid+'\',\''+nmSafe+'\')" style="cursor:pointer;">'+nm+'</span>'):nm;
-    return '<tr style="border-bottom:1px solid #eee;"><td style="padding:6px 10px;font-weight:600;">'+nameCell+'</td><td style="padding:6px 8px;text-align:right;">'+fmtMoney(pot)+'</td><td style="padding:6px 8px;text-align:right;font-weight:700;">'+fmtMoney(pay)+'</td><td style="padding:6px 8px;text-align:right;">'+pct.toFixed(0)+'%</td></tr>'; }).join('');
-  return '<div style="background:#fff;border-radius:8px;overflow:auto;box-shadow:0 1px 4px rgba(0,0,0,.12);"><table style="width:100%;border-collapse:collapse;font-size:12.5px;"><thead><tr style="background:#2E4D8A;color:#fff;"><th style="padding:7px 10px;text-align:left;">Stylist</th><th style="padding:7px 8px;text-align:right;">Potential</th><th style="padding:7px 8px;text-align:right;">Payout</th><th style="padding:7px 8px;text-align:right;">%</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+  // SD-STYLIST-BONUS-v2 — how each payout was reached, not just the number.
+  // The same five measures, colour bands and rules as the area-manager bonus
+  // table (buildBonusMonth), plus the sum itself: points x $ per point, the
+  // product penalty, and anything that stopped it being paid.
+  const pk=bp.periodKey;
+  let totPay=0, totPot=0, earned=0;
+  const td='padding:6px 8px;text-align:center;white-space:nowrap;';
+  const rows=stys.map(function(e){
+    const pot=parseFloat(e.potential)||0, raw=parseFloat(e.payout)||0;
+    const pts=parseFloat(e.points), perPt=parseFloat(e.perPt);
+    const prod=parseFloat(e.product)||0, nr=parseFloat(e.nr)||0, rr=parseFloat(e.rr)||0;
+    const mbc=parseFloat(e.mbc)||0, hc=parseFloat(e.hcTime)||0, hrs=parseFloat(e.avgWkHrs)||0;
+    const penalty=(e.prodPenalty==='true'||e.prodPenalty===true);
+    const underPts=(e.eligible==='false'||e.eligible===false)&&pot>0;
+    const discPts=activeDiscPoints(e.globalId, pk), discOut=discPts>=4, inact=isInactive(e.globalId);
+    // Blocked the same way the area-manager table blocks it: 4+ active points
+    // or inactive means the earned figure is shown struck through and counts
+    // for nothing in the totals.
+    const pay=(discOut||inact) ? 0 : payablePayout(e, pk);
+    totPay+=pay; totPot+=pot; if(pay>0) earned++;
+    const pp=pot>0?pay/pot:0;
+    const prC=prod<BONUS_CFG.PROD_1?'bv-orange':prod<BONUS_CFG.PROD_2?'bv-yellow':'bv-green';
+    const nrC=nr>=BONUS_CFG.NR_2?'bv-green':nr>=BONUS_CFG.NR_1?'bv-yellow':'bv-red';
+    const rrC=rr>=BONUS_CFG.RR_2?'bv-green':rr>=BONUS_CFG.RR_1?'bv-yellow':'bv-red';
+    const mbC=mbc<=BONUS_CFG.MBC_2?'bv-green':mbc<=BONUS_CFG.MBC_1?'bv-yellow':'bv-red';
+    const hcC=(hc>=BONUS_CFG.HC_E_LO&&hc<=BONUS_CFG.HC_E_HI)?'bv-green':(hc>=BONUS_CFG.HC_G_LO1&&hc<=BONUS_CFG.HC_G_HI2)?'bv-yellow':'bv-red';
+    const payC=(discOut||inact)?'bv-red':pay>0?(pp<0.5?'bv-yellow':'bv-green'):'bv-red';
+    // The sum, in words a stylist would recognise.
+    let how;
+    if(pot===0) how='Under 10 floor hrs a week — no potential';
+    else if(underPts) how=(isNaN(pts)?'?':pts)+' pts — 5 needed to earn';
+    else if(!isNaN(pts)&&!isNaN(perPt)) how=pts+' pts × $'+perPt+(penalty?' × 0.25 (product under 4%)':'')+' = '+fmtMoney(raw);
+    else how=fmtMoney(raw);
+    const notes=[];
+    if(inact){ const since=inactiveSince(e.globalId); notes.push('⛔ Inactive'+(since?' since '+fmtWeek(since):'')+' — not paid'); }
+    if(discOut) notes.push('⚠ '+discPts+' disciplinary pts — not paid');
+    const nm=fmtName(e.empName||''), nmSafe=nm.replace(/'/g,''), gid=(e.globalId||'').trim();
+    const nameCell=gid?('<span class="salon-link" onclick="openStylistBonus(\''+gid+'\',\''+nmSafe+'\')" style="cursor:pointer;">'+nm+'</span>'):nm;
+    const payCell=(pay===0&&raw>0)?'<s style="color:#999;">'+fmtMoney(raw)+'</s>':fmtMoney(pay);
+    return '<tr style="border-bottom:1px solid #eee;'+((discOut||inact)?'opacity:.8;':'')+'">'
+      +'<td style="padding:6px 10px;font-weight:600;white-space:nowrap;">'+nameCell+'</td>'
+      +'<td style="'+td+'">'+fmtN1(hrs)+'</td>'
+      +'<td class="'+prC+'" style="'+td+'">'+fmtPct(prod)+'</td>'
+      +'<td class="'+nrC+'" style="'+td+'">'+fmtPct(nr)+'</td>'
+      +'<td class="'+rrC+'" style="'+td+'">'+fmtPct(rr)+'</td>'
+      +'<td class="'+mbC+'" style="'+td+'">'+fmtN1(mbc)+'</td>'
+      +'<td class="'+hcC+'" style="'+td+'">'+fmtN1(hc)+'</td>'
+      +'<td style="'+td+'font-weight:700;">'+(isNaN(pts)?'—':pts)+'</td>'
+      +'<td style="'+td+'">'+(isNaN(perPt)?'—':'$'+perPt)+'</td>'
+      +'<td style="'+td+'">'+fmtMoney(pot)+'</td>'
+      +'<td class="'+payC+'" style="'+td+'font-weight:700;">'+payCell+'</td>'
+      +'<td class="'+payC+'" style="'+td+'">'+(discOut?'—':pot>0?Math.round(pp*100)+'%':'—')+'</td>'
+      +'<td style="padding:6px 10px;font-size:11.5px;color:#444;">'+hEsc(how)
+        +(notes.length?'<div style="font-size:10.5px;color:#b3261e;margin-top:2px;">'+notes.join(' · ')+'</div>':'')+'</td>'
+      +'</tr>';
+  }).join('');
+  const stat=function(n,l){ return '<div style="flex:1 1 120px;background:#fff;border:1px solid var(--border);border-radius:8px;padding:9px 12px;">'
+    +'<div style="font-size:19px;font-weight:700;">'+n+'</div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);">'+l+'</div></div>'; };
+  const th='padding:7px 8px;text-align:center;white-space:nowrap;';
+  return '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">'
+      +stat(stys.length,'Stylists')+stat(earned,'Earned a payout')+stat(fmtMoney(totPay),'Total payout')
+      +stat(fmtMoney(totPot),'Total potential')+stat(totPot>0?Math.round(totPay/totPot*100)+'%':'—','Of potential')
+    +'</div>'
+    +'<div style="background:#fff;border-radius:8px;overflow:auto;box-shadow:0 1px 4px rgba(0,0,0,.12);">'
+    +'<table class="bonus-table" style="width:100%;border-collapse:collapse;font-size:12.5px;"><thead><tr style="background:#2E4D8A;color:#fff;">'
+      +'<th style="padding:7px 10px;text-align:left;">Stylist</th><th style="'+th+'">Avg Floor Hrs</th><th style="'+th+'">Prod %</th>'
+      +'<th style="'+th+'">NR %</th><th style="'+th+'">RR %</th><th style="'+th+'">MBC</th><th style="'+th+'">HC Time</th>'
+      +'<th style="'+th+'">Pts</th><th style="'+th+'">$/Pt</th><th style="'+th+'">Potential</th><th style="'+th+'">Payout</th>'
+      +'<th style="'+th+'">%</th><th style="padding:7px 10px;text-align:left;">How it adds up</th>'
+    +'</tr></thead><tbody>'+rows+'</tbody></table></div>'
+    +'<div style="background:#D6E4F7;color:#03654e;font-size:11px;padding:9px 12px;border-radius:6px;margin-top:10px;line-height:1.7;">'
+      +'<strong>Points:</strong> Prod%: &lt;4%=0 pts + penalty / ≥4%=1 / ≥6%=2 &nbsp;|&nbsp; NR%: &lt;24%=0 / ≥24%=1 / ≥26%=2 &nbsp;|&nbsp; '
+      +'RR%: &lt;74%=0 / ≥74%=1 / ≥77%=2 &nbsp;|&nbsp; MBC: &gt;3=0 / ≤3=1 / ≤2=2 &nbsp;|&nbsp; HC Time: same tiers as the area managers<br>'
+      +'<strong>Potential:</strong> Avg floor hrs &gt;30 → $200 ($20/pt) | ≥10 → $100 ($10/pt) | &lt;10 → none &nbsp;|&nbsp; '
+      +'<strong>Min 5 pts</strong> to earn &nbsp;|&nbsp; <strong>Product under 4%:</strong> whole payout × 0.25 &nbsp;|&nbsp; '
+      +'<span class="bv-green" style="padding:0 5px;border-radius:3px;">2 pts</span> <span class="bv-yellow" style="padding:0 5px;border-radius:3px;">1 pt</span> <span class="bv-red" style="padding:0 5px;border-radius:3px;">0</span>'
+    +'</div>';
 }
 function setSdBonusType(t){ S_sdBonusType=t; sdRender(); }
 function renderSdBonuses(snum){
@@ -8807,7 +8882,16 @@ function openCompanyTrends(){
 // Legend shortcuts. With every salon plotted, clicking lines off one at a
 // time is the slow way round; these drive the same Chart.js visibility the
 // legend does, so the two stay in step.
+// Every salon in a week, for a COMPANY average. For a salon manager the server
+// sends their own salon in `salons` and every other salon only as unnamed
+// `coRows` (lib/scope-filter, MANAGER-RELEASE-v2): enough to pool the company
+// figure, never enough to draw, list or pick another salon.
+function coRowsOf(w){ return ((w && w.salons) || []).concat((w && w.coRows) || []); }
+
 function trendLineControlsHtml(){
+  // A salon manager's chart holds their salon and the company line, nothing
+  // else to pick -- and the area managers are not theirs to see.
+  if(_navSalonUser()) return '';
   const ams = AM_ORDER.filter(function(id){ return AMS[id] && (AMS[id].salons||[]).length; });
   const b = function(fn, label){
     return '<button onclick="' + fn + '" style="padding:3px 11px;border-radius:14px;border:1px solid var(--border);' +
@@ -9051,7 +9135,7 @@ function selectTrendMetric(key, btn, overrideSalon, hostId, storeView){
       });
     });
     // Company average — prior year (dashed gray)
-    const coPyData = weeks.map(w=>{ const pw=priorWeekOf(w.weekEnding); return pw?getVal(calcAvgs(pw.salons||[])):null; });
+    const coPyData = weeks.map(w=>{ const pw=priorWeekOf(w.weekEnding); return pw?getVal(calcAvgs(coRowsOf(pw))):null; });
     if(!coPyData.every(v=>v===null)){
       datasets.push({ label:'Company Avg (PY)', data:coPyData, borderColor:'#999', backgroundColor:'transparent', borderWidth:1.5, borderDash:[2,3], pointRadius:0, pointHoverRadius:5, tension:0.3, fill:false, type:'line', order:5 });
     }
@@ -9083,7 +9167,7 @@ function selectTrendMetric(key, btn, overrideSalon, hostId, storeView){
   }
 
   // Company average — dashed gray
-  const coData = weeks.map(w=>getVal(calcAvgs(w.salons||[])));
+  const coData = weeks.map(w=>getVal(calcAvgs(coRowsOf(w))));
   datasets.push({
     label: 'Company Avg',
     data: coData,

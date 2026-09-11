@@ -146,6 +146,37 @@ export function scopeAllData(data: any, access: Access): any {
         if (inScope(homeSalonOf(gid))) out.trackerData[gid] = entries
       }
     }
+
+    // MANAGER-RELEASE-v2. Weekly and monthly PERFORMANCE was passing through
+    // whole: every salon's week, and every stylist's weekly numbers company-
+    // wide. A manager's trend chart could switch other salons on.
+    //
+    //   weeks[].salons   -> their own salon only.
+    //   weeks[].coRows   -> every other salon, UNNAMED and cut to the counts
+    //                       calcAvgs() pools, so "vs Company Avg" still adds up
+    //                       exactly without any salon being identifiable.
+    //   weeks[].emps     -> people at, or homed at, their salon.
+    //   salonSummaryPeriods -> their own salon's monthly row only.
+    const CO_FIELDS = [
+      'weekEnding', 'ccThis', 'ccLast', 'salesThis', 'salesLast', '_sales', 'cph', 'payroll',
+      'product', 'nr', 'rr', 'ssWaits', 'waits', 'nonOciWaits', 'mbc', 'hcTime',
+      'ssWaitCount', 'ssCustCount', 'nonOciWaitCount', 'nonOciCustCount',
+      'nrVisitCount', 'nrReturnCount', 'rrVisitCount', 'rrReturnCount',
+    ]
+    const unnamed = (r: any) => {
+      const o: any = { _anon: true }
+      for (const k of CO_FIELDS) if (r && r[k] !== undefined) o[k] = r[k]
+      return o
+    }
+    out.weeks = (data.weeks || []).map((w: any) => ({
+      ...w,
+      salons: (w.salons || []).filter((r: any) => inScope(r.salonNum)),
+      coRows: (w.salons || []).filter((r: any) => !inScope(r.salonNum)).map(unnamed),
+      emps: (w.emps || []).filter(empInScope),
+    }))
+    out.salonSummaryPeriods = (data.salonSummaryPeriods || []).map((p: any) => ({
+      ...p, salons: (p.salons || []).filter((r: any) => inScope(r.salonNum)),
+    }))
     return out
   }
 
