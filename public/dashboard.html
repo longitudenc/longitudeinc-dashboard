@@ -252,7 +252,7 @@
   /* YTD badge */
   .ytd-badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:700;background:#e8eaf5;color:#3a4a9a;margin-left:6px;vertical-align:middle;}
   .salon-link{color:var(--primary);cursor:pointer;font-weight:600;text-decoration:none;border-bottom:1px dashed var(--accent);transition:color .15s;}
-  .stylist-link{color:var(--primary);cursor:pointer;font-weight:600;text-decoration:none;border-bottom:1px dashed rgba(79,107,187,.4);transition:color .15s;}
+  .stylist-link{color:var(--primary);cursor:pointer;font-weight:600;text-decoration:none;border-bottom:1px dashed var(--accent);transition:color .15s;}
   .stylist-link:hover{color:var(--accent);border-bottom-color:var(--accent);}
   .am-link{cursor:pointer;transition:opacity .15s;}
   .am-link:hover{opacity:.65;}
@@ -295,7 +295,7 @@
   .bv-yellow{background:#FFEB9C!important;color:#7D6608!important;font-weight:600;}
   .bv-red{background:#FFC7CE!important;color:#9C0006!important;font-weight:600;}
   .bv-orange{background:#FCE4D6!important;color:#843C0C!important;font-weight:600;}
-  .bv-blue{background:#D9E1F2!important;color:#2E4D8A!important;font-weight:600;}
+  .bv-blue{background:#D9E1F2!important;color:#03654e!important;font-weight:600;}
   .bonus-stat-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:1.5rem;}
   .bonus-stat{background:white;border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center;}
   .bonus-stat-n{font-size:20px;font-weight:700;color:var(--primary);}
@@ -5380,7 +5380,7 @@ function renderRequests(scope){
   else {
     const _cols=[['salon','Salon','left'],['rate','Request %','center'],['req','Requests','center'],['cust','Customers','center']];
     const _th=_cols.map(function(c){ var ar=S_reqSort.col===c[0]?(S_reqSort.dir<0?' \u25BC':' \u25B2'):''; return '<th onclick="sortRequests(\''+scope+'\',\''+c[0]+'\')" style="cursor:pointer;text-align:'+(c[2]==='left'?'left':'center')+';padding:7px 10px;white-space:nowrap;">'+c[1]+ar+'</th>'; }).join('');
-    h+='<div style="overflow-x:auto;"><table class="emp-table" style="width:100%;"><thead><tr style="background:#2E4D8A;color:#fff;">'+_th+'</tr></thead><tbody>';
+    h+='<div style="overflow-x:auto;"><table class="emp-table" style="width:100%;"><thead><tr style="background:#03654e;color:#fff;">'+_th+'</tr></thead><tbody>';
     for(const sn of salons){
       const o=salonAgg[sn], exp=!!S_reqDrill[scope+'|'+sn];
       h+='<tr onclick="toggleReqDrill(\''+scope+'\',\''+sn+'\')" style="border-bottom:1px solid #e5e9f2;cursor:pointer;background:#f4f6fb;font-weight:600;"><td style="text-align:left;padding:7px 10px;white-space:nowrap;">'+(exp?'\u25be ':'\u25b8 ')+salonDisplay(sn)+'</td><td style="text-align:center;padding:7px 10px;">'+fmtR(o)+'</td><td style="text-align:center;padding:7px 10px;">'+o.req+'</td><td style="text-align:center;padding:7px 10px;">'+o.cust+'</td></tr>';
@@ -5492,7 +5492,7 @@ function renderTeamBody(){
     const keyOf=r=>S_teamGroup==='salon'?(r.salonName||r.salonNum||'\u2014'):(r.amName||'Unassigned');
     const groups={}; people.forEach(r=>{ const k=keyOf(r); (groups[k]=groups[k]||[]).push(r); });
     body=Object.keys(groups).sort().map(k=>{ const rows=groups[k].slice().sort(cmp);
-      return '<tr style="background:#eef1f8;"><td colspan="'+TEAM_COLS.length+'" style="padding:6px 10px;font-weight:700;color:#2E4D8A;">'+k+' <span style="font-weight:400;color:var(--text-muted);">· '+rows.length+'</span></td></tr>'+rows.map(_teamRowHtml).join('');
+      return '<tr style="background:#eef5f1;"><td colspan="'+TEAM_COLS.length+'" style="padding:6px 10px;font-weight:700;color:#03654e;">'+k+' <span style="font-weight:400;color:var(--text-muted);">· '+rows.length+'</span></td></tr>'+rows.map(_teamRowHtml).join('');
     }).join('');
   }
   tb.innerHTML=body||'<tr><td colspan="'+TEAM_COLS.length+'" style="padding:20px;text-align:center;color:var(--text-muted);">'+_teamEmptyMsg()+'</td></tr>';
@@ -5507,7 +5507,7 @@ function renderCompanyTeam(){
   host.style.display='';
   const rangeOpts=[['8','Last 8 weeks'],['13','Last 13 weeks'],['26','Last 26 weeks'],['ytd','YTD'],['all','All']];
   const grpOpts=[['none','No grouping'],['salon','Group by salon'],['am','Group by Area Manager']];
-  const thead='<tr style="background:#2E4D8A;color:#fff;">'+TEAM_COLS.map((c,i)=>{ const ar=S_teamSort.col===i?(S_teamSort.dir<0?' \u25BC':' \u25B2'):''; return '<th onclick="sortTeam('+i+')" style="padding:7px 8px;cursor:pointer;white-space:nowrap;text-align:'+(c.align==='left'?'left':'center')+';">'+teamColLabel(c)+ar+'</th>'; }).join('')+'</tr>';
+  const thead='<tr style="background:#03654e;color:#fff;">'+TEAM_COLS.map((c,i)=>{ const ar=S_teamSort.col===i?(S_teamSort.dir<0?' \u25BC':' \u25B2'):''; return '<th onclick="sortTeam('+i+')" style="padding:7px 8px;cursor:pointer;white-space:nowrap;text-align:'+(c.align==='left'?'left':'center')+';">'+teamColLabel(c)+ar+'</th>'; }).join('')+'</tr>';
   host.innerHTML='<div class="table-card-header"><h3 style="margin:0;">Team — All Employees</h3></div>'
     +'<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;padding:8px 4px 12px;">'+teamHoursToggleHtml()+'<label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--text-muted);cursor:pointer;user-select:none;"><input type="checkbox" '+(S_hideTermed?'checked':'')+' onchange="S_hideTermed=this.checked;refreshTeamViews();" style="cursor:pointer;">Hide termed</label>'
     
@@ -7722,7 +7722,7 @@ function _sdTbl(rows, cols){
   if(!rows.length) return '<div style="padding:24px;color:var(--text-muted);">No data on record for this range.</div>';
   const ccCol=cols.find(c=>c.k==='cc');
   const ctx=r=>{ const v=ccCol?ccCol.g(r):NaN; return isNaN(v)?0:Math.round(v); };
-  const head='<th style="position:sticky;left:0;background:#2E4D8A;color:#fff;text-align:left;padding:7px 10px;z-index:1;">Period</th>'+cols.map(c=>'<th style="background:#2E4D8A;color:#fff;padding:7px 8px;text-align:center;white-space:nowrap;">'+c.lbl+'</th>').join('');
+  const head='<th style="position:sticky;left:0;background:#03654e;color:#fff;text-align:left;padding:7px 10px;z-index:1;">Period</th>'+cols.map(c=>'<th style="background:#03654e;color:#fff;padding:7px 8px;text-align:center;white-space:nowrap;">'+c.lbl+'</th>').join('');
   const bodyRows=rows.map(rw=>{
     const cc=ctx(rw.r);
     const cells=cols.map(c=>{ const v=c.g(rw.r); const has=(v!==null&&v!==undefined&&!isNaN(v)); const cls=(has&&c.t)?c.t(v,cc):''; return '<td class="'+cls+'" style="padding:6px 8px;text-align:center;white-space:nowrap;">'+(has?c.f(v):'—')+'</td>'; }).join('');
@@ -7731,7 +7731,7 @@ function _sdTbl(rows, cols){
     return '<tr style="border-bottom:1px solid #eee;"><td style="position:sticky;left:0;background:#fff;font-weight:600;padding:6px 10px;white-space:nowrap;">'+labelHtml+wkN+'</td>'+cells+'</tr>';
   }).join('');
   const totCells=cols.map(c=>{ const vals=rows.map(rw=>c.g(rw.r)).filter(v=>v!==null&&v!==undefined&&!isNaN(v)); const a=vals.length?vals.reduce((x,y)=>x+y,0)/vals.length:NaN; return '<td style="padding:7px 8px;text-align:center;font-weight:700;white-space:nowrap;">'+(isNaN(a)?'—':c.f(a))+'</td>'; }).join('');
-  const totRow='<tr style="border-top:2px solid #2E4D8A;background:#eef1f8;"><td style="position:sticky;left:0;background:#eef1f8;font-weight:800;padding:7px 10px;">Average</td>'+totCells+'</tr>';
+  const totRow='<tr style="border-top:2px solid #03654e;background:#eef5f1;"><td style="position:sticky;left:0;background:#eef5f1;font-weight:800;padding:7px 10px;">Average</td>'+totCells+'</tr>';
   return '<div style="background:#fff;border-radius:8px;overflow:auto;box-shadow:0 1px 4px rgba(0,0,0,.12);"><table style="width:100%;border-collapse:collapse;font-size:12.5px;"><thead><tr>'+head+'</tr></thead><tbody>'+bodyRows+totRow+'</tbody></table></div>';
 }
 function _sdTodayIso(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
@@ -7982,9 +7982,9 @@ function _sdMgrBonusYTD(snum){
   var totRow='';
   if(mgrs.length>1){
     var monthTotCells=periods.map(function(pp){ return '<td style="padding:7px 8px;text-align:right;font-weight:700;">'+fmtMoney(periodTot[pp.periodKey]||0)+'</td>'; }).join('');
-    totRow='<tr style="border-top:2px solid #2E4D8A;background:#eef1f8;"><td style="position:sticky;left:0;background:#eef1f8;padding:7px 10px;font-weight:800;">All Managers</td>'+monthTotCells+'<td style="padding:7px 8px;text-align:right;font-weight:800;border-left:1px solid #d8dce8;">'+fmtMoney(totPay)+'</td><td style="padding:7px 8px;text-align:right;font-weight:700;">'+fmtMoney(totPot)+'</td><td style="padding:7px 8px;text-align:right;font-weight:700;">'+totPct.toFixed(0)+'%</td></tr>';
+    totRow='<tr style="border-top:2px solid #03654e;background:#eef5f1;"><td style="position:sticky;left:0;background:#eef5f1;padding:7px 10px;font-weight:800;">All Managers</td>'+monthTotCells+'<td style="padding:7px 8px;text-align:right;font-weight:800;border-left:1px solid #d3e4dc;">'+fmtMoney(totPay)+'</td><td style="padding:7px 8px;text-align:right;font-weight:700;">'+fmtMoney(totPot)+'</td><td style="padding:7px 8px;text-align:right;font-weight:700;">'+totPct.toFixed(0)+'%</td></tr>';
   }
-  return '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Month-by-month manager payout, then YTD totals. Click a month header to open the full bonus card for that month.</div><div style="background:#fff;border-radius:8px;overflow:auto;box-shadow:0 1px 4px rgba(0,0,0,.12);"><table style="width:100%;border-collapse:collapse;font-size:12.5px;"><thead><tr style="background:#2E4D8A;color:#fff;"><th style="position:sticky;left:0;background:#2E4D8A;padding:7px 10px;text-align:left;">Manager</th>'+monthHead+'<th style="padding:7px 8px;text-align:right;border-left:1px solid rgba(255,255,255,.25);">YTD Payout</th><th style="padding:7px 8px;text-align:right;">YTD Potential</th><th style="padding:7px 8px;text-align:right;">Earned %</th></tr></thead><tbody>'+rows+totRow+'</tbody></table></div>';
+  return '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Month-by-month manager payout, then YTD totals. Click a month header to open the full bonus card for that month.</div><div style="background:#fff;border-radius:8px;overflow:auto;box-shadow:0 1px 4px rgba(0,0,0,.12);"><table style="width:100%;border-collapse:collapse;font-size:12.5px;"><thead><tr style="background:#03654e;color:#fff;"><th style="position:sticky;left:0;background:#03654e;padding:7px 10px;text-align:left;">Manager</th>'+monthHead+'<th style="padding:7px 8px;text-align:right;border-left:1px solid rgba(255,255,255,.25);">YTD Payout</th><th style="padding:7px 8px;text-align:right;">YTD Potential</th><th style="padding:7px 8px;text-align:right;">Earned %</th></tr></thead><tbody>'+rows+totRow+'</tbody></table></div>';
 }
 function _sdStylistBonusYTD(snum){
   const periods=_sdYtdPeriods();
@@ -8002,8 +8002,8 @@ function _sdStylistBonusYTD(snum){
     return '<tr style="border-bottom:1px solid #eee;"><td style="position:sticky;left:0;background:#fff;padding:6px 10px;font-weight:600;white-space:nowrap;">'+nameCell+'</td>'+monthCells+'<td style="padding:6px 8px;text-align:right;font-weight:700;border-left:1px solid #e3e3e3;">'+fmtMoney(o.pay)+'</td><td style="padding:6px 8px;text-align:right;">'+fmtMoney(o.pot)+'</td><td style="padding:6px 8px;text-align:right;">'+pct.toFixed(0)+'%</td></tr>'; }).join('');
   var totPct=totPot>0?(totPay/totPot*100):0;
   const monthTotCells=periods.map(function(pp){ return '<td style="padding:7px 8px;text-align:right;font-weight:700;">'+fmtMoney(periodTot[pp.periodKey]||0)+'</td>'; }).join('');
-  const totRow='<tr style="border-top:2px solid #2E4D8A;background:#eef1f8;"><td style="position:sticky;left:0;background:#eef1f8;padding:7px 10px;font-weight:800;">All Stylists</td>'+monthTotCells+'<td style="padding:7px 8px;text-align:right;font-weight:800;border-left:1px solid #d8dce8;">'+fmtMoney(totPay)+'</td><td style="padding:7px 8px;text-align:right;font-weight:700;">'+fmtMoney(totPot)+'</td><td style="padding:7px 8px;text-align:right;font-weight:700;">'+totPct.toFixed(0)+'%</td></tr>';
-  return '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Month-by-month payout per stylist, then YTD totals. Click a name for their bonus history.</div><div style="background:#fff;border-radius:8px;overflow:auto;box-shadow:0 1px 4px rgba(0,0,0,.12);"><table style="width:100%;border-collapse:collapse;font-size:12.5px;"><thead><tr style="background:#2E4D8A;color:#fff;"><th style="position:sticky;left:0;background:#2E4D8A;padding:7px 10px;text-align:left;">Stylist</th>'+monthHead+'<th style="padding:7px 8px;text-align:right;border-left:1px solid rgba(255,255,255,.25);">YTD Payout</th><th style="padding:7px 8px;text-align:right;">YTD Potential</th><th style="padding:7px 8px;text-align:right;">Earned %</th></tr></thead><tbody>'+rows+totRow+'</tbody></table></div>';
+  const totRow='<tr style="border-top:2px solid #03654e;background:#eef5f1;"><td style="position:sticky;left:0;background:#eef5f1;padding:7px 10px;font-weight:800;">All Stylists</td>'+monthTotCells+'<td style="padding:7px 8px;text-align:right;font-weight:800;border-left:1px solid #d3e4dc;">'+fmtMoney(totPay)+'</td><td style="padding:7px 8px;text-align:right;font-weight:700;">'+fmtMoney(totPot)+'</td><td style="padding:7px 8px;text-align:right;font-weight:700;">'+totPct.toFixed(0)+'%</td></tr>';
+  return '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Month-by-month payout per stylist, then YTD totals. Click a name for their bonus history.</div><div style="background:#fff;border-radius:8px;overflow:auto;box-shadow:0 1px 4px rgba(0,0,0,.12);"><table style="width:100%;border-collapse:collapse;font-size:12.5px;"><thead><tr style="background:#03654e;color:#fff;"><th style="position:sticky;left:0;background:#03654e;padding:7px 10px;text-align:left;">Stylist</th>'+monthHead+'<th style="padding:7px 8px;text-align:right;border-left:1px solid rgba(255,255,255,.25);">YTD Payout</th><th style="padding:7px 8px;text-align:right;">YTD Potential</th><th style="padding:7px 8px;text-align:right;">Earned %</th></tr></thead><tbody>'+rows+totRow+'</tbody></table></div>';
 }
 function setSdIndivRange(v){ S_sdIndivRange=v; sdRender(); }
 function setSdBonusView(v){ S_sdBonusView=v; sdRender(); }
@@ -8077,7 +8077,7 @@ function _sdStylistBonus(snum, normLabel){
       +stat(fmtMoney(totPot),'Total potential')+stat(totPot>0?Math.round(totPay/totPot*100)+'%':'—','Of potential')
     +'</div>'
     +'<div style="background:#fff;border-radius:8px;overflow:auto;box-shadow:0 1px 4px rgba(0,0,0,.12);">'
-    +'<table class="bonus-table" style="width:100%;border-collapse:collapse;font-size:12.5px;"><thead><tr style="background:#2E4D8A;color:#fff;">'
+    +'<table class="bonus-table" style="width:100%;border-collapse:collapse;font-size:12.5px;"><thead><tr style="background:#03654e;color:#fff;">'
       +'<th style="padding:7px 10px;text-align:left;">Stylist</th><th style="'+th+'">Avg Floor Hrs</th><th style="'+th+'">Prod %</th>'
       +'<th style="'+th+'">NR %</th><th style="'+th+'">RR %</th><th style="'+th+'">MBC</th><th style="'+th+'">HC Time</th>'
       +'<th style="'+th+'">Pts</th><th style="'+th+'">$/Pt</th><th style="'+th+'">Potential</th><th style="'+th+'">Payout</th>'
@@ -8153,7 +8153,7 @@ function renderSdIndividual(snum){
       +'<td class="'+cls(tierRR,g.rr)+'" style="padding:6px 8px;text-align:center;">'+f1(g.rr)+'%</td>'
       +'<td style="padding:6px 8px;text-align:center;color:var(--text-muted);">'+g.wks+'</td></tr>'; }).join('');
   return ctrl
-    +'<div style="background:#fff;border-radius:8px;overflow:auto;box-shadow:0 1px 4px rgba(0,0,0,.12);"><table style="width:100%;border-collapse:collapse;font-size:12.5px;"><thead><tr style="background:#2E4D8A;color:#fff;"><th style="padding:7px 10px;text-align:left;">Stylist</th><th style="padding:7px 8px;">Pos</th><th style="padding:7px 8px;">Floor Hrs/wk</th><th style="padding:7px 8px;">CC</th><th style="padding:7px 8px;">HC</th><th style="padding:7px 8px;">MBC</th><th style="padding:7px 8px;">Prod%</th><th style="padding:7px 8px;">NR%</th><th style="padding:7px 8px;">RR%</th><th style="padding:7px 8px;">Wks</th></tr></thead><tbody>'+rowsHtml+'</tbody></table></div>';
+    +'<div style="background:#fff;border-radius:8px;overflow:auto;box-shadow:0 1px 4px rgba(0,0,0,.12);"><table style="width:100%;border-collapse:collapse;font-size:12.5px;"><thead><tr style="background:#03654e;color:#fff;"><th style="padding:7px 10px;text-align:left;">Stylist</th><th style="padding:7px 8px;">Pos</th><th style="padding:7px 8px;">Floor Hrs/wk</th><th style="padding:7px 8px;">CC</th><th style="padding:7px 8px;">HC</th><th style="padding:7px 8px;">MBC</th><th style="padding:7px 8px;">Prod%</th><th style="padding:7px 8px;">NR%</th><th style="padding:7px 8px;">RR%</th><th style="padding:7px 8px;">Wks</th></tr></thead><tbody>'+rowsHtml+'</tbody></table></div>';
 }
 
 function buildSalonRow(r,cols,showAM=false){
@@ -8397,7 +8397,7 @@ function renderIndividual(){
   if(q) rows=rows.filter(r=>(fmtName(r.name||'')+' '+(r.salonName||'')+' '+(r.position||'')).toLowerCase().includes(q));
   const col=TEAM_COLS[S_teamSort.col], dir=S_teamSort.dir;
   rows.sort((a,b)=>{ const va=col.sv(a),vb=col.sv(b); if(col.txt) return String(va).localeCompare(String(vb))*dir; const na=isNaN(va),nb=isNaN(vb); if(na&&nb)return 0; if(na)return 1; if(nb)return -1; return (va-vb)*dir; });
-  thead.innerHTML='<tr style="background:#2E4D8A;color:#fff;">'+TEAM_COLS.map((c,i)=>{ const ar=S_teamSort.col===i?(S_teamSort.dir<0?' \u25BC':' \u25B2'):''; return '<th onclick="sortTeam('+i+')" style="padding:7px 8px;cursor:pointer;white-space:nowrap;text-align:'+(c.align==='left'?'left':'center')+';">'+teamColLabel(c)+ar+'</th>'; }).join('')+'</tr>';
+  thead.innerHTML='<tr style="background:#03654e;color:#fff;">'+TEAM_COLS.map((c,i)=>{ const ar=S_teamSort.col===i?(S_teamSort.dir<0?' \u25BC':' \u25B2'):''; return '<th onclick="sortTeam('+i+')" style="padding:7px 8px;cursor:pointer;white-space:nowrap;text-align:'+(c.align==='left'?'left':'center')+';">'+teamColLabel(c)+ar+'</th>'; }).join('')+'</tr>';
   tbody.innerHTML=rows.length?rows.map(_teamRowHtml).join(''):'<tr><td colspan="'+TEAM_COLS.length+'" class="no-data"><div class="no-data-icon">\ud83d\udc65</div>'+_teamEmptyMsg()+'</td></tr>';
   const note=document.getElementById('indiv-count-note'); if(note) note.textContent=rows.length+' stylists';
 }
@@ -14470,7 +14470,7 @@ function exportBonusJPEG(periodKey){
   let rows = '';
   Object.keys(bySalon).sort((a,b)=>parseInt(a)-parseInt(b)).forEach(sn=>{
     // Salon header row
-    rows += `<tr style="background:#2E4D8A;color:white;font-size:13px;font-weight:700;">
+    rows += `<tr style="background:#03654e;color:white;font-size:13px;font-weight:700;">
       <td colspan="13" style="padding:8px 10px;">${sn}</td>
     </tr>`;
 
@@ -19862,9 +19862,9 @@ function renderReview(data){
     <thead>
       <tr style="background:var(--primary-dark);color:white;">
         <th style="padding:5px 8px;text-align:left;min-width:90px;">Metric</th>
-        <th style="padding:5px 8px;text-align:center;background:#2E4D8A;">Goal</th>
+        <th style="padding:5px 8px;text-align:center;background:#03654e;">Goal</th>
         ${REVIEW_MONTHS.map(m=>`<th style="padding:5px 6px;text-align:center;">${m}</th>`).join('')}
-        <th style="padding:5px 8px;text-align:center;background:#2E4D8A;">12-Mo Avg</th>
+        <th style="padding:5px 8px;text-align:center;background:#03654e;">12-Mo Avg</th>
       </tr>
     </thead>
     <tbody>
@@ -19894,7 +19894,7 @@ function renderReview(data){
       <div style="background:var(--primary-dark);color:white;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.06em;padding:5px 8px;margin-bottom:4px;">12-Month Score</div>
       <table style="width:100%;border-collapse:collapse;font-size:11px;">
         <thead>
-          <tr style="background:#2E4D8A;color:white;">
+          <tr style="background:#03654e;color:white;">
             <th style="padding:5px 8px;text-align:left;">Metric</th>
             <th style="padding:5px 6px;text-align:center;">Q1</th>
             <th style="padding:5px 6px;text-align:center;">Q2</th>
@@ -19945,7 +19945,7 @@ function renderReview(data){
       <!-- Raise table -->
       <table style="width:100%;border-collapse:collapse;font-size:10px;margin-bottom:8px;">
         <thead>
-          <tr style="background:#2E4D8A;color:white;">
+          <tr style="background:#03654e;color:white;">
             <td style="padding:4px 6px;font-weight:700;">Points</td>
             ${Object.keys(REVIEW_RAISE).map(pts=>`<th style="padding:4px 5px;text-align:center;${parseInt(pts)===data.totalPts?'background:#FFD700;color:#333;':''}">${pts}</th>`).join('')}
           </tr>
@@ -20219,9 +20219,9 @@ function buildAllReviewCardsHTML(data){
         <thead>
           <tr style="background:var(--primary-dark);color:white;">
             <th style="padding:4px 6px;text-align:left;width:70px;">Metric</th>
-            <th style="padding:4px 6px;text-align:center;background:#2E4D8A;width:40px;">Goal</th>
+            <th style="padding:4px 6px;text-align:center;background:#03654e;width:40px;">Goal</th>
             ${MONTHS.map(m=>`<th style="padding:4px 4px;text-align:center;">${m}</th>`).join('')}
-            <th style="padding:4px 6px;text-align:center;background:#2E4D8A;">Avg</th>
+            <th style="padding:4px 6px;text-align:center;background:#03654e;">Avg</th>
           </tr>
         </thead>
         <tbody>
@@ -20243,7 +20243,7 @@ function buildAllReviewCardsHTML(data){
       <!-- Score + Raise -->
       <table style="width:100%;border-collapse:collapse;font-size:10px;margin-bottom:6px;">
         <thead>
-          <tr style="background:#2E4D8A;color:white;">
+          <tr style="background:#03654e;color:white;">
             <th style="padding:4px 6px;text-align:left;">Metric</th>
             <th style="padding:4px 6px;text-align:center;">Q1</th><th style="padding:4px 6px;text-align:center;">Q2</th>
             <th style="padding:4px 6px;text-align:center;">Q3</th><th style="padding:4px 6px;text-align:center;">Q4</th>
@@ -20273,7 +20273,7 @@ function buildAllReviewCardsHTML(data){
 
       <!-- Raise table + result -->
       <table style="width:100%;border-collapse:collapse;font-size:10px;margin-bottom:6px;">
-        <tr style="background:#2E4D8A;color:white;">
+        <tr style="background:#03654e;color:white;">
           <td style="padding:4px 6px;font-weight:700;">Points</td>
           ${Object.keys(RAISE_TABLE).map(pts=>`<td style="padding:4px 5px;text-align:center;font-weight:700;${parseInt(pts)===r.totalPts?'background:#FFD700;color:#333;':''}">${pts}</td>`).join('')}
         </tr>
@@ -20616,14 +20616,14 @@ function paintHome(){
     .hc-link-edit{display:flex;gap:4px;flex-shrink:0;}
     @media(max-width:760px){.hc-two{grid-template-columns:1fr;gap:20px;}}
     /* ── the newsletter's look: white cards, a small eyebrow, a heading, a
-       dashed lime rule, and plain rows instead of a box per person ── */
+       short solid lime rule, and plain rows instead of a box per person ── */
     .nl-card{background:#fff;border:1px solid #e3e7e2;border-radius:14px;padding:18px 20px 20px;margin-bottom:20px;}
     .nl-eyebrow{display:flex;align-items:center;gap:8px;font-size:10.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#048667;}
     .nl-eyebrow svg{width:15px;height:15px;stroke:#9acb3a;flex:0 0 auto;}
     .nl-h2{margin:3px 0 0;font-size:20px;font-weight:700;color:#03654e;display:flex;align-items:center;justify-content:space-between;gap:10px;}
-    .nl-rule{height:2px;background:repeating-linear-gradient(90deg,#9acb3a 0 8px,transparent 8px 14px);border-radius:2px;margin:9px 0 14px;}
+    .nl-rule{height:3px;width:44px;background:#9acb3a;border-radius:2px;margin:9px 0 14px;}
     .nl-plist{list-style:none;margin:0;padding:0;}
-    .nl-plist li{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:8px 0;border-bottom:1px dashed #e3e7e2;font-size:14px;}
+    .nl-plist li{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:8px 0;border-bottom:1px solid #eef1ee;font-size:14px;}
     .nl-plist li:last-child{border-bottom:none;}
     .nl-who{font-weight:600;color:#1a1a1a;min-width:0;}
     .nl-meta{color:#6b6b6b;font-size:12.5px;white-space:nowrap;}
@@ -20640,7 +20640,7 @@ function paintHome(){
     .nl-feature .n{font-size:13px;opacity:.88;margin-top:6px;}
     .nl-feature .hc-li-act{justify-content:center;margin-top:10px;}
     .nl-sched{list-style:none;margin:14px 0 0;padding:0;}
-    .nl-sched li{display:flex;gap:14px;padding:9px 0;border-bottom:1px dashed #e3e7e2;align-items:baseline;}
+    .nl-sched li{display:flex;gap:14px;padding:9px 0;border-bottom:1px solid #eef1ee;align-items:baseline;}
     .nl-sched li.click{cursor:pointer;}
     .nl-sched li.click:hover{background:#f7faf8;}
     .nl-sched li:last-child{border-bottom:none;}

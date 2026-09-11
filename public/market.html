@@ -4,14 +4,18 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>CLT Market Compare · Longitude</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
-  :root{ --primary:#03654e; --primary-dark:#05463a; --ink:#1d2b26; --muted:#6b7a74; --line:#e7ece9; --bg:#f3f6f4; }
+  /* THEME-v1: the dashboard's tokens and font, so this reads as part of it --
+     it now opens inside the dashboard, directly under its header. */
+  :root{ --primary:#048667; --primary-dark:#03654e; --ink:#1a1a1a; --muted:#6b6b6b; --line:#dfe3df; --bg:#f2f2f2; }
   *{box-sizing:border-box;}
   html,body{height:100%;}
-  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:var(--ink);background:var(--bg);}
+  body{margin:0;font-family:'Poppins','Segoe UI',system-ui,sans-serif;color:var(--ink);background:var(--bg);}
   header{background:var(--primary-dark);color:#eafaf3;padding:10px 18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
   header h1{font-size:16px;margin:0;font-weight:700;letter-spacing:.02em;white-space:nowrap;}
   header .spacer{flex:1;}
