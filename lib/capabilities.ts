@@ -58,6 +58,9 @@ export type Capability =
   // signed-in + seesEmployee, so a salon manager would have been sent the pay of
   // everyone homed at their salon. Scope still applies on top of this.
   | 'view.wages'         // GET /api/gs/effective-wage (Effective wage, Pay trends)
+  // USAGE-v1 -- the dashboard usage report. Recording is open to everyone signed
+  // in (POST /api/usage); READING who used what is this.
+  | 'view.usage'         // GET /api/usage
 
 export interface CapabilityMeta {
   key: Capability
@@ -114,6 +117,7 @@ export const CAPABILITY_META: CapabilityMeta[] = [
   { group: 'Forms',   key: 'delete.submissions', kind: 'permission', enforcedOn: 'DELETE /api/forms/submissions', label: 'Delete submissions', description: 'Remove a submission and its comments for good — unrecoverable, and it leaves no record that it happened. Owner only.' },
 
   { group: 'Administration', key: 'edit.settings', kind: 'permission', enforcedOn: 'POST /api/gs/save*, /api/home/save', label: 'Edit settings', description: 'Thresholds, AM assignments, manager table, waivers and the home page.' },
+  { group: 'Administration', key: 'view.usage',    kind: 'permission', enforcedOn: 'GET /api/usage', label: 'Dashboard usage', description: 'Who opens the dashboard, how often, and which screens get used.' },
   { group: 'Administration', key: 'run.dataops',   kind: 'permission', enforcedOn: 'POST /api/gs/triggerProcessAndLoad and the other rebuild endpoints', label: 'Run data jobs', description: 'Rebuild, de-duplicate and bulk-generate. Heavy, and it rewrites shared tabs.' },
   { group: 'Administration', key: 'manage.access', kind: 'permission', enforcedOn: 'GET/POST /api/admin/users, /api/admin/capabilities', label: 'Manage access', description: 'This panel. Who can sign in and what they can see.' },
 
@@ -172,7 +176,7 @@ export const ROLE_DEFAULTS: Record<Role, Capability[]> = {
     'view.facility', 'edit.facility',
     'edit.newsletter', 'manage.forms',
     'view.points', 'edit.points', 'run.dataops',
-    'view.wages',
+    'view.wages', 'view.usage',
     // v5: delete.submissions is gone from here too. Removing a submission and
     // its comment thread is unrecoverable and leaves no trace that it happened,
     // so it stays with the owner until it is a soft delete.

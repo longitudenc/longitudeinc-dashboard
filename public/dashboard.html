@@ -3098,6 +3098,7 @@ C 643.09 1131.02 639.78 1135.42 635.00 1137.00 Z"/></g></g></svg>
     </div>
 
     <div id="login-msg" style="margin-top:14px;font-size:13px;text-align:center;min-height:18px;"></div>
+    <div style="margin-top:10px;font-size:10.5px;color:#9a9a9a;text-align:center;">Dashboard use is logged to help us improve it.</div>
   </div>
 </div>
 
@@ -4786,6 +4787,7 @@ function startDashboard(){
     // role-gating reads the verified role/scope.
     USER_EMAIL = SESSION.email || '';
     USER_ROLE  = SESSION.role || 'none';
+    usageTrack('open');   // USAGE-v1: one visit per page load
     try { S_deepReq = new URLSearchParams(location.search).get('req') || null; } catch(e){ S_deepReq=null; }
     // ?form=<formId> opens a single form. This is what an event’s Sign up
     // button points at, so the link has to survive a cold load for someone
@@ -7734,7 +7736,7 @@ function _sdTbl(rows, cols){
 }
 function _sdTodayIso(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 function setSdTab(t){ S_sdTab=t; sdRender(); }
-function setSdSection(sec){ S_sdSection=sec; if(sec==='performance' && !S_sdTab) S_sdTab='weekly'; sdRender(); }
+function setSdSection(sec){ S_sdSection=sec; if(sec==='performance' && !S_sdTab) S_sdTab='weekly'; usageTrack('salon/'+sec, S_sdSalon); sdRender(); }
 function _sdPlaceholder(title,msg){ return '<div style="background:#fff;border-radius:8px;padding:40px 24px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.12);"><div style="font-size:16px;font-weight:700;margin-bottom:6px;">'+title+'</div><div style="color:var(--text-muted);font-size:13px;">'+msg+'</div></div>'; }
 function setSdRange(v){ S_sdRange=v; sdRender(); }
 function setSdSalon(sn){ if(!canDrillSalon(sn)) return; S_sdSalon=String(sn).trim(); sdRender(); }
@@ -11445,6 +11447,43 @@ let _applyingRoute = false;
 let _routeReady = false;      // first route replaces, so there is no blank entry
 let _routeDepth = 0;          // pushes we own, so Close knows if Back is safe
 
+// USAGE-v1 — which screens get used. One event per screen opened, plus one
+// "open" per page load (a visit), queued and sent in small batches -- on a
+// timer, at 20, and when the tab is hidden -- so tracking never slows a click.
+// Declared with var: init() can run before this part of the script is reached.
+var _usageQ = [], _usageLast = '', _usageLastAt = 0, _usageTimer = null;
+function usageScreenOf(hash){
+  const seg = String(hash || '').replace(/^#\/?/, '').split('?')[0].split('/').filter(Boolean);
+  const k = seg[0] || 'home';
+  if(k === 'hub' || k === 'forms' || k === 'company' || k === 'page' || k === 'form') return k + '/' + (seg[1] || '');
+  if(k === 'am') return 'am/' + (seg[2] || 'overview');
+  if(k === 'salon') return 'salon/' + (seg[2] || 'performance');
+  return k;
+}
+function usageDetailOf(hash){
+  const seg = String(hash || '').replace(/^#\/?/, '').split('?')[0].split('/').filter(Boolean);
+  return (seg[0] === 'salon' || seg[0] === 'am') ? (seg[1] || '') : '';
+}
+function usageTrack(screen, detail){
+  if(!screen || typeof SESSION === 'undefined' || !SESSION.email || SESSION.viewingAs) return;
+  const now = Date.now();
+  if(screen === _usageLast && now - _usageLastAt < 3000) return;   // one screen, one event
+  _usageLast = screen; _usageLastAt = now;
+  _usageQ.push({ screen: screen, detail: detail || '', at: new Date(now).toISOString() });
+  if(_usageQ.length >= 20) usageFlush();
+  else if(!_usageTimer) _usageTimer = setTimeout(usageFlush, 15000);
+}
+function usageFlush(){
+  if(_usageTimer){ clearTimeout(_usageTimer); _usageTimer = null; }
+  if(!_usageQ.length) return;
+  const body = JSON.stringify({ events: _usageQ.splice(0, 50) });
+  try{
+    if(navigator.sendBeacon && navigator.sendBeacon('/api/usage', new Blob([body], { type:'application/json' }))) return;
+  }catch(e){}
+  fetch('/api/usage', { method:'POST', headers:{'Content-Type':'application/json'}, body: body, keepalive: true }).catch(function(){});
+}
+document.addEventListener('visibilitychange', function(){ if(document.visibilityState === 'hidden') usageFlush(); });
+
 function _route(hash, replace){
   if(_applyingRoute) return;                       // rendering FROM a route
   if(!hash) return;
@@ -11454,6 +11493,7 @@ function _route(hash, replace){
     else { history.pushState({h:hash}, '', hash); _routeDepth++; }
     _routeReady = true;
   }catch(e){}
+  usageTrack(usageScreenOf(hash), usageDetailOf(hash));
 }
 
 // Close an overlay the way a browser would: step back if we own the entry that
@@ -11498,6 +11538,8 @@ function _closeOverlaysExcept(kind){
 function applyRoute(){
   const { seg, q } = _seg();
   const kind = seg[0] || '';
+  // Back, Forward and deep links arrive here rather than through _route.
+  usageTrack(usageScreenOf(location.hash), usageDetailOf(location.hash));
   _applyingRoute = true;
   try{
     _closeOverlaysExcept(kind);
@@ -11520,6 +11562,7 @@ function applyRoute(){
       case 'pay-trends': showPayTrends(seg[1] || '', seg[2] || ''); break;
       case 'facility':  showFacility(); break;
       case 'page':      showEmbeddedPage(seg[1] || ''); break;
+      case 'usage':     showUsage(); break;
       case 'supplies':  showSupplyCatalog(); break;
       case 'request':   if(seg[1]) openRequestDeepLink(seg[1]); break;
       case 'event':     if(seg[1]) openEventDetail(seg[1]); break;
@@ -11701,6 +11744,8 @@ const HUB_GROUPS = {
         cap:'view.leases', href:'/leases.html' },
       { t:'Facility & maintenance', d:'Corporate review findings and salon repairs — what is open, what is overdue.',
         cap:'view.facility', go:function(){ showFacility(); } },
+      { t:'Dashboard usage', d:'Who is using the dashboard, how often, and which screens get used most and least.',
+        cap:'view.usage', go:function(){ showUsage(); } },
     ],
   },
 };
@@ -17222,6 +17267,232 @@ const FAC_STATUS_STYLE = {
   variance_requested:  { bg:'#f3eefb', fg:'#5b3a8c', bd:'#d9c9ef' },
   variance_approved:   { bg:'#e6f4e0', fg:'#1a5c0a', bd:'#a8d890' },
 };
+
+// ── Dashboard usage (USAGE-v1) ────────────────────────────────────────────
+// Owner and admin. How often people come in, who has not, and which screens
+// earn their place. Everything is counted from /api/usage rows, which are one
+// line per person per screen per day.
+var S_usageDays = 30, S_usageRole = '', S_usageData = null;
+const USAGE_ROLE_LABEL = { owner:'Owner', admin:'Admin', viewer:'Viewer', area_manager:'Area manager',
+  manager:'Salon manager', stylist:'Stylist', office:'Office', maintenance:'Maintenance' };
+const USAGE_LABELS = {
+  'home':'Home',
+  'hub/performance':'Performance menu', 'hub/pay':'Pay menu', 'hub/people':'People menu',
+  'hub/market':'Market menu', 'hub/office':'Office menu',
+  'salon/performance':'Salon view › Performance', 'salon/individual':'Salon view › Individual',
+  'salon/bonuses':'Salon view › Bonuses', 'salon/trends':'Salon view › Trends', 'salon/reviews':'Salon view › Reviews',
+  'company/':'Company overview', 'trends':'Company trends',
+  'forms/new':'Forms › Submit a form', 'forms/mine':'Forms › My requests', 'forms/queue':'Forms › Requests',
+  'forms/points':'Disciplinary points', 'facility':'Facility & maintenance',
+  'effective-wage':'Effective wage', 'pay-trends':'Pay trends', 'reviews':'Google reviews',
+  'activity':'Form activity', 'slides':'Monthly slides', 'supplies':'Supply catalogue', 'admin':'Settings',
+  'person':'Employee profile', 'page/leases':'Leases', 'page/market':'Market compare',
+  'page/payroll':'Payroll', 'page/newsletter':'Newsletter', 'page/flexibility':'Flexibility & reliability',
+};
+function usageLabel(k){
+  if(USAGE_LABELS[k]) return USAGE_LABELS[k];
+  if(k === 'open') return 'Opened the dashboard';
+  if(k === 'usage') return 'Dashboard usage';
+  if(k === 'request') return 'Opened a request';
+  if(k === 'event') return 'Opened an event';
+  if(k.indexOf('form/') === 0){
+    const f = (typeof FORMS_DEFS !== 'undefined' ? FORMS_DEFS : []).find(function(x){ return x.formId === k.slice(5); });
+    return 'Form › ' + (f ? f.title : k.slice(5));
+  }
+  if(k.indexOf('company/') === 0) return 'Company › ' + k.slice(8);
+  if(k.indexOf('am/') === 0) return 'Area manager › ' + k.slice(3);
+  return k;
+}
+function showUsage(){
+  _route('#/usage');
+  clearActive();
+  const pg = document.getElementById('page-hub'); if(!pg) return;
+  pg.classList.add('active');
+  S_topNav = 'office'; if(typeof renderTopNav === 'function') renderTopNav();
+  const mainEl = document.querySelector('.content'); if(mainEl) mainEl.scrollTop = 0;
+  pg.innerHTML = '<div class="page-header"><h2>Dashboard usage</h2>'
+    + '<div class="sub">Who comes in, how often, and which screens get used</div></div>'
+    + '<div id="usage-body"><div class="no-data" style="padding:14px;">Loading&hellip;</div></div>';
+  loadUsage();
+}
+function loadUsage(){
+  const h = document.getElementById('usage-body');
+  if(h && S_usageData) h.style.opacity = '.5';
+  fetch('/api/usage?days=' + S_usageDays).then(function(r){ return r.json(); }).then(function(res){
+    if(!res || !res.success) throw new Error((res && res.error) || 'could not load');
+    S_usageData = res; paintUsage();
+  }).catch(function(e){
+    const b = document.getElementById('usage-body');
+    if(b){ b.style.opacity = ''; b.innerHTML = '<div class="no-data" style="padding:14px;">' + hEsc(e.message || String(e)) + '</div>'; }
+  });
+}
+function usageSetDays(n){ S_usageDays = n; loadUsage(); }
+function usageSetRole(r){ S_usageRole = r; paintUsage(); }
+function usageWeekStart(iso){
+  const d = new Date(iso + 'T12:00:00Z');
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));   // Monday
+  return d.toISOString().slice(0, 10);
+}
+function paintUsage(){
+  const host = document.getElementById('usage-body'); if(!host || !S_usageData) return;
+  host.style.opacity = '';
+  const d = S_usageData, role = S_usageRole;
+  const inRole = function(x){ return !role || x.role === role; };
+  const rows = (d.rows || []).filter(inRole);
+  const expected = (d.people || []).filter(inRole);
+  const sum = function(list){ return list.reduce(function(s, r){ return s + (Number(r.views) || 0); }, 0); };
+  const opens = rows.filter(function(r){ return r.screen === 'open'; });
+  const screens = rows.filter(function(r){ return r.screen !== 'open' && r.screen !== 'usage'; });
+  const seen = new Set(rows.map(function(r){ return r.email; }));
+  const wk = dIsoAddDays(d.today, -6);
+  const seen7 = new Set(rows.filter(function(r){ return r.date >= wk; }).map(function(r){ return r.email; }));
+  const notSeen = expected.filter(function(p){ return !seen.has(p.email); });
+
+  const pill = function(on, label, fn){
+    return '<button onclick="' + fn + '" style="width:auto;flex:0 0 auto;font-size:12px;padding:5px 11px;line-height:1.2;'
+      + 'border:1px solid ' + (on ? 'var(--primary-dark)' : 'var(--border)') + ';border-radius:7px;background:'
+      + (on ? 'var(--primary-dark)' : '#fff') + ';color:' + (on ? '#fff' : 'var(--text)') + ';font-weight:' + (on ? '700' : '500')
+      + ';cursor:pointer;">' + label + '</button>';
+  };
+  const roles = [...new Set((d.people || []).map(function(p){ return p.role; })
+    .concat((d.rows || []).map(function(r){ return r.role; })))].filter(Boolean).sort();
+  const controls = '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">'
+    + '<div style="display:flex;gap:4px;flex-wrap:wrap;">'
+      + [[7,'7 days'],[30,'30 days'],[90,'90 days'],[365,'1 year']].map(function(o){
+          return pill(S_usageDays === o[0], o[1], 'usageSetDays(' + o[0] + ')'); }).join('')
+    + '</div>'
+    + '<select class="ff-select" style="width:auto;font-size:12.5px;padding:6px 9px;" onchange="usageSetRole(this.value)">'
+      + '<option value="">Everyone</option>'
+      + roles.map(function(r){ return '<option value="' + hEsc(r) + '"' + (r === role ? ' selected' : '') + '>'
+          + hEsc(USAGE_ROLE_LABEL[r] || r) + '</option>'; }).join('')
+    + '</select>'
+    + '<span style="font-size:12px;color:var(--text-muted);">' + hEsc(pDate(d.since)) + ' &ndash; ' + hEsc(pDate(d.today)) + '</span>'
+    + '</div>';
+
+  const tile = function(label, value, sub, col){
+    return '<div style="flex:1 1 150px;min-width:140px;background:#fff;border:1px solid var(--border);border-radius:10px;padding:11px 14px;'
+      + (col ? 'border-left:3px solid ' + col + ';' : '') + '">'
+      + '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);">' + label + '</div>'
+      + '<div style="font-size:22px;font-weight:700;line-height:1.3;">' + value + '</div>'
+      + (sub ? '<div style="font-size:11px;color:var(--text-muted);">' + sub + '</div>' : '') + '</div>';
+  };
+  const tiles = '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;">'
+    + tile('Active people', seen.size, 'of ' + expected.length + ' with access', 'var(--primary)')
+    + tile('Active this week', seen7.size, 'in the last 7 days')
+    + tile('Visits', sum(opens), seen.size ? (sum(opens) / seen.size).toFixed(1) + ' per active person' : '')
+    + tile('Screens opened', sum(screens), '')
+    + tile('Not seen', notSeen.length, 'have access, not seen in this period', notSeen.length ? '#c98a12' : '')
+    + '</div>';
+
+  // Active people per week (Monday start).
+  const weeks = [];
+  for(let w = usageWeekStart(d.since); w <= d.today; w = dIsoAddDays(w, 7)) weeks.push(w);
+  const perWeek = weeks.map(function(w){
+    const end = dIsoAddDays(w, 6);
+    return new Set(rows.filter(function(r){ return r.date >= w && r.date <= end; }).map(function(r){ return r.email; })).size;
+  });
+  const maxW = Math.max(1, Math.max.apply(null, perWeek.concat([0])));
+  const weekChart = weeks.length < 2 ? '' :
+    '<div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:16px;">'
+    + '<div style="font-weight:700;font-size:13px;margin-bottom:8px;">Active people by week</div>'
+    + '<div style="display:flex;align-items:flex-end;gap:4px;height:110px;">'
+      + perWeek.map(function(v, i){
+          return '<div title="Week of ' + hEsc(pDate(weeks[i])) + ': ' + v + '" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;">'
+            + '<div style="font-size:10px;color:var(--text-muted);">' + (v || '') + '</div>'
+            + '<div style="width:100%;max-width:34px;height:' + Math.round(v / maxW * 86) + 'px;background:var(--primary);opacity:.8;border-radius:3px 3px 0 0;"></div></div>';
+        }).join('')
+    + '</div>'
+    + '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-muted);margin-top:4px;">'
+      + '<span>' + hEsc(pDate(weeks[0])) + '</span><span>' + hEsc(pDate(weeks[weeks.length - 1])) + '</span></div>'
+    + '</div>';
+
+  // Screens, most used first, and the ones nobody opened.
+  const byScreen = {};
+  screens.forEach(function(r){
+    const s = byScreen[r.screen] || (byScreen[r.screen] = { views:0, people:new Set(), last:'' });
+    s.views += Number(r.views) || 0; s.people.add(r.email); if(r.date > s.last) s.last = r.date;
+  });
+  const ranked = Object.keys(byScreen).sort(function(a, b){ return byScreen[b].views - byScreen[a].views; });
+  const maxV = ranked.length ? byScreen[ranked[0]].views : 1;
+  const td = 'padding:6px 10px;font-size:12.5px;border-top:1px solid var(--border);';
+  const screenTable = '<div style="background:#fff;border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:16px;">'
+    + '<div style="font-weight:700;font-size:13px;padding:11px 14px 6px;">Screens, most used first</div>'
+    + (ranked.length
+        ? '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;">'
+          + '<thead><tr style="font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);">'
+          + '<th style="text-align:left;padding:6px 10px;">Screen</th><th style="text-align:right;padding:6px 10px;">Opened</th>'
+          + '<th style="text-align:right;padding:6px 10px;">People</th><th style="text-align:right;padding:6px 10px;">Last used</th></tr></thead><tbody>'
+          + ranked.map(function(k){
+              const s = byScreen[k];
+              return '<tr><td style="' + td + '"><div>' + hEsc(usageLabel(k)) + '</div>'
+                + '<div style="height:4px;background:#eceeec;border-radius:3px;margin-top:3px;max-width:320px;">'
+                + '<div style="height:100%;width:' + Math.max(2, Math.round(s.views / maxV * 100)) + '%;background:var(--primary);border-radius:3px;"></div></div></td>'
+                + '<td style="' + td + 'text-align:right;font-weight:700;">' + s.views + '</td>'
+                + '<td style="' + td + 'text-align:right;">' + s.people.size + '</td>'
+                + '<td style="' + td + 'text-align:right;color:var(--text-muted);">' + hEsc(pDate(s.last)) + '</td></tr>';
+            }).join('')
+          + '</tbody></table></div>'
+        : '<div style="padding:10px 14px 14px;color:var(--text-muted);font-size:12.5px;">Nothing recorded in this window yet.</div>')
+    + '</div>';
+  const unused = Object.keys(USAGE_LABELS).filter(function(k){ return !byScreen[k]; });
+  const unusedBox = !unused.length ? '' :
+    '<div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:11px 14px;margin-bottom:16px;">'
+    + '<div style="font-weight:700;font-size:13px;margin-bottom:6px;">Not opened in this window'
+    + (role ? ' by ' + hEsc((USAGE_ROLE_LABEL[role] || role).toLowerCase()) + 's' : '') + '</div>'
+    + '<div style="display:flex;gap:6px;flex-wrap:wrap;">'
+      + unused.map(function(k){ return '<span style="border:1px solid var(--border);border-radius:999px;padding:2px 10px;font-size:12px;color:var(--text-muted);">'
+          + hEsc(USAGE_LABELS[k]) + '</span>'; }).join('')
+    + '</div><div style="font-size:11px;color:var(--text-muted);margin-top:6px;">Some of these are only offered to certain roles, so a gap can simply mean nobody who can see it came by.</div></div>';
+
+  // People: everyone with access, plus anyone recorded who is not on that list.
+  const byPerson = {};
+  rows.forEach(function(r){
+    const p = byPerson[r.email] || (byPerson[r.email] = { visits:0, views:0, days:new Set(), last:'', top:{} });
+    const v = Number(r.views) || 0;
+    if(r.screen === 'open') p.visits += v;
+    else if(r.screen !== 'usage'){ p.views += v; p.top[r.screen] = (p.top[r.screen] || 0) + v; }
+    p.days.add(r.date); if(r.date > p.last) p.last = r.date;
+  });
+  const list = expected.map(function(p){ return { email:p.email, name:p.name, role:p.role, salon:p.salon }; });
+  const known = new Set(list.map(function(p){ return p.email; }));
+  rows.forEach(function(r){ if(!known.has(r.email)){ known.add(r.email); list.push({ email:r.email, name:'', role:r.role, salon:r.salon }); } });
+  list.sort(function(a, b){
+    const la = (byPerson[a.email] || {}).last || '', lb = (byPerson[b.email] || {}).last || '';
+    return lb.localeCompare(la) || String(a.name || a.email).localeCompare(String(b.name || b.email));
+  });
+  const peopleTable = '<div style="background:#fff;border:1px solid var(--border);border-radius:10px;overflow:hidden;">'
+    + '<div style="font-weight:700;font-size:13px;padding:11px 14px 6px;">People <span style="font-weight:400;color:var(--text-muted);font-size:12px;">'
+      + list.length + '</span></div>'
+    + '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;">'
+    + '<thead><tr style="font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);">'
+      + '<th style="text-align:left;padding:6px 10px;">Person</th><th style="text-align:left;padding:6px 10px;">Role</th>'
+      + '<th style="text-align:left;padding:6px 10px;">Salon</th><th style="text-align:right;padding:6px 10px;">Visits</th>'
+      + '<th style="text-align:right;padding:6px 10px;">Screens</th><th style="text-align:right;padding:6px 10px;">Days active</th>'
+      + '<th style="text-align:right;padding:6px 10px;">Last seen</th><th style="text-align:left;padding:6px 10px;">Uses most</th></tr></thead><tbody>'
+    + list.map(function(p){
+        const u = byPerson[p.email];
+        const top = u ? Object.keys(u.top).sort(function(a, b){ return u.top[b] - u.top[a]; })[0] : '';
+        const nm = p.name ? fmtName(p.name) : p.email;
+        return '<tr' + (u ? '' : ' style="background:#fffaf0;"') + '>'
+          + '<td style="' + td + '"><div style="font-weight:600;">' + hEsc(nm) + '</div>'
+            + (p.name ? '<div style="font-size:11px;color:var(--text-muted);">' + hEsc(p.email) + '</div>' : '') + '</td>'
+          + '<td style="' + td + '">' + hEsc(USAGE_ROLE_LABEL[p.role] || p.role || '') + '</td>'
+          + '<td style="' + td + 'white-space:nowrap;">' + hEsc(p.salon || '') + '</td>'
+          + '<td style="' + td + 'text-align:right;font-weight:700;">' + (u ? u.visits : 0) + '</td>'
+          + '<td style="' + td + 'text-align:right;">' + (u ? u.views : 0) + '</td>'
+          + '<td style="' + td + 'text-align:right;">' + (u ? u.days.size : 0) + '</td>'
+          + '<td style="' + td + 'text-align:right;white-space:nowrap;' + (u ? '' : 'color:#8a5a12;font-weight:600;') + '">'
+            + (u ? hEsc(pDate(u.last)) : 'not in window') + '</td>'
+          + '<td style="' + td + 'color:var(--text-muted);">' + (top ? hEsc(usageLabel(top)) : '') + '</td></tr>';
+      }).join('')
+    + '</tbody></table></div></div>';
+
+  host.innerHTML = controls + tiles + weekChart + screenTable + unusedBox + peopleTable
+    + '<div style="font-size:11px;color:var(--text-muted);margin-top:12px;line-height:1.6;">'
+    + 'A visit is each time someone opens or reloads the dashboard. Screens count once per opening. Today is live; earlier days '
+    + 'are daily totals. Nothing is recorded while an owner is viewing as someone else, and nothing typed or searched is ever recorded. '
+    + 'Tracking started 09/2026, so earlier dates are empty.</div>';
+}
 
 // EMBED-PAGES-v1 — the tools that live in their own files (leases, market,
 // payroll, newsletter, flexibility) open INSIDE the dashboard, under the same
