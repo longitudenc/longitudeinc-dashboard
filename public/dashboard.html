@@ -4758,6 +4758,8 @@ function init(){
   fetch('/api/auth/me').then(r=>r.json()).then(me=>{
     if(!me || !me.access){
       showLogin();
+      // SESSION-WEEKLY-v1: managers and stylists get a fresh code every week.
+      if(me && me.expired) loginMsg('Your weekly sign-in has expired. Enter your email for a new code.', false);
       return;
     }
     SESSION = {
@@ -15616,6 +15618,52 @@ function renderProfileWeekly(){
   if(el) el.innerHTML = profileWeeklyHtml();
 }
 
+// PROFILE-WEEK-MERGE-v1. Someone who works two salons in one week has one row
+// per salon that week, and the profile drew each as its own point -- 5/29
+// twice, each carrying only part of the hours. One row per week: floor hours,
+// customers and paid-time-off hours ADD; the rates are re-weighted by
+// customers (by floor hours where a salon row has none); CPH is weighted by
+// hours, so it stays customers per hour across the whole week. The salon and
+// position shown are those of the salon where most hours were worked.
+function mergeEmpWeeks(rows){
+  const byWk = {}, order = [];
+  rows.forEach(function(r){
+    const k = String(r.weekEnding);
+    if(!byWk[k]){ byWk[k] = []; order.push(k); }
+    byWk[k].push(r);
+  });
+  return order.map(function(k){
+    const list = byWk[k];
+    if(list.length === 1) return list[0];
+    const num = function(v){ const x = n(v); return isNaN(x) ? 0 : x; };
+    const hrs = list.reduce(function(s, r){ return s + num(r.floorHours); }, 0);
+    const cust = list.reduce(function(s, r){ return s + num(r.custCount); }, 0);
+    const byCust = function(r){ return cust > 0 ? num(r.custCount) : num(r.floorHours); };
+    const wavg = function(field, parse, weightOf){
+      let s = 0, w = 0;
+      list.forEach(function(r){
+        const v = parse(r[field]), ww = weightOf(r);
+        if(v !== null && v !== undefined && !isNaN(v) && ww > 0){ s += v * ww; w += ww; }
+      });
+      return w ? s / w : list[0][field];
+    };
+    const main = list.slice().sort(function(a, b){ return num(b.floorHours) - num(a.floorHours); })[0];
+    return Object.assign({}, main, {
+      floorHours: hrs,
+      custCount: cust,
+      cph: wavg('cph', n, function(r){ return num(r.floorHours); }),
+      hcTime: wavg('hcTime', n, byCust),
+      mbc: wavg('mbc', n, byCust),
+      product: wavg('product', p, byCust),
+      nr: wavg('nr', p, byCust),
+      rr: wavg('rr', p, byCust),
+      vacationHours: list.reduce(function(s, r){ return s + num(r.vacationHours); }, 0),
+      holidayHours: list.reduce(function(s, r){ return s + num(r.holidayHours); }, 0),
+      _salons: list.map(function(r){ return r.salonNum; }),
+    });
+  });
+}
+
 function buildProfile(globalId, name){
   const el = document.getElementById('profile-content');
   el.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-muted);">Loading...</div>';
@@ -15639,9 +15687,9 @@ function buildProfile(globalId, name){
     .sort((a,b)=>fmtName(a.name).localeCompare(fmtName(b.name)));
   if(!viewableStylists.find(e=>e.globalId===globalId)) viewableStylists.unshift({globalId, name});
 
-  const empRows = S.weekHistory.flatMap(w=>
+  const empRows = mergeEmpWeeks(S.weekHistory.flatMap(w=>
     (w.emps||[]).filter(e=>e.globalId && e.globalId.trim()===globalId)
-  ).sort((a,b)=>new Date(a.weekEnding)-new Date(b.weekEnding));
+  )).sort((a,b)=>new Date(a.weekEnding)-new Date(b.weekEnding));
   // Consolidated weekly rows for THIS person (computed before the template so the
   // first render gets the right data — window vars below are set after the template).
   const weeklyCons = (S.empWeeklyConsByGid && S.empWeeklyConsByGid[globalId]) ? S.empWeeklyConsByGid[globalId] : [];

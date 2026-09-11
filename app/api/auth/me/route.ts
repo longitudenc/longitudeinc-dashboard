@@ -6,16 +6,22 @@
 // returns the CALLER's own info, derived from their session cookie.
 
 import { NextResponse } from 'next/server'
-import { getSessionEmail } from '@/lib/session'
+import { getSession, sessionExpiredFor } from '@/lib/session'
 import { resolveAccess } from '@/lib/auth-roles'
 import { getViewAsEmail } from '@/lib/view-as'
 import { capabilitiesFor } from '@/lib/capabilities'
 
 export async function GET() {
-  const email = await getSessionEmail()
+  const session = await getSession()
+  const email = session ? session.email : null
   if (!email) return NextResponse.json({ access: null })
   const access = await resolveAccess(email)
   if (!access) return NextResponse.json({ access: null })
+  // SESSION-WEEKLY-v1: a manager's or stylist's sign-in older than 7 days reads
+  // as signed out, so the page goes straight to "send me a code".
+  if (sessionExpiredFor(access.role, session!.issuedAt)) {
+    return NextResponse.json({ access: null, expired: true })
+  }
 
   // While an owner is viewing as someone, report THAT person's access so the
   // client renders their dashboard, plus who is really signed in so the banner

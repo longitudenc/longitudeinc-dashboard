@@ -9,7 +9,7 @@
 //   // ...gate.access has { role, globalId?, salons? }
 
 import { NextResponse } from 'next/server'
-import { getSessionEmail } from './session'
+import { getSession, sessionExpiredFor } from './session'
 import { getViewAsEmail } from './view-as'
 import { resolveAccess, type Access, type Role } from './auth-roles'
 import { capabilitiesFor, type Capability } from './capabilities'
@@ -29,13 +29,20 @@ type GateOk = {
 type GateFail = { ok: false; response: NextResponse }
 
 async function requireRoles(allowed: Role[]): Promise<GateOk | GateFail> {
-  const email = await getSessionEmail()
+  const session = await getSession()
+  const email = session ? session.email : null
   if (!email) {
     return { ok: false, response: NextResponse.json({ success: false, error: 'not signed in' }, { status: 401 }) }
   }
   const realAccess = await resolveAccess(email)
   if (!realAccess) {
     return { ok: false, response: NextResponse.json({ success: false, error: 'no access' }, { status: 403 }) }
+  }
+  // SESSION-WEEKLY-v1: managers and stylists sign in again every 7 days. The
+  // REAL role decides, so an owner viewing as a manager is not timed out.
+  if (sessionExpiredFor(realAccess.role, session!.issuedAt)) {
+    return { ok: false, response: NextResponse.json(
+      { success: false, error: 'sign-in expired — request a new code', expired: true }, { status: 401 }) }
   }
 
   // VIEW AS. Honoured ONLY when the real session is an owner, so a forged
