@@ -18,7 +18,9 @@ import { TAB_DEFS, DEFS_COLUMNS, STATUS_KEYS, serializeActionLabels } from '@/li
 
 // The only group tags the engine understands. Anything else is dropped, except
 // that notify additionally accepts real email addresses.
-const GROUP_TAGS = new Set(['am', 'office', 'maintenance', 'owner'])
+// 'manager' means "the salon's own manager may READ responses filed at their
+// salon" (lib/forms.ts roleSeesTags). It is offered for responseView only.
+const GROUP_TAGS = new Set(['am', 'office', 'maintenance', 'owner', 'manager'])
 const WORKFLOWS = new Set(['ticket', 'approval', 'record'])
 
 // Roles that may be named in `audience` -- who can OPEN and submit a form.

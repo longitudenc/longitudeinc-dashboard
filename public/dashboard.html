@@ -11406,19 +11406,15 @@ window.addEventListener('popstate', function(){
 function _navPerfUser(){ return canSeeAllSalons() || isAMRole() || _navSalonUser(); }
 // A manager with a salon: their whole dashboard is the salon drill, which
 // already exists and is already salon-scoped. Nothing new is built for them.
-// MANAGER-SCOPE-v1. A salon manager gets the home page and forms, and nothing
-// else, until their own landing page exists.
-//
-// This used to return true for a manager with a salon, which put them into
-// every performance, pay and people card in the top bar -- scoped to their own
-// salon, so no other salon's numbers were ever at risk, but a menu full of
-// screens that were not theirs to run.
-//
-// The capability list backs this up rather than relying on it: `manager` now
-// holds nothing, so the two market routes it used to reach refuse as well. This
-// only decides what is OFFERED; lib/scope-filter decides what any of it would
-// have returned, and that has not changed.
-function _navSalonUser(){ return false; }
+// MANAGER-RELEASE-v1. A salon manager gets their own salon: every card with a
+// `salon` destination (performance, trends, bonuses, team, reviews), always
+// scoped to access.salons by lib/scope-filter, plus their facility tracker.
+// What they do NOT get is decided twice, once here and once on the server:
+// effective wage and pay trends (view.wages), staffing trends (view.dayofweek),
+// Google reviews (view.salondata, whose routes are not salon-scoped), the
+// office tools, and Flexibility & Reliability (below: it has no server data to
+// refuse, so the menu is the gate).
+function _navSalonUser(){ return isManagerRole() && !!_mySalon(); }
 function _mySalon(){ return String((SESSION.salons||[])[0]||'').trim(); }
 function _salonGo(section){ return function(){ openSalonDrill(_mySalon(), section); }; }
 
@@ -11484,9 +11480,9 @@ const HUB_GROUPS = {
       { t:'Monthly slides', d:'The two bonus slides for a closed month, ready to paste into the deck.',
         cap:'view.company', go:function(){ showBonusSlides(); } },
       { t:'Effective wage', d:'What an hour on the floor is worth — by company, salon and person.',
-        show:_navPerfUser, go:function(){ showEffWageReport(); } },
+        cap:'view.wages', show:_navPerfUser, go:function(){ showEffWageReport(); } },
       { t:'Pay trends', d:'Which pay bucket moved — base, tips, incentives and bonus, drilled to the person.',
-        show:_navPerfUser, go:function(){ showPayTrends(); } },
+        cap:'view.wages', show:_navPerfUser, go:function(){ showPayTrends(); } },
     ],
   },
   people: {
@@ -11502,7 +11498,7 @@ const HUB_GROUPS = {
       { t:'Standouts', d:'Monthly recognition across the company.',
         show:_navPerfUser, dest:{ company:_coGo('standouts') } },
       { t:'Flexibility & Reliability', d:'Availability and dependability across the team.',
-        show:_navPerfUser, href:'/flexibility_reliability_tool.html' },
+        show:function(){ return _navPerfUser() && !_navSalonUser(); }, href:'/flexibility_reliability_tool.html' },
       // The company sub-nav is on its way out, so this stands on its own in the
       // top bar rather than only being reachable from beside it.
       { t:'Staffing trends', d:'Where the wait builds, by day of week and half-hour, over months.',
@@ -11589,8 +11585,16 @@ function renderTopNav(){
     // A group with nothing in it would be a dead end, so hide it entirely.
     const g = HUB_GROUPS[it.key];
     if(g && !g.cards.some(_tnAllowed)) return;
-    html += '<button class="tn' + (S_topNav === it.key ? ' active' : '') + '" data-nav="' + it.key + '"'
-          + ' onclick="topNavGo(this)">' + _accEsc(it.label) + '</button>';
+    // Office for someone whose only office card is the facility tracker -- a
+    // salon manager, an area manager -- is not "Office": it is one screen, so
+    // the button names it and goes straight there instead of to a one-card hub.
+    let key = it.key, label = it.label;
+    if(g && it.key === 'office'){
+      const ok = g.cards.filter(_tnAllowed);
+      if(ok.length === 1 && ok[0].t === 'Facility & maintenance'){ key = 'facility'; label = 'Facility'; }
+    }
+    html += '<button class="tn' + (S_topNav === key ? ' active' : '') + '" data-nav="' + key + '"'
+          + ' onclick="topNavGo(this)">' + _accEsc(label) + '</button>';
   });
   // The "Back to ..." chip that used to live here is gone: the browser Back
   // button now does the same job properly, for every view rather than only
@@ -11608,6 +11612,7 @@ function topNavGo(btn){
   if(key === 'home')         { S_hubDrilled = false; switchToHome(); }
   else if(key === 'requests'){ S_hubDrilled = false; switchToForms(); }
   else if(key === 'admin')   { S_hubDrilled = false; switchToAdminFromNav(); }
+  else if(key === 'facility'){ S_hubDrilled = false; showFacility(); }
   else                       { showHub(key); return; }   // showHub re-renders
   renderTopNav();
 }
@@ -17046,6 +17051,8 @@ function showEmbeddedPage(key){
 }
 
 function showFacility(){
+  // A salon manager has one building; open on it rather than on a grid of one.
+  if(_navSalonUser()) S_facSalon = _mySalon();
   _route('#/facility');
   clearActive();
   const pg = document.getElementById('page-hub');
@@ -17377,6 +17384,21 @@ function facRemoveReview(reviewId, label, photos){
     }).catch(function(e){ alert((e && e.message) || 'could not remove it'); });
 }
 
+/** Changing the tracker. Seeing it, and commenting on it, need only view.facility. */
+function facCanEdit(){ return hasCap('edit.facility'); }
+/** Where an item stands, as text, for someone who can read the tracker but not change it. */
+function facProgressText(it){
+  const bit = function(k, v){
+    return v ? '<div><div style="font-size:11px;color:var(--text-muted);">' + k + '</div>'
+      + '<div style="font-size:13px;">' + v + '</div></div>' : '';
+  };
+  return '<div style="display:flex;gap:22px;flex-wrap:wrap;">'
+    + bit('Status', hEsc(FAC_STATUS_LABEL[it.status] || it.status))
+    + bit('Fix by', it.dueDate ? hEsc(pDate(it.dueDate)) : 'not set')
+    + bit('Who is doing it', hEsc(it.assignee || ''))
+    + '</div>';
+}
+
 function facComment(itemId){
   const box = document.getElementById('fac-c-' + itemId);
   const txt = box ? box.value.trim() : '';
@@ -17512,11 +17534,11 @@ function facPhotoStrip(it){
         + 'onclick="facZoom(' + "'" + hEsc(p.photoId) + "','" + hEsc(p.fileName).replace(/'/g,'') + "'" + ')" '
         + 'title="' + hEsc(p.fileName) + '" loading="lazy" '
         + 'style="width:92px;height:92px;object-fit:cover;border-radius:8px;border:1px solid var(--border);cursor:zoom-in;background:#f4f4f2;">'
-      + '<button title="' + (assigned ? 'Put it back with the review' : 'Attach it to this item') + '" '
+      + (!facCanEdit() ? '' : '<button title="' + (assigned ? 'Put it back with the review' : 'Attach it to this item') + '" '
         + 'onclick="facAssign(' + "'" + hEsc(p.photoId) + "','" + (assigned ? '' : hEsc(it.itemId)) + "'" + ')" '
         + 'style="position:absolute;top:3px;right:3px;border:none;border-radius:5px;cursor:pointer;'
         + 'background:rgba(255,255,255,.92);font-size:11px;font-weight:700;line-height:1;padding:3px 6px;'
-        + 'color:' + (assigned ? '#b3261e' : 'var(--primary-dark)') + ';">' + (assigned ? '×' : '+') + '</button>'
+        + 'color:' + (assigned ? '#b3261e' : 'var(--primary-dark)') + ';">' + (assigned ? '×' : '+') + '</button>')
       + '</div>';
   };
   if(!mine.length && !pool.length) return '';
@@ -17840,7 +17862,7 @@ function facRow(it, opts){
           : '<div style="font-size:13.5px;line-height:1.6;">' + hEsc(ls[0] || it.detail) + '</div>')
       + (photos ? label('Photos') + photos : '')
       + label('Progress')
-      + '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">'
+      + (!facCanEdit() ? facProgressText(it) : '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">'
         + field('Status', '<select style="' + ctl + '" onchange="facUpdate(' + id + ', {status:this.value})">'
             + Object.keys(FAC_STATUS_LABEL).map(function(k){
                 return '<option value="' + k + '"' + (it.status === k ? ' selected' : '') + '>' + FAC_STATUS_LABEL[k] + '</option>';
@@ -17851,7 +17873,7 @@ function facRow(it, opts){
             + 'onchange="facUpdate(' + id + ', {assignee:this.value})">')
         + field('Cost', '<input type="text" value="' + (it.cost ? hEsc(String(it.cost)) : '') + '" style="' + ctl + 'width:90px;" '
             + 'onchange="facUpdate(' + id + ', {cost:this.value})">')
-      + '</div>'
+      + '</div>')
       + label('Comments' + (cs.length ? ' &middot; ' + cs.length : ''))
       + cs.map(function(c){
           return '<div style="margin-bottom:10px;padding-left:10px;border-left:2px solid var(--border);">'
@@ -18168,10 +18190,10 @@ function facArchive(){
                 ? '<a href="/api/facility/file?reviewId=' + encodeURIComponent(r.reviewId) + '&dl=1" '
                   + 'style="color:var(--primary);font-weight:600;text-decoration:none;">Download the email</a>'
                 : '<span style="color:var(--text-muted);">not stored</span>')
-            + ' <button onclick="facRemoveReview(' + "'" + hEsc(r.reviewId) + "','"
+            + (!facCanEdit() ? '' : ' <button onclick="facRemoveReview(' + "'" + hEsc(r.reviewId) + "','"
               + hEsc(salonDisplay(r.salonNum) + ' ' + (pDate(r.reviewDate) || '')).replace(/'/g,'') + "'," + (r.photos||0) + ')" '
               + 'style="margin-left:10px;border:1px solid var(--border);background:#fff;border-radius:6px;'
-              + 'padding:2px 8px;font-size:11.5px;color:#b3261e;cursor:pointer;">Remove</button>'
+              + 'padding:2px 8px;font-size:11.5px;color:#b3261e;cursor:pointer;">Remove</button>')
           + '</td></tr>';
       }).join('')
     + '</table></div></details>';
@@ -18246,12 +18268,13 @@ function paintFacility(){
     return S_facSalon || !S_facIssue || st.openCritical + st.openAction + st.openReqs > 0;
   });
   const summaryTop = facSummaryTop(states, today);
-  const canGf = !!S_facSalon && all.some(function(i){
+  const canGf = !!S_facSalon && facCanEdit() && all.some(function(i){
     return i.salonNum === S_facSalon && i.source === 'review' && FAC_GF_ELIGIBLE[i.status]; });
   const strip = S_facSalon
     ? '<div style="margin-bottom:6px;">'
         + '<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">'
-          + '<button class="btn btn-sm btn-secondary" onclick="facSetSalon(' + "''" + ')">&larr; Every salon</button>'
+          + (_navSalonUser() ? ''
+              : '<button class="btn btn-sm btn-secondary" onclick="facSetSalon(' + "''" + ')">&larr; Every salon</button>')
           + (canGf
               ? '<button class="btn btn-sm btn-primary" style="margin-left:auto;" onclick="facOpenGreenFlag()">'
                 + '&#128681; Request a green flag</button>'
@@ -18345,7 +18368,7 @@ function paintFacility(){
   // Inside one salon the page is about that salon: no estate summary above the
   // card that already says the same thing, and no upload box below it unless a
   // review is mid-way through being loaded.
-  const loadSection = (S_facSalon && !S_facProposal) ? ''
+  const loadSection = (!facCanEdit() || (S_facSalon && !S_facProposal)) ? ''
     : '<div style="font-weight:700;font-size:14px;margin:30px 0 8px;">Load a facility review</div>'
       + facPaint_proposal() + drop;
   host.innerHTML = banner + (S_facSalon ? '' : summaryTop) + issueBar + strip + listing + facArchive() + loadSection
@@ -20945,6 +20968,7 @@ function openAccessDialog(formId){
       ${cb('acv-am',"Salon's area manager",has(view,'am'))}
       ${cb('acv-office','Office (Laura, Brandy)',has(view,'office'))}
       ${cb('acv-maint','Maintenance (handyman)',has(view,'maintenance'))}
+      ${cb('acv-mgr','Salon manager (their own salon, read only)',has(view,'manager'))}
 
       <div style="font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin:16px 0 2px;">Who gets emailed</div>
       ${cb('acn-am',"Salon's area manager",has(notify,'am'))}
@@ -20986,6 +21010,7 @@ function saveAccess(formId){
   if(g('acv-am').checked)     view.push('am');
   if(g('acv-office').checked)  view.push('office');
   if(g('acv-maint').checked)   view.push('maintenance');
+  if(g('acv-mgr') && g('acv-mgr').checked) view.push('manager');
   const notify=[];
   if(g('acn-am').checked)     notify.push('am');
   if(g('acn-office').checked)  notify.push('office');
@@ -21329,6 +21354,7 @@ function renderFormRunner(){
         </div>
       </div>
       <div id="form-msg"></div>
+      <div id="form-open-reqs"></div>
       <div class="ff-grid">${f.fields.map(renderFormField).join('')}</div>
       <div class="ff-actions">
         <button class="btn btn-primary" id="form-submit-btn" onclick="submitActiveForm()">Submit</button>
@@ -21336,6 +21362,92 @@ function renderFormRunner(){
         ${reqCount?`<span style="font-size:11.5px;color:var(--text-muted);margin-left:auto;">${reqCount} required field${reqCount===1?'':'s'} <span class="ff-req">*</span></span>`:''}
       </div>
     </div>`;
+  formWireOpenRequests();
+}
+
+// OPEN-REQUESTS-v1 — before a maintenance request is filed, what is already
+// open at that salon. Most duplicates are someone not knowing it was already
+// reported; this puts the open ones in front of them with the conversation and
+// a one-click "Ask for an update", which posts a comment -- and a comment
+// re-notifies the same people a new request would have.
+const FORM_OPEN_STATUSES = { submitted:1, in_review:1 };
+const FORM_DEDUPE_FORMS = { maintenance:1 };
+function formWireOpenRequests(){
+  const host = document.getElementById('forms-new');
+  // Once per page: the host outlives every form drawn into it.
+  if(host && host.dataset.orWired !== '1'){
+    host.dataset.orWired = '1';
+    host.addEventListener('change', function(e){
+      const f = S_activeForm; if(!f || !FORM_DEDUPE_FORMS[f.formId]) return;
+      const t = e.target;
+      if(t && t.tagName === 'SELECT' && /^fld-/.test(t.id || '')) paintOpenRequests();
+    });
+  }
+  paintOpenRequests();
+}
+function paintOpenRequests(){
+  const f = S_activeForm, box = document.getElementById('form-open-reqs');
+  if(!f || !box) return;
+  if(!FORM_DEDUPE_FORMS[f.formId]){ box.innerHTML = ''; return; }
+  // Narrow to the salon picked on the form, when the form asks for one.
+  const sf = (f.fields || []).find(function(x){ return x.type === 'salon'; });
+  const el = sf ? document.getElementById('fld-' + sf.fieldKey) : null;
+  const pick = el ? String(el.value || '').trim() : '';
+  let list = (FORMS_SUBS || []).filter(function(s){ return s.formId === f.formId && FORM_OPEN_STATUSES[s.status]; });
+  if(pick) list = list.filter(function(s){ return s.salonNum === pick; });
+  list.sort(function(a, b){ return String(b.submittedAt || '').localeCompare(String(a.submittedAt || '')); });
+  if(!list.length){ box.innerHTML = ''; return; }
+  box.innerHTML = '<div style="border:1px solid #f0d49a;background:#fffaf0;border-radius:10px;padding:12px 14px;margin:12px 0 4px;">'
+    + '<div style="font-weight:700;font-size:13.5px;">Already open' + (pick ? ' at ' + hEsc(salonDisplay(pick)) : '')
+      + ' (' + list.length + ')</div>'
+    + '<div style="font-size:12px;color:var(--text-muted);margin:2px 0 8px;line-height:1.45;">'
+      + 'If your issue is one of these, add a comment or ask for an update instead of sending a new request.</div>'
+    + list.map(openReqRow).join('') + '</div>';
+}
+function openReqRow(s){
+  const k = 'o-' + s.submissionId, sid = hEsc(s.submissionId), kk = hEsc(k);
+  const d = s.data || {}, n = (s.comments || []).length;
+  return '<div style="background:#fff;border:1px solid var(--border);border-radius:8px;margin-top:6px;">'
+    + '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 11px;">'
+      + '<div style="flex:1 1 260px;min-width:0;">'
+        + '<div style="font-weight:600;font-size:13px;">' + hEsc(d.issueType || s.formTitle || 'Request')
+          + ' <span style="font-weight:400;font-size:12px;color:var(--text-muted);">'
+          + hEsc(salonDisplay(s.salonNum || '')) + ' &middot; '
+          + hEsc(s.submittedAt ? pDate(String(s.submittedAt).slice(0, 10)) : '')
+          + (s.submittedByName ? ' &middot; ' + hEsc(fmtName(s.submittedByName)) : '') + '</span></div>'
+        + '<div style="font-size:12px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'
+          + subSummary(s) + '</div>'
+      + '</div>'
+      + statusPill(s.status, s.formId)
+      + '<button type="button" class="btn btn-secondary btn-sm" onclick="toggleOpenReq(\'' + kk + '\')">'
+        + (n ? n + ' comment' + (n === 1 ? '' : 's') : 'Comment') + '</button>'
+      + '<button type="button" class="btn btn-primary btn-sm" id="oru-' + kk + '" '
+        + 'onclick="askForUpdate(\'' + kk + '\',\'' + sid + '\')">Ask for an update</button>'
+    + '</div>'
+    + '<div id="orx-' + kk + '" style="display:none;padding:0 11px 10px;border-top:1px solid var(--border);">'
+      + '<div id="cmts-' + kk + '" style="margin-top:8px;">' + renderCommentThread(s, k) + '</div>'
+    + '</div></div>';
+}
+function toggleOpenReq(k){
+  const el = document.getElementById('orx-' + k);
+  if(el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+function askForUpdate(k, sid){
+  const btn = document.getElementById('oru-' + k);
+  if(btn){ btn.disabled = true; btn.textContent = 'Asking…'; }
+  fetch('/api/forms/comments', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ submissionId: sid, body: 'Could we get an update on this?' }) })
+    .then(function(r){ return r.json(); }).then(function(res){
+      if(!res.success) throw new Error(res.error || 'could not send');
+      const s = (FORMS_SUBS || []).find(function(x){ return x.submissionId === sid; });
+      if(s) s.comments = (s.comments || []).concat([res.comment]);
+      const host = document.getElementById('cmts-' + k);
+      if(host && s) host.innerHTML = renderCommentThread(s, k);
+      if(btn) btn.textContent = 'Update requested ✓';
+    }).catch(function(e){
+      if(btn){ btn.disabled = false; btn.textContent = 'Ask for an update'; }
+      alert((e && e.message) || 'could not send');
+    });
 }
 
 function submitActiveForm(){

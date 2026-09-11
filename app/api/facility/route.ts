@@ -79,7 +79,10 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const gate = await requireCapability('edit.facility')
+  // Commenting needs only SIGHT of the item: a salon manager can say "the
+  // contractor came Tuesday" on their own salon's finding. Everything else here
+  // changes the tracker and still needs edit.facility.
+  const gate = await requireCapability('view.facility')
   if (!gate.ok) return gate.response
 
   let body: any
@@ -87,6 +90,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: false, error: 'invalid JSON' }, { status: 400 })
   }
   const kind = S(body?.kind, 20)
+  if (kind !== 'comment') {
+    const edit = await requireCapability('edit.facility')
+    if (!edit.ok) return edit.response
+  }
 
   try {
     if (kind === 'items') {

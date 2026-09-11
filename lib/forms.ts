@@ -368,13 +368,15 @@ function roleSeesTags(
   if (role === 'owner' || role === 'admin') return true  // both see everything
   if (role === 'viewer') return false                    // viewers never see responses
   if (role === 'area_manager') return amDefault && salonInScope
-  // A MANAGER READS, BUT DOES NOT ACT. They see their salon's responses on the
-  // same terms an area manager does -- useful for "has anyone reported this
-  // already?" -- but every status button belongs to the AM above them, so
-  // forAction is where they stop. Note this DOES mean a manager sees anything
-  // filed about their salon on a form whose responseView is blank, since blank
-  // means 'am': check the audience of anything sensitive before enabling them.
-  if (role === 'manager') return !forAction && amDefault && salonInScope
+  // A MANAGER READS, BUT DOES NOT ACT -- and reads ONLY forms tagged 'manager'.
+  // MANAGER-RELEASE-v1: this used to ride on the 'am' tag, which handed a salon
+  // manager every separation, discipline, conversation and status change filed
+  // at their salon -- including ones about THEM -- plus anything whose
+  // responseView is blank. Opting a form in is now explicit (the maintenance
+  // form, so "has anyone reported this already?" has an answer). Every status
+  // button still belongs to the AM above them, so forAction is where they stop.
+  // Their own submissions always come back through the `mine` rule.
+  if (role === 'manager') return !forAction && t.includes('manager') && salonInScope
   if (role === 'office') return t.includes('office')
   if (role === 'maintenance') return t.includes('maintenance')
   return false

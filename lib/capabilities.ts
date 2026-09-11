@@ -54,6 +54,10 @@ export type Capability =
   | 'edit.points'        // POST /api/gs/saveDiscPoints, /api/gs/reprocessDiscPoints
   | 'delete.submissions' // DELETE /api/forms/submissions
   | 'run.dataops'        // the rebuild / dedupe / bulk-generate endpoints
+  // MANAGER-RELEASE-v1 -- pay per floor hour, by bucket. The route was only
+  // signed-in + seesEmployee, so a salon manager would have been sent the pay of
+  // everyone homed at their salon. Scope still applies on top of this.
+  | 'view.wages'         // GET /api/gs/effective-wage (Effective wage, Pay trends)
 
 export interface CapabilityMeta {
   key: Capability
@@ -94,6 +98,7 @@ export const CAPABILITY_META: CapabilityMeta[] = [
 
   { group: 'People',  key: 'view.points',    kind: 'permission', enforcedOn: 'GET /api/gs/getDiscPoints — returns only your own record without it', label: 'Other people\'s points', description: 'Disciplinary points for their salons. Without it the server returns only their own record.' },
   { group: 'People',  key: 'edit.points',    kind: 'permission',   enforcedOn: 'POST /api/gs/saveDiscPoints, /api/gs/reprocessDiscPoints', label: 'Award & edit points', description: 'Add, change or clear disciplinary points. Needs the line above.' },
+  { group: 'People',  key: 'view.wages',     kind: 'permission',   enforcedOn: 'GET /api/gs/effective-wage', label: 'Effective wage & pay trends', description: 'Pay per floor hour and by pay bucket, for the people in their salons. Without it the report refuses.' },
 
   { group: 'Office',  key: 'view.payroll',   kind: 'permission',   enforcedOn: 'all /api/office/payroll/*',  label: 'Payroll tools',       description: 'The ADP upload builder, its settings and the finalised files.' },
   { group: 'Office',  key: 'view.facility',  kind: 'permission',   enforcedOn: 'GET /api/facility', label: 'Facility tracker', description: 'Corporate facility-review findings and maintenance items, for the salons they can already see.' },
@@ -167,20 +172,26 @@ export const ROLE_DEFAULTS: Record<Role, Capability[]> = {
     'view.facility', 'edit.facility',
     'edit.newsletter', 'manage.forms',
     'view.points', 'edit.points', 'run.dataops',
+    'view.wages',
     // v5: delete.submissions is gone from here too. Removing a submission and
     // its comment thread is unrecoverable and leaves no trace that it happened,
     // so it stays with the owner until it is a soft delete.
   ],
   viewer: [
     'view.company', 'view.dayreview', 'view.dayofweek',
-    'view.salondata', 'view.market',
+    'view.salondata', 'view.market', 'view.wages',
   ],
   // v3: an AM could always open the points screen (isAdminRole() || isAMRole())
   // and it is salon-scoped for them. Awarding points was admin-only and stays so.
-  area_manager: ['view.dayofweek', 'view.salondata', 'view.points', 'view.facility', 'edit.facility'],
-  // v5: a manager gets the home page and forms, and nothing else. view.salondata
-  // was reaching them the Ratings & CAQ screen, which is not part of that.
-  manager: [],
+  area_manager: ['view.dayofweek', 'view.salondata', 'view.points', 'view.facility', 'edit.facility', 'view.wages'],
+  // MANAGER-RELEASE-v1: a salon manager sees their own salon -- performance,
+  // trends, bonuses, team and reviews come through scope, not a capability --
+  // plus their facility tracker, read and comment only (commenting needs no
+  // more than view.facility; see POST /api/facility). Deliberately NOT here:
+  // view.wages (effective wage, pay trends), view.dayofweek (staffing trends),
+  // view.salondata (its routes are not salon-scoped: every salon's ratings),
+  // view.points, and every office capability.
+  manager: ['view.facility'],
   // v5: office is the paperwork role. It keeps LEASES and PAYROLL, which admin
   // now does not, and gives up the two admin keeps -- editing settings and
   // running data jobs -- because neither is office work. That is the whole
@@ -189,6 +200,7 @@ export const ROLE_DEFAULTS: Record<Role, Capability[]> = {
     'view.dayofweek', 'view.salondata', 'view.market',
     'view.points', 'edit.points',
     'view.payroll',                                // admin no longer has this
+    'view.wages',
     'view.leases', 'edit.leases',                  // nor these
     'view.supplies', 'edit.supplies', 'edit.newsletter',
     'view.facility', 'edit.facility',

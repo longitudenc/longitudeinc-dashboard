@@ -89,7 +89,7 @@
 // maintenance and anyone unscoped see only themselves.
 
 import { NextResponse } from 'next/server'
-import { requireSignedIn } from '@/lib/require-role'
+import { requireCapability } from '@/lib/require-role'
 import { readSheet, rowsToObjects, getEmployeeProfiles } from '@/lib/sheets'
 import { seesEmployee } from '@/lib/scope-filter'
 
@@ -193,7 +193,9 @@ function derivedPay(r: Record<string, any>) {
 }
 
 export async function GET(req: Request) {
-  const gate = await requireSignedIn()
+  // view.wages first (who may see pay at all), then seesEmployee below (whose).
+  // A salon manager has scope over their salon's people but not this.
+  const gate = await requireCapability('view.wages')
   if (!gate.ok) return gate.response
 
   try {
