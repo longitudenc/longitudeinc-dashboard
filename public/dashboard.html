@@ -11563,6 +11563,7 @@ function applyRoute(){
       case 'facility':  showFacility(); break;
       case 'page':      showEmbeddedPage(seg[1] || ''); break;
       case 'usage':     showUsage(); break;
+      case 'staffing-needs': showStaffingNeeds(); break;
       case 'supplies':  showSupplyCatalog(); break;
       case 'request':   if(seg[1]) openRequestDeepLink(seg[1]); break;
       case 'event':     if(seg[1]) openEventDetail(seg[1]); break;
@@ -11707,6 +11708,8 @@ const HUB_GROUPS = {
       { t:'Staffing trends', d:'Where the wait builds, by day of week and half-hour, over months.',
         cap:'view.dayofweek',
         go:function(){ switchToCompany(); showCompanyTab('staffing'); } },
+      { t:'Staffing needs', d:'Hours each salon needs against what its team can give — where to add hours, and where to hire.',
+        cap:'view.dayofweek', go:function(){ showStaffingNeeds(); } },
       // CAPABILITIES-v3: view.points, which is a SCREEN capability -- the rows
       // behind it are scoped by seesEmployee() in /api/gs/getDiscPoints either
       // way, and everyone can always see their own.
@@ -17267,6 +17270,160 @@ const FAC_STATUS_STYLE = {
   variance_requested:  { bg:'#f3eefb', fg:'#5b3a8c', bd:'#d9c9ef' },
   variance_approved:   { bg:'#e6f4e0', fg:'#1a5c0a', bd:'#a8d890' },
 };
+
+// ── Staffing needs (STAFF-NEEDS-v1) ───────────────────────────────────────
+// The recruiting question: is a salon short because its people need more
+// hours, or because it needs more people? Short and idle hours come from the
+// Staffing trends measure; room comes from each person's own record. The
+// levers are shown cheapest first: reschedule, add hours, hire.
+var S_snWeeks = 8, S_snCap = 38, S_snHire = 24, S_snData = null, S_snOpen = '';
+const SN_VERDICT = {
+  hire:        { t:'Hire',       bg:'#fdecea', fg:'#b3261e', bd:'#f4c4be' },
+  'add-hours': { t:'Add hours',  bg:'#fff4df', fg:'#8a5a12', bd:'#f0d49a' },
+  reschedule:  { t:'Reschedule', bg:'#eef4fb', fg:'#1f5f99', bd:'#c6dbef' },
+  ok:          { t:'Covered',    bg:'#e6f4e0', fg:'#1a5c0a', bd:'#a8d890' },
+};
+function showStaffingNeeds(){
+  _route('#/staffing-needs');
+  clearActive();
+  const pg = document.getElementById('page-hub'); if(!pg) return;
+  pg.classList.add('active');
+  S_topNav = 'people'; if(typeof renderTopNav === 'function') renderTopNav();
+  const m = document.querySelector('.content'); if(m) m.scrollTop = 0;
+  pg.innerHTML = '<div class="page-header"><h2>Staffing needs</h2>'
+    + '<div class="sub">The hours each salon needs against what its team can give &mdash; add hours, or hire</div></div>'
+    + '<div id="sn-body"><div class="no-data" style="padding:14px;">Crunching&hellip;</div></div>';
+  loadStaffingNeeds();
+}
+function loadStaffingNeeds(){
+  fetch('/api/gs/staffing-needs?weeks=' + S_snWeeks + '&cap=' + S_snCap + '&hire=' + S_snHire)
+    .then(function(r){ return r.json(); }).then(function(res){
+      if(!res || !res.success) throw new Error((res && res.error) || 'could not load');
+      S_snData = res; paintStaffingNeeds();
+    }).catch(function(e){
+      const b = document.getElementById('sn-body');
+      if(b){ b.style.opacity = ''; b.innerHTML = '<div class="no-data" style="padding:14px;">' + hEsc(e.message || String(e)) + '</div>'; }
+    });
+}
+function snSet(k, v){
+  if(k === 'weeks') S_snWeeks = v; if(k === 'cap') S_snCap = v; if(k === 'hire') S_snHire = v;
+  const b = document.getElementById('sn-body'); if(b) b.style.opacity = '.5';
+  loadStaffingNeeds();
+}
+function snToggle(sn){ S_snOpen = (S_snOpen === sn) ? '' : sn; paintStaffingNeeds(); }
+function snSlot(s){
+  if(!s) return '';
+  const day = (typeof ST_DOW !== 'undefined' && ST_DOW[s.dow]) ? ST_DOW[s.dow] : '';
+  return day + 's ' + (typeof dHHLabel === 'function' ? dHHLabel(s.hh) : '');
+}
+function paintStaffingNeeds(){
+  const host = document.getElementById('sn-body'); if(!host || !S_snData) return;
+  host.style.opacity = '';
+  const d = S_snData, list = d.salons || [];
+  const pill = function(on, label, fn){
+    return '<button onclick="' + fn + '" style="width:auto;flex:0 0 auto;font-size:12px;padding:5px 11px;line-height:1.2;'
+      + 'border:1px solid ' + (on ? 'var(--primary-dark)' : 'var(--border)') + ';border-radius:7px;background:'
+      + (on ? 'var(--primary-dark)' : '#fff') + ';color:' + (on ? '#fff' : 'var(--text)') + ';font-weight:' + (on ? '700' : '500')
+      + ';cursor:pointer;">' + label + '</button>';
+  };
+  const group = function(label, opts, cur, key){
+    return '<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">'
+      + '<span style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-right:3px;">' + label + '</span>'
+      + opts.map(function(o){ return pill(cur === o[0], o[1], "snSet('" + key + "'," + o[0] + ")"); }).join('') + '</div>';
+  };
+  const controls = '<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:14px;">'
+    + group('Window', [[4,'4 wk'],[8,'8 wk'],[13,'13 wk'],[26,'26 wk']], S_snWeeks, 'weeks')
+    + group('Full week', [[32,'32 h'],[35,'35 h'],[38,'38 h'],[40,'40 h']], S_snCap, 'cap')
+    + group('New hire works', [[16,'16 h'],[20,'20 h'],[24,'24 h'],[30,'30 h']], S_snHire, 'hire')
+    + '<span style="font-size:12px;color:var(--text-muted);">' + hEsc(pDate(d.start)) + ' &ndash; ' + hEsc(pDate(d.end)) + '</span>'
+    + '</div>';
+
+  const by = function(v){ return list.filter(function(s){ return s.verdict === v; }); };
+  const hireS = by('hire'), addS = by('add-hours'), resS = by('reschedule');
+  const tot = function(arr, k){ return arr.reduce(function(a, s){ return a + (Number(s[k]) || 0); }, 0); };
+  const tile = function(label, value, sub, col){
+    return '<div style="flex:1 1 160px;min-width:150px;background:#fff;border:1px solid var(--border);border-radius:10px;padding:11px 14px;'
+      + (col ? 'border-left:3px solid ' + col + ';' : '') + '">'
+      + '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);">' + label + '</div>'
+      + '<div style="font-size:22px;font-weight:700;line-height:1.3;">' + value + '</div>'
+      + (sub ? '<div style="font-size:11px;color:var(--text-muted);">' + sub + '</div>' : '') + '</div>';
+  };
+  const tiles = '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;">'
+    + tile('People to hire', tot(hireS, 'hires'), hireS.length ? 'across ' + hireS.length + ' salon' + (hireS.length === 1 ? '' : 's') : 'no salon needs a hire', hireS.length ? '#b3261e' : '')
+    + tile('Fixed by adding hours', addS.length, addS.length ? Math.round(tot(addS, 'gap')) + ' hrs/wk to the current teams' : 'salons', addS.length ? '#c98a12' : '')
+    + tile('Fixed by rescheduling', resS.length, resS.length ? 'enough idle time to move into busy slots' : 'salons', resS.length ? '#1f5f99' : '')
+    + tile('Short hours a week', Math.round(tot(list, 'shortHours')), 'where customers waited 8+ min', 'var(--primary)')
+    + tile('Room in current teams', Math.round(tot(list, 'headroom')), 'hrs/wk people have shown they can add')
+    + '</div>';
+
+  const td = 'padding:7px 10px;font-size:12.5px;border-top:1px solid var(--border);';
+  const th = 'padding:7px 10px;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);';
+  const todo = function(s){
+    if(s.verdict === 'hire'){
+      return 'Hire <b>' + s.hires + '</b> &mdash; ' + s.remaining + ' hrs/wk beyond what the team can give'
+        + (s.fromStaff ? ' (after ' + s.fromStaff + ' hrs from the current team' + (s.movable ? ' and ' + s.movable + ' rescheduled' : '') + ')' : '');
+    }
+    if(s.verdict === 'add-hours'){
+      const n = s.staff.filter(function(p){ return p.room > 0; }).length;
+      return 'Add <b>' + s.gap + ' hrs/wk</b> across ' + n + ' ' + (n === 1 ? 'person' : 'people') + ' with room'
+        + (s.movable ? ', after moving ' + s.movable + ' idle hrs' : '');
+    }
+    if(s.verdict === 'reschedule') return 'Move <b>' + s.movable + ' idle hrs/wk</b> into the busy slots';
+    return '&mdash;';
+  };
+  const rows = list.map(function(s){
+    const v = SN_VERDICT[s.verdict] || SN_VERDICT.ok, open = S_snOpen === s.salon;
+    let row = '<tr style="cursor:pointer;" onclick="snToggle(\'' + hEsc(s.salon) + '\')">'
+      + '<td style="' + td + 'font-weight:600;white-space:nowrap;">' + (open ? '&#9662; ' : '&#9656; ') + hEsc(salonDisplay(s.salon)) + '</td>'
+      + '<td style="' + td + 'text-align:right;">' + Math.round(s.floorPerWeek) + '</td>'
+      + '<td style="' + td + 'text-align:right;font-weight:700;color:' + (s.shortHours ? '#b3261e' : 'var(--text-muted)') + ';">' + s.shortHours + '</td>'
+      + '<td style="' + td + 'text-align:right;color:var(--text-muted);">' + s.overHours + '</td>'
+      + '<td style="' + td + 'text-align:right;">' + s.team + '</td>'
+      + '<td style="' + td + 'text-align:right;">' + s.headroom + '</td>'
+      + '<td style="' + td + '"><span style="background:' + v.bg + ';color:' + v.fg + ';border:1px solid ' + v.bd + ';border-radius:5px;'
+        + 'padding:2px 8px;font-size:11px;font-weight:700;white-space:nowrap;">' + v.t + '</span></td>'
+      + '<td style="' + td + '">' + todo(s) + '</td></tr>';
+    if(open){
+      const worst = [
+        s.worstShort ? 'Shortest: <b>' + hEsc(snSlot(s.worstShort)) + '</b>, ' + s.worstShort.waitMin + ' min average wait' : '',
+        s.worstOver ? 'Most idle: <b>' + hEsc(snSlot(s.worstOver)) + '</b>, ' + s.worstOver.idle + ' stylists with nobody waiting' : '',
+      ].filter(Boolean).join(' &middot; ');
+      const staff = s.staff.map(function(p){
+        const note = p.noHours ? 'no hours in this window' : p.isNew ? 'new — not enough history' : p.ot >= 1 ? p.ot + ' hrs overtime a week' : '';
+        return '<tr><td style="' + td + '">' + hEsc(fmtName(p.name)) + '</td>'
+          + '<td style="' + td + 'text-align:right;">' + p.weeks + '</td>'
+          + '<td style="' + td + 'text-align:right;">' + p.avgTotal + '</td>'
+          + '<td style="' + td + 'text-align:right;">' + p.avgFloor + '</td>'
+          + '<td style="' + td + 'text-align:right;">' + p.peak + '</td>'
+          + '<td style="' + td + 'text-align:right;font-weight:700;color:' + (p.room ? '#1a5c0a' : 'var(--text-muted)') + ';">' + (p.room ? '+' + p.room : '&mdash;') + '</td>'
+          + '<td style="' + td + 'color:var(--text-muted);font-size:11.5px;">' + hEsc(note) + '</td></tr>';
+      }).join('');
+      row += '<tr><td colspan="8" style="padding:4px 14px 14px;background:#fafcfb;">'
+        + (worst ? '<div style="font-size:12px;margin:8px 0;">' + worst + '</div>' : '')
+        + '<table style="width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--border);border-radius:8px;">'
+        + '<thead><tr><th style="' + th + 'text-align:left;">Team member</th><th style="' + th + 'text-align:right;">Weeks</th>'
+        + '<th style="' + th + 'text-align:right;">Avg hrs/wk</th><th style="' + th + 'text-align:right;">Floor hrs/wk</th>'
+        + '<th style="' + th + 'text-align:right;">Usual high</th><th style="' + th + 'text-align:right;">Room</th><th style="' + th + '"></th></tr></thead>'
+        + '<tbody>' + (staff || '<tr><td colspan="7" style="' + td + 'color:var(--text-muted);">Nobody homed here with hours on record.</td></tr>') + '</tbody></table></td></tr>';
+    }
+    return row;
+  }).join('');
+
+  host.innerHTML = controls + tiles
+    + '<div style="background:#fff;border:1px solid var(--border);border-radius:10px;overflow:auto;">'
+    + '<table style="width:100%;border-collapse:collapse;"><thead><tr>'
+      + '<th style="' + th + 'text-align:left;">Salon</th><th style="' + th + 'text-align:right;">Worked hrs/wk</th>'
+      + '<th style="' + th + 'text-align:right;">Short hrs/wk</th><th style="' + th + 'text-align:right;">Idle hrs/wk</th>'
+      + '<th style="' + th + 'text-align:right;">Team</th><th style="' + th + 'text-align:right;">Room in team</th>'
+      + '<th style="' + th + 'text-align:left;">Answer</th><th style="' + th + 'text-align:left;">What to do</th>'
+    + '</tr></thead><tbody>' + rows + '</tbody></table></div>'
+    + '<div style="font-size:11px;color:var(--text-muted);margin-top:12px;line-height:1.65;">'
+    + '<b>Short</b> hours are half-hours where customers averaged 8+ minutes waiting (12+ counts double), summed over a typical week &mdash; the same measure as Staffing trends. '
+    + '<b>Idle</b> hours are half-hours with stylists standing idle and nobody waiting. Rescheduling is tried first, then the current team, then hiring. '
+    + '<b>Room</b> is how far each person could go toward the full week without passing their own usual high (their 90th-percentile week over 26 weeks), so it only counts hours someone has shown they can work. '
+    + 'Salondata has no availability field, so someone who wants more hours but has never been given them shows no room &mdash; ask the managers about them. '
+    + 'Click a salon to see its team.</div>';
+}
 
 // ── Dashboard usage (USAGE-v1) ────────────────────────────────────────────
 // Owner and admin. How often people come in, who has not, and which screens
