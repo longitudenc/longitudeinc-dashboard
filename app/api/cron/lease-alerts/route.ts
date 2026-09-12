@@ -31,6 +31,7 @@ import { leaseAlertRecipients, maskEmail } from '@/lib/lease-settings'
 import {
   milestonesFor, sentLedger, dueNow, recordSent, milestoneHeadline,
 } from '@/lib/lease-notices'
+import { alreadySent, markSent } from '@/lib/email-log'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -113,6 +114,14 @@ export async function GET(req: NextRequest) {
         })))
       }
       return NextResponse.json({ ok: true, sent: false, reason: 'nothing due' })
+    }
+
+    // EMAIL-ONCE-v1: every nightly run now calls this, so the digest goes out
+    // at most once a day. The milestone ledger already stops a once-only
+    // reminder repeating; this stops the rolling sections repeating 3x a day.
+    // ?force=1 sends again.
+    if (new URL(req.url).searchParams.get('force') !== '1' && await alreadySent('lease-alerts', today)) {
+      return NextResponse.json({ ok: true, sent: false, reason: 'already sent today' })
     }
 
     const rows: string[] = []
@@ -199,6 +208,7 @@ export async function GET(req: NextRequest) {
     // these are the reminders that cost money to miss.
     let recorded = 0
     if (sent.sent) {
+      await markSent('lease-alerts', today, (sent.to || []).length + ' recipient(s)')
       recorded = await recordSent([
         ...due.send.map(m => ({
           milestone: m, status: 'sent', sentTo: (sent.to || []).join(', '),

@@ -8,9 +8,17 @@
 //   /api/report/payroll-pace?secret=…&preview=1  → build + return JSON (no email)
 //   /api/report/payroll-pace?secret=…&asOf=YYYY-MM-DD  → pretend it's that date
 
+//   /api/report/payroll-pace?secret=…&force=1    → send even if this week's went out
+//
+// EMAIL-ONCE-v1: the workflow now calls this on every Wednesday run and again
+// on Thursday. The first call that sends records the week in EmailLog; the rest
+// answer ok:true with skipped:'already sent'.
+
 import { NextResponse } from 'next/server'
 import { buildPayrollPace, sendPayrollPace } from '@/lib/payroll-pace'
 import { sendAlert } from '@/lib/alert'
+import { alreadySent, markSent } from '@/lib/email-log'
+import { todayET, fiscalWeekContaining } from '@/lib/fiscal'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -27,7 +35,12 @@ export async function GET(request: Request) {
       const data = await buildPayrollPace(asOf)
       return NextResponse.json({ ok: true, ...data })
     }
+    const weekEnd = fiscalWeekContaining(asOf || todayET()).end
+    if (url.searchParams.get('force') !== '1' && await alreadySent('payroll-pace', weekEnd)) {
+      return NextResponse.json({ ok: true, sent: false, skipped: 'already sent for the week ending ' + weekEnd })
+    }
     const r = await sendPayrollPace(asOf)
+    if (r.sent) await markSent('payroll-pace', weekEnd, `${r.count} salons`)
     if (!r.sent) {
       await sendAlert(
         '[Longitude] Payroll pace did NOT send',

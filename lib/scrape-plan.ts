@@ -175,20 +175,22 @@ export function planForDate(todayIso?: string, hourUtc?: number): PlannedJob[] {
   //    above have landed, so it goes near the end. This used to hang off
   //    /api/cron/run, which nothing scheduled after the workflow took over, so
   //    it had silently stopped sending.
-  //    Only on the FIRST run of the day. The schedule now fires several times so
-  //    a dropped trigger is covered, and scrapes are idempotent -- but an email
-  //    is not. hourUtc is undefined for a manual run, which still sends.
-  if (dow === 3 && (hourUtc === undefined || hourUtc < 12)) {
+  //    EMAIL-ONCE-v1: on EVERY Wednesday run, and Thursday as a catch-up. This
+  //    used to be kept to runs starting before 12:00 UTC so the mail went once,
+  //    but GitHub has been starting the 08:00 run at ~12:40, which silently
+  //    dropped it on 09/02 and 09/09. The route now records the week it sent
+  //    in EmailLog and skips after that, so repeating the call is safe and a
+  //    late or dropped trigger no longer costs the week. (hourUtc is still
+  //    accepted and no longer consulted.)
+  void hourUtc
+  if (dow === 3 || dow === 4) {
     jobs.push({ name: 'payroll-pace', path: '/api/report/payroll-pace', query: '' })
   }
 
-  // 7b. DAILY -- the lease alert email. Same first-run-only guard as the
-  //     payroll-pace mail above, for the same reason: scrapes are idempotent,
-  //     an email is not. The route itself sends NOTHING when nothing is due,
-  //     so a quiet day costs one HTTP call and no inbox noise.
-  if (hourUtc === undefined || hourUtc < 12) {
-    jobs.push({ name: 'lease-alerts', path: '/api/cron/lease-alerts', query: '' })
-  }
+  // 7b. DAILY -- the lease alert email. On every run: the route sends at most
+  //     once a day (EmailLog) and NOTHING when nothing is due, so a quiet day
+  //     costs one HTTP call and no inbox noise.
+  jobs.push({ name: 'lease-alerts', path: '/api/cron/lease-alerts', query: '' })
 
   // 8. ALWAYS LAST — verify the data actually arrived. Deliberately takes no
   //    date: it checks yesterday in EASTERN time, which is the day the scrape
